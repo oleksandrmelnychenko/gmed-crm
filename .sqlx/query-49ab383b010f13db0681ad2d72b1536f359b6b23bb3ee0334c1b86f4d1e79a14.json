@@ -1,0 +1,27 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE field_access_policies\n         SET access_level = $4, condition_type = $5, updated_by = $6, updated_at = now()\n         WHERE role = $1 AND entity_type = $2 AND field_name = $3 AND NOT is_system_locked\n         RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "49ab383b010f13db0681ad2d72b1536f359b6b23bb3ee0334c1b86f4d1e79a14"
+}

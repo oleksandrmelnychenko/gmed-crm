@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'dsgvo_data_export', 'patient', $2, $3)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "46a0b37906fc23e71ec6bc1b18e7b5768e9f2106bfad83091cc06746c39bc529"
+}

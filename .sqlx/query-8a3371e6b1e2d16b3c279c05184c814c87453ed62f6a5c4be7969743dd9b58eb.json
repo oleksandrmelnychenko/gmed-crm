@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(*) AS \"c!\" FROM leads WHERE qualification_status = 'qualified' AND updated_at >= date_trunc('month', now())",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "c!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "8a3371e6b1e2d16b3c279c05184c814c87453ed62f6a5c4be7969743dd9b58eb"
+}

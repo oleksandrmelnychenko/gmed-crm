@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE direct_messages SET is_read = true WHERE from_user = $2 AND to_user = $1 AND NOT is_read",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "722eb5acaf22a1af46281ebb322788559f2d859276601fb35fdba8bf2ec316df"
+}

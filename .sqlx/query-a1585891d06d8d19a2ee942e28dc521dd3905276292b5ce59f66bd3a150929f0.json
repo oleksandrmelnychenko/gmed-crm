@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users SET password_changed_at = '2000-01-01'::timestamptz WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a1585891d06d8d19a2ee942e28dc521dd3905276292b5ce59f66bd3a150929f0"
+}

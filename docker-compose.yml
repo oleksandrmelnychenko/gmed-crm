@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: gmed-postgres
+    environment:
+      POSTGRES_DB: gmed
+      POSTGRES_USER: gmed
+      POSTGRES_PASSWORD: gmed
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

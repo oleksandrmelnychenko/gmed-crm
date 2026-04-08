@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT allergie, reaktion FROM allergien WHERE case_id = $1 ORDER BY sort_order",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "allergie",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "reaktion",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "49a79b1dc99624eb86ef56814123143a01970fbc81e4ebbbf932df3934bfc7f1"
+}

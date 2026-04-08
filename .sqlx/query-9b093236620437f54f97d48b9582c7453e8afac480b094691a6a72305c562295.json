@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT erkrankung, erstdiagnose, notiz FROM vorerkrankungen WHERE case_id = $1 ORDER BY sort_order",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "erkrankung",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "erstdiagnose",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "notiz",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "9b093236620437f54f97d48b9582c7453e8afac480b094691a6a72305c562295"
+}

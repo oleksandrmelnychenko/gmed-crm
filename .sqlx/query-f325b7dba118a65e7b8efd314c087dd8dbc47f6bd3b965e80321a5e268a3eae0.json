@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COALESCE(MAX(sort_order), 0) + 1 AS \"v!\" FROM appointment_checklists WHERE appointment_id = $1 AND phase = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "v!",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "f325b7dba118a65e7b8efd314c087dd8dbc47f6bd3b965e80321a5e268a3eae0"
+}

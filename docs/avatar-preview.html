@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Online Avatars Preview — 20 users</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Onest:wght@100..900&display=swap"/>
+<style>
+:root {
+    --primary: #1677ff;
+    --bg: #fff;
+    --bg-layout: #f5f5f5;
+    --border: #d9d9d9;
+    --border-secondary: #f0f0f0;
+    --text: rgba(0,0,0,0.88);
+    --text-secondary: rgba(0,0,0,0.65);
+    --text-tertiary: rgba(0,0,0,0.45);
+    --text-quaternary: rgba(0,0,0,0.25);
+    --error: #ff4d4f;
+    --font: 'Onest', -apple-system, sans-serif;
+    --radius: 6px;
+    --radius-lg: 8px;
+    --shadow-md: 0 6px 16px rgba(0,0,0,0.08);
+    --topbar-height: 48px;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: var(--font); background: var(--bg-layout); color: var(--text); }
+
+.demo-section {
+    max-width: 900px;
+    margin: 40px auto;
+    padding: 24px;
+}
+h2 { font-size: 18px; font-weight: 600; margin-bottom: 16px; color: var(--text); }
+.demo-row {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    padding: 16px 20px;
+    background: var(--bg);
+    border: 1px solid var(--border-secondary);
+    border-radius: var(--radius-lg);
+    margin-bottom: 12px;
+}
+.demo-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-tertiary);
+    min-width: 100px;
+}
+
+.online-avatars {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+}
+.avatar {
+    border-radius: 50%;
+    background: var(--primary);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    flex-shrink: 0;
+    border: 2px solid var(--bg);
+    transition: transform 0.15s cubic-bezier(0.2,0,0,1);
+}
+.avatar:hover {
+    transform: scale(1.15);
+    z-index: 30 !important;
+}
+.avatar-overflow {
+    background: var(--text-tertiary);
+}
+
+/* Colors for variety */
+.c0 { background: #1677ff; }
+.c1 { background: #722ed1; }
+.c2 { background: #52c41a; }
+.c3 { background: #eb2f96; }
+.c4 { background: #fa8c16; }
+.c5 { background: #13c2c2; }
+.c6 { background: #2f54eb; }
+.c7 { background: #f5222d; }
+
+/* Topbar mock */
+.topbar-mock {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: var(--topbar-height);
+    padding: 0 24px;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border-secondary);
+    margin-bottom: 24px;
+}
+.topbar-mock-left { font-size: 14px; font-weight: 600; color: var(--text); }
+.topbar-mock-right { display: flex; align-items: center; gap: 12px; }
+
+.notif-bell {
+    position: relative;
+    width: 36px; height: 36px;
+    display: flex; align-items: center; justify-content: center;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg);
+    cursor: pointer;
+    color: var(--text-secondary);
+}
+.notif-badge {
+    position: absolute; top: -4px; right: -4px;
+    min-width: 18px; height: 18px;
+    background: var(--error); color: #fff;
+    font-size: 10px; font-weight: 700;
+    border-radius: 9px;
+    display: flex; align-items: center; justify-content: center;
+    padding: 0 4px;
+    border: 2px solid var(--bg);
+}
+.search-box {
+    display: flex; align-items: center; gap: 8px;
+    height: 32px; padding: 0 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text-quaternary);
+    font-size: 13px; min-width: 180px;
+}
+.lang-btn {
+    height: 28px; padding: 0 8px;
+    font-size: 13px; border: 1px solid var(--border);
+    border-radius: 4px; background: var(--bg);
+    cursor: pointer;
+}
+.user-info {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 13px;
+}
+.user-info strong { font-weight: 600; }
+.tag-gray {
+    display: inline-flex; align-items: center;
+    height: 22px; padding: 0 8px;
+    border-radius: 4px; font-size: 12px;
+    background: var(--bg-layout);
+    border: 1px solid var(--border-secondary);
+    color: var(--text-tertiary);
+}
+</style>
+</head>
+<body>
+
+<!-- Full topbar mockup with 20 users -->
+<div class="topbar-mock">
+    <div class="topbar-mock-left">GMED CRM</div>
+    <div class="topbar-mock-right">
+        <div class="online-avatars" id="topbar-avatars-20"></div>
+        <div class="user-info">
+            <strong>Admin User</strong>
+            <span class="tag-gray">IT-Admin</span>
+        </div>
+        <div class="notif-bell">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/>
+            </svg>
+            <span class="notif-badge">3</span>
+        </div>
+        <div class="search-box">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <span>Search</span>
+        </div>
+        <button class="lang-btn">🇩🇪 DE</button>
+    </div>
+</div>
+
+<div class="demo-section">
+    <h2>Online Avatars — Scale Comparison</h2>
+
+    <div class="demo-row">
+        <span class="demo-label">3 users</span>
+        <div class="online-avatars" id="demo-3"></div>
+    </div>
+
+    <div class="demo-row">
+        <span class="demo-label">5 users</span>
+        <div class="online-avatars" id="demo-5"></div>
+    </div>
+
+    <div class="demo-row">
+        <span class="demo-label">8 users</span>
+        <div class="online-avatars" id="demo-8"></div>
+    </div>
+
+    <div class="demo-row">
+        <span class="demo-label">12 users</span>
+        <div class="online-avatars" id="demo-12"></div>
+    </div>
+
+    <div class="demo-row">
+        <span class="demo-label">15 users</span>
+        <div class="online-avatars" id="demo-15"></div>
+    </div>
+
+    <div class="demo-row">
+        <span class="demo-label">20 users</span>
+        <div class="online-avatars" id="demo-20"></div>
+    </div>
+</div>
+
+<script>
+const names = [
+    "Anna M.", "Boris K.", "Clara S.", "Dmitry V.", "Elena T.",
+    "Felix R.", "Greta H.", "Hans W.", "Irina P.", "Jan B.",
+    "Katya L.", "Leon F.", "Marta Z.", "Niklas J.", "Olga D.",
+    "Pavel N.", "Rita G.", "Stefan A.", "Tanja U.", "Viktor E.",
+];
+
+function initials(name) {
+    return name.split(' ').map(w => w[0]).join('').toUpperCase();
+}
+
+function renderAvatars(containerId, count) {
+    const el = document.getElementById(containerId);
+    const maxShow = 8;
+    const show = Math.min(count, maxShow);
+    const overflow = count > maxShow ? count - maxShow : 0;
+
+    let size, overlap;
+    if (count <= 5)       { size = 28; overlap = -6; }
+    else if (count <= 10) { size = 24; overlap = -8; }
+    else if (count <= 15) { size = 20; overlap = -10; }
+    else                  { size = 18; overlap = -10; }
+
+    for (let i = 0; i < show; i++) {
+        const div = document.createElement('div');
+        div.className = `avatar c${i % 8}`;
+        div.title = names[i];
+        div.textContent = initials(names[i]);
+        div.style.cssText = `width:${size}px;height:${size}px;font-size:${Math.max(size/2-1, 8)}px;margin-left:${i===0?0:overlap}px;z-index:${20-i}`;
+        el.appendChild(div);
+    }
+
+    if (overflow > 0) {
+        const div = document.createElement('div');
+        div.className = 'avatar avatar-overflow';
+        div.textContent = `+${overflow}`;
+        div.style.cssText = `width:${size}px;height:${size}px;font-size:${Math.max(size/2-1, 8)}px;margin-left:${overlap}px`;
+        el.appendChild(div);
+    }
+}
+
+renderAvatars('topbar-avatars-20', 20);
+renderAvatars('demo-3', 3);
+renderAvatars('demo-5', 5);
+renderAvatars('demo-8', 8);
+renderAvatars('demo-12', 12);
+renderAvatars('demo-15', 15);
+renderAvatars('demo-20', 20);
+</script>
+</body>
+</html>

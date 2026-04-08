@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT relname AS \"table!\", pg_size_pretty(pg_total_relation_size(relid)) AS \"size!\"\n           FROM pg_catalog.pg_statio_user_tables ORDER BY pg_total_relation_size(relid) DESC LIMIT 10",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "table!",
+        "type_info": "Name"
+      },
+      {
+        "ordinal": 1,
+        "name": "size!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      true,
+      null
+    ]
+  },
+  "hash": "6f304fce05c74acfa733699342391c58df3e20c32e07f09341441ba8b2fb0cea"
+}

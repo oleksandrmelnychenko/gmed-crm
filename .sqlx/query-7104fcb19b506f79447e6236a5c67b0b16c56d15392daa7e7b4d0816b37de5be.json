@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(*) AS \"c!\" FROM leads WHERE created_at >= date_trunc('month', now()) - interval '1 month' AND created_at < date_trunc('month', now())",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "c!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "7104fcb19b506f79447e6236a5c67b0b16c56d15392daa7e7b4d0816b37de5be"
+}

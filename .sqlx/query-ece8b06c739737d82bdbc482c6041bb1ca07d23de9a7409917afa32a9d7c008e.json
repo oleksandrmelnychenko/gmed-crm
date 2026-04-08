@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO patient_assignments (patient_id, user_id, assigned_by)\n                 VALUES ($1, $2, $3)\n                 ON CONFLICT (patient_id, user_id) DO UPDATE SET revoked_at = NULL, assigned_by = $3, assigned_at = now()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ece8b06c739737d82bdbc482c6041bb1ca07d23de9a7409917afa32a9d7c008e"
+}

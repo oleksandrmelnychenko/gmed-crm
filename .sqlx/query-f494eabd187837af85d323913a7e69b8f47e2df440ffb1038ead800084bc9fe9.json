@@ -1,0 +1,68 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT a.id, a.title, a.date, a.time_start, a.appointment_type,\n                  a.status, a.location,\n                  p.first_name, p.last_name\n           FROM appointments a\n           JOIN patients p ON p.id = a.patient_id\n           WHERE a.date >= CURRENT_DATE AND a.status IN ('planned', 'confirmed')\n           ORDER BY a.date, a.time_start LIMIT 10",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "date",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 3,
+        "name": "time_start",
+        "type_info": "Time"
+      },
+      {
+        "ordinal": 4,
+        "name": "appointment_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "location",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "first_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "last_name",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "f494eabd187837af85d323913a7e69b8f47e2df440ffb1038ead800084bc9fe9"
+}

@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE custom_fields SET field_label=$2, field_type=$3, options=$4, is_required=$5, sort_order=$6, is_active=true WHERE id=$1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Bool",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "60be792b1ca951773d5c1e43e6e366cda96cbfc0eefdbb369cc6fd1c9cbf522b"
+}

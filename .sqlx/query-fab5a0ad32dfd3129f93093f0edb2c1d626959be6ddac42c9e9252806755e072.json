@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO audit_log (user_id, action, entity_type, context)\n         VALUES ($1, 'revoke_all_users_sessions', 'token_family', $2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fab5a0ad32dfd3129f93093f0edb2c1d626959be6ddac42c9e9252806755e072"
+}

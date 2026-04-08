@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT qualification_status AS \"status!\", COUNT(*)::int AS \"count!: i32\"\n         FROM leads\n         GROUP BY qualification_status\n         ORDER BY 2 DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "status!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "count!: i32",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "73b984890a2cb4d3c7e2dbecf7ad9796f765768dbc64322988bbf294921f0051"
+}

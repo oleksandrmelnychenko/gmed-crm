@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE appointments SET interpreter_id = $2, interpreter_response = 'pending' WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d409f164de368203e8968cc562cdcdcfb168561de5eb71fbb5e51e12f6863dda"
+}

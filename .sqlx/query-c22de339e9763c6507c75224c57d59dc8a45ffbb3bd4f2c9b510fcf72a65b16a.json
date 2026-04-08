@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO audit_log (user_id, action, entity_type, entity_id) VALUES ($1, 'delete_ip_whitelist', 'ip_whitelist', $2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c22de339e9763c6507c75224c57d59dc8a45ffbb3bd4f2c9b510fcf72a65b16a"
+}

@@ -1,0 +1,88 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT lokalisierung, seit_wann, ursache, qualitaet, kontinuitaet, entwicklung, nrs_aktuell, nrs_anfang, dauer_anfang, dauer_aktuell, ausstrahlung, auftreten FROM pain_records WHERE case_id = $1 ORDER BY sort_order",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "lokalisierung",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "seit_wann",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "ursache",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "qualitaet",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "kontinuitaet",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "entwicklung",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "nrs_aktuell",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "nrs_anfang",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "dauer_anfang",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "dauer_aktuell",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "ausstrahlung",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "auftreten",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "59aaa165b55cfe582e9cb34059427f96b9ce2191902b7bdace0037b70ce1a9e6"
+}

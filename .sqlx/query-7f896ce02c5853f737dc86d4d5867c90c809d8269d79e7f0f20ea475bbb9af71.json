@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO symptome (case_id, beschreibung, fachrichtung, sort_order) VALUES ($1, $2, $3, $4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7f896ce02c5853f737dc86d4d5867c90c809d8269d79e7f0f20ea475bbb9af71"
+}

@@ -1,0 +1,88 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT handelsname, wirkstoff, dosis, dosis_einheit, einnahmeschema, darreichungsform, einheit, anmerkung, grund, seit, verordnender_arzt, med_typ FROM medikamente WHERE case_id = $1 ORDER BY sort_order",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "handelsname",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "wirkstoff",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "dosis",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "dosis_einheit",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "einnahmeschema",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "darreichungsform",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "einheit",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "anmerkung",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "grund",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "seit",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "verordnender_arzt",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "med_typ",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "34d81cd03dce51a04a40d0b84162082b420daddb9f632cf22e9f64330feeb953"
+}

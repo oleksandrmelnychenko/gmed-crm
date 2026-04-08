@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE user_notifications SET is_read = true WHERE user_id = $1 AND NOT is_read",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "60a7bd4552297c67fe8f04d9fdc8529190128af019403aa68e96c74ced345c36"
+}

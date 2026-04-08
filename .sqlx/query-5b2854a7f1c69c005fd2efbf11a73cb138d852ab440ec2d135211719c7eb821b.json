@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO audit_log (user_id, action, entity_type, entity_id) VALUES ($1, 'delete_custom_field', 'custom_field', $2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5b2854a7f1c69c005fd2efbf11a73cb138d852ab440ec2d135211719c7eb821b"
+}

@@ -1,0 +1,8 @@
+/target
+/target-test-run
+/dist
+/pkg
+.env
+*.wasm
+node_modules/
+*.log

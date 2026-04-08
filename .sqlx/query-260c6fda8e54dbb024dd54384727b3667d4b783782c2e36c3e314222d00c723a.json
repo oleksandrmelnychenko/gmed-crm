@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, phase, item_text, is_completed, completed_at FROM appointment_checklists WHERE appointment_id = $1 ORDER BY phase, sort_order",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "phase",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "item_text",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "is_completed",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "completed_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "260c6fda8e54dbb024dd54384727b3667d4b783782c2e36c3e314222d00c723a"
+}

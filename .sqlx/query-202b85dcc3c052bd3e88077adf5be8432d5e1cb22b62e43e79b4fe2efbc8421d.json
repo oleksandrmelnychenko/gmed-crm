@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE token_families SET is_revoked = true, revoked_reason = $1 WHERE NOT is_revoked",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "202b85dcc3c052bd3e88077adf5be8432d5e1cb22b62e43e79b4fe2efbc8421d"
+}

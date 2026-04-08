@@ -1,0 +1,70 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, entity_type, field_key, field_label, field_type, options, is_required, sort_order, is_active\n           FROM custom_fields\n           WHERE ($1::TEXT IS NULL OR entity_type = $1)\n           ORDER BY entity_type, sort_order, field_label",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "entity_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "field_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "field_label",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "field_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "options",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 6,
+        "name": "is_required",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 7,
+        "name": "sort_order",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "is_active",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "79ea47edd497f6b9fc8073ae7c07579289cd916177bb50e90fab3a5867f52802"
+}

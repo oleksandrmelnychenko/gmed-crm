@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE system_settings SET value = $1::JSONB, updated_by = $2, updated_at = now() WHERE key = 'maintenance_mode'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Jsonb",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ed2b105f8964ddf91d8eefcc4457c6c687522c03ce7c7efcaf8a2a736ef9987d"
+}

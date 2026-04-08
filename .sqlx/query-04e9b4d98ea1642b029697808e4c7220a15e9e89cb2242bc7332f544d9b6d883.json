@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT attachment_filename, attachment_mime\n           FROM direct_messages\n           WHERE attachment_key = $1 AND (from_user = $2 OR to_user = $2)\n           LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "attachment_filename",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "attachment_mime",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true,
+      true
+    ]
+  },
+  "hash": "04e9b4d98ea1642b029697808e4c7220a15e9e89cb2242bc7332f544d9b6d883"
+}

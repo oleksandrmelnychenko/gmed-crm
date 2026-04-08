@@ -1,0 +1,78 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, from_user, to_user, message, is_read, created_at,\n                  attachment_filename, attachment_mime, attachment_size, attachment_key\n           FROM direct_messages\n           WHERE (from_user = $1 AND to_user = $2) OR (from_user = $2 AND to_user = $1)\n           ORDER BY created_at DESC LIMIT $3",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "from_user",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "to_user",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "message",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "is_read",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "attachment_filename",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "attachment_mime",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "attachment_size",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 9,
+        "name": "attachment_key",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "7d3639f3712fa563969d5db8cd5c5a736629be506eaca2d606b773e6cb4f2de3"
+}

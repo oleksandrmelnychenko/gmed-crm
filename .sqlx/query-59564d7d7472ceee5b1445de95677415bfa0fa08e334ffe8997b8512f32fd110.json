@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT appetit_durst, koerpergroesse, gewicht, gewichtsveraenderung, grund FROM vegetative_anamnese WHERE case_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "appetit_durst",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "koerpergroesse",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 2,
+        "name": "gewicht",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 3,
+        "name": "gewichtsveraenderung",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "grund",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "59564d7d7472ceee5b1445de95677415bfa0fa08e334ffe8997b8512f32fd110"
+}

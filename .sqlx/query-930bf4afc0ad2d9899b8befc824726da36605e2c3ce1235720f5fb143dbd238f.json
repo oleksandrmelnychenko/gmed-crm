@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO audit_log (user_id, action, entity_type, entity_id) VALUES ($1, 'delete_notification_channel', 'notification_channel', $2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "930bf4afc0ad2d9899b8befc824726da36605e2c3ce1235720f5fb143dbd238f"
+}

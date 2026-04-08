@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE announcements SET title=$2, message=$3, variant=$4, is_active=$5, ends_at=$6 WHERE id=$1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Bool",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4348a1c1e532dfb54a7bfeb4df732b9493138d89801c1b21a7397684b1cd97e3"
+}

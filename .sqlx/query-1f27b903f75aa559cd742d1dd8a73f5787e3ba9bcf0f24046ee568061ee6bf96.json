@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM vorerkrankungen WHERE case_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1f27b903f75aa559cd742d1dd8a73f5787e3ba9bcf0f24046ee568061ee6bf96"
+}

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE interpreter_reports\n         SET approval_status = 'rejected', approved_by = $2, approved_at = now(), notes = COALESCE($3, notes)\n         WHERE appointment_id = $1 AND approval_status = 'pending'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a896c843aeb8e777eca2769a4ebdfadfde7601945daf452824085dde611305f6"
+}

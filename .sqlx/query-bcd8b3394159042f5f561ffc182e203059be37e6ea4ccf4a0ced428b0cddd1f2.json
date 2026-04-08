@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT beschreibung, fachrichtung FROM symptome WHERE case_id = $1 ORDER BY sort_order",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "beschreibung",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "fachrichtung",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "bcd8b3394159042f5f561ffc182e203059be37e6ea4ccf4a0ced428b0cddd1f2"
+}

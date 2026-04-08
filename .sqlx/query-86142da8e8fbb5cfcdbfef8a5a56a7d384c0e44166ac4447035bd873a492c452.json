@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE order_leistungen SET status = 'approved', approved_by = $3, approved_at = now()\n         WHERE id = $2 AND order_id = $1 AND status = 'delivered'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "86142da8e8fbb5cfcdbfef8a5a56a7d384c0e44166ac4447035bd873a492c452"
+}

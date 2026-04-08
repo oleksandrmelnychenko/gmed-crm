@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE patients SET\n            title = COALESCE($2, title),\n            first_name = $3, last_name = $4,\n            phone_primary = COALESCE($5, phone_primary),\n            phone_secondary = COALESCE($6, phone_secondary),\n            email = COALESCE($7, email),\n            nationality = COALESCE($8, nationality),\n            residence_country = COALESCE($9, residence_country),\n            languages = COALESCE($10, languages),\n            address_street = COALESCE($11, address_street),\n            address_city = COALESCE($12, address_city),\n            address_zip = COALESCE($13, address_zip),\n            address_country = COALESCE($14, address_country),\n            insurance_provider = COALESCE($15, insurance_provider),\n            insurance_number = COALESCE($16, insurance_number),\n            insurance_type = COALESCE($17, insurance_type),\n            emergency_contact_name = COALESCE($18, emergency_contact_name),\n            emergency_contact_phone = COALESCE($19, emergency_contact_phone),\n            emergency_contact_relation = COALESCE($20, emergency_contact_relation),\n            notes = COALESCE($21, notes)\n        WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "TextArray",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0b40cc6f91ab9768fb9011e2e6123a8e52df0c9b027ec05a6710abf60e519fca"
+}

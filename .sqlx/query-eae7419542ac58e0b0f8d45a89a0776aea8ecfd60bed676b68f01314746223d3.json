@@ -1,0 +1,59 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, role, entity_type, field_name, access_level, condition_type, is_system_locked\n         FROM field_access_policies\n         WHERE ($1::text IS NULL OR entity_type = $1)\n           AND ($2::text IS NULL OR role = $2)\n         ORDER BY entity_type, role, field_name",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "role",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "entity_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "field_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "access_level",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "condition_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "is_system_locked",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "eae7419542ac58e0b0f8d45a89a0776aea8ecfd60bed676b68f01314746223d3"
+}

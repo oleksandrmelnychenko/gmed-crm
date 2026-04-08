@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM symptome WHERE case_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8b7b0f39ce4efe0215f83c6c7b3cd81a90c1c54a3ce88dc3a082c7e6a35378f6"
+}

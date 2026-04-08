@@ -1,0 +1,142 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT o.*, p.first_name, p.last_name, p.patient_id AS p_pid\n           FROM orders o JOIN patients p ON p.id = o.patient_id WHERE o.id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "order_number",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "patient_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "contract_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "phase",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "needs_description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "conditions",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 8,
+        "name": "signed_patient",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 9,
+        "name": "signed_agency",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 10,
+        "name": "signed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "total_estimated",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 12,
+        "name": "total_actual",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 13,
+        "name": "currency",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "notes",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 15,
+        "name": "created_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 16,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 17,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 18,
+        "name": "first_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 19,
+        "name": "last_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 20,
+        "name": "p_pid",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "1a03f53f0472c26fe41b4ddbff76d8f9c6edeaf1373216617a07a1a13ae45a18"
+}

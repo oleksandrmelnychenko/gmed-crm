@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT is_system_locked AS \"locked!\" FROM field_access_policies\n         WHERE role = $1 AND entity_type = $2 AND field_name = $3",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "locked!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "eef51ffbea7a0f79fd6d0329d0a7c094990a7c2d43974014622bc6a9fa56d8b0"
+}

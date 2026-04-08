@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT DISTINCT ON (tf.user_id)\n                  tf.user_id, u.name AS \"user_name!\", u.email AS \"user_email!\", u.role AS \"role!\"\n           FROM token_families tf\n           JOIN users u ON u.id = tf.user_id\n           WHERE NOT tf.is_revoked\n             AND tf.last_activity_at > now() - interval '15 minutes'\n           ORDER BY tf.user_id, tf.last_activity_at DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_name!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "user_email!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "role!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "dd64fcbbc7e9239ac908683154e2d6cb1cc7dac0611b8759b45836aa47cdb881"
+}

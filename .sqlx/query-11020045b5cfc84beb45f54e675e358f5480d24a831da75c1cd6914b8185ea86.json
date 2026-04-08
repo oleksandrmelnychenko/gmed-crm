@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO impfstatus (case_id, status_text) VALUES ($1, $2)\n         ON CONFLICT (case_id) DO UPDATE SET status_text=$2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "11020045b5cfc84beb45f54e675e358f5480d24a831da75c1cd6914b8185ea86"
+}

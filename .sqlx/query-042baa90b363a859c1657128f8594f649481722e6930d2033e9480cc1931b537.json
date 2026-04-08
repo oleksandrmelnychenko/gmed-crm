@@ -1,0 +1,44 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT cr.id, cr.user_id, u.name AS \"user_name!\",\n                  cr.consent_type, cr.granted_at\n           FROM consent_records cr\n           JOIN users u ON u.id = cr.user_id\n           WHERE cr.granted = true AND cr.revoked_at IS NULL\n             AND cr.granted_at < now() - interval '1 year'\n           ORDER BY cr.granted_at ASC LIMIT 100",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "user_name!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "consent_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "granted_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "042baa90b363a859c1657128f8594f649481722e6930d2033e9480cc1931b537"
+}
