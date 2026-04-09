@@ -278,9 +278,9 @@ pub fn Chat() -> impl IntoView {
         });
     };
 
-    // Polling: refresh conversations every 10 seconds
-    Effect::new(move |_| {
-        let handle = gloo_timers::callback::Interval::new(10_000, move || {
+    // Polling: refresh conversations every 10 seconds — properly cleaned up on unmount
+    {
+        let cb = wasm_bindgen::closure::Closure::<dyn Fn()>::new(move || {
             wasm_bindgen_futures::spawn_local(async move {
                 let convos = client::get::<Vec<Conversation>>("/messages/conversations")
                     .await
@@ -295,8 +295,20 @@ pub fn Chat() -> impl IntoView {
                 }
             });
         });
-        std::mem::forget(handle);
-    });
+        let win = web_sys::window().unwrap();
+        let interval_id = win
+            .set_interval_with_callback_and_timeout_and_arguments_0(
+                cb.as_ref().unchecked_ref(),
+                10_000,
+            )
+            .unwrap_or(0);
+        cb.forget();
+        on_cleanup(move || {
+            if let Some(w) = web_sys::window() {
+                w.clear_interval_with_handle(interval_id);
+            }
+        });
+    }
 
     view! {
         <div class="chat-page">

@@ -1564,6 +1564,7 @@ async fn get_report(
 
     match sqlx::query(
         r#"SELECT ir.id, ir.interpreter_id, ir.hours, ir.report_text, ir.approval_status,
+                  ir.notes,
                   ir.approved_at, ir.created_at,
                   u.name AS interpreter_name,
                   approver.name AS approved_by_name
@@ -1585,6 +1586,7 @@ async fn get_report(
             "hours": row.try_get::<rust_decimal::Decimal, _>("hours").map(|value| value.to_string()).unwrap_or_default(),
             "report_text": row.try_get::<Option<String>, _>("report_text").unwrap_or_default(),
             "approval_status": row.try_get::<String, _>("approval_status").unwrap_or_default(),
+            "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
             "approved_by_name": row.try_get::<Option<String>, _>("approved_by_name").unwrap_or_default(),
             "approved_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("approved_at").unwrap_or_default().map(|value| value.to_rfc3339()),
             "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),

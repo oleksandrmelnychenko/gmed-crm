@@ -30,7 +30,13 @@ async fn overview(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Billing, Role::Sales]) {
+    if let Err(e) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::CeoAssistant,
+        Role::PatientManager,
+        Role::Billing,
+        Role::Sales,
+    ]) {
         return e;
     }
 
@@ -78,7 +84,12 @@ async fn leads_stats(
     Extension(auth): Extension<AuthUser>,
     Query(q): Query<PeriodQuery>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Sales]) {
+    if let Err(e) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::CeoAssistant,
+        Role::PatientManager,
+        Role::Sales,
+    ]) {
         return e;
     }
 
@@ -133,7 +144,12 @@ async fn leads_monthly(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Sales]) {
+    if let Err(e) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::CeoAssistant,
+        Role::PatientManager,
+        Role::Sales,
+    ]) {
         return e;
     }
 
@@ -167,7 +183,12 @@ async fn leads_by_status(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Sales]) {
+    if let Err(e) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::CeoAssistant,
+        Role::PatientManager,
+        Role::Sales,
+    ]) {
         return e;
     }
 
@@ -198,7 +219,12 @@ async fn orders_by_phase(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Billing]) {
+    if let Err(e) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::CeoAssistant,
+        Role::PatientManager,
+        Role::Billing,
+    ]) {
         return e;
     }
 
@@ -228,7 +254,12 @@ async fn upcoming_appointments(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::TeamleadInterpreter]) {
+    if let Err(e) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::CeoAssistant,
+        Role::PatientManager,
+        Role::TeamleadInterpreter,
+    ]) {
         return e;
     }
 

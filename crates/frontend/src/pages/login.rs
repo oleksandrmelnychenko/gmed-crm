@@ -6,8 +6,8 @@ use leptos::prelude::*;
 pub fn Login() -> impl IntoView {
     let lang = use_context::<ReadSignal<Lang>>().unwrap();
     let set_lang = use_context::<WriteSignal<Lang>>().unwrap();
-    let (email, set_email) = signal("admin@gmed.de".to_string());
-    let (password, set_password) = signal("admin123".to_string());
+    let (email, set_email) = signal(String::new());
+    let (password, set_password) = signal(String::new());
     let (error, set_error) = signal(Option::<String>::None);
     let (loading, set_loading) = signal(false);
 
@@ -68,7 +68,7 @@ pub fn Login() -> impl IntoView {
                         <input
                             id="email"
                             type="email"
-                            placeholder="admin@gmed.de"
+                            placeholder="name@gmed.de"
                             required
                             prop:value=email
                             on:input=move |ev| set_email.set(event_target_value(&ev))

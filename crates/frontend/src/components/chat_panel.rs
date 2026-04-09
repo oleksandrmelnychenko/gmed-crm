@@ -122,9 +122,9 @@ pub fn ChatPanel() -> impl IntoView {
         }
     });
 
-    // Poll every 8 seconds
-    Effect::new(move |_| {
-        let handle = gloo_timers::callback::Interval::new(8_000, move || {
+    // Poll every 8 seconds — properly cleaned up on unmount
+    {
+        let cb = wasm_bindgen::closure::Closure::<dyn Fn()>::new(move || {
             wasm_bindgen_futures::spawn_local(async move {
                 let c = client::get::<Vec<Conversation>>("/messages/conversations")
                     .await
@@ -138,8 +138,20 @@ pub fn ChatPanel() -> impl IntoView {
                 }
             });
         });
-        std::mem::forget(handle);
-    });
+        let win = web_sys::window().unwrap();
+        let interval_id = win
+            .set_interval_with_callback_and_timeout_and_arguments_0(
+                cb.as_ref().unchecked_ref(),
+                8_000,
+            )
+            .unwrap_or(0);
+        cb.forget();
+        on_cleanup(move || {
+            if let Some(w) = web_sys::window() {
+                w.clear_interval_with_handle(interval_id);
+            }
+        });
+    }
 
     let open_peer = move |uid: String, name: String, role: String| {
         set_peer_id.set(Some(uid));

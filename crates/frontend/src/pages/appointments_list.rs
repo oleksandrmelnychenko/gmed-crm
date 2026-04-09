@@ -5,6 +5,11 @@ use crate::i18n::{self, Lang};
 use crate::session::{CurrentUserContext, role_display_name};
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
+use wasm_bindgen::JsValue;
+
+fn debug_log(message: &str) {
+    web_sys::console::log_1(&JsValue::from_str(message));
+}
 
 #[allow(dead_code)]
 #[derive(Deserialize, Clone, Debug)]
@@ -706,6 +711,7 @@ const MONTHS_RU: &[&str] = &[
 
 #[component]
 pub fn AppointmentsList() -> impl IntoView {
+    debug_log("appointments:init");
     let lang = use_context::<ReadSignal<Lang>>().unwrap();
     let current_user = use_context::<CurrentUserContext>().unwrap();
 
@@ -861,6 +867,7 @@ pub fn AppointmentsList() -> impl IntoView {
     };
 
     Effect::new(move |_| {
+        debug_log("appointments:metadata-effect");
         if current_user.loading.get() || metadata_loaded.get() {
             return;
         }
@@ -876,17 +883,21 @@ pub fn AppointmentsList() -> impl IntoView {
     });
 
     Effect::new(move |_| {
+        debug_log("appointments:list-effect");
         let _ = reload_nonce.get();
         if current_user.loading.get() {
+            debug_log("appointments:list-effect loading-return");
             return;
         }
         if !permissions().can_view_page {
+            debug_log("appointments:list-effect no-access");
             set_loading.set(false);
             set_load_error.set(None);
             set_apts.set(Vec::new());
             return;
         }
 
+        debug_log("appointments:list-effect before-url");
         let url = appointments_query_url(
             &search.get(),
             &filter_status.get(),
@@ -898,16 +909,21 @@ pub fn AppointmentsList() -> impl IntoView {
             &filter_date_from.get(),
             &filter_date_to.get(),
         );
+        debug_log("appointments:list-effect after-url");
 
         set_loading.set(true);
         set_load_error.set(None);
+        debug_log("appointments:list-effect before-spawn");
         wasm_bindgen_futures::spawn_local(async move {
+            debug_log("appointments:list-effect spawned");
             match client::get::<Vec<Appointment>>(&url).await {
                 Ok(items) => {
+                    debug_log("appointments:list-effect request-ok");
                     set_apts.set(items);
                     set_loading.set(false);
                 }
                 Err(err) => {
+                    debug_log("appointments:list-effect request-err");
                     set_apts.set(Vec::new());
                     set_load_error.set(Some(err));
                     set_loading.set(false);
@@ -1713,6 +1729,7 @@ pub fn AppointmentsList() -> impl IntoView {
             </div>
 
             {move || {
+                debug_log("appointments:render-body");
                 if current_user.loading.get() {
                     return view! { <div class="page-loading">"Loading appointments..."</div> }.into_any();
                 }
@@ -1726,6 +1743,11 @@ pub fn AppointmentsList() -> impl IntoView {
                         </div>
                     }
                     .into_any();
+                }
+
+                if loading.get() && apts.get().is_empty() && load_error.get().is_none() {
+                    return view! { <div class="page-loading">"Loading appointments..."</div> }
+                        .into_any();
                 }
 
                 view! {
@@ -2087,6 +2109,19 @@ pub fn AppointmentsList() -> impl IntoView {
 
                                     if let Some(err) = load_error.get() {
                                         return view! { <div class="page-error">{err}</div> }.into_any();
+                                    }
+
+                                    if apts.get().is_empty() {
+                                        return view! {
+                                            <div class="card">
+                                                <div class="empty-state">
+                                                    <strong>"No appointments available for this role right now."</strong>
+                                                    <div class="provider-subline" style="margin-top:8px">
+                                                        "Check active filters, patient assignments, and owner mappings for the current user."
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        }.into_any();
                                     }
 
                                     match view_mode.get() {
