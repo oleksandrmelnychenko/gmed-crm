@@ -43,24 +43,20 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { apiFetch } from "@/lib/api";
+import { downloadLeadAttachment } from "@/lib/api/leads";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
-import type { CreateLeadBody, Lead, LeadsStats, MonthlyEntry, StatusCount } from "@/lib/api/types";
+import type {
+  CreateLeadBody,
+  Lead,
+  LeadDetail,
+  LeadsStats,
+  MonthlyEntry,
+  StatusCount,
+} from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
-type LeadListItem = Lead & {
-  compliance_status?: string | null;
-};
-
-type LeadDetail = Lead & {
-  languages?: string[];
-  needs_medical?: string | null;
-  needs_non_medical?: string | null;
-  compliance_status: string;
-  converted_patient_id?: string | null;
-  notes?: string | null;
-  updated_at?: string;
-};
+type LeadListItem = Lead;
 
 type LeadFilters = {
   search: string;
@@ -77,9 +73,6 @@ type LeadForm = {
   phone: string;
   source: string;
   country: string;
-  languages: string;
-  needsMedical: string;
-  needsNonMedical: string;
   notes: string;
 };
 
@@ -131,9 +124,6 @@ function blankLeadForm(): LeadForm {
     phone: "",
     source: "",
     country: "",
-    languages: "",
-    needsMedical: "",
-    needsNonMedical: "",
     notes: "",
   };
 }
@@ -143,11 +133,21 @@ function nonempty(value: string): string | null {
   return trimmed || null;
 }
 
-function parseLanguages(value: string) {
-  return value
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
+function yesNo(value: boolean | null | undefined): string {
+  if (value === true) return "Yes";
+  if (value === false) return "No";
+  return "—";
+}
+
+function dashOrValue(value?: string | null): string {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : "—";
+}
+
+function formatSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function buildLeadsPath(filters: LeadFilters) {
@@ -393,20 +393,13 @@ export function LeadsPage() {
     setCreateBusy(true);
     setCreateError("");
 
-    const payload: CreateLeadBody & {
-      languages?: string[];
-      needs_non_medical?: string | null;
-      notes?: string | null;
-    } = {
+    const payload: CreateLeadBody = {
       first_name: createForm.firstName.trim(),
       last_name: createForm.lastName.trim(),
       email: nonempty(createForm.email),
       phone: nonempty(createForm.phone),
       source: nonempty(createForm.source),
       country: nonempty(createForm.country),
-      languages: parseLanguages(createForm.languages),
-      needs_medical: nonempty(createForm.needsMedical),
-      needs_non_medical: nonempty(createForm.needsNonMedical),
       notes: nonempty(createForm.notes),
     };
 
