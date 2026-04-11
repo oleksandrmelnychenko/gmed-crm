@@ -5,6 +5,10 @@ import { NavPanel } from "./nav-panel";
 import { Topbar } from "./topbar";
 import { cn } from "@/lib/utils";
 
+function isPatientPortalPath(pathname: string) {
+  return pathname === "/" || pathname === "/documents" || pathname === "/privacy" || pathname === "/invoices" || pathname === "/appointments";
+}
+
 export function AppLayout() {
   const { user, loading } = useAuth();
   const location = useLocation();
@@ -25,6 +29,10 @@ export function AppLayout() {
         state={{ from: `${location.pathname}${location.search}${location.hash}` }}
       />
     );
+  }
+
+  if (user.role === "patient" && !isPatientPortalPath(location.pathname)) {
+    return <Navigate to="/" replace />;
   }
 
   return (

@@ -5,7 +5,6 @@ members = [
     "crates/shared",
     "crates/db",
     "crates/server",
-    "crates/frontend",
 ]
 
 [workspace.package]

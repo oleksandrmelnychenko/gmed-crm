@@ -6,3 +6,4 @@
 *.wasm
 node_modules/
 *.log
+.agent-extract/

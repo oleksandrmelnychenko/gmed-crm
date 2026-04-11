@@ -1,0 +1,2978 @@
+import {
+  startTransition,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useState,
+  type ChangeEvent,
+  type FormEvent,
+  type ReactNode,
+} from "react";
+import { Link, useSearchParams } from "react-router-dom";
+import {
+  Download,
+  FileText,
+  FolderPlus,
+  LoaderCircle,
+  RefreshCw,
+  Search,
+  Share2,
+} from "lucide-react";
+
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import { apiFetch, getAccessToken } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
+import { useLang } from "@/lib/i18n";
+import { PatientDocumentsPage } from "@/pages/patient-documents";
+import { cn } from "@/lib/utils";
+
+type DocumentStatus = "draft" | "active" | "archived";
+type DocumentVisibility =
+  | "internal"
+  | "released_internal"
+  | "released_external"
+  | "patient_visible";
+
+type DocumentItem = {
+  id: string;
+  patient_id: string | null;
+  order_id: string | null;
+  appointment_id: string | null;
+  patient_pid: string | null;
+  patient_name: string | null;
+  order_number: string | null;
+  appointment_title: string | null;
+  auto_name: string;
+  original_filename: string | null;
+  art: string;
+  category: string | null;
+  status: string;
+  visibility: string;
+  is_medical: boolean;
+  mime_type: string | null;
+  file_size: number | null;
+  klinik: string | null;
+  ursprung: string | null;
+  notes: string | null;
+  uploaded_by_name: string | null;
+  created_at: string;
+  updated_at: string;
+  share_count: number;
+  shared_to_current: boolean;
+  data_sensitivity: string;
+};
+
+type DocumentShare = {
+  id: string;
+  shared_with_provider_id: string | null;
+  shared_with_user_id: string | null;
+  provider_name: string | null;
+  target_user_name: string | null;
+  target_user_role: string | null;
+  shared_by_name: string | null;
+  channel: string | null;
+  requires_confirmation: boolean;
+  confirmed: boolean;
+  confirmed_at: string | null;
+  shared_at: string;
+  revoked_at: string | null;
+};
+
+type StaffOption = { id: string; name: string; role: string };
+type CategoryOption = { key: string; label: string };
+type CategoriesResponse = { categories: CategoryOption[]; arts: string[] };
+type PatientOption = {
+  id: string;
+  patient_id: string;
+  first_name?: string;
+  last_name?: string;
+};
+type ProviderOption = { id: string; name: string; address_city: string | null };
+type OrderOption = { id: string; order_number: string; patient_pid: string };
+type AppointmentOption = {
+  id: string;
+  title: string;
+  date: string;
+  time_start: string | null;
+};
+
+type FiltersState = {
+  search: string;
+  patientId: string;
+  orderId: string;
+  appointmentId: string;
+  status: string;
+  visibility: string;
+  art: string;
+  category: string;
+};
+
+type UploadFormState = {
+  file: File | null;
+  patientId: string;
+  orderId: string;
+  appointmentId: string;
+  autoName: string;
+  art: string;
+  category: string;
+  status: DocumentStatus;
+  visibility: DocumentVisibility;
+  isMedical: boolean;
+  klinik: string;
+  ursprung: string;
+  notes: string;
+};
+
+type EditFormState = {
+  patientId: string;
+  orderId: string;
+  appointmentId: string;
+  autoName: string;
+  art: string;
+  category: string;
+  status: DocumentStatus;
+  visibility: DocumentVisibility;
+  isMedical: boolean;
+  klinik: string;
+  ursprung: string;
+  notes: string;
+};
+
+type ShareFormState = {
+  targetType: "user" | "provider";
+  userId: string;
+  providerId: string;
+  channel: string;
+  requiresConfirmation: boolean;
+};
+
+type DocumentTemplate = {
+  id: string;
+  label: string;
+  description: string;
+  art: string;
+  category: string;
+  default_auto_name: string;
+  default_status: DocumentStatus;
+  default_visibility: DocumentVisibility;
+  is_medical: boolean;
+  supported_languages: string[];
+  text_block_keys: string[];
+};
+
+type TemplateTextBlock = {
+  key: string;
+  label: string;
+  description: string;
+};
+
+type TemplateCatalogResponse = {
+  templates: DocumentTemplate[];
+  text_blocks: TemplateTextBlock[];
+};
+
+type GenerateFormState = {
+  templateId: string;
+  patientId: string;
+  orderId: string;
+  appointmentId: string;
+  autoName: string;
+  status: DocumentStatus;
+  visibility: DocumentVisibility;
+  language: string;
+  titleOverride: string;
+  introduction: string;
+  closingNote: string;
+  klinik: string;
+  ursprung: string;
+  notes: string;
+  textBlockKeys: string[];
+};
+
+type GenerateDocumentResponse = {
+  id: string;
+  auto_name: string;
+  original_filename: string;
+  mime_type: string;
+  file_size: number;
+  preview_html?: string;
+};
+
+const STATUS_OPTIONS: DocumentStatus[] = ["draft", "active", "archived"];
+const VISIBILITY_OPTIONS: DocumentVisibility[] = [
+  "internal",
+  "released_internal",
+  "released_external",
+  "patient_visible",
+];
+const selectClassName =
+  "h-10 w-full rounded-xl border border-input bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100";
+const textareaClassName =
+  "min-h-[104px] w-full rounded-xl border border-input bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100";
+
+function canManageDocuments(role?: string) {
+  return role === "ceo" || role === "patient_manager";
+}
+
+function canViewDocuments(role?: string) {
+  return [
+    "ceo",
+    "ceo_assistant",
+    "patient_manager",
+    "teamlead_interpreter",
+    "interpreter",
+    "concierge",
+    "billing",
+  ].includes(role ?? "");
+}
+
+function buildDocumentsPath(filters: FiltersState) {
+  const params = new URLSearchParams();
+  if (filters.search.trim()) params.set("search", filters.search.trim());
+  if (filters.patientId) params.set("patient_id", filters.patientId);
+  if (filters.orderId) params.set("order_id", filters.orderId);
+  if (filters.appointmentId)
+    params.set("appointment_id", filters.appointmentId);
+  if (filters.status) params.set("status", filters.status);
+  if (filters.visibility) params.set("visibility", filters.visibility);
+  if (filters.art.trim()) params.set("art", filters.art.trim());
+  if (filters.category) params.set("category", filters.category);
+  return params.size ? `/documents?${params.toString()}` : "/documents";
+}
+
+function formatDateTime(value?: string | null) {
+  if (!value) return "Not set";
+  try {
+    return new Intl.DateTimeFormat("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(value));
+  } catch {
+    return value;
+  }
+}
+
+function formatDate(value?: string | null) {
+  if (!value) return "Not set";
+  try {
+    return new Intl.DateTimeFormat("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    }).format(new Date(`${value}T00:00:00`));
+  } catch {
+    return value;
+  }
+}
+
+function formatFileSize(value?: number | null) {
+  if (!value || value <= 0) return "Not set";
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function statusBadge(status: string) {
+  if (status === "active")
+    return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  if (status === "archived")
+    return "border-slate-200 bg-slate-100 text-slate-600";
+  return "border-amber-200 bg-amber-50 text-amber-700";
+}
+
+function visibilityBadge(visibility: string) {
+  if (visibility === "released_internal")
+    return "border-sky-200 bg-sky-50 text-sky-700";
+  if (visibility === "released_external")
+    return "border-violet-200 bg-violet-50 text-violet-700";
+  if (visibility === "patient_visible")
+    return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  return "border-slate-200 bg-slate-100 text-slate-700";
+}
+
+function sensitivityBadge(value: string) {
+  if (value.toLowerCase() === "medical")
+    return "border-rose-200 bg-rose-50 text-rose-700";
+  if (value.toLowerCase() === "financial")
+    return "border-orange-200 bg-orange-50 text-orange-700";
+  return "border-sky-200 bg-sky-50 text-sky-700";
+}
+
+function patientOptionLabel(patient: PatientOption) {
+  return `${patient.patient_id} · ${[patient.first_name, patient.last_name].filter(Boolean).join(" ")}`;
+}
+
+function emptyUploadForm(patientId = ""): UploadFormState {
+  return {
+    file: null,
+    patientId,
+    orderId: "",
+    appointmentId: "",
+    autoName: "",
+    art: "",
+    category: "",
+    status: "active",
+    visibility: "internal",
+    isMedical: false,
+    klinik: "",
+    ursprung: "",
+    notes: "",
+  };
+}
+
+function emptyGenerateForm(patientId = ""): GenerateFormState {
+  return {
+    templateId: "",
+    patientId,
+    orderId: "",
+    appointmentId: "",
+    autoName: "",
+    status: "draft",
+    visibility: "patient_visible",
+    language: "de",
+    titleOverride: "",
+    introduction: "",
+    closingNote: "",
+    klinik: "",
+    ursprung: "",
+    notes: "",
+    textBlockKeys: [],
+  };
+}
+
+function detailToEditForm(detail: DocumentItem): EditFormState {
+  return {
+    patientId: detail.patient_id ?? "",
+    orderId: detail.order_id ?? "",
+    appointmentId: detail.appointment_id ?? "",
+    autoName: detail.auto_name,
+    art: detail.art,
+    category: detail.category ?? "",
+    status: (detail.status as DocumentStatus) ?? "active",
+    visibility: (detail.visibility as DocumentVisibility) ?? "internal",
+    isMedical: detail.is_medical,
+    klinik: detail.klinik ?? "",
+    ursprung: detail.ursprung ?? "",
+    notes: detail.notes ?? "",
+  };
+}
+
+async function downloadDocument(id: string, filename: string) {
+  const token = getAccessToken();
+  const response = await fetch(`/api/v1/documents/${id}/download`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  });
+  if (!response.ok)
+    throw new Error(`${response.status} ${response.statusText}`);
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename || "document";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function writePreviewWindow(previewWindow: Window | null, html?: string) {
+  if (!previewWindow || !html) return false;
+  previewWindow.document.open();
+  previewWindow.document.write(html);
+  previewWindow.document.close();
+  return true;
+}
+
+function openBlobPreviewWindow(previewWindow: Window | null, blob: Blob) {
+  const openedWindow =
+    previewWindow ?? window.open("", "_blank", "noopener,noreferrer");
+  if (!openedWindow) return false;
+  const objectUrl = URL.createObjectURL(blob);
+  openedWindow.location.href = objectUrl;
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+  return true;
+}
+
+async function openDocumentPreview(id: string, previewWindow?: Window | null) {
+  const token = getAccessToken();
+  const response = await fetch(`/api/v1/documents/${id}/download`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  });
+  if (!response.ok)
+    throw new Error(`${response.status} ${response.statusText}`);
+  const contentType = response.headers.get("content-type") ?? "";
+  if (contentType.startsWith("text/html")) {
+    const html = await response.text();
+    const opened = writePreviewWindow(
+      previewWindow ?? window.open("", "_blank", "noopener,noreferrer"),
+      html,
+    );
+    if (!opened) {
+      if (previewWindow) previewWindow.close();
+      throw new Error("Allow pop-ups to preview the generated document.");
+    }
+    return;
+  }
+
+  const blob = await response.blob();
+  const opened = openBlobPreviewWindow(previewWindow ?? null, blob);
+  if (!opened) {
+    if (previewWindow) previewWindow.close();
+    throw new Error("Allow pop-ups to preview the generated document.");
+  }
+}
+
+export function DocumentsPage() {
+  const { user } = useAuth();
+
+  if (user?.role === "patient") {
+    return <PatientDocumentsPage />;
+  }
+
+  return <StaffDocumentsPage />;
+}
+
+function StaffDocumentsPage() {
+  const { user } = useAuth();
+  const { t } = useLang();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const canView = canViewDocuments(user?.role);
+  const canManage = canManageDocuments(user?.role);
+
+  const [filters, setFilters] = useState<FiltersState>(() => ({
+    search: searchParams.get("search") ?? "",
+    patientId: searchParams.get("patient") ?? "",
+    orderId: searchParams.get("order") ?? "",
+    appointmentId: searchParams.get("appointment") ?? "",
+    status: searchParams.get("status") ?? "",
+    visibility: searchParams.get("visibility") ?? "",
+    art: searchParams.get("art") ?? "",
+    category: searchParams.get("category") ?? "",
+  }));
+  const deferredSearch = useDeferredValue(filters.search);
+
+  const [documents, setDocuments] = useState<DocumentItem[]>([]);
+  const [busy, setBusy] = useState(true);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [version, setVersion] = useState(0);
+
+  const [patients, setPatients] = useState<PatientOption[]>([]);
+  const [providers, setProviders] = useState<ProviderOption[]>([]);
+  const [staff, setStaff] = useState<StaffOption[]>([]);
+  const [categories, setCategories] = useState<CategoryOption[]>([]);
+  const [arts, setArts] = useState<string[]>([]);
+
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadForm, setUploadForm] = useState<UploadFormState>(() =>
+    emptyUploadForm(searchParams.get("patient") ?? ""),
+  );
+  const [uploadOrders, setUploadOrders] = useState<OrderOption[]>([]);
+  const [uploadAppointments, setUploadAppointments] = useState<
+    AppointmentOption[]
+  >([]);
+  const [uploadBusy, setUploadBusy] = useState(false);
+  const [uploadError, setUploadError] = useState("");
+
+  const [templateOpen, setTemplateOpen] = useState(false);
+  const [templates, setTemplates] = useState<DocumentTemplate[]>([]);
+  const [templateTextBlocks, setTemplateTextBlocks] = useState<
+    TemplateTextBlock[]
+  >([]);
+  const [generateForm, setGenerateForm] = useState<GenerateFormState>(() =>
+    emptyGenerateForm(searchParams.get("patient") ?? ""),
+  );
+  const [generateOrders, setGenerateOrders] = useState<OrderOption[]>([]);
+  const [generateAppointments, setGenerateAppointments] = useState<
+    AppointmentOption[]
+  >([]);
+  const [generateBusy, setGenerateBusy] = useState(false);
+  const [generateError, setGenerateError] = useState("");
+
+  const [selectedId, setSelectedId] = useState(
+    searchParams.get("document") ?? "",
+  );
+  const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([]);
+  const [detail, setDetail] = useState<DocumentItem | null>(null);
+  const [detailBusy, setDetailBusy] = useState(false);
+  const [detailError, setDetailError] = useState("");
+  const [editForm, setEditForm] = useState<EditFormState | null>(null);
+  const [detailOrders, setDetailOrders] = useState<OrderOption[]>([]);
+  const [detailAppointments, setDetailAppointments] = useState<
+    AppointmentOption[]
+  >([]);
+  const [saveBusy, setSaveBusy] = useState(false);
+  const [saveError, setSaveError] = useState("");
+
+  const [shares, setShares] = useState<DocumentShare[]>([]);
+  const [shareForm, setShareForm] = useState<ShareFormState>({
+    targetType: "user",
+    userId: "",
+    providerId: "",
+    channel: "email",
+    requiresConfirmation: true,
+  });
+  const [shareBusy, setShareBusy] = useState(false);
+  const [shareError, setShareError] = useState("");
+  const [portalBusy, setPortalBusy] = useState(false);
+
+  const selectedTemplate = useMemo(
+    () =>
+      templates.find((template) => template.id === generateForm.templateId) ??
+      null,
+    [generateForm.templateId, templates],
+  );
+  const availableTemplateBlocks = useMemo(() => {
+    const allowed = new Set(selectedTemplate?.text_block_keys ?? []);
+    return templateTextBlocks.filter((block) => allowed.has(block.key));
+  }, [selectedTemplate, templateTextBlocks]);
+  const activePortalShares = useMemo(
+    () =>
+      shares.filter(
+        (share) => share.target_user_role === "patient" && !share.revoked_at,
+      ),
+    [shares],
+  );
+  const confirmedPortalShares = useMemo(
+    () => activePortalShares.filter((share) => share.confirmed).length,
+    [activePortalShares],
+  );
+
+  useEffect(() => {
+    setSelectedId(searchParams.get("document") ?? "");
+  }, [searchParams]);
+
+  const documentsPath = useMemo(
+    () => buildDocumentsPath({ ...filters, search: deferredSearch }),
+    [deferredSearch, filters],
+  );
+
+  useEffect(() => {
+    if (!canView) return;
+    let active = true;
+    async function loadLookups() {
+      const [
+        patientsResponse,
+        providersResponse,
+        staffResponse,
+        categoriesResponse,
+        templateCatalogResponse,
+      ] = await Promise.all([
+        apiFetch<PatientOption[]>("/patients?active_only=true").catch(() => []),
+        canManage
+          ? apiFetch<ProviderOption[]>("/providers?active_only=true").catch(
+              () => [],
+            )
+          : Promise.resolve([]),
+        apiFetch<StaffOption[]>("/documents/meta/staff").catch(() => []),
+        apiFetch<CategoriesResponse>("/documents/meta/categories").catch(
+          () => ({ categories: [], arts: [] }),
+        ),
+        canManage
+          ? apiFetch<TemplateCatalogResponse>("/documents/templates").catch(
+              () => ({ templates: [], text_blocks: [] }),
+            )
+          : Promise.resolve({ templates: [], text_blocks: [] }),
+      ]);
+      if (!active) return;
+      startTransition(() => {
+        setPatients(patientsResponse);
+        setProviders(providersResponse);
+        setStaff(staffResponse);
+        setCategories(categoriesResponse.categories);
+        setArts(categoriesResponse.arts);
+        setTemplates(templateCatalogResponse.templates);
+        setTemplateTextBlocks(templateCatalogResponse.text_blocks);
+      });
+    }
+    void loadLookups();
+    return () => {
+      active = false;
+    };
+  }, [canManage, canView]);
+
+  useEffect(() => {
+    if (!canView) return;
+    let active = true;
+    async function loadDocuments() {
+      setBusy(true);
+      setError("");
+      try {
+        const rows = await apiFetch<DocumentItem[]>(documentsPath);
+        if (!active) return;
+        startTransition(() => setDocuments(rows));
+      } catch (nextError) {
+        if (!active) return;
+        setDocuments([]);
+        setError(
+          nextError instanceof Error
+            ? nextError.message
+            : "Failed to load documents.",
+        );
+      } finally {
+        if (active) setBusy(false);
+      }
+    }
+    void loadDocuments();
+    return () => {
+      active = false;
+    };
+  }, [canView, documentsPath, version]);
+
+  useEffect(() => {
+    setSelectedDocumentIds((current) =>
+      current.filter((id) => documents.some((item) => item.id === id)),
+    );
+  }, [documents]);
+
+  useEffect(() => {
+    if (!canView || !selectedId) {
+      setDetail(null);
+      setEditForm(null);
+      setShares([]);
+      return;
+    }
+    let active = true;
+    async function loadDetail() {
+      setDetailBusy(true);
+      setDetailError("");
+      try {
+        const [documentResponse, shareResponse] = await Promise.all([
+          apiFetch<DocumentItem>(`/documents/${selectedId}`),
+          canManage
+            ? apiFetch<DocumentShare[]>(
+                `/documents/${selectedId}/shares`,
+              ).catch(() => [])
+            : Promise.resolve([]),
+        ]);
+        if (!active) return;
+        setDetail(documentResponse);
+        setEditForm(detailToEditForm(documentResponse));
+        setShares(shareResponse);
+      } catch (nextError) {
+        if (!active) return;
+        setDetail(null);
+        setEditForm(null);
+        setShares([]);
+        setDetailError(
+          nextError instanceof Error
+            ? nextError.message
+            : "Failed to load document.",
+        );
+      } finally {
+        if (active) setDetailBusy(false);
+      }
+    }
+    void loadDetail();
+    return () => {
+      active = false;
+    };
+  }, [canManage, canView, selectedId]);
+
+  useEffect(() => {
+    if (!uploadOpen || !uploadForm.patientId) {
+      setUploadOrders([]);
+      setUploadAppointments([]);
+      return;
+    }
+    let active = true;
+    async function loadUploadContext() {
+      const [orderRows, appointmentRows] = await Promise.all([
+        apiFetch<OrderOption[]>(
+          `/orders?patient_id=${uploadForm.patientId}`,
+        ).catch(() => []),
+        apiFetch<AppointmentOption[]>(
+          `/appointments?patient_id=${uploadForm.patientId}`,
+        ).catch(() => []),
+      ]);
+      if (!active) return;
+      setUploadOrders(orderRows);
+      setUploadAppointments(appointmentRows);
+    }
+    void loadUploadContext();
+    return () => {
+      active = false;
+    };
+  }, [uploadForm.patientId, uploadOpen]);
+
+  useEffect(() => {
+    if (templates.length === 0) return;
+    setGenerateForm((current) => {
+      const fallbackTemplate = templates[0];
+      const nextTemplate =
+        templates.find((template) => template.id === current.templateId) ??
+        fallbackTemplate;
+      const allowedBlocks = new Set(nextTemplate.text_block_keys);
+      return {
+        ...current,
+        templateId: nextTemplate.id,
+        status: current.templateId
+          ? current.status
+          : nextTemplate.default_status,
+        visibility: current.templateId
+          ? current.visibility
+          : nextTemplate.default_visibility,
+        autoName: current.autoName || nextTemplate.default_auto_name,
+        textBlockKeys: current.textBlockKeys.filter((key) =>
+          allowedBlocks.has(key),
+        ),
+      };
+    });
+  }, [templates]);
+
+  useEffect(() => {
+    if (!templateOpen || !generateForm.patientId) {
+      setGenerateOrders([]);
+      setGenerateAppointments([]);
+      return;
+    }
+    let active = true;
+    async function loadGenerateContext() {
+      const [orderRows, appointmentRows] = await Promise.all([
+        apiFetch<OrderOption[]>(
+          `/orders?patient_id=${generateForm.patientId}`,
+        ).catch(() => []),
+        apiFetch<AppointmentOption[]>(
+          `/appointments?patient_id=${generateForm.patientId}`,
+        ).catch(() => []),
+      ]);
+      if (!active) return;
+      setGenerateOrders(orderRows);
+      setGenerateAppointments(appointmentRows);
+    }
+    void loadGenerateContext();
+    return () => {
+      active = false;
+    };
+  }, [generateForm.patientId, templateOpen]);
+
+  useEffect(() => {
+    if (!detail || !editForm?.patientId || !canManage) {
+      setDetailOrders([]);
+      setDetailAppointments([]);
+      return;
+    }
+    const patientId = editForm.patientId;
+    let active = true;
+    async function loadDetailContext() {
+      const [orderRows, appointmentRows] = await Promise.all([
+        apiFetch<OrderOption[]>(`/orders?patient_id=${patientId}`).catch(
+          () => [],
+        ),
+        apiFetch<AppointmentOption[]>(
+          `/appointments?patient_id=${patientId}`,
+        ).catch(() => []),
+      ]);
+      if (!active) return;
+      setDetailOrders(orderRows);
+      setDetailAppointments(appointmentRows);
+    }
+    void loadDetailContext();
+    return () => {
+      active = false;
+    };
+  }, [canManage, detail, editForm?.patientId]);
+
+  function refresh() {
+    startTransition(() => setVersion((current) => current + 1));
+  }
+
+  function openDocument(id: string) {
+    const next = new URLSearchParams(searchParams);
+    next.set("document", id);
+    setSearchParams(next, { replace: true });
+    setSelectedId(id);
+  }
+
+  function toggleDocumentSelection(id: string, checked: boolean) {
+    setSelectedDocumentIds((current) => {
+      if (checked) {
+        return current.includes(id) ? current : [...current, id];
+      }
+      return current.filter((value) => value !== id);
+    });
+  }
+
+  function closeDetail() {
+    const next = new URLSearchParams(searchParams);
+    next.delete("document");
+    setSearchParams(next, { replace: true });
+    setSelectedId("");
+  }
+
+  function handleUploadFileChange(event: ChangeEvent<HTMLInputElement>) {
+    setUploadForm((current) => ({
+      ...current,
+      file: event.target.files?.[0] ?? null,
+    }));
+  }
+
+  async function handleUpload(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!uploadForm.file || !uploadForm.art.trim()) {
+      setUploadError("File and type are required.");
+      return;
+    }
+    if (
+      !uploadForm.patientId &&
+      !uploadForm.orderId &&
+      !uploadForm.appointmentId
+    ) {
+      setUploadError("Link the document to a patient, order or appointment.");
+      return;
+    }
+    setUploadBusy(true);
+    setUploadError("");
+    try {
+      const formData = new FormData();
+      formData.append("file", uploadForm.file);
+      if (uploadForm.patientId)
+        formData.append("patient_id", uploadForm.patientId);
+      if (uploadForm.orderId) formData.append("order_id", uploadForm.orderId);
+      if (uploadForm.appointmentId)
+        formData.append("appointment_id", uploadForm.appointmentId);
+      if (uploadForm.autoName.trim())
+        formData.append("auto_name", uploadForm.autoName.trim());
+      formData.append("art", uploadForm.art.trim());
+      if (uploadForm.category) formData.append("category", uploadForm.category);
+      formData.append("status", uploadForm.status);
+      formData.append("visibility", uploadForm.visibility);
+      if (uploadForm.isMedical) formData.append("is_medical", "true");
+      if (uploadForm.klinik.trim())
+        formData.append("klinik", uploadForm.klinik.trim());
+      if (uploadForm.ursprung.trim())
+        formData.append("ursprung", uploadForm.ursprung.trim());
+      if (uploadForm.notes.trim())
+        formData.append("notes", uploadForm.notes.trim());
+      const response = await apiFetch<{ id: string }>("/documents/upload", {
+        method: "POST",
+        body: formData,
+      });
+      setNotice("Document uploaded.");
+      setUploadOpen(false);
+      refresh();
+      if (response.id) openDocument(response.id);
+    } catch (nextError) {
+      setUploadError(
+        nextError instanceof Error
+          ? nextError.message
+          : "Failed to upload document.",
+      );
+    } finally {
+      setUploadBusy(false);
+    }
+  }
+
+  function applyGenerateTemplate(templateId: string) {
+    const template = templates.find((item) => item.id === templateId);
+    setGenerateForm((current) => {
+      if (!template) {
+        return { ...current, templateId, textBlockKeys: [] };
+      }
+      const previousTemplate = templates.find(
+        (item) => item.id === current.templateId,
+      );
+      const allowedBlocks = new Set(template.text_block_keys);
+      return {
+        ...current,
+        templateId,
+        autoName:
+          !current.autoName ||
+          current.autoName === previousTemplate?.default_auto_name
+            ? template.default_auto_name
+            : current.autoName,
+        status: template.default_status,
+        visibility: template.default_visibility,
+        language: template.supported_languages.includes(current.language)
+          ? current.language
+          : (template.supported_languages[0] ?? "de"),
+        textBlockKeys: current.textBlockKeys.filter((key) =>
+          allowedBlocks.has(key),
+        ),
+      };
+    });
+  }
+
+  async function handleGenerateDocument(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedTemplate) {
+      setGenerateError("Choose a template.");
+      return;
+    }
+    if (!generateForm.patientId) {
+      setGenerateError("Patient context is required.");
+      return;
+    }
+
+    const previewWindow = window.open("", "_blank", "noopener,noreferrer");
+    setGenerateBusy(true);
+    setGenerateError("");
+    try {
+      const response = await apiFetch<GenerateDocumentResponse>(
+        "/documents/generate",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            template_id: selectedTemplate.id,
+            patient_id: generateForm.patientId,
+            order_id: generateForm.orderId || null,
+            appointment_id: generateForm.appointmentId || null,
+            auto_name: generateForm.autoName.trim() || null,
+            status: generateForm.status,
+            visibility: generateForm.visibility,
+            language: generateForm.language,
+            title_override: generateForm.titleOverride.trim() || null,
+            introduction: generateForm.introduction.trim() || null,
+            closing_note: generateForm.closingNote.trim() || null,
+            klinik: generateForm.klinik.trim() || null,
+            ursprung: generateForm.ursprung.trim() || null,
+            notes: generateForm.notes.trim() || null,
+            text_block_keys: generateForm.textBlockKeys,
+          }),
+        },
+      );
+      let previewOpened = false;
+      if (response.mime_type.startsWith("text/html")) {
+        previewOpened = writePreviewWindow(previewWindow, response.preview_html);
+      } else if (response.id) {
+        try {
+          await openDocumentPreview(response.id, previewWindow);
+          previewOpened = true;
+        } catch {
+          previewOpened = false;
+        }
+      }
+      if (!previewOpened && previewWindow) {
+        previewWindow.close();
+      }
+      setTemplateOpen(false);
+      setNotice(
+        previewOpened
+          ? "Template document generated and preview opened."
+          : "Template document generated.",
+      );
+      refresh();
+      if (response.id) openDocument(response.id);
+    } catch (nextError) {
+      if (previewWindow) previewWindow.close();
+      setGenerateError(
+        nextError instanceof Error
+          ? nextError.message
+          : "Failed to generate document.",
+      );
+    } finally {
+      setGenerateBusy(false);
+    }
+  }
+
+  async function handleOpenPreview() {
+    if (!detail) return;
+    try {
+      await openDocumentPreview(detail.id);
+      setNotice("Generated document preview opened.");
+    } catch (nextError) {
+      setDetailError(
+        nextError instanceof Error
+          ? nextError.message
+          : "Failed to open generated document preview.",
+      );
+    }
+  }
+
+  async function handleSave(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (
+      !detail ||
+      !editForm ||
+      !editForm.autoName.trim() ||
+      !editForm.art.trim()
+    ) {
+      setSaveError("Document name and type are required.");
+      return;
+    }
+    setSaveBusy(true);
+    setSaveError("");
+    try {
+      await apiFetch<{ ok: boolean }>(`/documents/${detail.id}/update`, {
+        method: "POST",
+        body: JSON.stringify({
+          patient_id: editForm.patientId || null,
+          order_id: editForm.orderId || null,
+          appointment_id: editForm.appointmentId || null,
+          auto_name: editForm.autoName.trim(),
+          art: editForm.art.trim(),
+          category: editForm.category || null,
+          status: editForm.status,
+          visibility: editForm.visibility,
+          is_medical: editForm.isMedical,
+          klinik: editForm.klinik.trim() || null,
+          ursprung: editForm.ursprung.trim() || null,
+          notes: editForm.notes.trim() || null,
+        }),
+      });
+      const fresh = await apiFetch<DocumentItem>(`/documents/${detail.id}`);
+      setDetail(fresh);
+      setEditForm(detailToEditForm(fresh));
+      setNotice("Document metadata updated.");
+      refresh();
+    } catch (nextError) {
+      setSaveError(
+        nextError instanceof Error ? nextError.message : "Failed to save.",
+      );
+    } finally {
+      setSaveBusy(false);
+    }
+  }
+
+  async function handleCreateShare(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const targetDocumentIds =
+      selectedDocumentIds.length > 1
+        ? selectedDocumentIds
+        : detail
+          ? [detail.id]
+          : [];
+    if (targetDocumentIds.length === 0) return;
+    if (shareForm.targetType === "user" && !shareForm.userId) {
+      setShareError("Choose a user target.");
+      return;
+    }
+    if (shareForm.targetType === "provider" && !shareForm.providerId) {
+      setShareError("Choose a provider target.");
+      return;
+    }
+    setShareBusy(true);
+    setShareError("");
+    try {
+      const payload =
+        shareForm.targetType === "user"
+          ? {
+              shared_with_user_id: shareForm.userId,
+              channel: shareForm.channel || null,
+              requires_confirmation: shareForm.requiresConfirmation,
+            }
+          : {
+              shared_with_provider_id: shareForm.providerId,
+              channel: shareForm.channel || null,
+              requires_confirmation: shareForm.requiresConfirmation,
+            };
+      if (targetDocumentIds.length > 1) {
+        await apiFetch<{ ok: boolean }>("/documents/shares/bulk", {
+          method: "POST",
+          body: JSON.stringify({
+            document_ids: targetDocumentIds,
+            ...payload,
+          }),
+        });
+      } else {
+        await apiFetch<{ ok: boolean }>(
+          `/documents/${targetDocumentIds[0]}/shares`,
+          {
+            method: "POST",
+            body: JSON.stringify(payload),
+          },
+        );
+      }
+      if (detail) {
+        setShares(await apiFetch<DocumentShare[]>(`/documents/${detail.id}/shares`));
+      }
+      setShareForm({
+        targetType: "user",
+        userId: "",
+        providerId: "",
+        channel: "email",
+        requiresConfirmation: true,
+      });
+      setNotice(
+        targetDocumentIds.length > 1
+          ? `${targetDocumentIds.length} documents shared.`
+          : "Share created.",
+      );
+      refresh();
+    } catch (nextError) {
+      setShareError(
+        nextError instanceof Error
+          ? nextError.message
+          : "Failed to create share.",
+      );
+    } finally {
+      setShareBusy(false);
+    }
+  }
+
+  async function handleRevokeShare(shareId: string) {
+    if (!detail) return;
+    await apiFetch<{ ok: boolean }>(
+      `/documents/${detail.id}/shares/${shareId}/revoke`,
+      {
+        method: "POST",
+      },
+    );
+    setShares(
+      await apiFetch<DocumentShare[]>(`/documents/${detail.id}/shares`),
+    );
+    setNotice("Share revoked.");
+    refresh();
+  }
+
+  async function handleConfirmShare(shareId: string) {
+    if (!detail) return;
+    await apiFetch<{ ok: boolean }>(
+      `/documents/${detail.id}/shares/${shareId}/confirm`,
+      {
+        method: "POST",
+      },
+    );
+    if (canManage) {
+      setShares(
+        await apiFetch<DocumentShare[]>(`/documents/${detail.id}/shares`),
+      );
+    }
+    setNotice("Share confirmed.");
+    refresh();
+  }
+
+  async function handleReleaseToPortal() {
+    if (!detail) return;
+    setPortalBusy(true);
+    setShareError("");
+    try {
+      await apiFetch(`/documents/${detail.id}/portal-release`, {
+        method: "POST",
+        body: JSON.stringify({
+          channel: "patient_portal",
+          requires_confirmation: true,
+        }),
+      });
+      const [fresh, freshShares] = await Promise.all([
+        apiFetch<DocumentItem>(`/documents/${detail.id}`),
+        apiFetch<DocumentShare[]>(`/documents/${detail.id}/shares`),
+      ]);
+      setDetail(fresh);
+      setEditForm(detailToEditForm(fresh));
+      setShares(freshShares);
+      setNotice("Document released to patient portal.");
+      refresh();
+    } catch (nextError) {
+      setShareError(
+        nextError instanceof Error
+          ? nextError.message
+          : "Failed to release document to patient portal.",
+      );
+    } finally {
+      setPortalBusy(false);
+    }
+  }
+
+  async function handleRevokePortalRelease() {
+    if (!detail) return;
+    setPortalBusy(true);
+    setShareError("");
+    try {
+      await apiFetch(`/documents/${detail.id}/portal-release/revoke`, {
+        method: "POST",
+      });
+      const [fresh, freshShares] = await Promise.all([
+        apiFetch<DocumentItem>(`/documents/${detail.id}`),
+        apiFetch<DocumentShare[]>(`/documents/${detail.id}/shares`),
+      ]);
+      setDetail(fresh);
+      setEditForm(detailToEditForm(fresh));
+      setShares(freshShares);
+      setNotice("Patient portal release revoked.");
+      refresh();
+    } catch (nextError) {
+      setShareError(
+        nextError instanceof Error
+          ? nextError.message
+          : "Failed to revoke patient portal release.",
+      );
+    } finally {
+      setPortalBusy(false);
+    }
+  }
+
+  if (!canView) {
+    return (
+      <section className="rounded-[2rem] border border-slate-200 bg-white p-8 shadow-sm">
+        <h1 className="text-3xl font-semibold tracking-tight text-slate-950">
+          Documents workspace
+        </h1>
+        <p className="mt-3 text-sm text-slate-500">
+          This role cannot access document workflows.
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <section className="rounded-[2rem] border border-slate-200 bg-white p-8 shadow-sm">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-700">
+              {t.documents_title}
+            </p>
+            <h1 className="mt-3 text-3xl font-semibold tracking-tight text-slate-950">
+              Document workspace
+            </h1>
+            <p className="mt-3 max-w-3xl text-sm text-slate-500">
+              Upload, classify, share and track files against patients, orders
+              and appointments.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <Button variant="outline" className="rounded-2xl" onClick={refresh}>
+              <RefreshCw className="size-4" />
+              Refresh
+            </Button>
+            {canManage ? (
+              <Button
+                variant="outline"
+                className="rounded-2xl"
+                onClick={() => setTemplateOpen(true)}
+              >
+                <FileText className="size-4" />
+                Generate from template
+              </Button>
+            ) : null}
+            {canManage ? (
+              <Button
+                className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+                onClick={() => setUploadOpen(true)}
+              >
+                <FolderPlus className="size-4" />
+                Upload
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      </section>
+
+      {error ? <Banner tone="error">{error}</Banner> : null}
+      {notice ? <Banner tone="success">{notice}</Banner> : null}
+
+      <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+          <div className="relative xl:col-span-2">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+            <Input
+              value={filters.search}
+              onChange={(event) =>
+                setFilters((current) => ({
+                  ...current,
+                  search: event.target.value,
+                }))
+              }
+              className="h-10 rounded-xl border-slate-200 bg-slate-50 pl-9"
+              placeholder={t.common_search}
+            />
+          </div>
+          <select
+            value={filters.patientId}
+            onChange={(event) =>
+              setFilters((current) => ({
+                ...current,
+                patientId: event.target.value,
+                orderId: "",
+                appointmentId: "",
+              }))
+            }
+            className={selectClassName}
+          >
+            <option value="">All patients</option>
+            {patients.map((patient) => (
+              <option key={patient.id} value={patient.id}>
+                {patientOptionLabel(patient)}
+              </option>
+            ))}
+          </select>
+          <select
+            value={filters.status}
+            onChange={(event) =>
+              setFilters((current) => ({
+                ...current,
+                status: event.target.value,
+              }))
+            }
+            className={selectClassName}
+          >
+            <option value="">All statuses</option>
+            {STATUS_OPTIONS.map((status) => (
+              <option key={status} value={status}>
+                {status}
+              </option>
+            ))}
+          </select>
+          <select
+            value={filters.visibility}
+            onChange={(event) =>
+              setFilters((current) => ({
+                ...current,
+                visibility: event.target.value,
+              }))
+            }
+            className={selectClassName}
+          >
+            <option value="">All visibility</option>
+            {VISIBILITY_OPTIONS.map((value) => (
+              <option key={value} value={value}>
+                {value.replaceAll("_", " ")}
+              </option>
+            ))}
+          </select>
+          <Input
+            value={filters.art}
+            onChange={(event) =>
+              setFilters((current) => ({ ...current, art: event.target.value }))
+            }
+            list="documents-art-options"
+            className="h-10 rounded-xl border-slate-200 bg-slate-50"
+            placeholder={t.documents_category}
+          />
+        </div>
+        <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <Input
+            value={filters.orderId}
+            onChange={(event) =>
+              setFilters((current) => ({
+                ...current,
+                orderId: event.target.value,
+              }))
+            }
+            className="h-10 rounded-xl border-slate-200 bg-slate-50"
+            placeholder={t.orders_title}
+          />
+          <Input
+            value={filters.appointmentId}
+            onChange={(event) =>
+              setFilters((current) => ({
+                ...current,
+                appointmentId: event.target.value,
+              }))
+            }
+            className="h-10 rounded-xl border-slate-200 bg-slate-50"
+            placeholder={t.appointments_title}
+          />
+        </div>
+        <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <select
+            value={filters.category}
+            onChange={(event) =>
+              setFilters((current) => ({
+                ...current,
+                category: event.target.value,
+              }))
+            }
+            className={selectClassName}
+          >
+            <option value="">All categories</option>
+            {categories.map((category) => (
+              <option key={category.key} value={category.key}>
+                {category.label}
+              </option>
+            ))}
+          </select>
+          <Button
+            variant="outline"
+            className="rounded-xl"
+            onClick={() =>
+              setFilters({
+                search: "",
+                patientId: "",
+                orderId: "",
+                appointmentId: "",
+                status: "",
+                visibility: "",
+                art: "",
+                category: "",
+              })
+            }
+          >
+            Reset filters
+          </Button>
+        </div>
+        <datalist id="documents-art-options">
+          {arts.map((art) => (
+            <option key={art} value={art} />
+          ))}
+        </datalist>
+        {selectedDocumentIds.length > 0 ? (
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+            <span>
+              {selectedDocumentIds.length} document
+              {selectedDocumentIds.length === 1 ? "" : "s"} selected
+            </span>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="rounded-xl"
+                onClick={() =>
+                  setSelectedDocumentIds(documents.map((item) => item.id))
+                }
+              >
+                Select all shown
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="rounded-xl"
+                onClick={() => setSelectedDocumentIds([])}
+              >
+                Clear selection
+              </Button>
+            </div>
+          </div>
+        ) : null}
+
+        {busy ? (
+          <div className="flex min-h-[260px] items-center justify-center text-sm text-slate-500">
+            <LoaderCircle className="mr-2 size-4 animate-spin" />
+            Loading documents…
+          </div>
+        ) : documents.length === 0 ? (
+          <div className="mt-6 rounded-[1.6rem] border border-dashed border-slate-200 bg-slate-50 px-5 py-8 text-center text-sm text-slate-500">
+            No documents match the current filters.
+          </div>
+        ) : (
+          <div className="mt-6 grid gap-4 xl:grid-cols-2">
+            {documents.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => openDocument(item.id)}
+                className={cn(
+                  "rounded-[1.6rem] border p-5 text-left transition hover:-translate-y-0.5 hover:shadow-[0_18px_48px_rgba(15,23,42,0.08)]",
+                  selectedId === item.id
+                    ? "border-sky-300 bg-sky-50/70"
+                    : "border-slate-200 bg-white",
+                )}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <label
+                      className="mb-3 inline-flex items-center gap-2 text-xs font-medium text-slate-600"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedDocumentIds.includes(item.id)}
+                        onChange={(event) =>
+                          toggleDocumentSelection(item.id, event.target.checked)
+                        }
+                        className="size-4 rounded border-slate-300"
+                      />
+                      Select for bulk share
+                    </label>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span
+                        className={cn(
+                          "rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em]",
+                          statusBadge(item.status),
+                        )}
+                      >
+                        {item.status}
+                      </span>
+                      <span
+                        className={cn(
+                          "rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em]",
+                          visibilityBadge(item.visibility),
+                        )}
+                      >
+                        {item.visibility.replaceAll("_", " ")}
+                      </span>
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "rounded-full",
+                          sensitivityBadge(item.data_sensitivity),
+                        )}
+                      >
+                        {item.data_sensitivity}
+                      </Badge>
+                    </div>
+                    <h3 className="mt-3 text-lg font-semibold text-slate-950">
+                      {item.auto_name}
+                    </h3>
+                    <p className="mt-1 text-sm text-slate-600">
+                      {[item.original_filename, item.art, item.category]
+                        .filter(Boolean)
+                        .join(" · ") || "Unclassified"}
+                    </p>
+                  </div>
+                  <Badge
+                    variant="outline"
+                    className="rounded-full border-slate-200 bg-white text-slate-700"
+                  >
+                    {formatFileSize(item.file_size)}
+                  </Badge>
+                </div>
+                <div className="mt-4 space-y-2 text-sm text-slate-600">
+                  <div>
+                    {item.patient_name
+                      ? `${item.patient_pid ?? "PID"} · ${item.patient_name}`
+                      : t.common_not_set}
+                  </div>
+                  <div>
+                    {item.order_number ||
+                      item.appointment_title ||
+                      t.common_not_set}
+                  </div>
+                  <div>
+                    {item.uploaded_by_name || "Unknown uploader"} ·{" "}
+                    {formatDateTime(item.updated_at)}
+                  </div>
+                </div>
+                <div className="mt-4 flex items-center justify-between text-xs text-slate-500">
+                  <span>{item.share_count} shares</span>
+                  <span>
+                    {item.shared_to_current
+                      ? t.documents_share
+                      : item.klinik || item.ursprung || t.common_not_set}
+                  </span>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <Dialog open={templateOpen} onOpenChange={setTemplateOpen}>
+        <DialogContent className="max-w-4xl rounded-[1.75rem] p-0">
+          <DialogHeader className="border-b border-border/70 px-6 pt-6 pb-4">
+            <DialogTitle>Generate document from template</DialogTitle>
+            <DialogDescription>
+              Create a structured, patient-facing document, save it into the
+              registry and open a print-ready preview.
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            onSubmit={handleGenerateDocument}
+            className="space-y-5 px-6 py-5"
+          >
+            {generateError ? (
+              <Banner tone="error">{generateError}</Banner>
+            ) : null}
+            {selectedTemplate ? (
+              <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-4 text-sm text-sky-900">
+                <p className="font-semibold">{selectedTemplate.label}</p>
+                <p className="mt-1 text-sky-800/80">
+                  {selectedTemplate.description}
+                </p>
+              </div>
+            ) : null}
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field label={t.documents_category} required>
+                <select
+                  value={generateForm.templateId}
+                  onChange={(event) =>
+                    applyGenerateTemplate(event.target.value)
+                  }
+                  className={selectClassName}
+                >
+                  <option value="">Select template</option>
+                  {templates.map((template) => (
+                    <option key={template.id} value={template.id}>
+                      {template.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label={t.patients_languages} required>
+                <select
+                  value={generateForm.language}
+                  onChange={(event) =>
+                    setGenerateForm((current) => ({
+                      ...current,
+                      language: event.target.value,
+                    }))
+                  }
+                  className={selectClassName}
+                  disabled={!selectedTemplate}
+                >
+                  {(selectedTemplate?.supported_languages ?? ["de"]).map(
+                    (language) => (
+                      <option key={language} value={language}>
+                        {language.toUpperCase()}
+                      </option>
+                    ),
+                  )}
+                </select>
+              </Field>
+              <Field label={t.documents_filename}>
+                <Input
+                  value={generateForm.autoName}
+                  onChange={(event) =>
+                    setGenerateForm((current) => ({
+                      ...current,
+                      autoName: event.target.value,
+                    }))
+                  }
+                  className="h-10 rounded-xl border-slate-200 bg-slate-50"
+                />
+              </Field>
+              <Field label={t.orders_patient} required>
+                <select
+                  value={generateForm.patientId}
+                  onChange={(event) =>
+                    setGenerateForm((current) => ({
+                      ...current,
+                      patientId: event.target.value,
+                      orderId: "",
+                      appointmentId: "",
+                    }))
+                  }
+                  className={selectClassName}
+                >
+                  <option value="">Select patient</option>
+                  {patients.map((patient) => (
+                    <option key={patient.id} value={patient.id}>
+                      {patientOptionLabel(patient)}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label={t.orders_title}>
+                <select
+                  value={generateForm.orderId}
+                  onChange={(event) =>
+                    setGenerateForm((current) => ({
+                      ...current,
+                      orderId: event.target.value,
+                    }))
+                  }
+                  className={selectClassName}
+                  disabled={!generateForm.patientId}
+                >
+                  <option value="">Use patient-wide context</option>
+                  {generateOrders.map((order) => (
+                    <option key={order.id} value={order.id}>
+                      {order.order_number} · {order.patient_pid}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label={t.appointments_title}>
+                <select
+                  value={generateForm.appointmentId}
+                  onChange={(event) =>
+                    setGenerateForm((current) => ({
+                      ...current,
+                      appointmentId: event.target.value,
+                    }))
+                  }
+                  className={selectClassName}
+                  disabled={!generateForm.patientId}
+                >
+                  <option value="">All appointments in scope</option>
+                  {generateAppointments.map((appointment) => (
+                    <option key={appointment.id} value={appointment.id}>
+                      {appointment.title} · {formatDate(appointment.date)}
+                      {appointment.time_start
+                        ? ` · ${appointment.time_start}`
+                        : ""}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label={t.users_status}>
+                <select
+                  value={generateForm.status}
+                  onChange={(event) =>
+                    setGenerateForm((current) => ({
+                      ...current,
+                      status: event.target.value as DocumentStatus,
+                    }))
+                  }
+                  className={selectClassName}
+                >
+                  {STATUS_OPTIONS.map((status) => (
+                    <option key={status} value={status}>
+                      {status}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label={t.users_status}>
+                <select
+                  value={generateForm.visibility}
+                  onChange={(event) =>
+                    setGenerateForm((current) => ({
+                      ...current,
+                      visibility: event.target.value as DocumentVisibility,
+                    }))
+                  }
+                  className={selectClassName}
+                >
+                  {VISIBILITY_OPTIONS.map((value) => (
+                    <option key={value} value={value}>
+                      {value.replaceAll("_", " ")}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label={t.documents_filename}>
+                <Input
+                  value={generateForm.titleOverride}
+                  onChange={(event) =>
+                    setGenerateForm((current) => ({
+                      ...current,
+                      titleOverride: event.target.value,
+                    }))
+                  }
+                  className="h-10 rounded-xl border-slate-200 bg-slate-50"
+                  placeholder={t.patients_notes}
+                />
+              </Field>
+              <Field label={t.common_provider}>
+                <Input
+                  value={generateForm.klinik}
+                  onChange={(event) =>
+                    setGenerateForm((current) => ({
+                      ...current,
+                      klinik: event.target.value,
+                    }))
+                  }
+                  className="h-10 rounded-xl border-slate-200 bg-slate-50"
+                  placeholder={t.common_provider}
+                />
+              </Field>
+              <Field label={t.documents_source}>
+                <Input
+                  value={generateForm.ursprung}
+                  onChange={(event) =>
+                    setGenerateForm((current) => ({
+                      ...current,
+                      ursprung: event.target.value,
+                    }))
+                  }
+                  className="h-10 rounded-xl border-slate-200 bg-slate-50"
+                  placeholder="Defaults to template:{id}"
+                />
+              </Field>
+            </div>
+            {availableTemplateBlocks.length > 0 ? (
+              <div className="space-y-3 rounded-[1.6rem] border border-slate-200 bg-slate-50/80 p-4">
+                <div>
+                  <p className="text-sm font-semibold text-slate-950">
+                    Reusable text blocks
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    These become standardized hint or instruction sections in
+                    the generated document.
+                  </p>
+                </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  {availableTemplateBlocks.map((block) => {
+                    const checked = generateForm.textBlockKeys.includes(
+                      block.key,
+                    );
+                    return (
+                      <label
+                        key={block.key}
+                        className="flex gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(event) =>
+                            setGenerateForm((current) => ({
+                              ...current,
+                              textBlockKeys: event.target.checked
+                                ? [...current.textBlockKeys, block.key]
+                                : current.textBlockKeys.filter(
+                                    (item) => item !== block.key,
+                                  ),
+                            }))
+                          }
+                          className="mt-0.5 size-4 rounded border-slate-300"
+                        />
+                        <span>
+                          <span className="block font-medium text-slate-900">
+                            {block.label}
+                          </span>
+                          <span className="mt-1 block text-xs text-slate-500">
+                            {block.description}
+                          </span>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field label={t.patients_notes}>
+                <textarea
+                  value={generateForm.introduction}
+                  onChange={(event) =>
+                    setGenerateForm((current) => ({
+                      ...current,
+                      introduction: event.target.value,
+                    }))
+                  }
+                  className={textareaClassName}
+                  placeholder={t.patients_notes}
+                />
+              </Field>
+              <Field label={t.patients_notes}>
+                <textarea
+                  value={generateForm.closingNote}
+                  onChange={(event) =>
+                    setGenerateForm((current) => ({
+                      ...current,
+                      closingNote: event.target.value,
+                    }))
+                  }
+                  className={textareaClassName}
+                  placeholder={t.patients_notes}
+                />
+              </Field>
+            </div>
+            <Field label={t.patients_notes}>
+              <textarea
+                value={generateForm.notes}
+                onChange={(event) =>
+                  setGenerateForm((current) => ({
+                    ...current,
+                    notes: event.target.value,
+                  }))
+                }
+                className={textareaClassName}
+                placeholder={t.patients_notes}
+              />
+            </Field>
+            <DialogFooter className="rounded-b-[1.75rem] border-slate-200 bg-slate-50/80 px-0">
+              <Button
+                type="button"
+                variant="outline"
+                className="rounded-2xl"
+                onClick={() => setTemplateOpen(false)}
+              >
+                {t.common_cancel}
+              </Button>
+              <Button
+                type="submit"
+                className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+                disabled={generateBusy || templates.length === 0}
+              >
+                {generateBusy ? (
+                  <LoaderCircle className="size-4 animate-spin" />
+                ) : (
+                  <FileText className="size-4" />
+                )}
+                {generateBusy ? "Generating…" : "Generate document"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={uploadOpen} onOpenChange={setUploadOpen}>
+        <DialogContent className="max-w-3xl rounded-[1.75rem] p-0">
+          <DialogHeader className="border-b border-border/70 px-6 pt-6 pb-4">
+            <DialogTitle>{t.documents_upload}</DialogTitle>
+            <DialogDescription>
+              Store the file and classify it before sharing it further.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleUpload} className="space-y-5 px-6 py-5">
+            {uploadError ? <Banner tone="error">{uploadError}</Banner> : null}
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field label={t.documents_filename} required>
+                <Input
+                  type="file"
+                  onChange={handleUploadFileChange}
+                  className="h-10 rounded-xl border-slate-200 bg-slate-50"
+                />
+              </Field>
+              <Field label={t.documents_filename}>
+                <Input
+                  value={uploadForm.autoName}
+                  onChange={(event) =>
+                    setUploadForm((current) => ({
+                      ...current,
+                      autoName: event.target.value,
+                    }))
+                  }
+                  className="h-10 rounded-xl border-slate-200 bg-slate-50"
+                />
+              </Field>
+              <Field label={t.orders_patient}>
+                <select
+                  value={uploadForm.patientId}
+                  onChange={(event) =>
+                    setUploadForm((current) => ({
+                      ...current,
+                      patientId: event.target.value,
+                      orderId: "",
+                      appointmentId: "",
+                    }))
+                  }
+                  className={selectClassName}
+                >
+                  <option value="">Select patient</option>
+                  {patients.map((patient) => (
+                    <option key={patient.id} value={patient.id}>
+                      {patientOptionLabel(patient)}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label={t.orders_title}>
+                <select
+                  value={uploadForm.orderId}
+                  onChange={(event) =>
+                    setUploadForm((current) => ({
+                      ...current,
+                      orderId: event.target.value,
+                    }))
+                  }
+                  className={selectClassName}
+                  disabled={!uploadForm.patientId}
+                >
+                  <option value="">Optional order link</option>
+                  {uploadOrders.map((order) => (
+                    <option key={order.id} value={order.id}>
+                      {order.order_number} · {order.patient_pid}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label={t.appointments_title}>
+                <select
+                  value={uploadForm.appointmentId}
+                  onChange={(event) =>
+                    setUploadForm((current) => ({
+                      ...current,
+                      appointmentId: event.target.value,
+                    }))
+                  }
+                  className={selectClassName}
+                  disabled={!uploadForm.patientId}
+                >
+                  <option value="">Optional appointment link</option>
+                  {uploadAppointments.map((appointment) => (
+                    <option key={appointment.id} value={appointment.id}>
+                      {appointment.title} · {formatDate(appointment.date)}
+                      {appointment.time_start
+                        ? ` · ${appointment.time_start}`
+                        : ""}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label={t.documents_category} required>
+                <Input
+                  value={uploadForm.art}
+                  onChange={(event) =>
+                    setUploadForm((current) => ({
+                      ...current,
+                      art: event.target.value,
+                    }))
+                  }
+                  list="documents-art-options"
+                  className="h-10 rounded-xl border-slate-200 bg-slate-50"
+                />
+              </Field>
+              <Field label={t.documents_category}>
+                <select
+                  value={uploadForm.category}
+                  onChange={(event) =>
+                    setUploadForm((current) => ({
+                      ...current,
+                      category: event.target.value,
+                    }))
+                  }
+                  className={selectClassName}
+                >
+                  <option value="">No category</option>
+                  {categories.map((category) => (
+                    <option key={category.key} value={category.key}>
+                      {category.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label={t.users_status}>
+                <select
+                  value={uploadForm.status}
+                  onChange={(event) =>
+                    setUploadForm((current) => ({
+                      ...current,
+                      status: event.target.value as DocumentStatus,
+                    }))
+                  }
+                  className={selectClassName}
+                >
+                  {STATUS_OPTIONS.map((status) => (
+                    <option key={status} value={status}>
+                      {status}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label={t.users_status}>
+                <select
+                  value={uploadForm.visibility}
+                  onChange={(event) =>
+                    setUploadForm((current) => ({
+                      ...current,
+                      visibility: event.target.value as DocumentVisibility,
+                    }))
+                  }
+                  className={selectClassName}
+                >
+                  {VISIBILITY_OPTIONS.map((value) => (
+                    <option key={value} value={value}>
+                      {value.replaceAll("_", " ")}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label={t.common_provider}>
+                <Input
+                  value={uploadForm.klinik}
+                  onChange={(event) =>
+                    setUploadForm((current) => ({
+                      ...current,
+                      klinik: event.target.value,
+                    }))
+                  }
+                  className="h-10 rounded-xl border-slate-200 bg-slate-50"
+                />
+              </Field>
+              <Field label={t.documents_source}>
+                <Input
+                  value={uploadForm.ursprung}
+                  onChange={(event) =>
+                    setUploadForm((current) => ({
+                      ...current,
+                      ursprung: event.target.value,
+                    }))
+                  }
+                  className="h-10 rounded-xl border-slate-200 bg-slate-50"
+                />
+              </Field>
+            </div>
+            <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={uploadForm.isMedical}
+                onChange={(event) =>
+                  setUploadForm((current) => ({
+                    ...current,
+                    isMedical: event.target.checked,
+                  }))
+                }
+                className="size-4 rounded border-slate-300"
+              />
+              Mark as medical data
+            </label>
+            <Field label={t.patients_notes}>
+              <textarea
+                value={uploadForm.notes}
+                onChange={(event) =>
+                  setUploadForm((current) => ({
+                    ...current,
+                    notes: event.target.value,
+                  }))
+                }
+                className={textareaClassName}
+              />
+            </Field>
+            <DialogFooter className="rounded-b-[1.75rem] border-slate-200 bg-slate-50/80 px-0">
+              <Button
+                type="button"
+                variant="outline"
+                className="rounded-2xl"
+                onClick={() => setUploadOpen(false)}
+              >
+                {t.common_cancel}
+              </Button>
+              <Button
+                type="submit"
+                className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+                disabled={uploadBusy}
+              >
+                {uploadBusy ? (
+                  <LoaderCircle className="size-4 animate-spin" />
+                ) : (
+                  <FolderPlus className="size-4" />
+                )}
+                {uploadBusy ? "Uploading…" : t.documents_upload}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Sheet
+        open={Boolean(selectedId)}
+        onOpenChange={(open) => (!open ? closeDetail() : undefined)}
+      >
+        <SheetContent side="right" className="w-full sm:max-w-[820px]">
+          <SheetHeader className="border-b border-border/70 pb-4">
+            <SheetTitle>{detail?.auto_name || t.documents_title}</SheetTitle>
+            <SheetDescription>
+              Metadata, context and share trail for the selected file.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="flex-1 overflow-y-auto px-4 pb-6">
+            {detailBusy ? (
+              <div className="flex min-h-[280px] items-center justify-center text-sm text-slate-500">
+                <LoaderCircle className="mr-2 size-4 animate-spin" />
+                Loading document…
+              </div>
+            ) : detailError ? (
+              <div className="pt-5">
+                <Banner tone="error">{detailError}</Banner>
+              </div>
+            ) : detail ? (
+              <div className="space-y-6 pt-5">
+                <section className="rounded-[1.6rem] border border-slate-200 bg-slate-50/70 p-5">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span
+                          className={cn(
+                            "rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em]",
+                            statusBadge(detail.status),
+                          )}
+                        >
+                          {detail.status}
+                        </span>
+                        <span
+                          className={cn(
+                            "rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em]",
+                            visibilityBadge(detail.visibility),
+                          )}
+                        >
+                          {detail.visibility.replaceAll("_", " ")}
+                        </span>
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            "rounded-full",
+                            sensitivityBadge(detail.data_sensitivity),
+                          )}
+                        >
+                          {detail.data_sensitivity}
+                        </Badge>
+                      </div>
+                      <p className="mt-3 text-xl font-semibold text-slate-950">
+                        {detail.auto_name}
+                      </p>
+                      <p className="mt-1 text-sm text-slate-600">
+                        {[
+                          detail.original_filename,
+                          detail.mime_type,
+                          formatFileSize(detail.file_size),
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {detail.mime_type?.startsWith("text/html") ||
+                      detail.mime_type?.startsWith("application/pdf") ? (
+                        <Button
+                          variant="outline"
+                          className="rounded-2xl"
+                          onClick={() => void handleOpenPreview()}
+                        >
+                          <FileText className="size-4" />
+                          Preview
+                        </Button>
+                      ) : null}
+                      <Button
+                        variant="outline"
+                        className="rounded-2xl"
+                        onClick={() =>
+                          void downloadDocument(
+                            detail.id,
+                            detail.original_filename ?? detail.auto_name,
+                          )
+                        }
+                      >
+                        <Download className="size-4" />
+                        {t.documents_download}
+                      </Button>
+                      {detail.patient_id ? (
+                        <Link
+                          to={`/patients?patient=${detail.patient_id}`}
+                          className="inline-flex h-10 items-center rounded-2xl border border-input bg-background px-4 text-sm font-medium text-slate-900 transition-colors hover:bg-accent hover:text-accent-foreground"
+                        >
+                          Patient
+                        </Link>
+                      ) : null}
+                      {detail.order_id ? (
+                        <Link
+                          to={`/orders?order=${detail.order_id}`}
+                          className="inline-flex h-10 items-center rounded-2xl border border-input bg-background px-4 text-sm font-medium text-slate-900 transition-colors hover:bg-accent hover:text-accent-foreground"
+                        >
+                          Order
+                        </Link>
+                      ) : null}
+                      {detail.appointment_id ? (
+                        <Link
+                          to={`/appointments?appointment=${detail.appointment_id}`}
+                          className="inline-flex h-10 items-center rounded-2xl border border-input bg-background px-4 text-sm font-medium text-slate-900 transition-colors hover:bg-accent hover:text-accent-foreground"
+                        >
+                          Appointment
+                        </Link>
+                      ) : null}
+                    </div>
+                  </div>
+                </section>
+
+                <SectionCard title={t.common_provider}>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <DetailField
+                      label={t.orders_patient}
+                      value={
+                        detail.patient_name
+                          ? `${detail.patient_pid ?? "PID"} · ${detail.patient_name}`
+                          : t.common_not_set
+                      }
+                    />
+                    <DetailField
+                      label={t.orders_title}
+                      value={detail.order_number || t.common_not_set}
+                    />
+                    <DetailField
+                      label={t.appointments_title}
+                      value={detail.appointment_title || t.common_not_set}
+                    />
+                    <DetailField
+                      label={t.documents_category}
+                      value={detail.art || t.common_not_set}
+                    />
+                    <DetailField
+                      label={t.documents_category}
+                      value={detail.category || t.common_not_set}
+                    />
+                    <DetailField
+                      label={t.common_provider}
+                      value={detail.klinik || t.common_not_set}
+                    />
+                    <DetailField
+                      label={t.documents_source}
+                      value={detail.ursprung || t.common_not_set}
+                    />
+                    <DetailField
+                      label={t.documents_uploaded_by}
+                      value={detail.uploaded_by_name || "Unknown"}
+                    />
+                    <DetailField
+                      label={t.users_created}
+                      value={formatDateTime(detail.created_at)}
+                    />
+                    <DetailField
+                      label="Updated"
+                      value={formatDateTime(detail.updated_at)}
+                    />
+                  </div>
+                  {detail.notes ? (
+                    <div className="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+                      {detail.notes}
+                    </div>
+                  ) : null}
+                </SectionCard>
+
+                {canManage && editForm ? (
+                  <SectionCard title={t.common_provider}>
+                    {saveError ? (
+                      <Banner tone="error">{saveError}</Banner>
+                    ) : null}
+                    <form onSubmit={handleSave} className="space-y-4">
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <Field label={t.orders_patient}>
+                          <select
+                            value={editForm.patientId}
+                            onChange={(event) =>
+                              setEditForm((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      patientId: event.target.value,
+                                      orderId: "",
+                                      appointmentId: "",
+                                    }
+                                  : current,
+                              )
+                            }
+                            className={selectClassName}
+                          >
+                            <option value="">No patient</option>
+                            {patients.map((patient) => (
+                              <option key={patient.id} value={patient.id}>
+                                {patientOptionLabel(patient)}
+                              </option>
+                            ))}
+                          </select>
+                        </Field>
+                        <Field label={t.orders_title}>
+                          <select
+                            value={editForm.orderId}
+                            onChange={(event) =>
+                              setEditForm((current) =>
+                                current
+                                  ? { ...current, orderId: event.target.value }
+                                  : current,
+                              )
+                            }
+                            className={selectClassName}
+                            disabled={!editForm.patientId}
+                          >
+                            <option value="">No order</option>
+                            {detailOrders.map((order) => (
+                              <option key={order.id} value={order.id}>
+                                {order.order_number} · {order.patient_pid}
+                              </option>
+                            ))}
+                          </select>
+                        </Field>
+                        <Field label={t.appointments_title}>
+                          <select
+                            value={editForm.appointmentId}
+                            onChange={(event) =>
+                              setEditForm((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      appointmentId: event.target.value,
+                                    }
+                                  : current,
+                              )
+                            }
+                            className={selectClassName}
+                            disabled={!editForm.patientId}
+                          >
+                            <option value="">No appointment</option>
+                            {detailAppointments.map((appointment) => (
+                              <option
+                                key={appointment.id}
+                                value={appointment.id}
+                              >
+                                {appointment.title} ·{" "}
+                                {formatDate(appointment.date)}
+                              </option>
+                            ))}
+                          </select>
+                        </Field>
+                        <Field label={t.documents_filename} required>
+                          <Input
+                            value={editForm.autoName}
+                            onChange={(event) =>
+                              setEditForm((current) =>
+                                current
+                                  ? { ...current, autoName: event.target.value }
+                                  : current,
+                              )
+                            }
+                            className="h-10 rounded-xl border-slate-200 bg-slate-50"
+                          />
+                        </Field>
+                        <Field label={t.documents_category} required>
+                          <Input
+                            value={editForm.art}
+                            onChange={(event) =>
+                              setEditForm((current) =>
+                                current
+                                  ? { ...current, art: event.target.value }
+                                  : current,
+                              )
+                            }
+                            list="documents-art-options"
+                            className="h-10 rounded-xl border-slate-200 bg-slate-50"
+                          />
+                        </Field>
+                        <Field label={t.documents_category}>
+                          <select
+                            value={editForm.category}
+                            onChange={(event) =>
+                              setEditForm((current) =>
+                                current
+                                  ? { ...current, category: event.target.value }
+                                  : current,
+                              )
+                            }
+                            className={selectClassName}
+                          >
+                            <option value="">No category</option>
+                            {categories.map((category) => (
+                              <option key={category.key} value={category.key}>
+                                {category.label}
+                              </option>
+                            ))}
+                          </select>
+                        </Field>
+                        <Field label={t.users_status}>
+                          <select
+                            value={editForm.status}
+                            onChange={(event) =>
+                              setEditForm((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      status: event.target
+                                        .value as DocumentStatus,
+                                    }
+                                  : current,
+                              )
+                            }
+                            className={selectClassName}
+                          >
+                            {STATUS_OPTIONS.map((status) => (
+                              <option key={status} value={status}>
+                                {status}
+                              </option>
+                            ))}
+                          </select>
+                        </Field>
+                        <Field label={t.users_status}>
+                          <select
+                            value={editForm.visibility}
+                            onChange={(event) =>
+                              setEditForm((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      visibility: event.target
+                                        .value as DocumentVisibility,
+                                    }
+                                  : current,
+                              )
+                            }
+                            className={selectClassName}
+                          >
+                            {VISIBILITY_OPTIONS.map((value) => (
+                              <option key={value} value={value}>
+                                {value.replaceAll("_", " ")}
+                              </option>
+                            ))}
+                          </select>
+                        </Field>
+                        <Field label={t.common_provider}>
+                          <Input
+                            value={editForm.klinik}
+                            onChange={(event) =>
+                              setEditForm((current) =>
+                                current
+                                  ? { ...current, klinik: event.target.value }
+                                  : current,
+                              )
+                            }
+                            className="h-10 rounded-xl border-slate-200 bg-slate-50"
+                          />
+                        </Field>
+                        <Field label={t.documents_source}>
+                          <Input
+                            value={editForm.ursprung}
+                            onChange={(event) =>
+                              setEditForm((current) =>
+                                current
+                                  ? { ...current, ursprung: event.target.value }
+                                  : current,
+                              )
+                            }
+                            className="h-10 rounded-xl border-slate-200 bg-slate-50"
+                          />
+                        </Field>
+                      </div>
+                      <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={editForm.isMedical}
+                          onChange={(event) =>
+                            setEditForm((current) =>
+                              current
+                                ? {
+                                    ...current,
+                                    isMedical: event.target.checked,
+                                  }
+                                : current,
+                            )
+                          }
+                          className="size-4 rounded border-slate-300"
+                        />
+                        Mark as medical data
+                      </label>
+                      <Field label={t.patients_notes}>
+                        <textarea
+                          value={editForm.notes}
+                          onChange={(event) =>
+                            setEditForm((current) =>
+                              current
+                                ? { ...current, notes: event.target.value }
+                                : current,
+                            )
+                          }
+                          className={textareaClassName}
+                        />
+                      </Field>
+                      <div className="flex justify-end">
+                        <Button
+                          type="submit"
+                          className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+                          disabled={saveBusy}
+                        >
+                          {saveBusy ? (
+                            <LoaderCircle className="size-4 animate-spin" />
+                          ) : (
+                            <FileText className="size-4" />
+                          )}
+                          {saveBusy ? "Saving…" : "Save metadata"}
+                        </Button>
+                      </div>
+                    </form>
+                  </SectionCard>
+                ) : null}
+
+                <SectionCard title="Patient portal">
+                  <div className="grid gap-4 md:grid-cols-[1.2fr_0.8fr]">
+                    <div className="rounded-[1.6rem] border border-slate-200 bg-slate-50/80 p-4">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            "rounded-full",
+                            detail.visibility === "patient_visible"
+                              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                              : "border-slate-200 bg-slate-100 text-slate-600",
+                          )}
+                        >
+                          {detail.visibility === "patient_visible"
+                            ? "Portal eligible"
+                            : "Not portal eligible"}
+                        </Badge>
+                        <Badge
+                          variant="outline"
+                          className="rounded-full border-sky-200 bg-sky-50 text-sky-700"
+                        >
+                          {activePortalShares.length} active portal releases
+                        </Badge>
+                      </div>
+                      <p className="mt-3 text-sm text-slate-600">
+                        Portal access is granted only to patient-linked portal users and remains visible in the portal only while the active release exists.
+                      </p>
+                      {!detail.patient_id ? (
+                        <p className="mt-3 text-sm text-amber-700">
+                          Link the document to a patient before releasing it to the portal.
+                        </p>
+                      ) : null}
+                      {activePortalShares.length > 0 ? (
+                        <div className="mt-4 space-y-2">
+                          {activePortalShares.map((share) => (
+                            <div
+                              key={share.id}
+                              className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700"
+                            >
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <span>
+                                  {share.target_user_name || "Patient portal user"}
+                                </span>
+                                <Badge
+                                  variant="outline"
+                                  className={cn(
+                                    "rounded-full",
+                                    share.confirmed
+                                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                      : share.requires_confirmation
+                                        ? "border-amber-200 bg-amber-50 text-amber-700"
+                                        : "border-sky-200 bg-sky-50 text-sky-700",
+                                  )}
+                                >
+                                  {share.confirmed
+                                    ? "Confirmed"
+                                    : share.requires_confirmation
+                                      ? "Waiting for confirmation"
+                                      : "Released"}
+                                </Badge>
+                              </div>
+                              <p className="mt-2 text-xs text-slate-500">
+                                Released {formatDateTime(share.shared_at)}
+                                {share.confirmed
+                                  ? ` · confirmed by patient`
+                                  : ""}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className="rounded-[1.6rem] border border-slate-200 bg-white p-4">
+                      <p className="text-sm font-semibold text-slate-950">
+                        Portal controls
+                      </p>
+                      <p className="mt-2 text-sm text-slate-500">
+                        Release creates a portal-specific share trail and keeps confirmation state in the audit flow.
+                      </p>
+                      <div className="mt-4 grid gap-3">
+                        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                          Confirmed recipients: <span className="font-semibold text-slate-950">{confirmedPortalShares}</span>
+                        </div>
+                        {canManage ? (
+                          <>
+                            <Button
+                              type="button"
+                              className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+                              disabled={portalBusy || !detail.patient_id}
+                              onClick={() => void handleReleaseToPortal()}
+                            >
+                              {portalBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                              {activePortalShares.length > 0 ? "Refresh portal release" : "Release to patient portal"}
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="rounded-2xl"
+                              disabled={portalBusy || activePortalShares.length === 0}
+                              onClick={() => void handleRevokePortalRelease()}
+                            >
+                              {portalBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                              Revoke portal release
+                            </Button>
+                          </>
+                        ) : (
+                          <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
+                            Only CEO and patient manager can publish documents to the patient portal.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </SectionCard>
+
+                <SectionCard title={t.documents_share}>
+                  {shareError ? (
+                    <Banner tone="error">{shareError}</Banner>
+                  ) : null}
+                  <div className="space-y-3">
+                    {shares.length === 0 ? (
+                      <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
+                        No shares yet.
+                      </div>
+                    ) : (
+                      shares.map((share) => {
+                        const target = share.provider_name
+                          ? `Provider · ${share.provider_name}`
+                          : share.target_user_name
+                            ? `${share.target_user_name} · ${share.target_user_role ?? "user"}`
+                            : "Unknown target";
+                        const canCurrentUserConfirm =
+                          !share.confirmed &&
+                          !share.revoked_at &&
+                          share.shared_with_user_id === user?.id;
+                        return (
+                          <div
+                            key={share.id}
+                            className="rounded-2xl border border-slate-200 bg-white px-4 py-4"
+                          >
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div>
+                                <p className="text-sm font-semibold text-slate-950">
+                                  {target}
+                                </p>
+                                <p className="mt-1 text-xs text-slate-500">
+                                  Shared by {share.shared_by_name || "Unknown"}{" "}
+                                  · {formatDateTime(share.shared_at)}
+                                </p>
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                {share.revoked_at ? (
+                                  <Badge
+                                    variant="outline"
+                                    className="rounded-full border-slate-200 bg-slate-100 text-slate-600"
+                                  >
+                                    Revoked
+                                  </Badge>
+                                ) : share.confirmed ? (
+                                  <Badge
+                                    variant="outline"
+                                    className="rounded-full border-emerald-200 bg-emerald-50 text-emerald-700"
+                                  >
+                                    Confirmed
+                                  </Badge>
+                                ) : share.requires_confirmation ? (
+                                  <Badge
+                                    variant="outline"
+                                    className="rounded-full border-amber-200 bg-amber-50 text-amber-700"
+                                  >
+                                    Pending confirmation
+                                  </Badge>
+                                ) : (
+                                  <Badge
+                                    variant="outline"
+                                    className="rounded-full border-sky-200 bg-sky-50 text-sky-700"
+                                  >
+                                    Released
+                                  </Badge>
+                                )}
+                              </div>
+                            </div>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              {canCurrentUserConfirm ? (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  className="rounded-xl bg-slate-950 text-white hover:bg-slate-800"
+                                  onClick={() =>
+                                    void handleConfirmShare(share.id)
+                                  }
+                                >
+                                  Confirm
+                                </Button>
+                              ) : null}
+                              {canManage && !share.revoked_at ? (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  className="rounded-xl"
+                                  onClick={() =>
+                                    void handleRevokeShare(share.id)
+                                  }
+                                >
+                                  Revoke
+                                </Button>
+                              ) : null}
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                  {canManage ? (
+                    <form
+                      onSubmit={handleCreateShare}
+                      className="mt-5 space-y-4 rounded-[1.6rem] border border-slate-200 bg-slate-50/70 p-4"
+                    >
+                      {selectedDocumentIds.length > 1 ? (
+                        <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+                          Sharing {selectedDocumentIds.length} selected
+                          {" "}documents in one action.
+                        </div>
+                      ) : null}
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          variant={
+                            shareForm.targetType === "user"
+                              ? "default"
+                              : "outline"
+                          }
+                          className="rounded-xl"
+                          onClick={() =>
+                            setShareForm((current) => ({
+                              ...current,
+                              targetType: "user",
+                              providerId: "",
+                            }))
+                          }
+                        >
+                          Internal user
+                        </Button>
+                        <Button
+                          type="button"
+                          variant={
+                            shareForm.targetType === "provider"
+                              ? "default"
+                              : "outline"
+                          }
+                          className="rounded-xl"
+                          onClick={() =>
+                            setShareForm((current) => ({
+                              ...current,
+                              targetType: "provider",
+                              userId: "",
+                            }))
+                          }
+                        >
+                          Provider
+                        </Button>
+                      </div>
+                      <div className="grid gap-4 md:grid-cols-2">
+                        {shareForm.targetType === "user" ? (
+                          <Field label={t.patients_assign_owner} required>
+                            <select
+                              value={shareForm.userId}
+                              onChange={(event) =>
+                                setShareForm((current) => ({
+                                  ...current,
+                                  userId: event.target.value,
+                                }))
+                              }
+                              className={selectClassName}
+                            >
+                              <option value="">Select user</option>
+                              {staff.map((item) => (
+                                <option key={item.id} value={item.id}>
+                                  {item.name} · {item.role}
+                                </option>
+                              ))}
+                            </select>
+                          </Field>
+                        ) : (
+                          <Field label={t.common_provider} required>
+                            <select
+                              value={shareForm.providerId}
+                              onChange={(event) =>
+                                setShareForm((current) => ({
+                                  ...current,
+                                  providerId: event.target.value,
+                                }))
+                              }
+                              className={selectClassName}
+                            >
+                              <option value="">Select provider</option>
+                              {providers.map((item) => (
+                                <option key={item.id} value={item.id}>
+                                  {item.name} · {item.address_city || "No city"}
+                                </option>
+                              ))}
+                            </select>
+                          </Field>
+                        )}
+                        <Field label={t.documents_source}>
+                          <Input
+                            value={shareForm.channel}
+                            onChange={(event) =>
+                              setShareForm((current) => ({
+                                ...current,
+                                channel: event.target.value,
+                              }))
+                            }
+                            className="h-10 rounded-xl border-slate-200 bg-white"
+                          />
+                        </Field>
+                      </div>
+                      <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={shareForm.requiresConfirmation}
+                          onChange={(event) =>
+                            setShareForm((current) => ({
+                              ...current,
+                              requiresConfirmation: event.target.checked,
+                            }))
+                          }
+                          className="size-4 rounded border-slate-300"
+                        />
+                        Require confirmation
+                      </label>
+                      <div className="flex justify-end">
+                        <Button
+                          type="submit"
+                          className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+                          disabled={shareBusy}
+                        >
+                          {shareBusy ? (
+                            <LoaderCircle className="size-4 animate-spin" />
+                          ) : (
+                            <Share2 className="size-4" />
+                          )}
+                          {shareBusy ? "Sharing…" : "Create share"}
+                        </Button>
+                      </div>
+                    </form>
+                  ) : null}
+                </SectionCard>
+              </div>
+            ) : null}
+          </div>
+        </SheetContent>
+      </Sheet>
+    </div>
+  );
+}
+
+function Banner({
+  tone,
+  children,
+}: {
+  tone: "error" | "success";
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className={cn(
+        "rounded-2xl border px-4 py-3 text-sm",
+        tone === "error"
+          ? "border-rose-200 bg-rose-50 text-rose-700"
+          : "border-emerald-200 bg-emerald-50 text-emerald-700",
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+function SectionCard({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="rounded-[1.75rem] border border-slate-200 bg-white p-5 shadow-sm">
+      <h2 className="mb-4 text-base font-semibold text-slate-950">{title}</h2>
+      {children}
+    </section>
+  );
+}
+
+function DetailField({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+      <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500">
+        {label}
+      </p>
+      <div className="mt-2 text-sm text-slate-900">{value}</div>
+    </div>
+  );
+}
+
+function Field({
+  label,
+  children,
+  required = false,
+}: {
+  label: string;
+  children: ReactNode;
+  required?: boolean;
+}) {
+  return (
+    <div className="space-y-2">
+      <Label className="text-sm font-medium text-slate-800">
+        {label}
+        {required ? <span className="ml-1 text-rose-600">*</span> : null}
+      </Label>
+      {children}
+    </div>
+  );
+}

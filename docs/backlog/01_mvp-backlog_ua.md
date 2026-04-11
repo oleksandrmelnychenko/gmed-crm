@@ -1,6 +1,6 @@
 # MVP Backlog (UA)
 
-> Беклог зібраний з трьох джерел: процесної карти, анамнестичного флоу та Excel з user stories. Повний переклад user stories збережено в `docs/requirements/03_product-backlog_ua.md`. Тут подано робочу продуктову декомпозицію для реалізації.
+> **Ядро джерел (PDF + Excel):** перелік імен файлів і правила узгодження — `docs/00_source-of-truth_ua.md`. Канонічний **функціональний scope** трасований **рядок-у-рядок** до аркуша `User Stories` у `docs/1 (Update 2) User Story Salesforce.xlsx` через `docs/requirements/03_product-backlog_ua.md` (регенерація: `python scripts/generate_product_backlog_from_excel.py`). Цей файл — робоча **релізна** декомпозиція (MVP / epics), без дублювання всіх user stories.
 
 ## 1. Продуктові потоки
 

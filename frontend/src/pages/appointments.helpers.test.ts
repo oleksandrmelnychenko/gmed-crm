@@ -109,6 +109,26 @@ describe("buildAppointmentTimelineEvents", () => {
           created_at: "2026-04-09T10:00:00Z",
         },
       ],
+      communications: [
+        {
+          id: "comm-1",
+          target_type: "doctor",
+          direction: "outbound",
+          channel: "email",
+          status: "answered",
+          subject: "Request follow-up summary",
+          message: "Please send the written findings after the board review.",
+          contact_name: "Dr. Weber",
+          due_at: "2026-04-11T15:00:00Z",
+          responded_at: "2026-04-11T13:00:00Z",
+          closed_at: null,
+          created_at: "2026-04-10T12:00:00Z",
+          updated_at: "2026-04-11T13:00:00Z",
+          created_by_name: "Marta PM",
+          provider_name: "Klinik Mitte",
+          doctor_name: "Dr. Weber",
+        },
+      ],
       report: {
         id: "report-1",
         interpreter_name: "Iryna Kovalenko",
@@ -139,6 +159,10 @@ describe("buildAppointmentTimelineEvents", () => {
     expect(events.find((item) => item.id === "service:svc-1")).toMatchObject({
       kind: "concierge",
       tone: "info",
+    });
+    expect(events.find((item) => item.id === "communication:comm-1:answered")).toMatchObject({
+      kind: "communication",
+      tone: "success",
     });
     expect(events.find((item) => item.id === "task:task-2")).toMatchObject({
       kind: "workflow",
@@ -171,6 +195,7 @@ describe("buildAppointmentTimelineEvents", () => {
       reminders: [],
       tasks: [],
       services: [],
+      communications: [],
       report: {
         id: "report-2",
         interpreter_name: "Yulia Bondar",

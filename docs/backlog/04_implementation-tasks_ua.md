@@ -1,6 +1,6 @@
 # Таски розробки
 
-> Деталізований план реалізації по фазах і пріоритетах. Перенесено в delivery-layer як канонічний task-level roadmap.
+> Деталізований **інженерний** план по фазах. Продуктові вимоги та user stories — у `docs/requirements/03_product-backlog_ua.md` (1:1 з аркушем `User Stories` у `docs/1 (Update 2) User Story Salesforce.xlsx`, регенерація: `python scripts/generate_product_backlog_from_excel.py`). RBAC — `docs/backlog/02_rbac-matrix_ua.md`; KPI — `docs/backlog/03_kpi-catalog_ua.md`. Ієрархія джерел: `docs/00_source-of-truth_ua.md`. Чекбокси тут можуть відставати від коду — синхронізувати з репозиторієм окремо.
 
 ## Phase 1: Core System (Priority 1)
 

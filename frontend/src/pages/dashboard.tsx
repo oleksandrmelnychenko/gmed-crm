@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
+import { PatientDashboardPage } from "@/pages/patient-dashboard";
 import { cn } from "@/lib/utils";
 
 type OverviewStats = { patients: number; leads: number; orders: number; appointments: number; cases: number; users: number };
@@ -88,6 +89,16 @@ function taskHref(item: TaskItem) {
 }
 
 export function DashboardPage() {
+  const { user } = useAuth();
+
+  if (user?.role === "patient") {
+    return <PatientDashboardPage />;
+  }
+
+  return <StaffDashboardPage />;
+}
+
+function StaffDashboardPage() {
   const { user } = useAuth();
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;

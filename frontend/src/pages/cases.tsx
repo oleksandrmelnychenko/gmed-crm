@@ -601,6 +601,7 @@ export function CasesPage() {
   useEffect(() => {
     const patientParam = searchParams.get("patient") ?? "";
     const caseParam = searchParams.get("case") ?? "";
+    const createParam = searchParams.get("create") ?? "";
 
     if (patientParam !== filters.patientId) {
       setFilters((current) => ({ ...current, patientId: patientParam }));
@@ -610,7 +611,19 @@ export function CasesPage() {
       setSelectedId(caseParam);
       setDetailOpen(true);
     }
-  }, [filters.patientId, searchParams, selectedId]);
+
+    if (createParam && permissions.canCreate) {
+      setCreateError("");
+      setCreateForm({
+        ...DEFAULT_CREATE_FORM,
+        patientId: patientParam,
+      });
+      setCreateOpen(true);
+      const params = new URLSearchParams(searchParams);
+      params.delete("create");
+      setSearchParams(params, { replace: true });
+    }
+  }, [filters.patientId, permissions.canCreate, searchParams, selectedId, setSearchParams]);
 
   useEffect(() => {
     if (!permissions.canViewPage) return;
@@ -1273,7 +1286,7 @@ export function CasesPage() {
       >
         <SheetContent side="right" className="w-full overflow-y-auto border-l border-slate-200 p-0 sm:max-w-[980px]">
           <SheetHeader className="border-b border-border/70 px-6 py-5">
-            <SheetTitle>{detail?.case_id ?? selectedSummary?.case_id ?? "Case workspace"}</SheetTitle>
+            <SheetTitle>{detail?.case_id ?? selectedSummary?.case_id ?? t.cases_title}</SheetTitle>
             <SheetDescription>
               Full narrative and structured anamnesis editor for the selected patient case.
             </SheetDescription>
@@ -1332,10 +1345,10 @@ export function CasesPage() {
                   </div>
 
                   <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                    <MetricCard label="Preconditions" value={detail.vorerkrankungen.length.toString()} description="Structured pre-existing conditions." icon={<Stethoscope className="size-4" />} />
-                    <MetricCard label="Allergies" value={detail.allergien.length.toString()} description="Allergy and reaction entries." icon={<Plus className="size-4" />} />
-                    <MetricCard label="Medication" value={detail.medikamente.length.toString()} description="Current or recent medication lines." icon={<ClipboardList className="size-4" />} />
-                    <MetricCard label="Symptoms" value={detail.symptome.length.toString()} description="Symptom capture across specialties." icon={<Search className="size-4" />} />
+                    <MetricCard label={t.cases_preconditions} value={detail.vorerkrankungen.length.toString()} description={t.cases_subtitle} icon={<Stethoscope className="size-4" />} />
+                    <MetricCard label={t.cases_allergies} value={detail.allergien.length.toString()} description={t.cases_subtitle} icon={<Plus className="size-4" />} />
+                    <MetricCard label={t.cases_medication} value={detail.medikamente.length.toString()} description={t.cases_subtitle} icon={<ClipboardList className="size-4" />} />
+                    <MetricCard label={t.cases_symptoms} value={detail.symptome.length.toString()} description={t.cases_subtitle} icon={<Search className="size-4" />} />
                   </div>
                 </section>
 
@@ -1393,12 +1406,12 @@ export function CasesPage() {
                   </form>
                 </Panel>
 
-                <ItemEditorSection title={t.cases_preconditions} description={t.cases_subtitle} count={countFilled(vorerkrankungen, "erkrankung")} addLabel="Add condition" emptyTitle="No preconditions captured" emptyText="Use this section for diagnoses, history markers and disease notes." busy={sectionBusy === "vorerkrankungen"} error={sectionErrors.vorerkrankungen ?? ""} canEdit={permissions.canEdit} onAdd={() => setVorerkrankungen((current) => [...current, blankVorerkrankung()])} onSave={handleSaveVorerkrankungen}>
+                <ItemEditorSection title={t.cases_preconditions} description={t.cases_subtitle} count={countFilled(vorerkrankungen, "erkrankung")} addLabel={t.providers_add_service} emptyTitle={t.common_not_set} emptyText={t.cases_subtitle} busy={sectionBusy === "vorerkrankungen"} error={sectionErrors.vorerkrankungen ?? ""} canEdit={permissions.canEdit} onAdd={() => setVorerkrankungen((current) => [...current, blankVorerkrankung()])} onSave={handleSaveVorerkrankungen}>
                   {vorerkrankungen.map((item, index) => (
                     <div key={`vor-${index}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                       <div className="grid gap-4 md:grid-cols-2">
-                        <Field label="Condition"><Input value={item.erkrankung} onChange={(event) => setVorerkrankungen((current) => updateItemAtIndex(current, index, { erkrankung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label="First diagnosis"><Input value={item.erstdiagnose ?? ""} onChange={(event) => setVorerkrankungen((current) => updateItemAtIndex(current, index, { erstdiagnose: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.cases_preconditions}><Input value={item.erkrankung} onChange={(event) => setVorerkrankungen((current) => updateItemAtIndex(current, index, { erkrankung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.cases_preconditions}><Input value={item.erstdiagnose ?? ""} onChange={(event) => setVorerkrankungen((current) => updateItemAtIndex(current, index, { erstdiagnose: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                       </div>
                       <Field label={t.cases_note}>
                         <textarea value={item.notiz ?? ""} onChange={(event) => setVorerkrankungen((current) => updateItemAtIndex(current, index, { notiz: event.target.value }))} className="mt-2 min-h-[90px] w-full rounded-xl border border-input bg-white px-3 py-2 text-sm outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100" />
@@ -1408,25 +1421,25 @@ export function CasesPage() {
                   ))}
                 </ItemEditorSection>
 
-                <ItemEditorSection title={t.cases_allergies} description={t.cases_subtitle} count={countFilled(allergien, "allergie")} addLabel="Add allergy" emptyTitle="No allergies captured" emptyText="Capture allergy triggers and reaction detail while intake is still fresh." busy={sectionBusy === "allergien"} error={sectionErrors.allergien ?? ""} canEdit={permissions.canEdit} onAdd={() => setAllergien((current) => [...current, blankAllergie()])} onSave={handleSaveAllergien}>
+                <ItemEditorSection title={t.cases_allergies} description={t.cases_subtitle} count={countFilled(allergien, "allergie")} addLabel={t.providers_add_service} emptyTitle={t.common_not_set} emptyText={t.cases_subtitle} busy={sectionBusy === "allergien"} error={sectionErrors.allergien ?? ""} canEdit={permissions.canEdit} onAdd={() => setAllergien((current) => [...current, blankAllergie()])} onSave={handleSaveAllergien}>
                   {allergien.map((item, index) => (
                     <div key={`alg-${index}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                       <div className="grid gap-4 md:grid-cols-2">
-                        <Field label="Allergy"><Input value={item.allergie} onChange={(event) => setAllergien((current) => updateItemAtIndex(current, index, { allergie: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label="Reaction"><Input value={item.reaktion ?? ""} onChange={(event) => setAllergien((current) => updateItemAtIndex(current, index, { reaktion: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.cases_allergies}><Input value={item.allergie} onChange={(event) => setAllergien((current) => updateItemAtIndex(current, index, { allergie: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.cases_subtitle}><Input value={item.reaktion ?? ""} onChange={(event) => setAllergien((current) => updateItemAtIndex(current, index, { reaktion: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                       </div>
                       <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-2xl" onClick={() => setAllergien((current) => removeItemAtIndex(current, index))}>Remove</Button></div>
                     </div>
                   ))}
                 </ItemEditorSection>
 
-                <ItemEditorSection title={t.cases_operations} description={t.cases_subtitle} count={countFilled(operationen, "grund")} addLabel="Add operation" emptyTitle="No operations captured" emptyText="Add operation history where it changes treatment context or explains current limitations." busy={sectionBusy === "operationen"} error={sectionErrors.operationen ?? ""} canEdit={permissions.canEdit} onAdd={() => setOperationen((current) => [...current, blankOperation()])} onSave={handleSaveOperationen}>
+                <ItemEditorSection title={t.cases_operations} description={t.cases_subtitle} count={countFilled(operationen, "grund")} addLabel={t.providers_add_service} emptyTitle={t.common_not_set} emptyText={t.cases_subtitle} busy={sectionBusy === "operationen"} error={sectionErrors.operationen ?? ""} canEdit={permissions.canEdit} onAdd={() => setOperationen((current) => [...current, blankOperation()])} onSave={handleSaveOperationen}>
                   {operationen.map((item, index) => (
                     <div key={`op-${index}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                        <Field label="Date"><Input type="date" value={item.datum ?? ""} onChange={(event) => setOperationen((current) => updateItemAtIndex(current, index, { datum: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.appointments_date}><Input type="date" value={item.datum ?? ""} onChange={(event) => setOperationen((current) => updateItemAtIndex(current, index, { datum: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_reason}><Input value={item.grund} onChange={(event) => setOperationen((current) => updateItemAtIndex(current, index, { grund: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label="Doctor"><Input value={item.arzt ?? ""} onChange={(event) => setOperationen((current) => updateItemAtIndex(current, index, { arzt: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.common_doctor}><Input value={item.arzt ?? ""} onChange={(event) => setOperationen((current) => updateItemAtIndex(current, index, { arzt: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_note}><Input value={item.notiz ?? ""} onChange={(event) => setOperationen((current) => updateItemAtIndex(current, index, { notiz: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                       </div>
                       <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-2xl" onClick={() => setOperationen((current) => removeItemAtIndex(current, index))}>Remove</Button></div>
@@ -1434,56 +1447,56 @@ export function CasesPage() {
                   ))}
                 </ItemEditorSection>
 
-                <ItemEditorSection title={t.cases_medication} description={t.cases_subtitle} count={countFilled(medikamente, "handelsname")} addLabel="Add medication" emptyTitle="No medication captured" emptyText="Track what the patient is taking now or recently took before the appointment chain starts." busy={sectionBusy === "medikamente"} error={sectionErrors.medikamente ?? ""} canEdit={permissions.canEdit} onAdd={() => setMedikamente((current) => [...current, blankMedikament()])} onSave={handleSaveMedikamente}>
+                <ItemEditorSection title={t.cases_medication} description={t.cases_subtitle} count={countFilled(medikamente, "handelsname")} addLabel={t.providers_add_service} emptyTitle={t.common_not_set} emptyText={t.cases_subtitle} busy={sectionBusy === "medikamente"} error={sectionErrors.medikamente ?? ""} canEdit={permissions.canEdit} onAdd={() => setMedikamente((current) => [...current, blankMedikament()])} onSave={handleSaveMedikamente}>
                   {medikamente.map((item, index) => (
                     <div key={`med-${index}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                        <Field label="Trade name"><Input value={item.handelsname} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { handelsname: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label="Active ingredient"><Input value={item.wirkstoff ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { wirkstoff: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label="Type"><Input value={item.med_typ ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { med_typ: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label="Dose"><Input value={item.dosis ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { dosis: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label="Dose unit"><Input value={item.dosis_einheit ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { dosis_einheit: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label="Intake schedule"><Input value={item.einnahmeschema ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { einnahmeschema: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label="Form"><Input value={item.darreichungsform ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { darreichungsform: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label="Unit"><Input value={item.einheit ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { einheit: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label="Since"><Input value={item.seit ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { seit: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.cases_medications}><Input value={item.handelsname} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { handelsname: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.cases_medications}><Input value={item.wirkstoff ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { wirkstoff: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.documents_category}><Input value={item.med_typ ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { med_typ: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.cases_medications}><Input value={item.dosis ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { dosis: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.cases_medications}><Input value={item.dosis_einheit ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { dosis_einheit: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.cases_medications}><Input value={item.einnahmeschema ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { einnahmeschema: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.documents_category}><Input value={item.darreichungsform ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { darreichungsform: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.cases_medications}><Input value={item.einheit ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { einheit: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.providers_service_valid_from}><Input value={item.seit ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { seit: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_reason}><Input value={item.grund ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { grund: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label="Prescribing doctor"><Input value={item.verordnender_arzt ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { verordnender_arzt: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label="Comment"><Input value={item.anmerkung ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { anmerkung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.common_doctor}><Input value={item.verordnender_arzt ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { verordnender_arzt: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.patients_notes}><Input value={item.anmerkung ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { anmerkung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                       </div>
                       <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-2xl" onClick={() => setMedikamente((current) => removeItemAtIndex(current, index))}>Remove</Button></div>
                     </div>
                   ))}
                 </ItemEditorSection>
 
-                <ItemEditorSection title={t.cases_pain} description={t.cases_subtitle} count={countFilled(painRecords, "lokalisierung")} addLabel="Add pain record" emptyTitle="No pain records captured" emptyText="Use the dedicated pain section when the case includes chronic or acute pain history." busy={sectionBusy === "pain"} error={sectionErrors.pain ?? ""} canEdit={permissions.canEdit} onAdd={() => setPainRecords((current) => [...current, blankPainItem()])} onSave={handleSavePain}>
+                <ItemEditorSection title={t.cases_pain} description={t.cases_subtitle} count={countFilled(painRecords, "lokalisierung")} addLabel={t.providers_add_service} emptyTitle={t.common_not_set} emptyText={t.cases_subtitle} busy={sectionBusy === "pain"} error={sectionErrors.pain ?? ""} canEdit={permissions.canEdit} onAdd={() => setPainRecords((current) => [...current, blankPainItem()])} onSave={handleSavePain}>
                   {painRecords.map((item, index) => (
                     <div key={`pain-${index}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                        <Field label="Location"><Input value={item.lokalisierung} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { lokalisierung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label="Since when"><Input value={item.seit_wann ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { seit_wann: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label="Cause"><Input value={item.ursache ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { ursache: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label="Quality"><Input value={item.qualitaet ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { qualitaet: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label="Continuity"><Input value={item.kontinuitaet ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { kontinuitaet: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label="Development"><Input value={item.entwicklung ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { entwicklung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label="NRS current"><Input value={item.nrs_aktuell == null ? "" : String(item.nrs_aktuell)} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { nrs_aktuell: parsePainNumber(event.target.value) }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label="NRS initial"><Input value={item.nrs_anfang == null ? "" : String(item.nrs_anfang)} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { nrs_anfang: parsePainNumber(event.target.value) }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label="Initial duration"><Input value={item.dauer_anfang ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { dauer_anfang: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label="Current duration"><Input value={item.dauer_aktuell ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { dauer_aktuell: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label="Radiation"><Input value={item.ausstrahlung ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { ausstrahlung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label="Occurrence"><Input value={item.auftreten ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { auftreten: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.appointments_location}><Input value={item.lokalisierung} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { lokalisierung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.providers_service_valid_from}><Input value={item.seit_wann ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { seit_wann: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.cases_preconditions}><Input value={item.ursache ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { ursache: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.cases_symptoms}><Input value={item.qualitaet ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { qualitaet: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.cases_symptoms}><Input value={item.kontinuitaet ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { kontinuitaet: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.cases_symptoms}><Input value={item.entwicklung ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { entwicklung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.cases_pain}><Input value={item.nrs_aktuell == null ? "" : String(item.nrs_aktuell)} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { nrs_aktuell: parsePainNumber(event.target.value) }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.cases_pain}><Input value={item.nrs_anfang == null ? "" : String(item.nrs_anfang)} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { nrs_anfang: parsePainNumber(event.target.value) }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.cases_pain}><Input value={item.dauer_anfang ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { dauer_anfang: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.cases_pain}><Input value={item.dauer_aktuell ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { dauer_aktuell: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.cases_pain}><Input value={item.ausstrahlung ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { ausstrahlung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.cases_pain}><Input value={item.auftreten ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { auftreten: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                       </div>
                       <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-2xl" onClick={() => setPainRecords((current) => removeItemAtIndex(current, index))}>Remove</Button></div>
                     </div>
                   ))}
                 </ItemEditorSection>
 
-                <ItemEditorSection title={t.cases_symptoms} description={t.cases_subtitle} count={countFilled(symptome, "beschreibung")} addLabel="Add symptom" emptyTitle="No symptoms captured" emptyText="Capture symptoms early to support specialty matching and prioritization." busy={sectionBusy === "symptome"} error={sectionErrors.symptome ?? ""} canEdit={permissions.canEdit} onAdd={() => setSymptome((current) => [...current, blankSymptom()])} onSave={handleSaveSymptome}>
+                <ItemEditorSection title={t.cases_symptoms} description={t.cases_subtitle} count={countFilled(symptome, "beschreibung")} addLabel={t.providers_add_service} emptyTitle={t.common_not_set} emptyText={t.cases_subtitle} busy={sectionBusy === "symptome"} error={sectionErrors.symptome ?? ""} canEdit={permissions.canEdit} onAdd={() => setSymptome((current) => [...current, blankSymptom()])} onSave={handleSaveSymptome}>
                   {symptome.map((item, index) => (
                     <div key={`sym-${index}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                       <div className="grid gap-4 md:grid-cols-2">
-                        <Field label="Description"><Input value={item.beschreibung} onChange={(event) => setSymptome((current) => updateItemAtIndex(current, index, { beschreibung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label="Specialty"><Input value={item.fachrichtung ?? ""} onChange={(event) => setSymptome((current) => updateItemAtIndex(current, index, { fachrichtung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.patients_notes}><Input value={item.beschreibung} onChange={(event) => setSymptome((current) => updateItemAtIndex(current, index, { beschreibung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.cases_title}><Input value={item.fachrichtung ?? ""} onChange={(event) => setSymptome((current) => updateItemAtIndex(current, index, { fachrichtung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                       </div>
                       <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-2xl" onClick={() => setSymptome((current) => removeItemAtIndex(current, index))}>Remove</Button></div>
                     </div>
@@ -1494,10 +1507,10 @@ export function CasesPage() {
                   <form onSubmit={handleSaveVegetative} className="space-y-4">
                     {sectionErrors.vegetative ? <Banner tone="error">{sectionErrors.vegetative}</Banner> : null}
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      <Field label="Appetite / thirst"><Input value={vegetative.appetit_durst} onChange={(event) => setVegetative((current) => ({ ...current, appetit_durst: event.target.value }))} className="h-10 rounded-xl bg-slate-50" /></Field>
-                      <Field label="Height (cm)"><Input value={vegetative.koerpergroesse} onChange={(event) => setVegetative((current) => ({ ...current, koerpergroesse: event.target.value }))} className="h-10 rounded-xl bg-slate-50" /></Field>
-                      <Field label="Weight (kg)"><Input value={vegetative.gewicht} onChange={(event) => setVegetative((current) => ({ ...current, gewicht: event.target.value }))} className="h-10 rounded-xl bg-slate-50" /></Field>
-                      <Field label="Weight change"><Input value={vegetative.gewichtsveraenderung} onChange={(event) => setVegetative((current) => ({ ...current, gewichtsveraenderung: event.target.value }))} className="h-10 rounded-xl bg-slate-50" /></Field>
+                      <Field label={t.cases_symptoms}><Input value={vegetative.appetit_durst} onChange={(event) => setVegetative((current) => ({ ...current, appetit_durst: event.target.value }))} className="h-10 rounded-xl bg-slate-50" /></Field>
+                      <Field label={t.cases_symptoms}><Input value={vegetative.koerpergroesse} onChange={(event) => setVegetative((current) => ({ ...current, koerpergroesse: event.target.value }))} className="h-10 rounded-xl bg-slate-50" /></Field>
+                      <Field label={t.cases_symptoms}><Input value={vegetative.gewicht} onChange={(event) => setVegetative((current) => ({ ...current, gewicht: event.target.value }))} className="h-10 rounded-xl bg-slate-50" /></Field>
+                      <Field label={t.cases_symptoms}><Input value={vegetative.gewichtsveraenderung} onChange={(event) => setVegetative((current) => ({ ...current, gewichtsveraenderung: event.target.value }))} className="h-10 rounded-xl bg-slate-50" /></Field>
                       <Field label={t.cases_reason}><Input value={vegetative.grund} onChange={(event) => setVegetative((current) => ({ ...current, grund: event.target.value }))} className="h-10 rounded-xl bg-slate-50" /></Field>
                     </div>
                     <div className="flex justify-end border-t border-border/70 pt-4">

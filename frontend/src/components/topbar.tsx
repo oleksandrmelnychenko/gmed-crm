@@ -68,6 +68,7 @@ function roleDisplay(role: string) {
 
 function notificationHref(item: Notification) {
   if (!item.entity_id || !item.entity_type) return null;
+  if (item.entity_type === "visitor_intake") return `/intakes?intake=${item.entity_id}`;
   if (item.entity_type === "lead") return `/leads?lead=${item.entity_id}`;
   if (item.entity_type === "patient") return `/patients?patient=${item.entity_id}`;
   if (item.entity_type === "provider") return `/providers?provider=${item.entity_id}`;
@@ -82,12 +83,17 @@ export function Topbar() {
   const { lang, setLang } = useLang();
   const [unread, setUnread] = useState(0);
   const [onlineUsers, setOnlineUsers] = useState<ActiveSession[]>([]);
+  const isPatientPortal = user?.role === "patient";
 
   // Panels
   const [notifOpen, setNotifOpen] = useState(false);
   const [usersOpen, setUsersOpen] = useState(false);
 
   useEffect(() => {
+    if (isPatientPortal) {
+      return;
+    }
+
     let cancelled = false;
 
     async function load() {
@@ -109,7 +115,7 @@ export function Topbar() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, []);
+  }, [isPatientPortal]);
 
   const toggleLang = () => {
     setLang(lang === "de" ? "ru" : "de");
@@ -122,7 +128,7 @@ export function Topbar() {
 
         <div className="flex items-center gap-3">
           {/* Online users avatars */}
-          {onlineUsers.length > 0 && (
+          {!isPatientPortal && onlineUsers.length > 0 && (
             <OnlineAvatars
               users={onlineUsers}
               onToggle={() => {
@@ -159,13 +165,15 @@ export function Topbar() {
           </button>
 
           {/* Search */}
-          <div className="flex items-center gap-2 h-8 px-3 rounded-lg border border-border bg-muted/50 text-muted-foreground text-sm cursor-pointer hover:bg-muted transition-colors">
-            <Search className="size-3.5" />
-            <span>Search</span>
-            <kbd className="ml-2 text-[10px] font-mono bg-background border border-border rounded px-1.5 py-0.5">
-              /
-            </kbd>
-          </div>
+          {!isPatientPortal ? (
+            <div className="flex items-center gap-2 h-8 px-3 rounded-lg border border-border bg-muted/50 text-muted-foreground text-sm cursor-pointer hover:bg-muted transition-colors">
+              <Search className="size-3.5" />
+              <span>Search</span>
+              <kbd className="ml-2 text-[10px] font-mono bg-background border border-border rounded px-1.5 py-0.5">
+                /
+              </kbd>
+            </div>
+          ) : null}
 
           {/* Lang */}
           <button

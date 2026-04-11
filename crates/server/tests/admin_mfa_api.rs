@@ -90,6 +90,8 @@ async fn settings_list_ok_for_it_admin() {
     let arr = body.as_array().unwrap();
     assert!(arr.iter().any(|s| s["key"] == "access_token_minutes"));
     assert!(arr.iter().any(|s| s["key"] == "refresh_token_days"));
+    assert!(arr.iter().any(|s| s["key"] == "agency_name"));
+    assert!(arr.iter().any(|s| s["key"] == "agency_email"));
 }
 
 #[tokio::test]
@@ -168,6 +170,48 @@ async fn settings_update_valid_value() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["ok"], true);
+}
+
+#[tokio::test]
+async fn settings_update_accepts_agency_profile_values() {
+    let Some(app) = test_app().await else { return };
+    let admin = auth_header("it_admin");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/admin/settings/agency_name",
+        &admin,
+        Some(json!({"value": "GMED Operations"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["ok"], true);
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/admin/settings/agency_email",
+        &admin,
+        Some(json!({"value": "ops@gmed.de"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["ok"], true);
+}
+
+#[tokio::test]
+async fn settings_update_rejects_invalid_agency_email() {
+    let Some(app) = test_app().await else { return };
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        "/api/v1/admin/settings/agency_email",
+        &auth_header("it_admin"),
+        Some(json!({"value": "invalid-email"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 }
 
 #[tokio::test]

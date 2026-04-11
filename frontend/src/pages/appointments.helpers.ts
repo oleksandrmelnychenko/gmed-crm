@@ -3,7 +3,8 @@ export type AppointmentTimelineKind =
   | "interpreter"
   | "clinical"
   | "followup"
-  | "concierge";
+  | "concierge"
+  | "communication";
 
 export type AppointmentTimelineTone =
   | "neutral"
@@ -89,6 +90,25 @@ type TimelineReportSummary = {
   notes?: string | null;
 };
 
+type TimelineCommunicationEntry = {
+  id: string;
+  target_type: "clinic" | "doctor" | "service_provider";
+  direction: "outbound" | "inbound";
+  channel: "phone" | "email" | "portal" | "fax" | "whatsapp" | "other";
+  status: "planned" | "sent" | "answered" | "closed" | "cancelled";
+  subject: string;
+  message: string | null;
+  contact_name: string | null;
+  due_at: string | null;
+  responded_at: string | null;
+  closed_at: string | null;
+  created_at: string;
+  updated_at: string;
+  created_by_name: string;
+  provider_name: string | null;
+  doctor_name: string | null;
+};
+
 const FINDINGS_PREFIX = "Findings:";
 const INCOMING_DATA_PREFIX = "Incoming data:";
 const DOCTOR_FOLLOW_UP_PREFIX = "Doctor-directed:";
@@ -137,6 +157,33 @@ function toneFromTaskStatus(status: string): AppointmentTimelineTone {
   }
 }
 
+function toneFromCommunicationStatus(
+  status: TimelineCommunicationEntry["status"]
+): AppointmentTimelineTone {
+  switch (status) {
+    case "answered":
+    case "closed":
+      return "success";
+    case "cancelled":
+      return "danger";
+    case "planned":
+      return "warning";
+    default:
+      return "info";
+  }
+}
+
+function communicationTargetLabel(entry: TimelineCommunicationEntry) {
+  switch (entry.target_type) {
+    case "doctor":
+      return entry.doctor_name || "Doctor";
+    case "service_provider":
+      return entry.provider_name || "Service provider";
+    default:
+      return entry.provider_name || "Clinic";
+  }
+}
+
 export function canResubmitInterpreterReport(params: {
   approvalStatus?: string | null;
   currentUserId?: string | null;
@@ -156,8 +203,9 @@ export function buildAppointmentTimelineEvents(args: {
   tasks: TimelineTaskEntry[];
   services: TimelineServiceEntry[];
   report: TimelineReportSummary | null;
+  communications: TimelineCommunicationEntry[];
 }) {
-  const { detail, checklist, reminders, tasks, services, report } = args;
+  const { detail, checklist, reminders, tasks, services, report, communications } = args;
   if (!detail) return [] as AppointmentTimelineEvent[];
 
   const events: AppointmentTimelineEvent[] = [
@@ -249,6 +297,51 @@ export function buildAppointmentTimelineEvents(args: {
       kind: "concierge",
       tone: service.status === "completed" ? "success" : "info",
     });
+  }
+
+  for (const item of communications) {
+    events.push({
+      id: `communication:${item.id}:created`,
+      occurredAt: item.created_at,
+      title: item.subject,
+      detail: [
+        `${item.direction} via ${item.channel}`,
+        communicationTargetLabel(item),
+        item.contact_name ?? "",
+        item.message ?? "",
+      ]
+        .filter(Boolean)
+        .join(" · "),
+      kind: "communication",
+      tone: toneFromCommunicationStatus(item.status),
+    });
+
+    if (item.responded_at) {
+      events.push({
+        id: `communication:${item.id}:answered`,
+        occurredAt: item.responded_at,
+        title: "External response logged",
+        detail: [communicationTargetLabel(item), item.created_by_name, item.message ?? ""]
+          .filter(Boolean)
+          .join(" · "),
+        kind: "communication",
+        tone: "success",
+      });
+    }
+
+    if (item.closed_at) {
+      events.push({
+        id: `communication:${item.id}:closed`,
+        occurredAt: item.closed_at,
+        title:
+          item.status === "cancelled"
+            ? "External communication cancelled"
+            : "External communication closed",
+        detail: [communicationTargetLabel(item), item.created_by_name].filter(Boolean).join(" · "),
+        kind: "communication",
+        tone: item.status === "cancelled" ? "danger" : "success",
+      });
+    }
   }
 
   if (report) {

@@ -427,6 +427,7 @@ function EmptyState({ title, description, action }: EmptyStateProps) {
 
 export function OrdersPage() {
   const { t } = useLang();
+  const tx = t as unknown as Record<string, string>;
   const { user } = useAuth();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -566,6 +567,7 @@ export function OrdersPage() {
     const providerParam = searchParams.get("provider") ?? "";
     const doctorParam = searchParams.get("doctor") ?? "";
     const orderParam = searchParams.get("order") ?? "";
+    const createParam = searchParams.get("create") ?? "";
 
     setFilters((current) => {
       if (
@@ -587,7 +589,19 @@ export function OrdersPage() {
       setSelectedOrderId(orderParam);
       setDetailLoading(true);
     }
-  }, [searchParams, selectedOrderId]);
+
+    if (createParam && permissions.canCreate) {
+      setCreateError(null);
+      setCreateForm({
+        ...blankCreateOrderForm(),
+        patientId: patientParam,
+      });
+      setCreateOpen(true);
+      const params = new URLSearchParams(searchParams);
+      params.delete("create");
+      setSearchParams(params, { replace: true });
+    }
+  }, [permissions.canCreate, searchParams, selectedOrderId, setSearchParams]);
 
   useEffect(() => {
     if (!permissions.canViewPage) return;
@@ -853,8 +867,8 @@ export function OrdersPage() {
   if (!permissions.canViewPage) {
     return (
       <EmptyState
-        title="Orders are not available for this role"
-        description="This workspace is limited to patient management, billing and CEO access in the current backend contract."
+        title={tx.orders_title}
+        description={tx.orders_subtitle}
       />
     );
   }
@@ -887,34 +901,34 @@ export function OrdersPage() {
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <StatCard
-          label="Orders"
+          label={tx.orders_title}
           value={String(metrics.total)}
-          description="Visible records after current access rules and filters."
+          description={tx.orders_subtitle}
           icon={<ClipboardList className="size-4" />}
         />
         <StatCard
-          label="Active"
+          label={tx.common_active}
           value={String(metrics.active)}
-          description="Orders currently in active lifecycle states."
+          description={tx.orders_subtitle}
           icon={<CheckCircle2 className="size-4" />}
         />
         <StatCard
-          label="Execution"
+          label={tx.orders_phase}
           value={String(metrics.execution)}
-          description="Orders in execution or closure phases."
+          description={tx.orders_subtitle}
           icon={<Stethoscope className="size-4" />}
         />
         <StatCard
-          label="Est. Volume"
+          label={tx.contracts_total}
           value={formatCurrency(metrics.estimatedTotal)}
-          description="Estimated order volume based on current list payload."
+          description={tx.orders_subtitle}
           icon={<Wallet className="size-4" />}
         />
       </div>
 
       <SectionCard
-        title="Search and routing"
-        description="Filter orders by patient, phase and provider context without losing the selected detail."
+        title={tx.common_search}
+        description={tx.orders_subtitle}
       >
         <div className="grid gap-4 xl:grid-cols-6">
           <div className="xl:col-span-2">
@@ -941,7 +955,7 @@ export function OrdersPage() {
               }
               className={`mt-1 ${selectClassName}`}
             >
-              <option value="">All phases</option>
+              <option value="">{t.providers_all}</option>
               {ORDER_PHASES.map((phase) => (
                 <option key={phase} value={phase}>
                   {phase}
@@ -958,7 +972,7 @@ export function OrdersPage() {
               }
               className={`mt-1 ${selectClassName}`}
             >
-              <option value="">All statuses</option>
+              <option value="">{t.providers_all}</option>
               {ORDER_STATUSES.map((status) => (
                 <option key={status} value={status}>
                   {status}
@@ -1000,7 +1014,7 @@ export function OrdersPage() {
               }}
               className={`mt-1 ${selectClassName}`}
             >
-              <option value="">All providers</option>
+              <option value="">{t.providers_all}</option>
               {providers.map((provider) => (
                 <option key={provider.id} value={provider.id}>
                   {provider.name}
@@ -1024,7 +1038,7 @@ export function OrdersPage() {
               className={`mt-1 ${selectClassName}`}
               disabled={!filters.providerId}
             >
-              <option value="">All doctors</option>
+              <option value="">{t.providers_all}</option>
               {filterDoctorOptions.map((doctor) => (
                 <option key={doctor.id} value={doctor.id}>
                   {doctor.name}
@@ -1060,8 +1074,8 @@ export function OrdersPage() {
         </div>
       ) : orders.length === 0 ? (
         <EmptyState
-          title="No orders matched these filters"
-          description="Try broadening the provider or patient scope, or create the first order for a patient assignment you already manage."
+          title={tx.common_not_set}
+          description={tx.orders_subtitle}
           action={
             permissions.canCreate ? (
               <Button onClick={() => setCreateOpen(true)}>
@@ -1154,7 +1168,7 @@ export function OrdersPage() {
         >
           <SheetHeader className="border-b border-slate-200 px-6 py-5">
             <SheetTitle>
-              {orderDetail ? `${orderDetail.order_number} / ${orderDetail.patient_name}` : "Order"}
+              {orderDetail ? `${orderDetail.order_number} / ${orderDetail.patient_name}` : tx.orders_title}
             </SheetTitle>
             <SheetDescription>
               Full operational view for the current order, including phase control and provider-linked Leistungen.
@@ -1173,14 +1187,14 @@ export function OrdersPage() {
               </div>
             ) : !orderDetail ? (
               <EmptyState
-                title="Order detail is empty"
-                description="Choose an order from the list to load the detail workspace."
+                title={tx.common_not_set}
+                description={tx.orders_subtitle}
               />
             ) : (
               <>
                 <SectionCard
-                  title="Order overview"
-                  description="Patient and delivery context for this order."
+                  title={tx.orders_title}
+                  description={tx.orders_subtitle}
                   action={
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge variant="outline" className={cn("rounded-full", phaseClassName(orderDetail.phase))}>
@@ -1197,11 +1211,11 @@ export function OrdersPage() {
                 >
                   <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                     <DetailField
-                      label="Patient"
+                      label={t.orders_patient}
                       value={`${orderDetail.patient_name} (${orderDetail.patient_pid})`}
                     />
                     <DetailField
-                      label="Created"
+                      label={tx.patients_created}
                       value={
                         <span className="inline-flex items-center gap-2">
                           <CalendarClock className="size-4 text-slate-500" />
@@ -1210,7 +1224,7 @@ export function OrdersPage() {
                       }
                     />
                     <DetailField
-                      label="Updated"
+                      label={tx.common_loading}
                       value={
                         <span className="inline-flex items-center gap-2">
                           <RefreshCw className="size-4 text-slate-500" />
@@ -1219,32 +1233,32 @@ export function OrdersPage() {
                       }
                     />
                     <DetailField
-                      label="Signatures"
-                      value={`${orderDetail.signed_patient ? "Patient signed" : "Patient pending"} / ${
-                        orderDetail.signed_agency ? "Agency signed" : "Agency pending"
+                      label={tx.contracts_signed}
+                      value={`${orderDetail.signed_patient ? tx.contracts_signed : tx.mfa_pending} / ${
+                        orderDetail.signed_agency ? tx.contracts_signed : tx.mfa_pending
                       }`}
                     />
                     <DetailField
-                      label="Needs"
-                      value={orderDetail.needs_description || "No intake note"}
+                      label={t.leads_needs}
+                      value={orderDetail.needs_description || tx.common_not_set}
                     />
                     <DetailField
-                      label="Estimated total"
+                      label={tx.invoices_subtotal}
                       value={formatCurrency(orderDetail.total_estimated)}
                     />
                     <DetailField
-                      label="Actual total"
+                      label={tx.invoices_total}
                       value={formatCurrency(orderDetail.total_actual)}
                     />
                     <DetailField
-                      label="Leistungen"
+                      label={tx.providers_services}
                       value={`${leistungMetrics.total} items / ${leistungMetrics.delivered} delivered / ${leistungMetrics.approved} approved`}
                     />
                   </div>
                 </SectionCard>
 
                 <SectionCard
-                  title="Linked workspaces"
+                  title={tx.providers_linked_patients}
                   description="Jump to the adjacent patient, case and appointment contexts without rebuilding filters manually."
                 >
                   <div className="flex flex-wrap gap-2">
@@ -1272,11 +1286,35 @@ export function OrdersPage() {
                     >
                       Appointments
                     </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="rounded-2xl"
+                      onClick={() => navigate(`/contracts?order=${orderDetail.id}&patient=${orderDetail.patient_id}&tab=quotes`)}
+                    >
+                      Contracts
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="rounded-2xl"
+                      onClick={() => navigate(`/invoices?order=${orderDetail.id}&patient=${orderDetail.patient_id}`)}
+                    >
+                      Invoices
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="rounded-2xl"
+                      onClick={() => navigate(`/documents?order=${orderDetail.id}&patient=${orderDetail.patient_id}`)}
+                    >
+                      Documents
+                    </Button>
                   </div>
                 </SectionCard>
 
                 <SectionCard
-                  title="Phase control"
+                  title={tx.orders_phase}
                   description="Current backend allows explicit phase changes and forward progression."
                   action={
                     permissions.canManagePhase && nextPhase(orderDetail.phase) ? (
@@ -1337,25 +1375,25 @@ export function OrdersPage() {
 
                 <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                   <StatCard
-                    label="Leistungen"
+                    label={tx.providers_services}
                     value={String(leistungMetrics.total)}
                     description="Current service lines attached to this order."
                     icon={<ClipboardList className="size-4" />}
                   />
                   <StatCard
-                    label="Delivered"
+                    label={tx.common_active}
                     value={String(leistungMetrics.delivered)}
                     description="Service lines waiting for PM approval."
                     icon={<CheckCircle2 className="size-4" />}
                   />
                   <StatCard
-                    label="Approved"
+                    label={tx.common_active}
                     value={String(leistungMetrics.approved)}
                     description="Lines already approved in the current order."
                     icon={<Wallet className="size-4" />}
                   />
                   <StatCard
-                    label="Gross"
+                    label={tx.contracts_total}
                     value={formatCurrency(leistungMetrics.gross)}
                     description="Quantity x price across visible service lines."
                     icon={<Building2 className="size-4" />}
@@ -1363,7 +1401,7 @@ export function OrdersPage() {
                 </div>
 
                 <SectionCard
-                  title="Leistungen"
+                  title={tx.providers_services}
                   description="Provider- and doctor-linked services within the current order."
                   action={
                     permissions.canAddLeistung ? (
@@ -1376,7 +1414,7 @@ export function OrdersPage() {
                 >
                   {orderDetail.leistungen.length === 0 ? (
                     <EmptyState
-                      title="No Leistungen yet"
+                      title={tx.common_not_set}
                       description="Use provider-linked lines to build the order delivery scope and give billing enough context."
                       action={
                         permissions.canAddLeistung ? (
@@ -1418,7 +1456,7 @@ export function OrdersPage() {
 
                               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                                 <DetailField
-                                  label="Provider"
+                                  label={t.common_provider}
                                   value={
                                     leistung.provider_id ? (
                                       <button
@@ -1436,7 +1474,7 @@ export function OrdersPage() {
                                   }
                                 />
                                 <DetailField
-                                  label="Doctor"
+                                  label={t.common_doctor}
                                   value={
                                     leistung.provider_id && leistung.doctor_id ? (
                                       <button
@@ -1456,19 +1494,19 @@ export function OrdersPage() {
                                   }
                                 />
                                 <DetailField
-                                  label="Quantity"
+                                  label={t.providers_service_price}
                                   value={formatNumber(leistung.quantity)}
                                 />
                                 <DetailField
-                                  label="Unit price"
+                                  label={tx.invoices_amount}
                                   value={formatCurrency(leistung.unit_price, leistung.currency)}
                                 />
                                 <DetailField
-                                  label="VAT"
+                                  label={t.providers_service_price}
                                   value={`${formatNumber(leistung.vat_rate)}%`}
                                 />
                                 <DetailField
-                                  label="Gross line"
+                                  label={tx.invoices_total}
                                   value={formatCurrency(
                                     (numberFromUnknown(leistung.quantity) ?? 0) *
                                       (numberFromUnknown(leistung.unit_price) ?? 0),
@@ -1476,11 +1514,11 @@ export function OrdersPage() {
                                   )}
                                 />
                                 <DetailField
-                                  label="Delivered"
+                                  label={tx.common_active}
                                   value={formatDateTime(leistung.delivered_at)}
                                 />
                                 <DetailField
-                                  label="Approved"
+                                  label={tx.common_active}
                                   value={formatDateTime(leistung.approved_at)}
                                 />
                               </div>
@@ -1544,7 +1582,7 @@ export function OrdersPage() {
                 }
                 className={`mt-1 ${selectClassName}`}
               >
-                <option value="">Select patient</option>
+                <option value="">{t.orders_patient}</option>
                 {patients.map((patient) => (
                   <option key={patient.id} value={patient.id}>
                     {patientLabel(patient)}
@@ -1564,7 +1602,7 @@ export function OrdersPage() {
                   }))
                 }
                 className={`mt-1 ${textareaClassName}`}
-                placeholder="Describe treatment need, provider expectations or intake remarks."
+                placeholder={tx.patients_notes}
               />
             </div>
 
@@ -1680,7 +1718,7 @@ export function OrdersPage() {
                   }}
                   className={`mt-1 ${selectClassName}`}
                 >
-                  <option value="">Select provider</option>
+                  <option value="">{t.common_provider}</option>
                   {providers.map((provider) => (
                     <option key={provider.id} value={provider.id}>
                       {provider.name}
@@ -1702,7 +1740,7 @@ export function OrdersPage() {
                   className={`mt-1 ${selectClassName}`}
                   disabled={!leistungForm.providerId}
                 >
-                  <option value="">Select doctor</option>
+                  <option value="">{t.common_doctor}</option>
                   {leistungDoctorOptions.map((doctor) => (
                     <option key={doctor.id} value={doctor.id}>
                       {doctor.name}

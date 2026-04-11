@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
@@ -52,12 +52,69 @@ interface PendingLogin {
 // Helpers
 // ---------------------------------------------------------------------------
 
-const SETTING_LABEL_KEYS: Record<string, string> = {
-  access_token_minutes: "settings_access_token_min",
-  refresh_token_days: "settings_refresh_token_days",
-  max_sessions_per_user: "settings_max_sessions",
-  session_idle_days: "settings_idle_days",
+type SettingFieldMeta = {
+  key: string;
+  labelKey: string;
+  inputType: "number" | "text" | "email" | "textarea";
+  min?: number;
+  rows?: number;
 };
+
+const TOKEN_SETTING_FIELDS: SettingFieldMeta[] = [
+  {
+    key: "access_token_minutes",
+    labelKey: "settings_access_token_min",
+    inputType: "number",
+    min: 1,
+  },
+  {
+    key: "refresh_token_days",
+    labelKey: "settings_refresh_token_days",
+    inputType: "number",
+    min: 1,
+  },
+  {
+    key: "max_sessions_per_user",
+    labelKey: "settings_max_sessions",
+    inputType: "number",
+    min: 1,
+  },
+  {
+    key: "session_idle_days",
+    labelKey: "settings_idle_days",
+    inputType: "number",
+    min: 1,
+  },
+];
+
+const AGENCY_SETTING_FIELDS: SettingFieldMeta[] = [
+  {
+    key: "agency_name",
+    labelKey: "settings_agency_name",
+    inputType: "text",
+  },
+  {
+    key: "agency_care_of",
+    labelKey: "settings_agency_care_of",
+    inputType: "text",
+  },
+  {
+    key: "agency_address",
+    labelKey: "settings_agency_address",
+    inputType: "textarea",
+    rows: 3,
+  },
+  {
+    key: "agency_phone",
+    labelKey: "settings_agency_phone",
+    inputType: "text",
+  },
+  {
+    key: "agency_email",
+    labelKey: "settings_agency_email",
+    inputType: "email",
+  },
+];
 
 function compactDt(value: string): string {
   return value.split("T")[0] ?? value;
@@ -82,6 +139,13 @@ export function AdminSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState<string | null>(null);
   const [editValues, setEditValues] = useState<Record<string, string>>({});
+  const settingsMap = useMemo(() => {
+    const map: Record<string, SettingRow> = {};
+    for (const row of settings) {
+      map[row.key] = row;
+    }
+    return map;
+  }, [settings]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -151,6 +215,47 @@ export function AdminSettingsPage() {
     setEditValues((prev) => ({ ...prev, [key]: val }));
   };
 
+  const renderSettingField = (field: SettingFieldMeta) => {
+    const row = settingsMap[field.key];
+    const label = tr[field.labelKey] ?? field.key;
+
+    return (
+      <div key={field.key} className="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+        <div className="space-y-1">
+          <Label htmlFor={`setting-${field.key}`}>{label}</Label>
+          {row?.description ? (
+            <p className="text-muted-foreground text-xs">{row.description}</p>
+          ) : null}
+        </div>
+
+        {field.inputType === "textarea" ? (
+          <textarea
+            id={`setting-${field.key}`}
+            value={editValues[field.key] ?? ""}
+            rows={field.rows ?? 3}
+            onChange={(event) => updateEditValue(field.key, event.target.value)}
+            className="min-h-[88px] w-full rounded-xl border border-input bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+          />
+        ) : (
+          <Input
+            id={`setting-${field.key}`}
+            type={field.inputType}
+            min={field.min}
+            value={editValues[field.key] ?? ""}
+            onChange={(event) => updateEditValue(field.key, event.target.value)}
+            className="bg-white"
+          />
+        )}
+
+        <div className="flex justify-end">
+          <Button size="sm" onClick={() => saveSetting(field.key)}>
+            {t.common_save}
+          </Button>
+        </div>
+      </div>
+    );
+  };
+
   // -- render --
   return (
     <div className="space-y-6">
@@ -175,33 +280,22 @@ export function AdminSettingsPage() {
           {/* Token configuration */}
           <div className="bg-white rounded-xl border p-6 space-y-4">
             <h2 className="text-lg font-medium">{t.settings_token_config}</h2>
-            {settings.map((row) => {
-              const labelKey = SETTING_LABEL_KEYS[row.key];
-              const label = labelKey ? tr[labelKey] ?? row.key : row.key;
-              return (
-                <div key={row.key} className="flex items-end gap-4">
-                  <div className="flex-[2] space-y-1">
-                    <Label>{label}</Label>
-                    {row.description && (
-                      <p className="text-muted-foreground text-xs">
-                        {row.description}
-                      </p>
-                    )}
-                    <Input
-                      type="number"
-                      min={1}
-                      value={editValues[row.key] ?? ""}
-                      onChange={(e) =>
-                        updateEditValue(row.key, e.target.value)
-                      }
-                    />
-                  </div>
-                  <Button size="sm" onClick={() => saveSetting(row.key)}>
-                    {t.common_save}
-                  </Button>
-                </div>
-              );
-            })}
+            <div className="grid gap-4 lg:grid-cols-2">
+              {TOKEN_SETTING_FIELDS.map(renderSettingField)}
+            </div>
+          </div>
+
+          {/* Agency profile */}
+          <div className="bg-white rounded-xl border p-6 space-y-4">
+            <div>
+              <h2 className="text-lg font-medium">{t.settings_agency_profile}</h2>
+              <p className="text-muted-foreground mt-1 text-sm">
+                {t.settings_agency_hint}
+              </p>
+            </div>
+            <div className="grid gap-4 lg:grid-cols-2">
+              {AGENCY_SETTING_FIELDS.map(renderSettingField)}
+            </div>
           </div>
 
           {/* MFA pending logins */}

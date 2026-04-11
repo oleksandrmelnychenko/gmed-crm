@@ -11,6 +11,10 @@ export interface Translations {
   nav_users_roles: string;
   nav_access_matrix: string;
   nav_logout: string;
+  nav_my_documents: string;
+  nav_my_appointments: string;
+  nav_my_invoices: string;
+  nav_my_privacy: string;
 
   login_title: string;
   login_email: string;
@@ -76,6 +80,7 @@ export interface Translations {
   patients_subtitle: string;
   patients_new: string;
   patients_last_name: string;
+  patients_created: string;
   patients_gender: string;
   patients_create: string;
   patients_edit: string;
@@ -122,6 +127,7 @@ export interface Translations {
   providers_linked_patients: string;
   providers_no_patients: string;
   providers_no_activity: string;
+  providers_add_service: string;
   providers_interactions: string;
   providers_patient: string;
   providers_appointments: string;
@@ -172,6 +178,7 @@ export interface Translations {
   cases_allergies: string;
   cases_operations: string;
   cases_medication: string;
+  cases_medications: string;
   cases_pain: string;
   cases_symptoms: string;
   cases_vegetative: string;
@@ -198,6 +205,7 @@ export interface Translations {
   nav_crm: string;
   nav_medicine: string;
   nav_providers: string;
+  nav_intakes: string;
 
   dash_pipeline: string;
   dash_daily_ops: string;
@@ -212,6 +220,13 @@ export interface Translations {
   settings_refresh_token_days: string;
   settings_max_sessions: string;
   settings_idle_days: string;
+  settings_agency_profile: string;
+  settings_agency_name: string;
+  settings_agency_care_of: string;
+  settings_agency_address: string;
+  settings_agency_phone: string;
+  settings_agency_email: string;
+  settings_agency_hint: string;
   settings_sessions: string;
   settings_active_sessions: string;
   settings_logout_user: string;
@@ -439,6 +454,69 @@ export interface Translations {
   field_vitals: string;
   field_internal_notes: string;
   field_travel_data: string;
+
+  // Contracts
+  contracts_title: string;
+  contracts_subtitle: string;
+  contracts_new: string;
+  contracts_number: string;
+  contracts_type: string;
+  contracts_status: string;
+  contracts_patient: string;
+  contracts_start_date: string;
+  contracts_end_date: string;
+  contracts_signed_at: string;
+  contracts_total: string;
+  contracts_notes: string;
+  contracts_draft: string;
+  contracts_active: string;
+  contracts_archived: string;
+  contracts_signed: string;
+  contracts_cancelled: string;
+  contracts_framework: string;
+  contracts_order: string;
+  contracts_treatment: string;
+
+  // Invoices
+  invoices_title: string;
+  invoices_subtitle: string;
+  invoices_new: string;
+  invoices_number: string;
+  invoices_patient: string;
+  invoices_type: string;
+  invoices_status: string;
+  invoices_amount: string;
+  invoices_issued_at: string;
+  invoices_due_at: string;
+  invoices_paid_at: string;
+  invoices_draft: string;
+  invoices_issued: string;
+  invoices_paid: string;
+  invoices_overdue: string;
+  invoices_cancelled: string;
+  invoices_advance: string;
+  invoices_final: string;
+  invoices_interim: string;
+  invoices_items: string;
+  invoices_subtotal: string;
+  invoices_vat: string;
+  invoices_total: string;
+
+  // Documents
+  documents_title: string;
+  documents_subtitle: string;
+  documents_upload: string;
+  documents_filename: string;
+  documents_category: string;
+  documents_status: string;
+  documents_uploaded_by: string;
+  documents_uploaded_at: string;
+  documents_download: string;
+  documents_share: string;
+  documents_delete: string;
+  documents_no_files: string;
+  documents_source: string;
+  documents_size: string;
 
   chat_title: string;
   chat_subtitle: string;

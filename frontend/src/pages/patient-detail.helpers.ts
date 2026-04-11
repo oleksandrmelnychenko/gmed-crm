@@ -1,0 +1,373 @@
+export type PatientTimelineItem = {
+  entity_type: string;
+  entity_id: string;
+  title: string;
+  category: string;
+  status: string;
+  happened_at: string;
+  source_label?: string | null;
+};
+
+export type PatientTimelineSummary = {
+  total: number;
+  open: number;
+  recent: number;
+  entityCounts: Array<{ entityType: string; count: number }>;
+};
+
+export type PatientLabelFormatId =
+  | "compact-90x48"
+  | "standard-105x74"
+  | "sheet-70x37";
+
+export type PatientLabelFormat = {
+  id: PatientLabelFormatId;
+  label: string;
+  width_mm: number;
+  height_mm: number;
+};
+
+export type PatientLabelPayload = {
+  patient_id: string;
+  title?: string | null;
+  salutation: string;
+  first_name: string;
+  last_name: string;
+  birth_date: string;
+  country_code?: string | null;
+  insurance_provider?: string | null;
+  agency: {
+    name: string;
+    care_of: string;
+    address?: string | null;
+    phone?: string | null;
+    email?: string | null;
+  };
+  format: PatientLabelFormat;
+  available_formats?: PatientLabelFormat[];
+  generated_at: string;
+};
+
+export type PatientTimelineRangeFilter = "all" | "30d" | "90d" | "180d" | "365d";
+
+type PatientTimelineFilters = {
+  entityFilter: string;
+  categoryFilter: string;
+  sourceFilter: string;
+  search: string;
+  rangeFilter: PatientTimelineRangeFilter;
+  now?: Date;
+};
+
+const TIMELINE_CLOSED_STATUSES = new Set([
+  "closed",
+  "completed",
+  "paid",
+  "signed",
+  "archived",
+  "cancelled",
+  "expired",
+  "terminated",
+]);
+
+const TIMELINE_RANGE_DAYS: Record<Exclude<PatientTimelineRangeFilter, "all">, number> = {
+  "30d": 30,
+  "90d": 90,
+  "180d": 180,
+  "365d": 365,
+};
+
+export const DEFAULT_PATIENT_LABEL_FORMAT_ID: PatientLabelFormatId = "compact-90x48";
+
+export const PATIENT_LABEL_FORMAT_OPTIONS: PatientLabelFormat[] = [
+  {
+    id: "compact-90x48",
+    label: "Compact 90 x 48 mm",
+    width_mm: 90,
+    height_mm: 48,
+  },
+  {
+    id: "standard-105x74",
+    label: "Standard 105 x 74 mm",
+    width_mm: 105,
+    height_mm: 74,
+  },
+  {
+    id: "sheet-70x37",
+    label: "Sheet 70 x 37 mm",
+    width_mm: 70,
+    height_mm: 37,
+  },
+];
+
+export function filterPatientTimelineItems(
+  items: PatientTimelineItem[],
+  filters: PatientTimelineFilters
+) {
+  const {
+    entityFilter,
+    categoryFilter,
+    sourceFilter,
+    search,
+    rangeFilter,
+    now = new Date(),
+  } = filters;
+  const normalizedSearch = search.trim().toLowerCase();
+  const normalizedSourceFilter = sourceFilter.trim().toLowerCase();
+  const rangeCutoff =
+    rangeFilter === "all"
+      ? null
+      : now.getTime() - TIMELINE_RANGE_DAYS[rangeFilter] * 24 * 60 * 60 * 1000;
+
+  return items.filter((item) => {
+    if (entityFilter !== "all" && item.entity_type !== entityFilter) {
+      return false;
+    }
+
+    if (categoryFilter !== "all" && item.category !== categoryFilter) {
+      return false;
+    }
+
+    if (normalizedSourceFilter && (item.source_label ?? "").toLowerCase() !== normalizedSourceFilter) {
+      return false;
+    }
+
+    if (rangeCutoff !== null) {
+      const happenedAt = Date.parse(item.happened_at);
+      if (Number.isNaN(happenedAt) || happenedAt < rangeCutoff) {
+        return false;
+      }
+    }
+
+    if (!normalizedSearch) {
+      return true;
+    }
+
+    const haystack = [
+      item.title,
+      item.category,
+      item.status,
+      item.entity_type,
+      item.source_label ?? "",
+    ]
+      .join(" ")
+      .toLowerCase();
+
+    return haystack.includes(normalizedSearch);
+  });
+}
+
+export function buildPatientTimelineSummary(
+  items: PatientTimelineItem[],
+  now: Date = new Date()
+): PatientTimelineSummary {
+  const entityCountsMap = new Map<string, number>();
+  const recentCutoff = now.getTime() - 30 * 24 * 60 * 60 * 1000;
+  let open = 0;
+  let recent = 0;
+
+  for (const item of items) {
+    entityCountsMap.set(item.entity_type, (entityCountsMap.get(item.entity_type) ?? 0) + 1);
+
+    if (!TIMELINE_CLOSED_STATUSES.has(item.status)) {
+      open += 1;
+    }
+
+    const happenedAt = Date.parse(item.happened_at);
+    if (!Number.isNaN(happenedAt) && happenedAt >= recentCutoff) {
+      recent += 1;
+    }
+  }
+
+  return {
+    total: items.length,
+    open,
+    recent,
+    entityCounts: [...entityCountsMap.entries()]
+      .map(([entityType, count]) => ({ entityType, count }))
+      .toSorted((left, right) => right.count - left.count || left.entityType.localeCompare(right.entityType)),
+  };
+}
+
+export function formatRelatedPatientOption(option: {
+  patient_id: string;
+  title?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+}) {
+  const name = formatRelatedPatientName(option);
+  return name ? `${option.patient_id} · ${name}` : option.patient_id;
+}
+
+export function formatRelatedPatientName(option: {
+  patient_id: string;
+  title?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+}) {
+  const name = [option.title, option.first_name, option.last_name]
+    .filter((value) => Boolean(value && value.trim()))
+    .join(" ")
+    .trim();
+  return name || option.patient_id;
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function formatPrintValue(value?: string | null, fallback = "Not set") {
+  const normalized = value?.trim();
+  return normalized ? normalized : fallback;
+}
+
+function formatPatientLabelBirthDate(value: string) {
+  try {
+    return new Intl.DateTimeFormat("de-DE", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    }).format(new Date(value.includes("T") ? value : `${value}T00:00:00`));
+  } catch {
+    return value;
+  }
+}
+
+function resolvePatientLabelFormat(formatId: string): PatientLabelFormat {
+  return (
+    PATIENT_LABEL_FORMAT_OPTIONS.find((option) => option.id === formatId) ??
+    PATIENT_LABEL_FORMAT_OPTIONS[0]
+  );
+}
+
+export function buildPatientLabelPrintHtml(payload: PatientLabelPayload) {
+  const format = resolvePatientLabelFormat(payload.format?.id ?? DEFAULT_PATIENT_LABEL_FORMAT_ID);
+  const labelWidth = Math.max(format.width_mm - 10, 48);
+  const labelHeight = Math.max(format.height_mm - 10, 24);
+  const titleLine = [payload.salutation, payload.title, payload.first_name, payload.last_name]
+    .filter((value) => Boolean(value && value.trim()))
+    .join(" ");
+  const metaLine = [
+    `DOB ${formatPatientLabelBirthDate(payload.birth_date)}`,
+    payload.country_code ? `Country ${payload.country_code}` : "",
+    payload.insurance_provider ? `Insurance ${payload.insurance_provider}` : "",
+  ]
+    .filter(Boolean)
+    .join("  ·  ");
+  const agencyLine = [
+    payload.agency.care_of || payload.agency.name,
+    payload.agency.address,
+    payload.agency.phone,
+    payload.agency.email,
+  ]
+    .filter((value) => Boolean(value && value.trim()))
+    .join("  ·  ");
+  const footerLine = `Generated ${formatPrintValue(payload.generated_at, new Date().toISOString())}`;
+
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>${escapeHtml(payload.patient_id)} label</title>
+    <style>
+      @page {
+        size: ${format.width_mm}mm ${format.height_mm}mm;
+        margin: 5mm;
+      }
+
+      :root {
+        color-scheme: light;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html, body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        min-height: 100%;
+        background: #f3f4f6;
+        font-family: "IBM Plex Sans", "Segoe UI", Arial, sans-serif;
+        color: #0f172a;
+      }
+
+      body {
+        display: grid;
+        place-items: center;
+        padding: 6mm;
+      }
+
+      .label {
+        width: ${labelWidth}mm;
+        min-height: ${labelHeight}mm;
+        border: 1px solid #cbd5e1;
+        border-radius: 4mm;
+        background:
+          radial-gradient(circle at top right, rgba(15, 23, 42, 0.06), transparent 42%),
+          linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+        padding: 4mm;
+        display: grid;
+        gap: 2.2mm;
+        box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+      }
+
+      .eyebrow {
+        font-size: 8pt;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: #475569;
+      }
+
+      .patient-id {
+        font-size: 12pt;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+      }
+
+      .name {
+        font-size: ${format.height_mm <= 40 ? "11.5pt" : "14pt"};
+        font-weight: 700;
+        line-height: 1.15;
+      }
+
+      .meta,
+      .agency,
+      .footer {
+        font-size: ${format.height_mm <= 40 ? "7.5pt" : "8.5pt"};
+        line-height: 1.35;
+        color: #334155;
+      }
+
+      .footer {
+        color: #64748b;
+      }
+    </style>
+  </head>
+  <body>
+    <article class="label">
+      <div class="eyebrow">${escapeHtml(format.label)}</div>
+      <div class="patient-id">${escapeHtml(payload.patient_id)}</div>
+      <div class="name">${escapeHtml(titleLine || payload.patient_id)}</div>
+      <div class="meta">${escapeHtml(metaLine || "DOB not set")}</div>
+      <div class="agency">${escapeHtml(agencyLine || payload.agency.name || "Agency not configured")}</div>
+      <div class="footer">${escapeHtml(footerLine)}</div>
+    </article>
+    <script>
+      window.addEventListener("load", function () {
+        window.setTimeout(function () {
+          window.focus();
+          window.print();
+        }, 80);
+      });
+    </script>
+  </body>
+</html>`;
+}

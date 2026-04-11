@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE patients SET is_active = false, updated_at = now() WHERE id = $1 AND is_active",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "789ffa31665f13b460e0bd7e91acb0f577e6d42a3aabcb8635b6c88e3ee50238"
+}

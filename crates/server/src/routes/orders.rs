@@ -208,6 +208,35 @@ async fn create_order(
         Err(resp) => return resp,
     }
 
+    if let Some(contract_id) = body.contract_id {
+        let contract_patient_id: Uuid = match sqlx::query_scalar::<_, Uuid>(
+            "SELECT patient_id FROM framework_contracts WHERE id = $1",
+        )
+        .bind(contract_id)
+        .fetch_optional(&state.db)
+        .await
+        {
+            Ok(Some(patient_id)) => patient_id,
+            Ok(None) => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Framework contract not found",
+                );
+            }
+            Err(e) => {
+                tracing::error!(error = %e, contract_id = %contract_id, "validate contract");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        };
+
+        if contract_patient_id != body.patient_id {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Framework contract does not belong to patient",
+            );
+        }
+    }
+
     let seq: i64 = match sqlx::query_scalar!("SELECT nextval('order_number_seq') AS \"v!\"")
         .fetch_one(&state.db)
         .await

@@ -10,15 +10,31 @@ use uuid::Uuid;
 
 use crate::access;
 use crate::auth::middleware::AuthUser;
+use crate::routes::me::resolve_self_patient_id;
 use crate::state::AppState;
 use gmed_domain::role::Role;
 use sqlx::Row;
 
 pub fn router() -> Router<AppState> {
     Router::new()
+        .route("/me/appointments", get(list_my_appointments))
+        .route(
+            "/me/appointment-requests",
+            get(list_my_appointment_requests).post(create_my_appointment_request),
+        )
         .route("/appointments/meta/interpreters", get(list_interpreters))
         .route("/appointments/meta/staff", get(list_staff))
         .route("/appointments/meta/conflicts", get(get_conflicts))
+        .route("/appointments/meta/attention", get(list_attention_items))
+        .route("/appointments/requests", get(list_appointment_requests))
+        .route(
+            "/appointments/requests/{id}/review",
+            post(review_appointment_request),
+        )
+        .route(
+            "/appointments/requests/{id}/convert",
+            post(convert_appointment_request),
+        )
         .route(
             "/appointments",
             get(list_appointments).post(create_appointment),
@@ -49,6 +65,14 @@ pub fn router() -> Router<AppState> {
         .route(
             "/appointments/{id}/reminders/{reminder_id}/complete",
             post(complete_reminder),
+        )
+        .route(
+            "/appointments/{id}/communications",
+            get(list_communications).post(create_communication),
+        )
+        .route(
+            "/appointments/{id}/communications/{communication_id}/status",
+            post(update_communication_status),
         )
         .route(
             "/appointments/{id}/report",
@@ -125,6 +149,23 @@ struct CreateReminder {
 }
 
 #[derive(Deserialize)]
+struct CreateCommunication {
+    target_type: String,
+    direction: String,
+    channel: String,
+    status: String,
+    subject: String,
+    message: Option<String>,
+    contact_name: Option<String>,
+    due_at: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct UpdateCommunicationStatus {
+    status: String,
+}
+
+#[derive(Deserialize)]
 struct RejectReport {
     notes: Option<String>,
 }
@@ -141,6 +182,49 @@ struct ListAppointmentsQuery {
     interpreter_id: Option<Uuid>,
     date_from: Option<String>,
     date_to: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ListAppointmentRequestsQuery {
+    status: Option<String>,
+    patient_id: Option<Uuid>,
+}
+
+#[derive(Deserialize)]
+struct CreateMyAppointmentRequest {
+    appointment_type: String,
+    order_id: Option<Uuid>,
+    preferred_date_from: Option<String>,
+    preferred_date_to: Option<String>,
+    preferred_time_of_day: Option<String>,
+    requested_provider_id: Option<Uuid>,
+    requested_doctor_id: Option<Uuid>,
+    specialty: Option<String>,
+    location: Option<String>,
+    reason: Option<String>,
+    notes: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ReviewAppointmentRequest {
+    status: String,
+    review_note: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ConvertAppointmentRequest {
+    provider_id: Option<Uuid>,
+    doctor_id: Option<Uuid>,
+    owner_user_id: Option<Uuid>,
+    interpreter_id: Option<Uuid>,
+    order_id: Option<Uuid>,
+    title: String,
+    date: String,
+    time_start: Option<String>,
+    time_end: Option<String>,
+    location: Option<String>,
+    category: Option<String>,
+    notes: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -165,6 +249,916 @@ struct StaffOptionResponse {
     id: Uuid,
     name: String,
     role: String,
+}
+
+struct AppointmentCommunicationContext {
+    appointment_id: Uuid,
+    patient_id: Uuid,
+    provider_id: Option<Uuid>,
+    doctor_id: Option<Uuid>,
+    appointment_type: String,
+    interpreter_id: Option<Uuid>,
+    owner_user_id: Option<Uuid>,
+}
+
+fn is_valid_patient_request_time_of_day(value: &str) -> bool {
+    matches!(
+        value,
+        "morning" | "midday" | "afternoon" | "evening" | "flexible"
+    )
+}
+
+fn is_valid_appointment_request_status(value: &str) -> bool {
+    matches!(
+        value,
+        "requested" | "approved" | "rejected" | "converted" | "cancelled"
+    )
+}
+
+fn is_valid_review_status(value: &str) -> bool {
+    matches!(value, "approved" | "rejected")
+}
+
+fn build_patient_appointment_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
+    serde_json::json!({
+        "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
+        "title": row.try_get::<String, _>("title").unwrap_or_default(),
+        "date": row.try_get::<chrono::NaiveDate, _>("date").map(|value| value.to_string()).unwrap_or_default(),
+        "time_start": row.try_get::<Option<chrono::NaiveTime>, _>("time_start").unwrap_or_default().map(|value| value.format("%H:%M").to_string()),
+        "time_end": row.try_get::<Option<chrono::NaiveTime>, _>("time_end").unwrap_or_default().map(|value| value.format("%H:%M").to_string()),
+        "appointment_type": row.try_get::<String, _>("appointment_type").unwrap_or_default(),
+        "status": row.try_get::<String, _>("status").unwrap_or_default(),
+        "location": row.try_get::<Option<String>, _>("location").unwrap_or_default(),
+        "category": row.try_get::<Option<String>, _>("category").unwrap_or_default(),
+        "provider_name": row.try_get::<Option<String>, _>("provider_name").unwrap_or_default(),
+        "doctor_name": row.try_get::<Option<String>, _>("doctor_name").unwrap_or_default(),
+        "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+    })
+}
+
+fn build_appointment_request_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
+    serde_json::json!({
+        "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
+        "patient_id": row.try_get::<Uuid, _>("patient_id").unwrap_or_else(|_| Uuid::nil()),
+        "patient_pid": row.try_get::<Option<String>, _>("patient_pid").unwrap_or_default(),
+        "patient_name": row.try_get::<Option<String>, _>("patient_name").unwrap_or_default(),
+        "order_id": row.try_get::<Option<Uuid>, _>("order_id").unwrap_or_default(),
+        "order_number": row.try_get::<Option<String>, _>("order_number").unwrap_or_default(),
+        "appointment_type": row.try_get::<String, _>("appointment_type").unwrap_or_default(),
+        "preferred_date_from": row.try_get::<Option<chrono::NaiveDate>, _>("preferred_date_from").unwrap_or_default().map(|value| value.to_string()),
+        "preferred_date_to": row.try_get::<Option<chrono::NaiveDate>, _>("preferred_date_to").unwrap_or_default().map(|value| value.to_string()),
+        "preferred_time_of_day": row.try_get::<Option<String>, _>("preferred_time_of_day").unwrap_or_default(),
+        "requested_provider_id": row.try_get::<Option<Uuid>, _>("requested_provider_id").unwrap_or_default(),
+        "requested_provider_name": row.try_get::<Option<String>, _>("requested_provider_name").unwrap_or_default(),
+        "requested_doctor_id": row.try_get::<Option<Uuid>, _>("requested_doctor_id").unwrap_or_default(),
+        "requested_doctor_name": row.try_get::<Option<String>, _>("requested_doctor_name").unwrap_or_default(),
+        "specialty": row.try_get::<Option<String>, _>("specialty").unwrap_or_default(),
+        "location": row.try_get::<Option<String>, _>("location").unwrap_or_default(),
+        "reason": row.try_get::<Option<String>, _>("reason").unwrap_or_default(),
+        "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
+        "status": row.try_get::<String, _>("status").unwrap_or_default(),
+        "review_note": row.try_get::<Option<String>, _>("review_note").unwrap_or_default(),
+        "reviewed_by": row.try_get::<Option<Uuid>, _>("reviewed_by").unwrap_or_default(),
+        "reviewed_by_name": row.try_get::<Option<String>, _>("reviewed_by_name").unwrap_or_default(),
+        "reviewed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("reviewed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+        "requested_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("requested_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+        "converted_appointment_id": row.try_get::<Option<Uuid>, _>("converted_appointment_id").unwrap_or_default(),
+        "converted_appointment_title": row.try_get::<Option<String>, _>("converted_appointment_title").unwrap_or_default(),
+        "converted_appointment_date": row.try_get::<Option<chrono::NaiveDate>, _>("converted_appointment_date").unwrap_or_default().map(|value| value.to_string()),
+    })
+}
+
+async fn load_appointment_request_row(
+    state: &AppState,
+    request_id: Uuid,
+) -> Result<Option<sqlx::postgres::PgRow>, axum::response::Response> {
+    sqlx::query(
+        r#"SELECT par.id, par.patient_id, par.requested_by, par.order_id, par.appointment_type,
+                  par.preferred_date_from, par.preferred_date_to, par.preferred_time_of_day,
+                  par.requested_provider_id, par.requested_doctor_id, par.specialty, par.location,
+                  par.reason, par.notes, par.status, par.review_note, par.reviewed_by,
+                  par.reviewed_at, par.requested_at, par.converted_appointment_id,
+                  p.patient_id AS patient_pid,
+                  trim(concat_ws(' ', p.first_name, p.last_name)) AS patient_name,
+                  o.order_number,
+                  provider.name AS requested_provider_name,
+                  doctor.name AS requested_doctor_name,
+                  reviewer.name AS reviewed_by_name,
+                  converted.title AS converted_appointment_title,
+                  converted.date AS converted_appointment_date
+           FROM patient_appointment_requests par
+           JOIN patients p ON p.id = par.patient_id
+           LEFT JOIN orders o ON o.id = par.order_id
+           LEFT JOIN providers provider ON provider.id = par.requested_provider_id
+           LEFT JOIN provider_doctors doctor ON doctor.id = par.requested_doctor_id
+           LEFT JOIN users reviewer ON reviewer.id = par.reviewed_by
+           LEFT JOIN appointments converted ON converted.id = par.converted_appointment_id
+           WHERE par.id = $1"#,
+    )
+    .bind(request_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, request_id = %request_id, "load appointment request");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load appointment request",
+        )
+    })
+}
+
+async fn list_my_appointments(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+) -> axum::response::Response {
+    if let Err(resp) = auth.require_any_role(&[Role::Patient]) {
+        return resp;
+    }
+
+    let patient_id = match resolve_self_patient_id(&state, auth.user_id).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+
+    match sqlx::query(
+        r#"SELECT a.id, a.title, a.date, a.time_start, a.time_end, a.appointment_type,
+                  a.status, a.location, a.category, a.created_at,
+                  provider.name AS provider_name,
+                  doctor.name AS doctor_name
+           FROM appointments a
+           LEFT JOIN providers provider ON provider.id = a.provider_id
+           LEFT JOIN provider_doctors doctor ON doctor.id = a.doctor_id
+           WHERE a.patient_id = $1
+             AND a.appointment_type <> 'internal'
+           ORDER BY CASE WHEN a.date >= current_date THEN 0 ELSE 1 END,
+                    CASE WHEN a.date >= current_date THEN a.date END ASC,
+                    CASE WHEN a.date < current_date THEN a.date END DESC,
+                    a.time_start"#,
+    )
+    .bind(patient_id)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => Json(
+            rows.iter()
+                .map(build_patient_appointment_json)
+                .collect::<Vec<_>>(),
+        )
+        .into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, user_id = %auth.user_id, "list my appointments");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load appointments",
+            )
+        }
+    }
+}
+
+async fn list_my_appointment_requests(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+) -> axum::response::Response {
+    if let Err(resp) = auth.require_any_role(&[Role::Patient]) {
+        return resp;
+    }
+
+    let patient_id = match resolve_self_patient_id(&state, auth.user_id).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+
+    match sqlx::query(
+        r#"SELECT par.id, par.patient_id, par.requested_by, par.order_id, par.appointment_type,
+                  par.preferred_date_from, par.preferred_date_to, par.preferred_time_of_day,
+                  par.requested_provider_id, par.requested_doctor_id, par.specialty, par.location,
+                  par.reason, par.notes, par.status, par.review_note, par.reviewed_by,
+                  par.reviewed_at, par.requested_at, par.converted_appointment_id,
+                  p.patient_id AS patient_pid,
+                  trim(concat_ws(' ', p.first_name, p.last_name)) AS patient_name,
+                  o.order_number,
+                  provider.name AS requested_provider_name,
+                  doctor.name AS requested_doctor_name,
+                  reviewer.name AS reviewed_by_name,
+                  converted.title AS converted_appointment_title,
+                  converted.date AS converted_appointment_date
+           FROM patient_appointment_requests par
+           JOIN patients p ON p.id = par.patient_id
+           LEFT JOIN orders o ON o.id = par.order_id
+           LEFT JOIN providers provider ON provider.id = par.requested_provider_id
+           LEFT JOIN provider_doctors doctor ON doctor.id = par.requested_doctor_id
+           LEFT JOIN users reviewer ON reviewer.id = par.reviewed_by
+           LEFT JOIN appointments converted ON converted.id = par.converted_appointment_id
+           WHERE par.patient_id = $1
+             AND par.requested_by = $2
+           ORDER BY par.requested_at DESC"#,
+    )
+    .bind(patient_id)
+    .bind(auth.user_id)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => Json(
+            rows.iter()
+                .map(build_appointment_request_json)
+                .collect::<Vec<_>>(),
+        )
+        .into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, user_id = %auth.user_id, "list my appointment requests");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load appointment requests",
+            )
+        }
+    }
+}
+
+async fn create_my_appointment_request(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Json(body): Json<CreateMyAppointmentRequest>,
+) -> axum::response::Response {
+    if let Err(resp) = auth.require_any_role(&[Role::Patient]) {
+        return resp;
+    }
+
+    let patient_id = match resolve_self_patient_id(&state, auth.user_id).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+
+    if !matches!(body.appointment_type.as_str(), "medical" | "non_medical") {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Appointment request type must be medical or non_medical",
+        );
+    }
+
+    let preferred_date_from = match parse_query_date(body.preferred_date_from.clone(), "date_from")
+    {
+        Ok(value) => value,
+        Err(_) => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Invalid preferred_date_from (YYYY-MM-DD)",
+            );
+        }
+    };
+    let preferred_date_to = match parse_query_date(body.preferred_date_to.clone(), "date_to") {
+        Ok(value) => value,
+        Err(_) => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Invalid preferred_date_to (YYYY-MM-DD)",
+            );
+        }
+    };
+
+    if let (Some(from), Some(to)) = (preferred_date_from, preferred_date_to)
+        && to < from
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "preferred_date_to must be on or after preferred_date_from",
+        );
+    }
+
+    let preferred_time_of_day = normalize_optional_text(body.preferred_time_of_day);
+    if let Some(ref value) = preferred_time_of_day
+        && !is_valid_patient_request_time_of_day(value)
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "preferred_time_of_day must be morning, midday, afternoon, evening or flexible",
+        );
+    }
+
+    if (body.requested_provider_id.is_some() || body.requested_doctor_id.is_some())
+        && let Err(resp) = validate_provider_doctor_context(
+            &state,
+            body.requested_provider_id,
+            body.requested_doctor_id,
+        )
+        .await
+    {
+        return resp;
+    }
+
+    if let Some(order_id) = body.order_id {
+        let belongs_to_patient = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM orders WHERE id = $1 AND patient_id = $2)",
+        )
+        .bind(order_id)
+        .bind(patient_id)
+        .fetch_one(&state.db)
+        .await
+        .unwrap_or(false);
+        if !belongs_to_patient {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Order does not belong to patient",
+            );
+        }
+    }
+
+    let reason = normalize_optional_text(body.reason);
+    let notes = normalize_optional_text(body.notes);
+    let specialty = normalize_optional_text(body.specialty);
+    let location = normalize_optional_text(body.location);
+
+    if preferred_date_from.is_none() && preferred_date_to.is_none() && reason.is_none() {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Appointment request must include a preferred date or a reason",
+        );
+    }
+
+    let open_request_exists = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(
+               SELECT 1
+               FROM patient_appointment_requests
+               WHERE patient_id = $1
+                 AND requested_by = $2
+                 AND appointment_type = $3
+                 AND status IN ('requested', 'approved')
+           )"#,
+    )
+    .bind(patient_id)
+    .bind(auth.user_id)
+    .bind(&body.appointment_type)
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or(false);
+
+    if open_request_exists {
+        return err(
+            StatusCode::CONFLICT,
+            "An open appointment request of this type already exists",
+        );
+    }
+
+    let request_id = match sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO patient_appointment_requests (
+                patient_id, requested_by, order_id, appointment_type, preferred_date_from,
+                preferred_date_to, preferred_time_of_day, requested_provider_id,
+                requested_doctor_id, specialty, location, reason, notes
+           ) VALUES (
+                $1, $2, $3, $4, $5,
+                $6, $7, $8,
+                $9, $10, $11, $12, $13
+           )
+           RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(auth.user_id)
+    .bind(body.order_id)
+    .bind(&body.appointment_type)
+    .bind(preferred_date_from)
+    .bind(preferred_date_to)
+    .bind(preferred_time_of_day.clone())
+    .bind(body.requested_provider_id)
+    .bind(body.requested_doctor_id)
+    .bind(specialty.clone())
+    .bind(location.clone())
+    .bind(reason.clone())
+    .bind(notes.clone())
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(id) => id,
+        Err(e) => {
+            tracing::error!(error = %e, user_id = %auth.user_id, "create appointment request");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create appointment request",
+            );
+        }
+    };
+
+    let _ = sqlx::query(
+        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'create_appointment_request', 'appointment_request', $2, $3)",
+    )
+    .bind(auth.user_id)
+    .bind(request_id)
+    .bind(serde_json::json!({
+        "patient_id": patient_id,
+        "appointment_type": body.appointment_type,
+        "preferred_date_from": preferred_date_from.map(|value| value.to_string()),
+        "preferred_date_to": preferred_date_to.map(|value| value.to_string()),
+        "preferred_time_of_day": preferred_time_of_day,
+        "requested_provider_id": body.requested_provider_id,
+        "requested_doctor_id": body.requested_doctor_id,
+        "order_id": body.order_id,
+    }))
+    .execute(&state.db)
+    .await;
+
+    let patient_label = sqlx::query(
+        r#"SELECT patient_id, trim(concat_ws(' ', first_name, last_name)) AS patient_name
+           FROM patients
+           WHERE id = $1"#,
+    )
+    .bind(patient_id)
+    .fetch_optional(&state.db)
+    .await
+    .ok()
+    .flatten()
+    .map(|row| {
+        let pid = row.try_get::<String, _>("patient_id").unwrap_or_default();
+        let name = row.try_get::<String, _>("patient_name").unwrap_or_default();
+        if pid.is_empty() {
+            name
+        } else if name.is_empty() {
+            pid
+        } else {
+            format!("{pid} · {name}")
+        }
+    })
+    .unwrap_or_else(|| "Patient".to_string());
+
+    let _ = sqlx::query(
+        r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
+           SELECT pa.user_id, 'appointment_request', $2, $3, 'appointment_request', $1
+           FROM patient_assignments pa
+           JOIN users u ON u.id = pa.user_id
+           WHERE pa.patient_id = $4
+             AND pa.revoked_at IS NULL
+             AND u.is_active = true
+             AND u.role IN ('patient_manager', 'ceo')"#,
+    )
+    .bind(request_id)
+    .bind(format!("New appointment request: {patient_label}"))
+    .bind("A patient requested appointment planning through the portal.")
+    .bind(patient_id)
+    .execute(&state.db)
+    .await;
+
+    match load_appointment_request_row(&state, request_id).await {
+        Ok(Some(row)) => (
+            StatusCode::CREATED,
+            Json(build_appointment_request_json(&row)),
+        )
+            .into_response(),
+        Ok(None) => err(StatusCode::NOT_FOUND, "Appointment request not found"),
+        Err(resp) => resp,
+    }
+}
+
+async fn list_appointment_requests(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Query(query): Query<ListAppointmentRequestsQuery>,
+) -> axum::response::Response {
+    if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+        return resp;
+    }
+
+    if let Some(ref status) = query.status
+        && !is_valid_appointment_request_status(status)
+    {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid request status");
+    }
+    if let Some(patient_id) = query.patient_id
+        && let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await
+        && auth.role != Role::Ceo
+    {
+        return resp;
+    }
+
+    let scope_user_id = if auth.role == Role::Ceo {
+        None
+    } else {
+        Some(auth.user_id)
+    };
+
+    match sqlx::query(
+        r#"SELECT par.id, par.patient_id, par.requested_by, par.order_id, par.appointment_type,
+                  par.preferred_date_from, par.preferred_date_to, par.preferred_time_of_day,
+                  par.requested_provider_id, par.requested_doctor_id, par.specialty, par.location,
+                  par.reason, par.notes, par.status, par.review_note, par.reviewed_by,
+                  par.reviewed_at, par.requested_at, par.converted_appointment_id,
+                  p.patient_id AS patient_pid,
+                  trim(concat_ws(' ', p.first_name, p.last_name)) AS patient_name,
+                  o.order_number,
+                  provider.name AS requested_provider_name,
+                  doctor.name AS requested_doctor_name,
+                  reviewer.name AS reviewed_by_name,
+                  converted.title AS converted_appointment_title,
+                  converted.date AS converted_appointment_date
+           FROM patient_appointment_requests par
+           JOIN patients p ON p.id = par.patient_id
+           LEFT JOIN orders o ON o.id = par.order_id
+           LEFT JOIN providers provider ON provider.id = par.requested_provider_id
+           LEFT JOIN provider_doctors doctor ON doctor.id = par.requested_doctor_id
+           LEFT JOIN users reviewer ON reviewer.id = par.reviewed_by
+           LEFT JOIN appointments converted ON converted.id = par.converted_appointment_id
+           WHERE ($1::text IS NULL OR par.status = $1)
+             AND ($2::uuid IS NULL OR par.patient_id = $2)
+             AND (
+                $3::uuid IS NULL
+                OR EXISTS(
+                    SELECT 1
+                    FROM patient_assignments pa
+                    WHERE pa.patient_id = par.patient_id
+                      AND pa.user_id = $3
+                      AND pa.revoked_at IS NULL
+                )
+             )
+           ORDER BY par.requested_at DESC"#,
+    )
+    .bind(query.status)
+    .bind(query.patient_id)
+    .bind(scope_user_id)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => Json(
+            rows.iter()
+                .map(build_appointment_request_json)
+                .collect::<Vec<_>>(),
+        )
+        .into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, user_id = %auth.user_id, "list appointment requests");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load appointment requests",
+            )
+        }
+    }
+}
+
+async fn review_appointment_request(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<ReviewAppointmentRequest>,
+) -> axum::response::Response {
+    if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+        return resp;
+    }
+    if !is_valid_review_status(&body.status) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Review status must be approved or rejected",
+        );
+    }
+
+    let row = match load_appointment_request_row(&state, id).await {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Appointment request not found"),
+        Err(resp) => return resp,
+    };
+    let patient_id = row
+        .try_get::<Uuid, _>("patient_id")
+        .unwrap_or_else(|_| Uuid::nil());
+    let requested_by = row
+        .try_get::<Uuid, _>("requested_by")
+        .unwrap_or_else(|_| Uuid::nil());
+    let current_status = row.try_get::<String, _>("status").unwrap_or_default();
+
+    if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await
+        && auth.role != Role::Ceo
+    {
+        return resp;
+    }
+    if current_status != "requested" {
+        return err(
+            StatusCode::CONFLICT,
+            "Only requested appointment requests can be reviewed",
+        );
+    }
+
+    let review_note = normalize_optional_text(body.review_note);
+    if let Err(e) = sqlx::query(
+        r#"UPDATE patient_appointment_requests
+           SET status = $2,
+               review_note = $3,
+               reviewed_by = $4,
+               reviewed_at = now()
+           WHERE id = $1"#,
+    )
+    .bind(id)
+    .bind(&body.status)
+    .bind(review_note.clone())
+    .bind(auth.user_id)
+    .execute(&state.db)
+    .await
+    {
+        tracing::error!(error = %e, request_id = %id, "review appointment request");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to review appointment request",
+        );
+    }
+
+    let _ = sqlx::query(
+        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'review_appointment_request', 'appointment_request', $2, $3)",
+    )
+    .bind(auth.user_id)
+    .bind(id)
+    .bind(serde_json::json!({
+        "patient_id": patient_id,
+        "status": body.status,
+        "review_note": review_note,
+    }))
+    .execute(&state.db)
+    .await;
+
+    let _ = sqlx::query(
+        "INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id) VALUES ($1, 'appointment_request_update', $2, $3, 'appointment_request', $4)",
+    )
+    .bind(requested_by)
+    .bind(format!("Appointment request {}", body.status))
+    .bind(
+        if body.status == "approved" {
+            "Your appointment request was approved and is waiting for scheduling."
+        } else {
+            "Your appointment request was reviewed and rejected."
+        },
+    )
+    .bind(id)
+    .execute(&state.db)
+    .await;
+
+    match load_appointment_request_row(&state, id).await {
+        Ok(Some(row)) => Json(build_appointment_request_json(&row)).into_response(),
+        Ok(None) => err(StatusCode::NOT_FOUND, "Appointment request not found"),
+        Err(resp) => resp,
+    }
+}
+
+async fn convert_appointment_request(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<ConvertAppointmentRequest>,
+) -> axum::response::Response {
+    if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+        return resp;
+    }
+
+    let request_row = match load_appointment_request_row(&state, id).await {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Appointment request not found"),
+        Err(resp) => return resp,
+    };
+    let patient_id = request_row
+        .try_get::<Uuid, _>("patient_id")
+        .unwrap_or_else(|_| Uuid::nil());
+    let requested_by = request_row
+        .try_get::<Uuid, _>("requested_by")
+        .unwrap_or_else(|_| Uuid::nil());
+    let request_status = request_row
+        .try_get::<String, _>("status")
+        .unwrap_or_default();
+    let request_type = request_row
+        .try_get::<String, _>("appointment_type")
+        .unwrap_or_default();
+    let request_order_id = request_row
+        .try_get::<Option<Uuid>, _>("order_id")
+        .unwrap_or_default();
+
+    if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await
+        && auth.role != Role::Ceo
+    {
+        return resp;
+    }
+    if request_status != "approved" {
+        return err(
+            StatusCode::CONFLICT,
+            "Only approved appointment requests can be converted",
+        );
+    }
+    if let Err(resp) =
+        validate_provider_doctor_context(&state, body.provider_id, body.doctor_id).await
+    {
+        return resp;
+    }
+    if let Some(interpreter_id) = body.interpreter_id {
+        match load_active_interpreter_role(&state, interpreter_id).await {
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "interpreter_id must reference an active interpreter or teamlead interpreter",
+                );
+            }
+            Err(resp) => return resp,
+        }
+    }
+
+    let owner_user_id = resolve_owner_user_id_for_write(&auth, body.owner_user_id);
+    if let Some(owner_user_id) = owner_user_id {
+        match load_active_appointment_owner_role(&state, owner_user_id).await {
+            Ok(Some(owner_role)) => {
+                if let Err(resp) =
+                    validate_owner_assignment_rules(&auth, owner_user_id, &owner_role)
+                {
+                    return resp;
+                }
+            }
+            Ok(None) => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "owner_user_id must reference an active PM/teamlead/interpreter/concierge",
+                );
+            }
+            Err(resp) => return resp,
+        }
+    }
+
+    let date = match chrono::NaiveDate::parse_from_str(&body.date, "%Y-%m-%d") {
+        Ok(value) => value,
+        Err(_) => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Invalid date (YYYY-MM-DD)",
+            );
+        }
+    };
+    let time_start = match parse_optional_time(body.time_start.as_deref()) {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    let time_end = match parse_optional_time(body.time_end.as_deref()) {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    if let (Some(time_start), Some(time_end)) = (time_start, time_end)
+        && time_end <= time_start
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "time_end must be later than time_start",
+        );
+    }
+
+    let order_id = body.order_id.or(request_order_id);
+    if let Some(order_id) = order_id {
+        let belongs_to_patient = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM orders WHERE id = $1 AND patient_id = $2)",
+        )
+        .bind(order_id)
+        .bind(patient_id)
+        .fetch_one(&state.db)
+        .await
+        .unwrap_or(false);
+        if !belongs_to_patient {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Order does not belong to patient",
+            );
+        }
+    }
+
+    let category = normalize_optional_text(body.category);
+    let location = normalize_optional_text(body.location);
+    let notes = normalize_optional_text(body.notes);
+
+    let inserted = match sqlx::query(
+        "INSERT INTO appointments (patient_id, provider_id, doctor_id, owner_user_id, interpreter_id, order_id, appointment_type, title, date, time_start, time_end, location, category, notes, created_by, interpreter_response)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+         RETURNING id, created_at",
+    )
+    .bind(patient_id)
+    .bind(body.provider_id)
+    .bind(body.doctor_id)
+    .bind(owner_user_id)
+    .bind(body.interpreter_id)
+    .bind(order_id)
+    .bind(&request_type)
+    .bind(body.title.trim())
+    .bind(date)
+    .bind(time_start)
+    .bind(time_end)
+    .bind(location.clone())
+    .bind(category.clone())
+    .bind(notes.clone())
+    .bind(auth.user_id)
+    .bind(body.interpreter_id.map(|_| "pending"))
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(row) => row,
+        Err(e) => {
+            tracing::error!(error = %e, request_id = %id, "convert appointment request");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to convert appointment request",
+            );
+        }
+    };
+
+    let appointment_id = inserted
+        .try_get::<Uuid, _>("id")
+        .unwrap_or_else(|_| Uuid::nil());
+
+    if let Some(interpreter_id) = body.interpreter_id {
+        let _ = sqlx::query!(
+            "INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
+             VALUES ($1, $2, $3)
+             ON CONFLICT (patient_id, user_id) DO UPDATE SET revoked_at = NULL, assigned_by = $3, assigned_at = now()",
+            patient_id,
+            interpreter_id,
+            auth.user_id
+        )
+        .execute(&state.db)
+        .await;
+
+        let _ = create_reminder_record(
+            &state,
+            appointment_id,
+            interpreter_id,
+            chrono::Utc::now(),
+            format!("New assignment: {}", body.title.trim()),
+            Some(format!("Appointment on {}", date)),
+        )
+        .await;
+    }
+
+    if request_type == "non_medical"
+        && let Err(resp) = bootstrap_concierge_workflow(
+            &state,
+            auth.user_id,
+            appointment_id,
+            patient_id,
+            body.title.trim(),
+            date,
+            time_start,
+        )
+        .await
+    {
+        return resp;
+    }
+    if request_type == "non_medical"
+        && let Err(resp) = crate::routes::concierge_services::bootstrap_default_service(
+            &state,
+            auth.user_id,
+            appointment_id,
+        )
+        .await
+    {
+        return resp;
+    }
+
+    if let Err(e) = sqlx::query(
+        r#"UPDATE patient_appointment_requests
+           SET status = 'converted',
+               reviewed_by = COALESCE(reviewed_by, $2),
+               reviewed_at = COALESCE(reviewed_at, now()),
+               converted_appointment_id = $3
+           WHERE id = $1"#,
+    )
+    .bind(id)
+    .bind(auth.user_id)
+    .bind(appointment_id)
+    .execute(&state.db)
+    .await
+    {
+        tracing::error!(error = %e, request_id = %id, appointment_id = %appointment_id, "mark appointment request converted");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to finalize appointment conversion",
+        );
+    }
+
+    let _ = sqlx::query(
+        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'convert_appointment_request', 'appointment_request', $2, $3)",
+    )
+    .bind(auth.user_id)
+    .bind(id)
+    .bind(serde_json::json!({
+        "patient_id": patient_id,
+        "appointment_id": appointment_id,
+        "appointment_type": request_type,
+        "provider_id": body.provider_id,
+        "doctor_id": body.doctor_id,
+        "owner_user_id": owner_user_id,
+        "interpreter_id": body.interpreter_id,
+        "order_id": order_id,
+    }))
+    .execute(&state.db)
+    .await;
+
+    let _ = sqlx::query(
+        "INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id) VALUES ($1, 'appointment_request_update', $2, $3, 'appointment_request', $4)",
+    )
+    .bind(requested_by)
+    .bind("Appointment request scheduled")
+    .bind("Your appointment request was converted into a scheduled appointment.")
+    .bind(id)
+    .execute(&state.db)
+    .await;
+
+    Json(serde_json::json!({
+        "ok": true,
+        "request_id": id,
+        "appointment_id": appointment_id,
+        "status": "converted",
+    }))
+    .into_response()
 }
 
 async fn list_appointments(
@@ -294,6 +1288,267 @@ async fn list_appointments(
             Json(items).into_response()
         }
         Err(e) => { tracing::error!(error = %e, "list appointments"); err(StatusCode::INTERNAL_SERVER_ERROR, "Failed") }
+    }
+}
+
+async fn list_attention_items(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Query(query): Query<ListAppointmentsQuery>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::PatientManager,
+        Role::TeamleadInterpreter,
+        Role::Interpreter,
+        Role::Concierge,
+    ]) {
+        return e;
+    }
+
+    if let Some(ref appointment_type) = query.appointment_type
+        && !is_valid_appointment_type(appointment_type)
+    {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid type");
+    }
+    if let Some(ref status) = query.status
+        && !is_valid_appointment_status(status)
+    {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid status");
+    }
+
+    let date_from = match parse_query_date(query.date_from, "date_from") {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    let date_to = match parse_query_date(query.date_to, "date_to") {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    let search_pattern = format!("%{}%", query.search.unwrap_or_default());
+    let today = chrono::Utc::now().date_naive();
+    let preparation_window_end = today + chrono::Days::new(2);
+
+    match sqlx::query(
+        r#"SELECT a.id, a.title, a.date, a.time_start, a.time_end, a.appointment_type, a.status,
+                  a.location, a.interpreter_response, a.checklist_phase, a.patient_id, a.interpreter_id,
+                  a.provider_id, a.doctor_id, a.owner_user_id,
+                  p.first_name, p.last_name, p.patient_id AS patient_code,
+                  pr.name AS provider_name,
+                  d.name AS doctor_name,
+                  u.name AS interpreter_name,
+                  owner.name AS owner_name,
+                  owner.role AS owner_role,
+                  COALESCE(checklists.open_count, 0) AS open_checklist_count,
+                  COALESCE(tasks.open_count, 0) AS open_task_count,
+                  COALESCE(reminders.open_count, 0) AS open_reminder_count,
+                  COALESCE(reminders.overdue_count, 0) AS overdue_reminder_count,
+                  reminders.next_due_at AS next_reminder_due_at,
+                  COALESCE(comms.open_count, 0) AS open_communication_count,
+                  comms.next_due_at AS next_communication_due_at,
+                  latest_report.approval_status AS latest_report_status
+           FROM appointments a
+           JOIN patients p ON p.id = a.patient_id
+           LEFT JOIN providers pr ON pr.id = a.provider_id
+           LEFT JOIN provider_doctors d ON d.id = a.doctor_id
+           LEFT JOIN users u ON u.id = a.interpreter_id
+           LEFT JOIN users owner ON owner.id = a.owner_user_id
+           LEFT JOIN LATERAL (
+             SELECT COUNT(*) FILTER (WHERE NOT c.is_completed) AS open_count
+             FROM appointment_checklists c
+             WHERE c.appointment_id = a.id
+           ) checklists ON true
+           LEFT JOIN LATERAL (
+             SELECT COUNT(*) FILTER (WHERE t.status NOT IN ('completed', 'cancelled')) AS open_count
+             FROM tasks t
+             WHERE t.appointment_id = a.id
+           ) tasks ON true
+           LEFT JOIN LATERAL (
+             SELECT COUNT(*) FILTER (WHERE NOT r.is_completed) AS open_count,
+                    COUNT(*) FILTER (WHERE NOT r.is_completed AND r.remind_at <= now()) AS overdue_count,
+                    MIN(r.remind_at) FILTER (WHERE NOT r.is_completed) AS next_due_at
+             FROM reminders r
+             WHERE r.appointment_id = a.id
+           ) reminders ON true
+           LEFT JOIN LATERAL (
+             SELECT COUNT(*) FILTER (WHERE ac.status NOT IN ('closed', 'cancelled')) AS open_count,
+                    MIN(ac.due_at) FILTER (WHERE ac.status NOT IN ('closed', 'cancelled') AND ac.due_at IS NOT NULL) AS next_due_at
+             FROM appointment_communications ac
+             WHERE ac.appointment_id = a.id
+           ) comms ON true
+           LEFT JOIN LATERAL (
+             SELECT ir.approval_status
+             FROM interpreter_reports ir
+             WHERE ir.appointment_id = a.id
+             ORDER BY ir.created_at DESC
+             LIMIT 1
+           ) latest_report ON true
+           WHERE ($1::text = '%%'
+                  OR a.title ILIKE $1
+                  OR COALESCE(a.location, '') ILIKE $1
+                  OR p.first_name ILIKE $1
+                  OR p.last_name ILIKE $1
+                  OR p.patient_id ILIKE $1
+                  OR COALESCE(pr.name, '') ILIKE $1
+                  OR COALESCE(d.name, '') ILIKE $1
+                  OR COALESCE(owner.name, '') ILIKE $1)
+             AND ($2::text IS NULL OR a.appointment_type = $2)
+             AND ($3::text IS NULL OR a.status = $3)
+             AND ($4::uuid IS NULL OR a.patient_id = $4)
+             AND ($5::uuid IS NULL OR a.provider_id = $5)
+             AND ($6::uuid IS NULL OR a.doctor_id = $6)
+             AND ($7::uuid IS NULL OR a.owner_user_id = $7)
+             AND ($8::uuid IS NULL OR a.interpreter_id = $8)
+             AND ($9::date IS NULL OR a.date >= $9)
+             AND ($10::date IS NULL OR a.date <= $10)
+           ORDER BY a.date DESC, a.time_start
+           LIMIT 200"#,
+    )
+    .bind(search_pattern)
+    .bind(query.appointment_type)
+    .bind(query.status)
+    .bind(query.patient_id)
+    .bind(query.provider_id)
+    .bind(query.doctor_id)
+    .bind(query.owner_user_id)
+    .bind(query.interpreter_id)
+    .bind(date_from)
+    .bind(date_to)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => {
+            let mut items = Vec::new();
+            for row in rows {
+                let appointment_id: Uuid = match row.try_get("id") {
+                    Ok(value) => value,
+                    Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"),
+                };
+                let patient_id: Uuid = match row.try_get("patient_id") {
+                    Ok(value) => value,
+                    Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"),
+                };
+                let interpreter_id: Option<Uuid> = match row.try_get("interpreter_id") {
+                    Ok(value) => value,
+                    Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"),
+                };
+                let owner_user_id: Option<Uuid> = match row.try_get("owner_user_id") {
+                    Ok(value) => value,
+                    Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"),
+                };
+
+                match can_access_appointment(
+                    &state,
+                    &auth,
+                    appointment_id,
+                    Some(patient_id),
+                    interpreter_id,
+                    owner_user_id,
+                )
+                .await
+                {
+                    Ok(true) => {}
+                    Ok(false) => continue,
+                    Err(resp) => return resp,
+                }
+
+                let appointment_date: chrono::NaiveDate = match row.try_get("date") {
+                    Ok(value) => value,
+                    Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"),
+                };
+                let status: String = row.try_get("status").unwrap_or_default();
+                let interpreter_response: Option<String> =
+                    row.try_get("interpreter_response").unwrap_or_default();
+                let open_checklist_count: i64 =
+                    row.try_get("open_checklist_count").unwrap_or_default();
+                let open_task_count: i64 = row.try_get("open_task_count").unwrap_or_default();
+                let open_reminder_count: i64 =
+                    row.try_get("open_reminder_count").unwrap_or_default();
+                let overdue_reminder_count: i64 =
+                    row.try_get("overdue_reminder_count").unwrap_or_default();
+                let open_communication_count: i64 =
+                    row.try_get("open_communication_count").unwrap_or_default();
+                let latest_report_status: Option<String> =
+                    row.try_get("latest_report_status").unwrap_or_default();
+                let next_reminder_due_at: Option<chrono::DateTime<chrono::Utc>> =
+                    row.try_get("next_reminder_due_at").unwrap_or_default();
+                let next_communication_due_at: Option<chrono::DateTime<chrono::Utc>> =
+                    row.try_get("next_communication_due_at").unwrap_or_default();
+
+                let mut reasons = Vec::new();
+                if appointment_date < today && !matches!(status.as_str(), "completed" | "cancelled")
+                {
+                    reasons.push("Past visit is still not closed".to_string());
+                }
+                if appointment_date >= today
+                    && appointment_date <= preparation_window_end
+                    && open_checklist_count > 0
+                {
+                    reasons.push(format!(
+                        "{open_checklist_count} preparation or follow-up checklist item(s) remain open"
+                    ));
+                }
+                if appointment_date >= today
+                    && appointment_date <= preparation_window_end
+                    && interpreter_id.is_some()
+                    && interpreter_response.as_deref() != Some("accepted")
+                {
+                    reasons.push("Interpreter confirmation is still pending".to_string());
+                }
+                if overdue_reminder_count > 0 {
+                    reasons.push(format!("{overdue_reminder_count} reminder(s) are overdue"));
+                }
+                if appointment_date < today && open_task_count > 0 {
+                    reasons.push(format!("{open_task_count} operational task(s) remain open"));
+                }
+                if appointment_date < today && open_checklist_count > 0 {
+                    reasons.push(format!(
+                        "{open_checklist_count} visit-processing checklist item(s) remain open"
+                    ));
+                }
+                if appointment_date < today && open_communication_count > 0 {
+                    reasons.push(format!(
+                        "{open_communication_count} external communication thread(s) remain open"
+                    ));
+                }
+                if interpreter_id.is_some()
+                    && appointment_date <= today
+                    && latest_report_status.as_deref() != Some("approved")
+                {
+                    reasons.push("Interpreter report or approval is still pending".to_string());
+                }
+                if appointment_date < today && open_reminder_count > 0 && overdue_reminder_count == 0
+                {
+                    reasons.push(format!("{open_reminder_count} reminder(s) are still active"));
+                }
+
+                if reasons.is_empty() {
+                    continue;
+                }
+
+                let next_due_at = match (next_reminder_due_at, next_communication_due_at) {
+                    (Some(left), Some(right)) => Some(std::cmp::min(left, right).to_rfc3339()),
+                    (Some(value), None) | (None, Some(value)) => Some(value.to_rfc3339()),
+                    (None, None) => None,
+                };
+
+                let mut item = build_appointment_list_json(&auth, &row, appointment_id, patient_id);
+                if let Some(object) = item.as_object_mut() {
+                    object.insert("attention_score".to_string(), serde_json::json!(reasons.len()));
+                    object.insert("reasons".to_string(), serde_json::json!(reasons));
+                    object.insert("next_due_at".to_string(), serde_json::json!(next_due_at));
+                }
+                items.push(item);
+            }
+            Json(items).into_response()
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "list appointment attention items");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to list appointment attention items",
+            )
+        }
     }
 }
 
@@ -673,6 +1928,28 @@ fn is_valid_appointment_status(value: &str) -> bool {
     )
 }
 
+fn is_valid_communication_target(value: &str) -> bool {
+    matches!(value, "clinic" | "doctor" | "service_provider")
+}
+
+fn is_valid_communication_direction(value: &str) -> bool {
+    matches!(value, "outbound" | "inbound")
+}
+
+fn is_valid_communication_channel(value: &str) -> bool {
+    matches!(
+        value,
+        "phone" | "email" | "portal" | "fax" | "whatsapp" | "other"
+    )
+}
+
+fn is_valid_communication_status(value: &str) -> bool {
+    matches!(
+        value,
+        "planned" | "sent" | "answered" | "closed" | "cancelled"
+    )
+}
+
 fn parse_query_date(
     value: Option<String>,
     field: &'static str,
@@ -684,6 +1961,21 @@ fn parse_query_date(
                 "date_from" => "Invalid date_from (YYYY-MM-DD)",
                 "date_to" => "Invalid date_to (YYYY-MM-DD)",
                 _ => "Invalid date (YYYY-MM-DD)",
+            }),
+        _ => Ok(None),
+    }
+}
+
+fn parse_optional_rfc3339(
+    value: Option<&str>,
+    field: &'static str,
+) -> Result<Option<chrono::DateTime<chrono::Utc>>, &'static str> {
+    match value {
+        Some(raw) if !raw.trim().is_empty() => chrono::DateTime::parse_from_rfc3339(raw)
+            .map(|value| Some(value.with_timezone(&chrono::Utc)))
+            .map_err(|_| match field {
+                "due_at" => "Invalid due_at (RFC3339)",
+                _ => "Invalid datetime (RFC3339)",
             }),
         _ => Ok(None),
     }
@@ -1518,6 +2810,339 @@ async fn complete_reminder(
     }
 }
 
+async fn list_communications(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(apt_id): Path<Uuid>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::PatientManager,
+        Role::TeamleadInterpreter,
+        Role::Interpreter,
+        Role::Concierge,
+    ]) {
+        return e;
+    }
+
+    let context = match ensure_appointment_communication_access(&state, &auth, apt_id, false).await
+    {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+
+    match sqlx::query(
+        r#"SELECT ac.id, ac.target_type, ac.direction, ac.channel, ac.status, ac.subject,
+                  ac.message, ac.contact_name, ac.due_at, ac.responded_at, ac.closed_at,
+                  ac.created_at, ac.updated_at, ac.provider_id, ac.doctor_id,
+                  p.name AS provider_name, d.name AS doctor_name,
+                  u.name AS created_by_name, u.role AS created_by_role
+           FROM appointment_communications ac
+           LEFT JOIN providers p ON p.id = ac.provider_id
+           LEFT JOIN provider_doctors d ON d.id = ac.doctor_id
+           JOIN users u ON u.id = ac.created_by
+           WHERE ac.appointment_id = $1
+           ORDER BY ac.updated_at DESC, ac.created_at DESC"#,
+    )
+    .bind(apt_id)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => Json(
+            rows.into_iter()
+                .map(|row| {
+                    serde_json::json!({
+                        "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                        "appointment_id": context.appointment_id,
+                        "patient_id": context.patient_id,
+                        "provider_id": row.try_get::<Option<Uuid>, _>("provider_id").unwrap_or_default(),
+                        "provider_name": row.try_get::<Option<String>, _>("provider_name").unwrap_or_default(),
+                        "doctor_id": row.try_get::<Option<Uuid>, _>("doctor_id").unwrap_or_default(),
+                        "doctor_name": row.try_get::<Option<String>, _>("doctor_name").unwrap_or_default(),
+                        "target_type": row.try_get::<String, _>("target_type").unwrap_or_default(),
+                        "direction": row.try_get::<String, _>("direction").unwrap_or_default(),
+                        "channel": row.try_get::<String, _>("channel").unwrap_or_default(),
+                        "status": row.try_get::<String, _>("status").unwrap_or_default(),
+                        "subject": row.try_get::<String, _>("subject").unwrap_or_default(),
+                        "message": row.try_get::<Option<String>, _>("message").unwrap_or_default(),
+                        "contact_name": row.try_get::<Option<String>, _>("contact_name").unwrap_or_default(),
+                        "due_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("due_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+                        "responded_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("responded_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+                        "closed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("closed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+                        "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+                        "updated_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+                        "created_by_name": row.try_get::<String, _>("created_by_name").unwrap_or_default(),
+                        "created_by_role": row.try_get::<String, _>("created_by_role").unwrap_or_default(),
+                    })
+                })
+                .collect::<Vec<_>>(),
+        )
+        .into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, appointment_id = %apt_id, "list communications");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to list appointment communications",
+            )
+        }
+    }
+}
+
+async fn create_communication(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(apt_id): Path<Uuid>,
+    Json(body): Json<CreateCommunication>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::PatientManager,
+        Role::TeamleadInterpreter,
+        Role::Concierge,
+    ]) {
+        return e;
+    }
+
+    let context = match ensure_appointment_communication_access(&state, &auth, apt_id, true).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+
+    if !is_valid_communication_target(&body.target_type) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid communication target",
+        );
+    }
+    if !is_valid_communication_direction(&body.direction) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid communication direction",
+        );
+    }
+    if !is_valid_communication_channel(&body.channel) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid communication channel",
+        );
+    }
+    if !is_valid_communication_status(&body.status) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid communication status",
+        );
+    }
+
+    let subject = body.subject.trim();
+    if subject.is_empty() || subject.len() > 255 {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Communication subject is required (max 255)",
+        );
+    }
+
+    let due_at = match parse_optional_rfc3339(body.due_at.as_deref(), "due_at") {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+
+    let (provider_id, doctor_id) = match body.target_type.as_str() {
+        "doctor" => match context.doctor_id {
+            Some(doctor_id) => (context.provider_id, Some(doctor_id)),
+            None => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Doctor communication requires an appointment doctor",
+                );
+            }
+        },
+        "clinic" | "service_provider" => match context.provider_id {
+            Some(provider_id) => (Some(provider_id), None),
+            None => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Provider communication requires an appointment provider",
+                );
+            }
+        },
+        _ => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Invalid communication target",
+            );
+        }
+    };
+
+    let responded_at = if body.status == "answered" {
+        Some(chrono::Utc::now())
+    } else {
+        None
+    };
+    let closed_at = if matches!(body.status.as_str(), "closed" | "cancelled") {
+        Some(chrono::Utc::now())
+    } else {
+        None
+    };
+
+    match sqlx::query(
+        r#"INSERT INTO appointment_communications (
+                appointment_id, patient_id, provider_id, doctor_id, target_type, direction,
+                channel, status, subject, message, contact_name, due_at, responded_at, closed_at,
+                created_by
+           ) VALUES (
+                $1, $2, $3, $4, $5, $6,
+                $7, $8, $9, $10, $11, $12, $13, $14,
+                $15
+           ) RETURNING id"#,
+    )
+    .bind(apt_id)
+    .bind(context.patient_id)
+    .bind(provider_id)
+    .bind(doctor_id)
+    .bind(body.target_type.clone())
+    .bind(body.direction.clone())
+    .bind(body.channel.clone())
+    .bind(body.status.clone())
+    .bind(subject)
+    .bind(normalize_optional_text(body.message))
+    .bind(normalize_optional_text(body.contact_name))
+    .bind(due_at)
+    .bind(responded_at)
+    .bind(closed_at)
+    .bind(auth.user_id)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(row) => {
+            let communication_id = row.try_get::<Uuid, _>("id").unwrap_or_default();
+            let _ = sqlx::query(
+                "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context)
+                 VALUES ($1, 'create_appointment_communication', 'appointment', $2, $3)",
+            )
+            .bind(auth.user_id)
+            .bind(apt_id)
+            .bind(serde_json::json!({
+                "communication_id": communication_id,
+                "target_type": body.target_type,
+                "direction": body.direction,
+                "channel": body.channel,
+                "status": body.status,
+                "provider_id": provider_id,
+                "doctor_id": doctor_id,
+            }))
+            .execute(&state.db)
+            .await;
+
+            (
+                StatusCode::CREATED,
+                Json(serde_json::json!({ "id": communication_id })),
+            )
+                .into_response()
+        }
+        Err(e) => {
+            tracing::error!(error = %e, appointment_id = %apt_id, "create communication");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create appointment communication",
+            )
+        }
+    }
+}
+
+async fn update_communication_status(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((apt_id, communication_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<UpdateCommunicationStatus>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::PatientManager,
+        Role::TeamleadInterpreter,
+        Role::Concierge,
+    ]) {
+        return e;
+    }
+
+    let _context = match ensure_appointment_communication_access(&state, &auth, apt_id, true).await
+    {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+
+    if !is_valid_communication_status(&body.status) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid communication status",
+        );
+    }
+
+    let responded_at = if body.status == "answered" {
+        Some(chrono::Utc::now())
+    } else {
+        None
+    };
+    let closed_at = if matches!(body.status.as_str(), "closed" | "cancelled") {
+        Some(chrono::Utc::now())
+    } else {
+        None
+    };
+
+    match sqlx::query(
+        r#"UPDATE appointment_communications
+           SET status = $3,
+               responded_at = CASE
+                   WHEN $4::timestamptz IS NULL THEN responded_at
+                   ELSE COALESCE(responded_at, $4)
+               END,
+               closed_at = CASE
+                   WHEN $5::timestamptz IS NULL THEN NULL
+                   ELSE COALESCE(closed_at, $5)
+               END,
+               updated_at = now()
+           WHERE id = $1
+             AND appointment_id = $2"#,
+    )
+    .bind(communication_id)
+    .bind(apt_id)
+    .bind(body.status.clone())
+    .bind(responded_at)
+    .bind(closed_at)
+    .execute(&state.db)
+    .await
+    {
+        Ok(result) if result.rows_affected() > 0 => {
+            let _ = sqlx::query(
+                "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context)
+                 VALUES ($1, 'update_appointment_communication_status', 'appointment', $2, $3)",
+            )
+            .bind(auth.user_id)
+            .bind(apt_id)
+            .bind(serde_json::json!({
+                "communication_id": communication_id,
+                "status": body.status,
+            }))
+            .execute(&state.db)
+            .await;
+
+            Json(serde_json::json!({ "ok": true })).into_response()
+        }
+        Ok(_) => err(StatusCode::NOT_FOUND, "Communication not found"),
+        Err(e) => {
+            tracing::error!(
+                error = %e,
+                appointment_id = %apt_id,
+                communication_id = %communication_id,
+                "update communication status"
+            );
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update appointment communication",
+            )
+        }
+    }
+}
+
 async fn submit_report(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -1706,6 +3331,96 @@ async fn ensure_checklist_access(
             "Checklist is only available for non-medical concierge appointments",
         ))
     }
+}
+
+async fn load_appointment_communication_context(
+    state: &AppState,
+    appointment_id: Uuid,
+) -> Result<Option<AppointmentCommunicationContext>, axum::response::Response> {
+    let row = sqlx::query(
+        r#"SELECT id, patient_id, provider_id, doctor_id, appointment_type, interpreter_id,
+                  owner_user_id
+           FROM appointments
+           WHERE id = $1"#,
+    )
+    .bind(appointment_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, appointment_id = %appointment_id, "Failed to load appointment communication context");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate appointment communication access",
+        )
+    })?;
+
+    let Some(row) = row else {
+        return Ok(None);
+    };
+
+    Ok(Some(AppointmentCommunicationContext {
+        appointment_id: row.try_get::<Uuid, _>("id").unwrap_or(appointment_id),
+        patient_id: row.try_get::<Uuid, _>("patient_id").unwrap_or_default(),
+        provider_id: row
+            .try_get::<Option<Uuid>, _>("provider_id")
+            .unwrap_or_default(),
+        doctor_id: row
+            .try_get::<Option<Uuid>, _>("doctor_id")
+            .unwrap_or_default(),
+        appointment_type: row
+            .try_get::<String, _>("appointment_type")
+            .unwrap_or_default(),
+        interpreter_id: row
+            .try_get::<Option<Uuid>, _>("interpreter_id")
+            .unwrap_or_default(),
+        owner_user_id: row
+            .try_get::<Option<Uuid>, _>("owner_user_id")
+            .unwrap_or_default(),
+    }))
+}
+
+async fn ensure_appointment_communication_access(
+    state: &AppState,
+    auth: &AuthUser,
+    appointment_id: Uuid,
+    manage: bool,
+) -> Result<AppointmentCommunicationContext, axum::response::Response> {
+    let Some(context) = load_appointment_communication_context(state, appointment_id).await? else {
+        return Err(err(StatusCode::NOT_FOUND, "Appointment not found"));
+    };
+
+    match can_access_appointment(
+        state,
+        auth,
+        appointment_id,
+        Some(context.patient_id),
+        context.interpreter_id,
+        context.owner_user_id,
+    )
+    .await
+    {
+        Ok(true) => {}
+        Ok(false) => return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions")),
+        Err(resp) => return Err(resp),
+    }
+
+    if is_blocked_slot(auth, &context.appointment_type) {
+        return Err(err(
+            StatusCode::FORBIDDEN,
+            "Blocked medical slots do not expose communication details",
+        ));
+    }
+
+    if manage
+        && !matches!(
+            auth.role,
+            Role::Ceo | Role::PatientManager | Role::TeamleadInterpreter | Role::Concierge
+        )
+    {
+        return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
+    }
+
+    Ok(context)
 }
 
 async fn load_active_patient_role_users(

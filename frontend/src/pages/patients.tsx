@@ -10,12 +10,15 @@ import {
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   CalendarClock,
+  ChevronLeft,
+  ChevronRight,
   Globe2,
   LoaderCircle,
   Mail,
   Phone,
   Plus,
   RefreshCw,
+  RotateCcw,
   ShieldCheck,
   UserRound,
   UsersRound,
@@ -42,6 +45,8 @@ import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+
+import { getPatientLegalStatusSummary, normalizePatientLegalStatus } from "./patient-legal-status";
 
 type PatientSummary = {
   id: string;
@@ -248,7 +253,8 @@ function patientToForm(detail: PatientDetail): PatientFormState {
 function buildPatientsPath(filters: PatientFilters) {
   const params = new URLSearchParams();
   if (filters.search.trim()) params.set("search", filters.search.trim());
-  if (filters.activeOnly) params.set("active_only", filters.activeOnly);
+  if (filters.activeOnly === "true") params.set("active_only", "true");
+  else params.set("active_only", "false");
   if (filters.providerId) params.set("provider_id", filters.providerId);
   if (filters.doctorId) params.set("doctor_id", filters.doctorId);
   const query = params.toString();
@@ -450,6 +456,8 @@ export function PatientsPage() {
   const [assignmentBusy, setAssignmentBusy] = useState(false);
   const [assignmentError, setAssignmentError] = useState("");
   const [selectedAssignee, setSelectedAssignee] = useState("");
+  const [page, setPage] = useState(0);
+  const PAGE_SIZE = 20;
 
   const effectiveFilters = useMemo(
     () => ({ ...filters, search: deferredSearch || filters.search }),
@@ -473,6 +481,15 @@ export function PatientsPage() {
       { total: 0, active: 0, privateCount: 0, selfPay: 0 }
     );
   }, [patients]);
+
+  const totalPages = Math.max(1, Math.ceil(patients.length / PAGE_SIZE));
+  const paginatedPatients = useMemo(
+    () => patients.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE),
+    [patients, page]
+  );
+
+  // Reset page when data changes
+  useEffect(() => { setPage(0); }, [patients.length]);
 
   function syncQuery(next: Record<string, string | null>) {
     const params = new URLSearchParams(searchParams);
@@ -563,13 +580,17 @@ export function PatientsPage() {
     if (!permissions.canViewPage) return;
 
     let cancelled = false;
-    setListBusy(true);
+    // Only show loading spinner on first load, not on filter changes
+    if (patients.length === 0) setListBusy(true);
     setListError("");
 
     void apiFetch<PatientSummary[]>(patientsPath)
       .then((items) => {
         if (!cancelled) {
-          startTransition(() => setPatients(items));
+          const filtered = filters.activeOnly === "false"
+            ? items.filter((p) => !p.is_active)
+            : items;
+          startTransition(() => setPatients(filtered));
         }
       })
       .catch((error: unknown) => {
@@ -586,7 +607,14 @@ export function PatientsPage() {
     return () => {
       cancelled = true;
     };
-  }, [commonFailedLoad, patientsPath, permissions.canViewPage, listVersion]);
+  }, [
+    commonFailedLoad,
+    filters.activeOnly,
+    patients.length,
+    patientsPath,
+    permissions.canViewPage,
+    listVersion,
+  ]);
 
   useEffect(() => {
     if (!detailOpen || !selectedId) return;
@@ -647,9 +675,7 @@ export function PatientsPage() {
   }
 
   function openPatient(patientId: string) {
-    setSelectedId(patientId);
-    setDetailOpen(true);
-    syncQuery({ patient: patientId });
+    navigate(`/patients/${patientId}`);
   }
 
   async function handleCreatePatient(event: FormEvent<HTMLFormElement>) {
@@ -687,10 +713,7 @@ export function PatientsPage() {
       });
       setCreateOpen(false);
       setCreateForm(blankPatientForm());
-      refreshList();
-      setSelectedId(created.id);
-      setDetailOpen(true);
-      refreshDetail();
+      navigate(`/patients/${created.id}`);
     } catch (error) {
       setCreateError(error instanceof Error ? error.message : t.common_failed_create);
     } finally {
@@ -801,9 +824,8 @@ export function PatientsPage() {
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
-              <Button type="button" variant="outline" className="rounded-2xl" onClick={refreshList}>
+              <Button type="button" variant="outline" size="icon" className="rounded-2xl size-10" onClick={refreshList}>
                 <RefreshCw className="size-4" />
-                {t.common_search}
               </Button>
               {permissions.canCreateEdit ? (
                 <Button
@@ -842,14 +864,15 @@ export function PatientsPage() {
               <Button
                 type="button"
                 variant="ghost"
-                size="sm"
+                size="icon-sm"
                 className="rounded-xl"
                 onClick={() => {
                   setFilters(DEFAULT_FILTERS);
                   syncQuery({ provider: null, doctor: null, patient: null });
                 }}
+                title={t.access_reset}
               >
-                Reset
+                <RotateCcw className="size-3.5" />
               </Button>
             </div>
 
@@ -866,13 +889,18 @@ export function PatientsPage() {
               </Field>
 
               <Field label={t.common_activity}>
-                <ShadSelect value={filters.activeOnly} onValueChange={(v) => setFilters((current) => ({ ...current, activeOnly: v ?? "true" }))}>
+                <ShadSelect value={filters.activeOnly} onValueChange={(v) => setFilters((current) => ({ ...current, activeOnly: v ?? "" }))}>
                   <SelectTrigger className="w-full h-10 rounded-xl bg-slate-50">
-                    <SelectValue />
+                    <SelectValue>
+                      {filters.activeOnly === "true" ? t.common_active
+                        : filters.activeOnly === "false" ? t.common_inactive
+                        : t.providers_all}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="">{t.providers_all}</SelectItem>
                     <SelectItem value="true">{t.common_active}</SelectItem>
-                    <SelectItem value="false">{t.providers_all}</SelectItem>
+                    <SelectItem value="false">{t.common_inactive}</SelectItem>
                   </SelectContent>
                 </ShadSelect>
               </Field>
@@ -959,8 +987,9 @@ export function PatientsPage() {
                 />
               </div>
             ) : (
-              <div className="mt-5 grid gap-4 xl:grid-cols-2">
-                {patients.map((patient) => (
+              <>
+                <div className="mt-5 grid gap-4 xl:grid-cols-2 min-h-[320px] content-start">
+                {paginatedPatients.map((patient) => (
                   <button
                     key={patient.id}
                     type="button"
@@ -1007,20 +1036,60 @@ export function PatientsPage() {
                     </div>
                   </button>
                 ))}
-              </div>
+                </div>
+
+                {totalPages > 1 && (
+                  <div className="mt-5 flex items-center justify-between">
+                  <span className="text-xs text-slate-500">
+                    {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, patients.length)} / {patients.length}
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="xs"
+                      className="rounded-lg"
+                      disabled={page === 0}
+                      onClick={() => setPage((p) => Math.max(0, p - 1))}
+                    >
+                      <ChevronLeft className="size-3.5" />
+                    </Button>
+                    {Array.from({ length: totalPages }, (_, i) => (
+                      <Button
+                        key={i}
+                        type="button"
+                        variant={i === page ? "default" : "outline"}
+                        size="xs"
+                        className="rounded-lg min-w-[28px]"
+                        onClick={() => setPage(i)}
+                      >
+                        {i + 1}
+                      </Button>
+                    ))}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="xs"
+                      className="rounded-lg"
+                      disabled={page >= totalPages - 1}
+                      onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                    >
+                      <ChevronRight className="size-3.5" />
+                    </Button>
+                  </div>
+                  </div>
+                )}
+              </>
             )}
           </section>
         </div>
       </div>
 
       <Sheet open={createOpen} onOpenChange={setCreateOpen}>
-        <SheetContent side="right" className="w-full sm:max-w-[760px]">
+        <SheetContent side="right" className="w-full !sm:max-w-[50vw]">
           <SheetHeader className="border-b border-border/70 pb-4">
-            <SheetTitle>Create patient</SheetTitle>
-            <SheetDescription>
-              Register the patient with the core demographic, contact and insurance data needed to
-              start the care flow.
-            </SheetDescription>
+            <SheetTitle>{t.patients_create}</SheetTitle>
+            <SheetDescription>{t.patients_subtitle}</SheetDescription>
           </SheetHeader>
 
           <div className="flex-1 overflow-y-auto px-4 pb-6">
@@ -1058,8 +1127,7 @@ export function PatientsPage() {
           <SheetHeader className="border-b border-border/70 pb-4">
             <SheetTitle>{detail ? patientName(detail) : t.patients_profile}</SheetTitle>
             <SheetDescription>
-              Review core patient data, update editable fields and manage care assignments without
-              leaving the workspace.
+              {t.patients_subtitle}
             </SheetDescription>
           </SheetHeader>
 
@@ -1080,6 +1148,8 @@ export function PatientsPage() {
                   onOpenCases={() => navigate(`/cases?patient=${detail.id}`)}
                   onOpenOrders={() => navigate(`/orders?patient=${detail.id}`)}
                   onOpenAppointments={() => navigate(`/appointments?patient=${detail.id}`)}
+                  onOpenContracts={() => navigate(`/contracts?patient=${detail.id}`)}
+                  onOpenDocuments={() => navigate(`/documents?patient=${detail.id}`)}
                 />
                 <PatientProfileSection
                   detail={detail}
@@ -1122,11 +1192,15 @@ function PatientOverviewSection({
   onOpenCases,
   onOpenOrders,
   onOpenAppointments,
+  onOpenContracts,
+  onOpenDocuments,
 }: {
   detail: PatientDetail;
   onOpenCases: () => void;
   onOpenOrders: () => void;
   onOpenAppointments: () => void;
+  onOpenContracts: () => void;
+  onOpenDocuments: () => void;
 }) {
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
@@ -1175,13 +1249,19 @@ function PatientOverviewSection({
 
       <div className="mt-5 flex flex-wrap gap-2">
         <Button type="button" variant="outline" className="rounded-2xl" onClick={onOpenCases}>
-          Cases
+          {t.cases_title}
         </Button>
         <Button type="button" variant="outline" className="rounded-2xl" onClick={onOpenOrders}>
-          Orders
+          {t.orders_title}
         </Button>
         <Button type="button" variant="outline" className="rounded-2xl" onClick={onOpenAppointments}>
-          Appointments
+          {t.appointments_title}
+        </Button>
+        <Button type="button" variant="outline" className="rounded-2xl" onClick={onOpenContracts}>
+          Contracts
+        </Button>
+        <Button type="button" variant="outline" className="rounded-2xl" onClick={onOpenDocuments}>
+          Documents
         </Button>
       </div>
     </section>
@@ -1207,18 +1287,21 @@ function PatientProfileSection({
 }) {
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
+  const legalStatusSummary = getPatientLegalStatusSummary(
+    normalizePatientLegalStatus(detail.legal_status)
+  );
 
   return (
     <section className={cardClass("p-5")}>
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h3 className="text-sm font-semibold text-slate-950">Patient profile</h3>
+          <h3 className="text-sm font-semibold text-slate-950">{t.patients_profile}</h3>
           <p className="mt-1 text-sm text-slate-600">
-            Editable care-contact, address and insurance fields for the active casework.
+            {t.patients_subtitle}
           </p>
         </div>
         <div className="text-xs uppercase tracking-[0.12em] text-slate-500">
-          Updated {formatDateTime(detail.updated_at, t.common_not_set)}
+          {t.users_created} {formatDateTime(detail.updated_at, t.common_not_set)}
         </div>
       </div>
 
@@ -1238,7 +1321,7 @@ function PatientProfileSection({
           </Field>
           <Field label={t.patients_legal_status}>
             <Input
-              value={typeof detail.legal_status === "string" ? detail.legal_status : t.common_not_set}
+              value={legalStatusSummary}
               disabled
               className="h-10 rounded-xl bg-slate-50"
             />
@@ -1290,13 +1373,13 @@ function AssignmentsSection({
     <section className={cardClass("p-5")}>
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h3 className="text-sm font-semibold text-slate-950">Assignments</h3>
+          <h3 className="text-sm font-semibold text-slate-950">{t.patients_assign_owner}</h3>
           <p className="mt-1 text-sm text-slate-600">
-            Active and historical ownership chain for this patient.
+            {t.patients_subtitle}
           </p>
         </div>
         <div className="text-xs uppercase tracking-[0.12em] text-slate-500">
-          {assignments.length} records
+          {assignments.length} {t.patients_records}
         </div>
       </div>
 
@@ -1366,7 +1449,7 @@ function AssignmentsSection({
                 onClick={onAssign}
               >
                 {assignmentBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                Assign
+                {t.patients_assign_owner}
               </Button>
             </div>
           </div>
@@ -1386,6 +1469,7 @@ function PatientFormFields({
   includeBirthAndGender?: boolean;
 }) {
   const { t } = useLang();
+  const tr = t as unknown as Record<string, string>;
 
   return (
     <div className="space-y-4">
@@ -1429,7 +1513,9 @@ function PatientFormFields({
           <Field label={t.patients_gender}>
             <ShadSelect value={form.gender} onValueChange={(v) => onChange("gender", v ?? "male")}>
               <SelectTrigger className="w-full h-10 rounded-xl bg-slate-50">
-                <SelectValue />
+                <SelectValue>
+                  {genderLabel(form.gender, tr)}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="male">{t.gender_male}</SelectItem>
@@ -1542,7 +1628,9 @@ function PatientFormFields({
         <Field label={t.patients_insurance_type}>
           <ShadSelect value={form.insuranceType} onValueChange={(v) => onChange("insuranceType", v ?? "")}>
             <SelectTrigger className="w-full h-10 rounded-xl bg-slate-50">
-              <SelectValue placeholder={t.common_not_set} />
+              <SelectValue>
+                {insuranceLabel(form.insuranceType, tr)}
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="">{t.common_not_set}</SelectItem>

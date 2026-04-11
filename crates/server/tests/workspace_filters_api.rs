@@ -1,7 +1,7 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use serde_json::{Value, json};
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 use tower::ServiceExt;
 use uuid::Uuid;
 
@@ -233,6 +233,32 @@ async fn seed_leistung(
     .execute(pool)
     .await
     .unwrap();
+}
+
+async fn seed_leistung_returning_id(
+    pool: &PgPool,
+    order_id: Uuid,
+    provider_id: Uuid,
+    doctor_id: Uuid,
+    description: &str,
+) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO order_leistungen (
+                order_id, description, quantity, unit_price, vat_rate, provider_id, doctor_id
+           ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7
+           ) RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(description)
+    .bind(1.0_f64)
+    .bind(150.0_f64)
+    .bind(19.0_f64)
+    .bind(provider_id)
+    .bind(doctor_id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -487,6 +513,349 @@ async fn orders_list_supports_search_phase_and_provider_doctor_filters() {
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["phase"], "execution");
     assert_eq!(items[0]["patient_id"], patient_id.to_string());
+}
+
+#[tokio::test]
+async fn patients_list_supports_provider_and_doctor_filters_across_appointments_and_orders() {
+    let Some((app, pool, admin_id, bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("patient-provider-filter");
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+
+    let appointment_patient = seed_patient(&pool, admin_id, &format!("{tag}-apt")).await;
+    seed_appointment(
+        &pool,
+        appointment_patient,
+        provider_id,
+        doctor_id,
+        admin_id,
+        &format!("Appointment {tag}"),
+        "confirmed",
+        "2026-04-18",
+    )
+    .await;
+
+    let order_patient = seed_patient(&pool, admin_id, &format!("{tag}-order")).await;
+    let order_id = seed_order(
+        &pool,
+        order_patient,
+        admin_id,
+        &format!("O-{tag}"),
+        "execution",
+        "active",
+        "Need provider-doctor linked service",
+    )
+    .await;
+    seed_leistung(
+        &pool,
+        order_id,
+        provider_id,
+        doctor_id,
+        &format!("Service {tag}"),
+    )
+    .await;
+
+    let other_provider_id = seed_provider(&pool, &format!("{tag}-other")).await;
+    let other_doctor_id = seed_doctor(&pool, other_provider_id, &format!("{tag}-other")).await;
+    let hidden_patient = seed_patient(&pool, admin_id, &format!("{tag}-hidden")).await;
+    seed_appointment(
+        &pool,
+        hidden_patient,
+        other_provider_id,
+        other_doctor_id,
+        admin_id,
+        "Other appointment",
+        "confirmed",
+        "2026-04-19",
+    )
+    .await;
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients?provider_id={provider_id}&doctor_id={doctor_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body.as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    let ids: Vec<_> = items
+        .iter()
+        .filter_map(|item| item["id"].as_str())
+        .collect();
+    assert!(ids.contains(&appointment_patient.to_string().as_str()));
+    assert!(ids.contains(&order_patient.to_string().as_str()));
+    assert!(!ids.contains(&hidden_patient.to_string().as_str()));
+}
+
+#[tokio::test]
+async fn order_detail_includes_provider_and_doctor_chain_for_leistungen() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("order-detail-chain");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let order_id = seed_order(
+        &pool,
+        patient_id,
+        admin_id,
+        &format!("O-{tag}"),
+        "execution",
+        "active",
+        "Needs linked provider and doctor details",
+    )
+    .await;
+    seed_leistung(
+        &pool,
+        order_id,
+        provider_id,
+        doctor_id,
+        &format!("Cardio package {tag}"),
+    )
+    .await;
+
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let billing_bearer = auth_header_for(billing_id, "billing");
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}"),
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let leistungen = body["leistungen"].as_array().unwrap();
+    assert_eq!(leistungen.len(), 1);
+    assert_eq!(leistungen[0]["provider_id"], provider_id.to_string());
+    assert_eq!(leistungen[0]["doctor_id"], doctor_id.to_string());
+    assert_eq!(leistungen[0]["provider_name"], format!("Clinic {tag}"));
+    assert_eq!(leistungen[0]["doctor_name"], format!("Doctor {tag}"));
+}
+
+#[tokio::test]
+async fn billing_sees_order_leistung_vat_and_cost_passthrough_fields() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("billing-leistung-values");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+
+    let order_id = seed_order(
+        &pool,
+        patient_id,
+        admin_id,
+        &format!("O-{tag}"),
+        "execution",
+        "active",
+        "Billing intake values",
+    )
+    .await;
+
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let billing_bearer = auth_header_for(billing_id, "billing");
+
+    let (status, first_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/leistungen"),
+        &pm_bearer,
+        Some(json!({
+            "description": "Organisation der Behandlung",
+            "quantity": 2.0,
+            "unit_price": 150.0,
+            "provider_id": provider_id,
+            "doctor_id": doctor_id,
+            "notes": "Default VAT service"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let first_id = first_body["id"].as_str().unwrap().to_string();
+
+    let (status, second_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/leistungen"),
+        &pm_bearer,
+        Some(json!({
+            "description": "Clinic invoice passthrough",
+            "quantity": 1.0,
+            "unit_price": 480.0,
+            "vat_rate": 0.0,
+            "is_cost_passthrough": true,
+            "provider_id": provider_id,
+            "doctor_id": doctor_id,
+            "notes": "External invoice"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let second_id = second_body["id"].as_str().unwrap().to_string();
+
+    let first_row = sqlx::query(
+        "SELECT vat_rate::text AS vat_rate, is_cost_passthrough FROM order_leistungen WHERE id = $1",
+    )
+    .bind(Uuid::parse_str(&first_id).unwrap())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let second_row = sqlx::query(
+        "SELECT vat_rate::text AS vat_rate, is_cost_passthrough FROM order_leistungen WHERE id = $1",
+    )
+    .bind(Uuid::parse_str(&second_id).unwrap())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let first_vat = first_row.try_get::<String, _>("vat_rate").unwrap();
+    assert!(first_vat == "19" || first_vat == "19.0");
+    assert!(!first_row.try_get::<bool, _>("is_cost_passthrough").unwrap());
+    let second_vat = second_row.try_get::<String, _>("vat_rate").unwrap();
+    assert!(second_vat == "0" || second_vat == "0.0");
+    assert!(
+        second_row
+            .try_get::<bool, _>("is_cost_passthrough")
+            .unwrap()
+    );
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}/leistungen"),
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body.as_array().unwrap();
+    assert_eq!(items.len(), 2);
+
+    let default_item = items
+        .iter()
+        .find(|item| item["id"] == first_id)
+        .expect("default VAT leistung visible");
+    let passthrough_item = items
+        .iter()
+        .find(|item| item["id"] == second_id)
+        .expect("cost passthrough leistung visible");
+
+    assert_eq!(default_item["is_cost_passthrough"], false);
+    assert_eq!(passthrough_item["is_cost_passthrough"], true);
+    assert_eq!(default_item["provider_id"], provider_id.to_string());
+    assert_eq!(passthrough_item["doctor_id"], doctor_id.to_string());
+}
+
+#[tokio::test]
+async fn only_patient_manager_can_approve_delivered_leistung_for_billing_flow() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("billing-approve");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+
+    let order_id = seed_order(
+        &pool,
+        patient_id,
+        admin_id,
+        &format!("O-{tag}"),
+        "execution",
+        "active",
+        "Delivered leistung approval",
+    )
+    .await;
+    let leistung_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO order_leistungen (
+                order_id, description, quantity, unit_price, vat_rate, provider_id, doctor_id
+           ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7
+           ) RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind("Delivered interpreter and coordination package")
+    .bind(1.0_f64)
+    .bind(150.0_f64)
+    .bind(19.0_f64)
+    .bind(provider_id)
+    .bind(doctor_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "UPDATE order_leistungen SET status = 'delivered', delivered_at = now() WHERE id = $1",
+    )
+    .bind(leistung_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let billing_bearer = auth_header_for(billing_id, "billing");
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/leistungen/{leistung_id}/approve"),
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/leistungen/{leistung_id}/approve"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["ok"], true);
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}"),
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let approved_item = body["leistungen"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == leistung_id.to_string())
+        .cloned()
+        .expect("approved leistung present in billing detail");
+
+    assert_eq!(approved_item["status"], "approved");
+    assert!(approved_item["approved_at"].as_str().is_some());
 }
 
 #[tokio::test]
@@ -876,6 +1245,199 @@ async fn interpreter_and_concierge_only_see_assigned_patients() {
             .iter()
             .any(|item| item["id"] == hidden_patient_id.to_string())
     );
+}
+
+#[tokio::test]
+async fn patient_detail_view_audit_logs_visible_fields_for_role_filtered_payload() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("patient-view-audit");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let interpreter_id = seed_user(&pool, &tag, "interpreter").await;
+    seed_patient_assignment(&pool, patient_id, interpreter_id, admin_id).await;
+    let interpreter_bearer = auth_header_for(interpreter_id, "interpreter");
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}"),
+        &interpreter_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.get("email").is_some());
+    assert!(body.get("insurance_provider").is_none());
+    assert!(body.get("insurance_number").is_none());
+    assert!(body.get("legal_status").is_none());
+    assert!(body.get("notes").is_none());
+
+    let context: Value = sqlx::query_scalar(
+        r#"SELECT context
+           FROM audit_log
+           WHERE action = 'view_patient'
+             AND entity_type = 'patient'
+             AND entity_id = $1
+           ORDER BY created_at DESC
+           LIMIT 1"#,
+    )
+    .bind(patient_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(context["role"], "interpreter");
+    let visible_fields = context["visible_fields"]
+        .as_array()
+        .expect("visible_fields array");
+    assert!(visible_fields.iter().any(|field| field == "email"));
+    assert!(
+        visible_fields
+            .iter()
+            .all(|field| field != "insurance_provider")
+    );
+    assert!(
+        visible_fields
+            .iter()
+            .all(|field| field != "insurance_number")
+    );
+    assert!(visible_fields.iter().all(|field| field != "legal_status"));
+    assert!(visible_fields.iter().all(|field| field != "notes"));
+}
+
+#[tokio::test]
+async fn patient_manager_can_fetch_patient_label_payload() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("patient-label");
+    let patient_uuid = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    seed_patient_assignment(&pool, patient_uuid, pm_id, admin_id).await;
+
+    sqlx::query(
+        r#"UPDATE patients
+           SET title = $2,
+               first_name = $3,
+               last_name = $4,
+               birth_date = $5,
+               gender = $6,
+               nationality = $7,
+               residence_country = $8,
+               insurance_provider = $9
+           WHERE id = $1"#,
+    )
+    .bind(patient_uuid)
+    .bind("Dr.")
+    .bind("Max")
+    .bind("Mustermann")
+    .bind("1990-04-10")
+    .bind("male")
+    .bind("Deutschland")
+    .bind("Germany")
+    .bind("AXA")
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    for (key, value, description) in [
+        ("agency_name", "GMED Ops", "Agency name"),
+        ("agency_care_of", "c/o GMED Ops", "Agency care of"),
+        ("agency_address", "Main Street 1, Berlin", "Agency address"),
+        ("agency_phone", "+49 30 000000", "Agency phone"),
+        ("agency_email", "ops@gmed.de", "Agency email"),
+    ] {
+        sqlx::query(
+            r#"INSERT INTO system_settings (key, value, description, updated_by)
+               VALUES ($1, to_jsonb($2::text), $3, $4)
+               ON CONFLICT (key)
+               DO UPDATE SET
+                   value = EXCLUDED.value,
+                   description = EXCLUDED.description,
+                   updated_by = EXCLUDED.updated_by,
+                   updated_at = now()"#,
+        )
+        .bind(key)
+        .bind(value)
+        .bind(description)
+        .bind(admin_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_uuid}/label?format=sheet-70x37"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["patient_id"], format!("PT-{tag}"));
+    assert_eq!(body["salutation"], "Herr");
+    assert_eq!(body["country_code"], "DE");
+    assert_eq!(body["insurance_provider"], "AXA");
+    assert_eq!(body["format"]["id"], "sheet-70x37");
+    assert_eq!(body["agency"]["care_of"], "c/o GMED Ops");
+    assert_eq!(body["agency"]["address"], "Main Street 1, Berlin");
+    assert_eq!(body["agency"]["phone"], "+49 30 000000");
+    assert_eq!(body["agency"]["email"], "ops@gmed.de");
+    assert!(
+        body["available_formats"]
+            .as_array()
+            .expect("available formats array")
+            .len()
+            >= 3
+    );
+
+    let context: Value = sqlx::query_scalar(
+        r#"SELECT context
+           FROM audit_log
+           WHERE action = 'generate_patient_label'
+             AND entity_type = 'patient'
+             AND entity_id = $1
+           ORDER BY created_at DESC
+           LIMIT 1"#,
+    )
+    .bind(patient_uuid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(context["format"], "sheet-70x37");
+    assert_eq!(context["country_code"], "DE");
+}
+
+#[tokio::test]
+async fn interpreter_cannot_fetch_patient_label_payload() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("patient-label-forbidden");
+    let patient_uuid = seed_patient(&pool, admin_id, &tag).await;
+    let interpreter_id = seed_user(&pool, &tag, "interpreter").await;
+    let interpreter_bearer = auth_header_for(interpreter_id, "interpreter");
+    seed_patient_assignment(&pool, patient_uuid, interpreter_id, admin_id).await;
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_uuid}/label"),
+        &interpreter_bearer,
+        None,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["message"], "Insufficient permissions");
 }
 
 #[tokio::test]
@@ -1299,6 +1861,441 @@ async fn reminders_can_be_created_by_pm_and_completed_by_assignee() {
     let items = body.as_array().unwrap();
     let completed = items.iter().find(|item| item["id"] == reminder_id).unwrap();
     assert_eq!(completed["is_completed"], true);
+}
+
+#[tokio::test]
+async fn patient_manager_can_log_and_close_appointment_communication() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("appointment-communication");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+
+    let appointment_id = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        pm_id,
+        &format!("Appointment {tag}"),
+        "confirmed",
+        "2026-05-01",
+    )
+    .await;
+
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{appointment_id}/communications"),
+        &pm_bearer,
+        Some(json!({
+            "target_type": "doctor",
+            "direction": "outbound",
+            "channel": "email",
+            "status": "sent",
+            "subject": "Request Arztbrief",
+            "message": "Please send the post-visit findings and recommendations.",
+            "contact_name": "Dr. Weber",
+            "due_at": "2026-05-03T09:00:00+00:00"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let communication_id = body["id"].as_str().unwrap().to_string();
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/appointments/{appointment_id}/communications"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body.as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["id"], communication_id);
+    assert_eq!(items[0]["target_type"], "doctor");
+    assert_eq!(items[0]["status"], "sent");
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{appointment_id}/communications/{communication_id}/status"),
+        &pm_bearer,
+        Some(json!({ "status": "closed" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/appointments/{appointment_id}/communications"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let item = body.as_array().unwrap().first().unwrap();
+    assert_eq!(item["status"], "closed");
+    assert!(item["closed_at"].as_str().unwrap_or_default().contains('T'));
+}
+
+#[tokio::test]
+async fn assigned_interpreter_can_view_appointment_communications() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("communication-interpreter");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let interpreter_id = seed_user(&pool, &tag, "interpreter").await;
+
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, interpreter_id, admin_id).await;
+
+    let appointment_id = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        pm_id,
+        &format!("Appointment {tag}"),
+        "confirmed",
+        "2026-05-02",
+    )
+    .await;
+
+    sqlx::query("UPDATE appointments SET interpreter_id = $2 WHERE id = $1")
+        .bind(appointment_id)
+        .bind(interpreter_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let interpreter_bearer = auth_header_for(interpreter_id, "interpreter");
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{appointment_id}/communications"),
+        &pm_bearer,
+        Some(json!({
+            "target_type": "clinic",
+            "direction": "outbound",
+            "channel": "phone",
+            "status": "sent",
+            "subject": "Confirm arrival slot"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/appointments/{appointment_id}/communications"),
+        &interpreter_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body.as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["subject"], "Confirm arrival slot");
+}
+
+#[tokio::test]
+async fn concierge_cannot_access_communications_for_blocked_medical_slots() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("communication-blocked");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let concierge_id = seed_user(&pool, &tag, "concierge").await;
+
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, concierge_id, admin_id).await;
+
+    let appointment_id = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        pm_id,
+        &format!("Appointment {tag}"),
+        "confirmed",
+        "2026-05-03",
+    )
+    .await;
+
+    sqlx::query("UPDATE appointments SET owner_user_id = $2 WHERE id = $1")
+        .bind(appointment_id)
+        .bind(concierge_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let concierge_bearer = auth_header_for(concierge_id, "concierge");
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/appointments/{appointment_id}/communications"),
+        &concierge_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(
+        body["message"],
+        "Blocked medical slots do not expose communication details"
+    );
+}
+
+#[tokio::test]
+async fn attention_endpoint_flags_past_visit_with_unprocessed_follow_up() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("attention-past");
+    let today = chrono::Utc::now().date_naive();
+    let appointment_date = (today - chrono::Days::new(1)).to_string();
+    let reminder_at = format!("{}T08:00:00+00:00", today - chrono::Days::new(1));
+
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let interpreter_id = seed_user(&pool, &tag, "interpreter").await;
+
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, interpreter_id, admin_id).await;
+
+    let appointment_id = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        pm_id,
+        &format!("Appointment {tag}"),
+        "confirmed",
+        &appointment_date,
+    )
+    .await;
+
+    sqlx::query(
+        "UPDATE appointments
+         SET interpreter_id = $2, interpreter_response = 'pending'
+         WHERE id = $1",
+    )
+    .bind(appointment_id)
+    .bind(interpreter_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        r#"INSERT INTO reminders (appointment_id, user_id, remind_at, title)
+           VALUES ($1, $2, $3, $4)"#,
+    )
+    .bind(appointment_id)
+    .bind(pm_id)
+    .bind(reminder_at)
+    .bind("Post-visit follow-up")
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/appointments/meta/attention?patient_id={patient_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body.as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    let reasons = items[0]["reasons"].as_array().unwrap();
+    assert!(
+        reasons
+            .iter()
+            .any(|item| item == "Past visit is still not closed")
+    );
+    assert!(
+        reasons
+            .iter()
+            .any(|item| item == "Interpreter report or approval is still pending")
+    );
+    assert!(
+        reasons
+            .iter()
+            .any(|item| item == "1 reminder(s) are overdue")
+    );
+}
+
+#[tokio::test]
+async fn attention_endpoint_flags_upcoming_slot_with_preparation_gaps() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("attention-upcoming");
+    let appointment_date = (chrono::Utc::now().date_naive() + chrono::Days::new(1)).to_string();
+
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let interpreter_id = seed_user(&pool, &tag, "interpreter").await;
+
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, interpreter_id, admin_id).await;
+
+    let appointment_id = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        pm_id,
+        &format!("Appointment {tag}"),
+        "confirmed",
+        &appointment_date,
+    )
+    .await;
+
+    sqlx::query(
+        "UPDATE appointments
+         SET interpreter_id = $2, interpreter_response = 'pending'
+         WHERE id = $1",
+    )
+    .bind(appointment_id)
+    .bind(interpreter_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        r#"INSERT INTO appointment_checklists (appointment_id, phase, item_text, sort_order)
+           VALUES ($1, 'preparation', 'Confirm clinic file transfer', 1)"#,
+    )
+    .bind(appointment_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/appointments/meta/attention?patient_id={patient_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body.as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    let reasons = items[0]["reasons"].as_array().unwrap();
+    assert!(reasons.iter().any(|item| {
+        item.as_str()
+            .unwrap_or_default()
+            .contains("preparation or follow-up checklist item")
+    }));
+    assert!(
+        reasons
+            .iter()
+            .any(|item| item == "Interpreter confirmation is still pending")
+    );
+}
+
+#[tokio::test]
+async fn attention_endpoint_excludes_resolved_completed_visits() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("attention-resolved");
+    let appointment_date = (chrono::Utc::now().date_naive() - chrono::Days::new(2)).to_string();
+
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let interpreter_id = seed_user(&pool, &tag, "interpreter").await;
+
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, interpreter_id, admin_id).await;
+
+    let appointment_id = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        pm_id,
+        &format!("Appointment {tag}"),
+        "completed",
+        &appointment_date,
+    )
+    .await;
+
+    sqlx::query(
+        "UPDATE appointments
+         SET interpreter_id = $2, interpreter_response = 'accepted'
+         WHERE id = $1",
+    )
+    .bind(appointment_id)
+    .bind(interpreter_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        r#"INSERT INTO interpreter_reports (
+                appointment_id, interpreter_id, hours, report_text, approval_status,
+                approved_by, approved_at
+           ) VALUES (
+                $1, $2, 2.0, 'done', 'approved', $3, now()
+           )"#,
+    )
+    .bind(appointment_id)
+    .bind(interpreter_id)
+    .bind(pm_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/appointments/meta/attention?patient_id={patient_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body.as_array().unwrap();
+    assert!(items.is_empty());
 }
 
 #[tokio::test]
@@ -2145,6 +3142,91 @@ async fn concierge_service_update_and_completion_flow_sets_ready_for_billing() {
 }
 
 #[tokio::test]
+async fn billing_can_only_update_financial_fields_on_concierge_service() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("billing-concierge-boundary");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider_with_type(&pool, &tag, "non_medical", "Italy").await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let concierge_id = seed_user(&pool, &tag, "concierge").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, concierge_id, admin_id).await;
+
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let billing_bearer = auth_header_for(billing_id, "billing");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/appointments",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "provider_id": provider_id,
+            "doctor_id": doctor_id,
+            "appointment_type": "non_medical",
+            "title": "Airport transfer",
+            "date": "2026-05-12",
+            "time_start": "08:00",
+            "time_end": "09:00"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let appointment_id = body["id"].as_str().unwrap().to_string();
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/concierge-services?appointment_id={appointment_id}"),
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let service_id = body[0]["id"].as_str().unwrap().to_string();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/concierge-services/{service_id}/update"),
+        &billing_bearer,
+        Some(json!({
+            "actual_cost": 129.50,
+            "billing_status": "ready",
+            "billing_notes": "Ready for invoice handoff"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["actual_cost"], "129.50");
+    assert_eq!(body["billing_status"], "ready");
+    assert_eq!(body["billing_notes"], "Ready for invoice handoff");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/concierge-services/{service_id}/update"),
+        &billing_bearer,
+        Some(json!({
+            "title": "Billing should not rename operational service"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(
+        body["message"],
+        "Billing can only update cost handoff and billing fields"
+    );
+}
+
+#[tokio::test]
 async fn appointment_conflicts_endpoint_reports_patient_and_interpreter_overlaps() {
     let Some((app, pool, admin_id, bearer)) = test_context().await else {
         return;
@@ -2330,4 +3412,859 @@ async fn providers_list_supports_country_and_doctor_filters() {
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["id"], non_medical_provider_id.to_string());
     assert_eq!(items[0]["provider_type"], "non_medical");
+}
+
+#[tokio::test]
+async fn provider_and_doctor_detail_expose_linked_patients_and_interactions() {
+    let Some((app, pool, admin_id, bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("provider-detail");
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+
+    seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        admin_id,
+        &format!("Visit {tag}"),
+        "confirmed",
+        "2026-04-20",
+    )
+    .await;
+    let order_id = seed_order(
+        &pool,
+        patient_id,
+        admin_id,
+        &format!("O-{tag}"),
+        "execution",
+        "active",
+        "Provider interaction chain",
+    )
+    .await;
+    seed_leistung(
+        &pool,
+        order_id,
+        provider_id,
+        doctor_id,
+        &format!("Leistung {tag}"),
+    )
+    .await;
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers/{provider_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let linked_patients = body["linked_patients"].as_array().unwrap();
+    assert_eq!(linked_patients.len(), 1);
+    assert_eq!(linked_patients[0]["id"], patient_id.to_string());
+    assert_eq!(linked_patients[0]["appointment_count"], 1);
+    assert_eq!(linked_patients[0]["leistung_count"], 1);
+    let interactions = body["interactions"].as_array().unwrap();
+    assert!(
+        interactions
+            .iter()
+            .any(|item| item["kind"] == "appointment")
+    );
+    assert!(interactions.iter().any(|item| item["kind"] == "leistung"));
+
+    let (status, doctor_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers/{provider_id}/doctors/{doctor_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(doctor_body["patient_count"], 1);
+    assert_eq!(doctor_body["appointment_count"], 1);
+    assert_eq!(
+        doctor_body["linked_patients"]
+            .as_array()
+            .unwrap()
+            .first()
+            .unwrap()["id"],
+        patient_id.to_string()
+    );
+}
+
+#[tokio::test]
+async fn assigned_interpreter_can_update_response_and_non_assignee_cannot() {
+    let Some((app, pool, admin_id, bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("interpreter-response");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let assigned_interpreter_id = seed_user(&pool, &tag, "interpreter").await;
+    let other_interpreter_id = seed_user(&pool, &format!("{tag}-other"), "interpreter").await;
+
+    let appointment_id = seed_appointment_slot(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        admin_id,
+        &format!("Appointment {tag}"),
+        "planned",
+        "2026-04-21",
+        "medical",
+        Some("10:00"),
+        Some("11:00"),
+        Some(assigned_interpreter_id),
+    )
+    .await;
+
+    let assigned_bearer = auth_header_for(assigned_interpreter_id, "interpreter");
+    let other_bearer = auth_header_for(other_interpreter_id, "interpreter");
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{appointment_id}/interpreter-response"),
+        &assigned_bearer,
+        Some(json!({ "response": "discussion_requested" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, detail_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/appointments/{appointment_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail_body["interpreter_response"], "discussion_requested");
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{appointment_id}/interpreter-response"),
+        &assigned_bearer,
+        Some(json!({ "response": "accepted" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, detail_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/appointments/{appointment_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail_body["interpreter_response"], "accepted");
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{appointment_id}/interpreter-response"),
+        &other_bearer,
+        Some(json!({ "response": "declined" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{appointment_id}/interpreter-response"),
+        &assigned_bearer,
+        Some(json!({ "response": "invalid" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn patient_profile_nested_endpoints_return_only_linked_records() {
+    let Some((app, pool, admin_id, bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("patient-tabs");
+    let patient_id = seed_patient(&pool, admin_id, &format!("{tag}-visible")).await;
+    let other_patient_id = seed_patient(&pool, admin_id, &format!("{tag}-hidden")).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+
+    let case_id = seed_case(
+        &pool,
+        patient_id,
+        admin_id,
+        &format!("CASE-{tag}"),
+        "open",
+        "Visible case",
+    )
+    .await;
+    let hidden_case_id = seed_case(
+        &pool,
+        other_patient_id,
+        admin_id,
+        &format!("CASE-{tag}-hidden"),
+        "closed",
+        "Hidden case",
+    )
+    .await;
+
+    let order_id = seed_order(
+        &pool,
+        patient_id,
+        admin_id,
+        &format!("ORD-{tag}"),
+        "execution",
+        "active",
+        "Visible order",
+    )
+    .await;
+    let hidden_order_id = seed_order(
+        &pool,
+        other_patient_id,
+        admin_id,
+        &format!("ORD-{tag}-hidden"),
+        "closed",
+        "completed",
+        "Hidden order",
+    )
+    .await;
+
+    let appointment_id = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        admin_id,
+        "Visible appointment",
+        "planned",
+        "2030-01-10",
+    )
+    .await;
+    let hidden_appointment_id = seed_appointment(
+        &pool,
+        other_patient_id,
+        provider_id,
+        doctor_id,
+        admin_id,
+        "Hidden appointment",
+        "planned",
+        "2030-01-11",
+    )
+    .await;
+
+    let document_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO documents (
+                patient_id, order_id, appointment_id, auto_name, original_filename,
+                art, category, status, visibility, is_medical, uploaded_by
+           ) VALUES (
+                $1, $2, $3, $4, $5,
+                $6, $7, $8, $9, $10, $11
+           ) RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(order_id)
+    .bind(appointment_id)
+    .bind("Visible document")
+    .bind("visible.pdf")
+    .bind("report")
+    .bind("medical")
+    .bind("active")
+    .bind("released_internal")
+    .bind(true)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let hidden_document_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO documents (
+                patient_id, order_id, appointment_id, auto_name, original_filename,
+                art, category, status, visibility, is_medical, uploaded_by
+           ) VALUES (
+                $1, $2, $3, $4, $5,
+                $6, $7, $8, $9, $10, $11
+           ) RETURNING id"#,
+    )
+    .bind(other_patient_id)
+    .bind(hidden_order_id)
+    .bind(hidden_appointment_id)
+    .bind("Hidden document")
+    .bind("hidden.pdf")
+    .bind("report")
+    .bind("medical")
+    .bind("active")
+    .bind("released_internal")
+    .bind(true)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let contract_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO framework_contracts (
+                patient_id, contract_number, signed_at, status, created_by
+           ) VALUES (
+                $1, $2, $3, $4, $5
+           ) RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(format!("FC-{tag}"))
+    .bind("2030-01-12T09:00:00Z")
+    .bind("signed")
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let hidden_contract_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO framework_contracts (
+                patient_id, contract_number, signed_at, status, created_by
+           ) VALUES (
+                $1, $2, $3, $4, $5
+           ) RETURNING id"#,
+    )
+    .bind(other_patient_id)
+    .bind(format!("FC-{tag}-hidden"))
+    .bind("2030-01-13T09:00:00Z")
+    .bind("signed")
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let invoice_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO invoices (
+                order_id, patient_id, invoice_number, invoice_type, status,
+                issued_at, due_date, total_net, total_vat, total_gross, line_items, created_by
+           ) VALUES (
+                $1, $2, $3, $4, $5,
+                $6, $7, $8, $9, $10, $11, $12
+           ) RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .bind(format!("INV-{tag}"))
+    .bind("final")
+    .bind("sent")
+    .bind("2030-01-14T10:00:00Z")
+    .bind("2030-01-31")
+    .bind("100.00")
+    .bind("19.00")
+    .bind("119.00")
+    .bind(json!([]))
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let hidden_invoice_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO invoices (
+                order_id, patient_id, invoice_number, invoice_type, status,
+                issued_at, due_date, total_net, total_vat, total_gross, line_items, created_by
+           ) VALUES (
+                $1, $2, $3, $4, $5,
+                $6, $7, $8, $9, $10, $11, $12
+           ) RETURNING id"#,
+    )
+    .bind(hidden_order_id)
+    .bind(other_patient_id)
+    .bind(format!("INV-{tag}-hidden"))
+    .bind("final")
+    .bind("sent")
+    .bind("2030-01-15T10:00:00Z")
+    .bind("2030-01-31")
+    .bind("100.00")
+    .bind("19.00")
+    .bind("119.00")
+    .bind(json!([]))
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let (status, cases_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/cases"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let cases = cases_body.as_array().expect("cases array");
+    assert_eq!(cases.len(), 1);
+    assert_eq!(cases[0]["id"], case_id.to_string());
+    assert_ne!(cases[0]["id"], hidden_case_id.to_string());
+
+    let (status, orders_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/orders"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let orders = orders_body.as_array().expect("orders array");
+    assert_eq!(orders.len(), 1);
+    assert_eq!(orders[0]["id"], order_id.to_string());
+    assert_ne!(orders[0]["id"], hidden_order_id.to_string());
+
+    let (status, appointments_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/appointments"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let appointments = appointments_body.as_array().expect("appointments array");
+    assert_eq!(appointments.len(), 1);
+    assert_eq!(appointments[0]["id"], appointment_id.to_string());
+    assert_ne!(appointments[0]["id"], hidden_appointment_id.to_string());
+
+    let (status, documents_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/documents"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let documents = documents_body.as_array().expect("documents array");
+    assert_eq!(documents.len(), 1);
+    assert_eq!(documents[0]["id"], document_id.to_string());
+    assert_ne!(documents[0]["id"], hidden_document_id.to_string());
+
+    let (status, contracts_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/framework-contracts"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let contracts = contracts_body.as_array().expect("contracts array");
+    assert_eq!(contracts.len(), 1);
+    assert_eq!(contracts[0]["id"], contract_id.to_string());
+    assert_ne!(contracts[0]["id"], hidden_contract_id.to_string());
+
+    let (status, invoices_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/invoices"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let invoices = invoices_body.as_array().expect("invoices array");
+    assert_eq!(invoices.len(), 1);
+    assert_eq!(invoices[0]["id"], invoice_id.to_string());
+    assert_ne!(invoices[0]["id"], hidden_invoice_id.to_string());
+}
+
+#[tokio::test]
+async fn patient_relations_crud_round_trip() {
+    let Some((app, pool, admin_id, bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("patient-relations");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let related_patient_id = seed_patient(&pool, admin_id, &format!("{tag}-linked")).await;
+
+    let (status, created_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/relations"),
+        &bearer,
+        Some(json!({
+            "related_patient_id": related_patient_id,
+            "related_name": "Primary relative",
+            "relation_type": "parent",
+            "is_emergency_contact": true,
+            "phone": "+49 111 222",
+            "notes": "Reachable after 18:00"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let relation_id = Uuid::parse_str(created_body["id"].as_str().unwrap()).unwrap();
+
+    let (status, list_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/relations"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let relations = list_body.as_array().expect("relations array");
+    assert_eq!(relations.len(), 1);
+    assert_eq!(relations[0]["relation_type"], "parent");
+    assert_eq!(
+        relations[0]["related_patient_id"],
+        related_patient_id.to_string()
+    );
+
+    let (status, updated_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/relations/{relation_id}/update"),
+        &bearer,
+        Some(json!({
+            "related_patient_id": related_patient_id,
+            "related_name": "Updated relative",
+            "relation_type": "caregiver",
+            "is_emergency_contact": false,
+            "phone": "+49 333 444",
+            "notes": "Updated note"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(updated_body["relation_type"], "caregiver");
+    assert_eq!(updated_body["related_name"], "Updated relative");
+
+    let (status, delete_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/relations/{relation_id}/delete"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(delete_body["ok"], true);
+
+    let (status, list_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/relations"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(list_body.as_array().expect("relations array").len(), 0);
+}
+
+#[tokio::test]
+async fn patient_profile_updates_structured_legal_status() {
+    let Some((app, pool, admin_id, bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("patient-legal-status");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/update"),
+        &bearer,
+        Some(json!({
+            "legal_status": {
+                "dsgvo_signed": true,
+                "confidentiality_release_signed": true,
+                "identity_verified": true,
+                "document_pack_complete": false,
+                "compliance_completed": false,
+                "contract_status": "sent",
+                "notes": "Waiting for signed framework package"
+            }
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["ok"], true);
+
+    let (status, detail_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail_body["legal_status"]["dsgvo_signed"], true);
+    assert_eq!(
+        detail_body["legal_status"]["confidentiality_release_signed"],
+        true
+    );
+    assert_eq!(detail_body["legal_status"]["identity_verified"], true);
+    assert_eq!(detail_body["legal_status"]["document_pack_complete"], false);
+    assert_eq!(detail_body["legal_status"]["compliance_completed"], false);
+    assert_eq!(detail_body["legal_status"]["contract_status"], "sent");
+    assert_eq!(
+        detail_body["legal_status"]["notes"],
+        "Waiting for signed framework package"
+    );
+}
+
+#[tokio::test]
+async fn patient_manager_can_export_patient_dsgvo_bundle() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("patient-dsgvo-export");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/admin/compliance/patient/{patient_id}/export"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["export_type"], "DSGVO Art. 15 - Right of Access");
+    assert_eq!(body["patient"]["id"], patient_id.to_string());
+    assert!(body["appointments"].is_array());
+    assert!(body["cases"].is_array());
+    assert!(body["orders"].is_array());
+    assert!(body["assignments"].is_array());
+}
+
+#[tokio::test]
+async fn patient_timeline_includes_compliance_audit_events() {
+    let Some((app, pool, admin_id, bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("patient-compliance-timeline");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/update"),
+        &bearer,
+        Some(json!({
+            "legal_status": {
+                "dsgvo_signed": true,
+                "compliance_completed": false,
+                "contract_status": "pending"
+            }
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/admin/compliance/patient/{patient_id}/export"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/timeline"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let items = body.as_array().expect("timeline array");
+    assert!(
+        items.iter().any(|item| {
+            item["entity_type"] == "compliance"
+                && item["title"] == "Legal/compliance status updated"
+        }),
+        "expected compliance status update event in patient timeline"
+    );
+    assert!(
+        items.iter().any(|item| {
+            item["entity_type"] == "compliance" && item["title"] == "DSGVO data export"
+        }),
+        "expected dsgvo export event in patient timeline"
+    );
+}
+
+#[tokio::test]
+async fn patient_timeline_aggregates_events_in_descending_order() {
+    let Some((app, pool, admin_id, bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("patient-timeline");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+
+    let case_id = seed_case(
+        &pool,
+        patient_id,
+        admin_id,
+        &format!("CASE-{tag}"),
+        "open",
+        "Timeline case",
+    )
+    .await;
+    let order_id = seed_order(
+        &pool,
+        patient_id,
+        admin_id,
+        &format!("ORD-{tag}"),
+        "execution",
+        "active",
+        "Timeline order",
+    )
+    .await;
+    let service_id =
+        seed_leistung_returning_id(&pool, order_id, provider_id, doctor_id, "Delivered service")
+            .await;
+    let appointment_id = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        admin_id,
+        "Timeline appointment",
+        "planned",
+        "2030-01-03",
+    )
+    .await;
+    let document_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO documents (
+                patient_id, order_id, appointment_id, auto_name, original_filename,
+                art, category, status, visibility, is_medical, uploaded_by
+           ) VALUES (
+                $1, $2, $3, $4, $5,
+                $6, $7, $8, $9, $10, $11
+           ) RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(order_id)
+    .bind(appointment_id)
+    .bind("Bloodwork summary")
+    .bind("bloodwork.pdf")
+    .bind("report")
+    .bind("lab")
+    .bind("active")
+    .bind("released_internal")
+    .bind(true)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let contract_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO framework_contracts (
+                patient_id, contract_number, signed_at, status, created_by
+           ) VALUES (
+                $1, $2, $3, $4, $5
+           ) RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(format!("FC-{tag}"))
+    .bind("2030-01-05T08:00:00Z")
+    .bind("signed")
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let invoice_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO invoices (
+                order_id, patient_id, invoice_number, invoice_type, status,
+                issued_at, due_date, total_net, total_vat, total_gross, line_items, created_by
+           ) VALUES (
+                $1, $2, $3, $4, $5,
+                $6, $7, $8, $9, $10, $11, $12
+           ) RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .bind(format!("INV-{tag}"))
+    .bind("final")
+    .bind("sent")
+    .bind("2030-01-06T08:00:00Z")
+    .bind("2030-01-20")
+    .bind(100.0_f64)
+    .bind(19.0_f64)
+    .bind(119.0_f64)
+    .bind(json!([]))
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query("UPDATE cases SET created_at = '2030-01-01T08:00:00Z' WHERE id = $1")
+        .bind(case_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE orders SET created_at = '2030-01-02T08:00:00Z' WHERE id = $1")
+        .bind(order_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE order_leistungen SET created_at = '2030-01-04T08:00:00Z' WHERE id = $1")
+        .bind(service_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE documents SET created_at = '2030-01-07T08:00:00Z' WHERE id = $1")
+        .bind(document_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/timeline"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body.as_array().expect("timeline array");
+    assert!(items.len() >= 7);
+    assert_eq!(items[0]["entity_type"], "document");
+    assert_eq!(items[0]["entity_id"], document_id.to_string());
+    assert_eq!(items[1]["entity_type"], "invoice");
+    assert_eq!(items[1]["entity_id"], invoice_id.to_string());
+    assert_eq!(items[2]["entity_type"], "contract");
+    assert_eq!(items[2]["entity_id"], contract_id.to_string());
+    assert_eq!(items[3]["entity_type"], "service");
+    assert_eq!(items[3]["entity_id"], service_id.to_string());
+    assert_eq!(items[4]["entity_type"], "appointment");
+    assert_eq!(items[4]["entity_id"], appointment_id.to_string());
+    assert_eq!(items[5]["entity_type"], "order");
+    assert_eq!(items[5]["entity_id"], order_id.to_string());
+    assert_eq!(items[6]["entity_type"], "case");
+    assert_eq!(items[6]["entity_id"], case_id.to_string());
 }

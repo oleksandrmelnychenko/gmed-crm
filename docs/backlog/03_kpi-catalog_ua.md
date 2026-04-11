@@ -1,6 +1,10 @@
 # KPI Catalog (UA)
 
-> Перекладено та нормалізовано з аркуша `KPIs` у `1 (Update 2) User Story Salesforce.xlsx`.
+> **Джерело правди:** аркуш `KPIs` у `docs/1 (Update 2) User Story Salesforce.xlsx`. При розбіжності пріоритет має Excel. Ієрархія джерел: `docs/00_source-of-truth_ua.md`.
+
+## Відповідність аркушу KPIs
+
+Групи нижче відповідають колонкам **`Gruppe`** та **`KPI-Gruppe`** у Excel; формулювання KPI — робочий переклад з **`KPI-Beschreibung`** (повний німецький текст і колонки *Detalisierung* / *Ermittlungsmethode* — у вихідному файлі, рядки 1–92).
 
 ## 1. Медичні service providers
 

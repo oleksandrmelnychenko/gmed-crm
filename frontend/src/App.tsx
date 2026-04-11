@@ -36,15 +36,57 @@ const LeadsPage = lazy(() =>
   })),
 );
 
+const IntakesPage = lazy(() =>
+  import("@/pages/intakes").then((module) => ({
+    default: module.IntakesPage,
+  })),
+);
+
 const OrdersPage = lazy(() =>
   import("@/pages/orders").then((module) => ({
     default: module.OrdersPage,
   })),
 );
 
+const ContractsPage = lazy(() =>
+  import("@/pages/contracts").then((module) => ({
+    default: module.ContractsPage,
+  })),
+);
+
+const InvoicesPage = lazy(() =>
+  import("@/pages/invoices").then((module) => ({
+    default: module.InvoicesPage,
+  })),
+);
+
 const CasesPage = lazy(() =>
   import("@/pages/cases").then((module) => ({
     default: module.CasesPage,
+  })),
+);
+
+const DocumentsPage = lazy(() =>
+  import("@/pages/documents").then((module) => ({
+    default: module.DocumentsPage,
+  })),
+);
+
+const PatientPrivacyPage = lazy(() =>
+  import("@/pages/patient-privacy").then((module) => ({
+    default: module.PatientPrivacyPage,
+  })),
+);
+
+const PatientDetailPage = lazy(() =>
+  import("@/pages/patient-detail").then((module) => ({
+    default: module.PatientDetailPage,
+  })),
+);
+
+const ProviderDetailPage = lazy(() =>
+  import("@/pages/provider-detail").then((module) => ({
+    default: module.ProviderDetailPage,
   })),
 );
 
@@ -120,9 +162,16 @@ export default function App() {
                 <Route index element={<DashboardPage />} />
                 <Route path="chat" element={<ChatPage />} />
                 <Route path="leads" element={<LeadsPage />} />
+                <Route path="intakes" element={<IntakesPage />} />
                 <Route path="patients" element={<PatientsPage />} />
+                <Route path="patients/:id" element={<PatientDetailPage />} />
                 <Route path="providers" element={<ProvidersPage />} />
+                <Route path="providers/:id" element={<ProviderDetailPage />} />
                 <Route path="orders" element={<OrdersPage />} />
+                <Route path="contracts" element={<ContractsPage />} />
+                <Route path="invoices" element={<InvoicesPage />} />
+                <Route path="documents" element={<DocumentsPage />} />
+                <Route path="privacy" element={<PatientPrivacyPage />} />
                 <Route path="cases" element={<CasesPage />} />
                 <Route path="appointments" element={<AppointmentsPage />} />
                 <Route path="admin/users" element={<AdminUsersPage />} />

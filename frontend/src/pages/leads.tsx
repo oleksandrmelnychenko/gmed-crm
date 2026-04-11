@@ -44,6 +44,7 @@ import {
 } from "@/components/ui/sheet";
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { useLang } from "@/lib/i18n";
 import type { CreateLeadBody, Lead, LeadsStats, MonthlyEntry, StatusCount } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
@@ -242,6 +243,8 @@ function StatCard({
 
 export function LeadsPage() {
   const { user } = useAuth();
+  const { t } = useLang();
+  const failedLoadMessage = t.common_failed_load;
   const [searchParams, setSearchParams] = useSearchParams();
   const permissions = useMemo(() => leadPermissions(user?.role), [user?.role]);
   const [filters, setFilters] = useState<LeadFilters>(DEFAULT_FILTERS);
@@ -306,7 +309,7 @@ export function LeadsPage() {
       })
       .catch((fetchError: unknown) => {
         if (!cancelled) {
-          setError(fetchError instanceof Error ? fetchError.message : "Failed to load leads");
+          setError(fetchError instanceof Error ? fetchError.message : failedLoadMessage);
         }
       })
       .finally(() => {
@@ -318,7 +321,7 @@ export function LeadsPage() {
     return () => {
       cancelled = true;
     };
-  }, [leadsPath, permissions.canViewPage, version]);
+  }, [failedLoadMessage, leadsPath, permissions.canViewPage, version]);
 
   useEffect(() => {
     if (!permissions.canViewPage) return;
@@ -357,7 +360,7 @@ export function LeadsPage() {
       })
       .catch((fetchError: unknown) => {
         if (!cancelled) {
-          setDetailError(fetchError instanceof Error ? fetchError.message : "Failed to load lead");
+          setDetailError(fetchError instanceof Error ? fetchError.message : failedLoadMessage);
         }
       })
       .finally(() => {
@@ -369,7 +372,7 @@ export function LeadsPage() {
     return () => {
       cancelled = true;
     };
-  }, [detailOpen, selectedLeadId, version]);
+  }, [detailOpen, failedLoadMessage, selectedLeadId, version]);
 
   function syncLeadQuery(leadId?: string) {
     const params = new URLSearchParams(searchParams);
@@ -417,7 +420,7 @@ export function LeadsPage() {
       reload();
     } catch (createFetchError) {
       setCreateError(
-        createFetchError instanceof Error ? createFetchError.message : "Failed to create lead"
+        createFetchError instanceof Error ? createFetchError.message : t.common_failed_create
       );
     } finally {
       setCreateBusy(false);
@@ -475,7 +478,7 @@ export function LeadsPage() {
                   Intake and qualification
                 </Badge>
                 <Badge variant="outline" className="rounded-full border-slate-200 bg-white/80 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-600">
-                  {permissions.canConvert ? "PM conversion control" : "Sales qualification view"}
+                  {permissions.canConvert ? t.leads_title : t.leads_subtitle}
                 </Badge>
               </div>
               <h1 className="mt-4 text-3xl font-semibold tracking-tight text-slate-950 md:text-4xl">
@@ -512,7 +515,7 @@ export function LeadsPage() {
           <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <StatCard
               icon={Users}
-              label="This month"
+              label={t.common_active}
               value={stats?.total_this_month ?? 0}
               tone="sky"
               footer={
@@ -524,9 +527,9 @@ export function LeadsPage() {
                 </span>
               }
             />
-            <StatCard icon={CheckCircle2} label="Qualified" value={stats?.qualified_this_month ?? 0} tone="emerald" />
-            <StatCard icon={UserPlus} label="Converted" value={stats?.converted_this_month ?? 0} tone="purple" />
-            <StatCard icon={TrendingUp} label="All time" value={stats?.total_all ?? 0} tone="slate" />
+            <StatCard icon={CheckCircle2} label={t.users_status} value={stats?.qualified_this_month ?? 0} tone="emerald" />
+            <StatCard icon={UserPlus} label={t.leads_convert} value={stats?.converted_this_month ?? 0} tone="purple" />
+            <StatCard icon={TrendingUp} label={t.common_active} value={stats?.total_all ?? 0} tone="slate" />
           </div>
         </section>
 
@@ -574,7 +577,7 @@ export function LeadsPage() {
           <section className={cardClass("p-5")}>
             <div className="flex items-center justify-between gap-3">
               <div>
-                <h2 className="text-sm font-semibold text-slate-950">Filters</h2>
+                <h2 className="text-sm font-semibold text-slate-950">{t.common_search}</h2>
                 <p className="mt-1 text-sm text-slate-600">
                   Search by person or origin and narrow the queue by lifecycle stage.
                 </p>
@@ -585,25 +588,25 @@ export function LeadsPage() {
             </div>
 
             <div className="mt-5 space-y-4">
-              <FilterField label="Search">
+              <FilterField label={t.common_search}>
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
                   <Input
                     className="h-10 rounded-xl bg-slate-50 pl-9"
-                    placeholder="Name, phone, email, country"
+                    placeholder={t.common_search}
                     value={filters.search}
                     onChange={(event) => setFilters((current) => ({ ...current, search: event.target.value }))}
                   />
                 </div>
               </FilterField>
 
-              <FilterField label="Status">
+              <FilterField label={t.users_status}>
                 <select
                   value={filters.status}
                   onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value }))}
                   className="h-10 w-full rounded-xl border border-input bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
                 >
-                  <option value="">All statuses</option>
+                  <option value="">{t.providers_all}</option>
                   {STATUS_OPTIONS.map((status) => (
                     <option key={status} value={status}>
                       {status}
@@ -612,15 +615,15 @@ export function LeadsPage() {
                 </select>
               </FilterField>
 
-              <FilterField label="Source">
+              <FilterField label={t.leads_source}>
                 <Input value={filters.source} onChange={(event) => setFilters((current) => ({ ...current, source: event.target.value }))} className="h-10 rounded-xl bg-slate-50" />
               </FilterField>
 
-              <FilterField label="Country">
+              <FilterField label={t.providers_country}>
                 <Input value={filters.country} onChange={(event) => setFilters((current) => ({ ...current, country: event.target.value }))} className="h-10 rounded-xl bg-slate-50" />
               </FilterField>
 
-              <FilterField label="Archive visibility">
+              <FilterField label={t.common_archive}>
                 <select
                   value={filters.includeArchived}
                   onChange={(event) => setFilters((current) => ({ ...current, includeArchived: event.target.value }))}
@@ -642,7 +645,7 @@ export function LeadsPage() {
                 </p>
               </div>
               <div className="text-xs uppercase tracking-[0.12em] text-slate-500">
-                {loading ? "Syncing" : `${leads.length} records`}
+                {loading ? t.patients_syncing : `${leads.length} records`}
               </div>
             </div>
 
@@ -703,15 +706,15 @@ export function LeadsPage() {
                       <div className="mt-4 grid gap-2 text-sm text-slate-600">
                         <div className="flex items-center gap-2">
                           <Mail className="size-4 text-slate-400" />
-                          <span>{lead.email || "No email yet"}</span>
+                          <span>{lead.email || t.common_not_set}</span>
                         </div>
                         <div className="flex items-center gap-2">
                           <Phone className="size-4 text-slate-400" />
-                          <span>{lead.phone || "No phone yet"}</span>
+                          <span>{lead.phone || t.common_not_set}</span>
                         </div>
                         <div className="flex items-center gap-2">
                           <MapPin className="size-4 text-slate-400" />
-                          <span>{lead.country || lead.source || "No source context yet"}</span>
+                          <span>{lead.country || lead.source || t.common_not_set}</span>
                         </div>
                       </div>
 
@@ -786,46 +789,46 @@ export function LeadsPage() {
             {createError ? <Banner tone="error">{createError}</Banner> : null}
 
             <div className="grid gap-4 md:grid-cols-2">
-              <LeadField label="First name *">
+              <LeadField label={t.patients_first_name}>
                 <Input value={createForm.firstName} onChange={(event) => setCreateForm((current) => ({ ...current, firstName: event.target.value }))} required />
               </LeadField>
-              <LeadField label="Last name *">
+              <LeadField label={t.patients_last_name}>
                 <Input value={createForm.lastName} onChange={(event) => setCreateForm((current) => ({ ...current, lastName: event.target.value }))} required />
               </LeadField>
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
-              <LeadField label="Phone">
+              <LeadField label={t.field_phone}>
                 <Input value={createForm.phone} onChange={(event) => setCreateForm((current) => ({ ...current, phone: event.target.value }))} />
               </LeadField>
-              <LeadField label="Email">
+              <LeadField label={t.patients_email}>
                 <Input type="email" value={createForm.email} onChange={(event) => setCreateForm((current) => ({ ...current, email: event.target.value }))} />
               </LeadField>
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
-              <LeadField label="Source">
+              <LeadField label={t.leads_source}>
                 <Input value={createForm.source} onChange={(event) => setCreateForm((current) => ({ ...current, source: event.target.value }))} />
               </LeadField>
-              <LeadField label="Country">
+              <LeadField label={t.providers_country}>
                 <Input value={createForm.country} onChange={(event) => setCreateForm((current) => ({ ...current, country: event.target.value }))} />
               </LeadField>
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
-              <LeadField label="Languages">
+              <LeadField label={t.patients_languages}>
                 <Input value={createForm.languages} onChange={(event) => setCreateForm((current) => ({ ...current, languages: event.target.value }))} placeholder="German, Ukrainian, English" />
               </LeadField>
-              <LeadField label="Medical needs">
+              <LeadField label={t.leads_needs}>
                 <Input value={createForm.needsMedical} onChange={(event) => setCreateForm((current) => ({ ...current, needsMedical: event.target.value }))} placeholder="Diagnostics, surgery, rehab" />
               </LeadField>
             </div>
 
-            <LeadField label="Non-medical needs">
+            <LeadField label={t.leads_needs}>
               <Input value={createForm.needsNonMedical} onChange={(event) => setCreateForm((current) => ({ ...current, needsNonMedical: event.target.value }))} placeholder="Hotel, transfer, visa, concierge" />
             </LeadField>
 
-            <LeadField label="Notes">
+            <LeadField label={t.patients_notes}>
               <textarea value={createForm.notes} onChange={(event) => setCreateForm((current) => ({ ...current, notes: event.target.value }))} className="min-h-[104px] w-full rounded-xl border border-input bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100" rows={4} />
             </LeadField>
 
@@ -835,7 +838,7 @@ export function LeadsPage() {
               </Button>
               <Button type="submit" disabled={createBusy}>
                 {createBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                {createBusy ? "Creating" : "Save lead"}
+                {createBusy ? t.patients_creating : t.common_save}
               </Button>
             </div>
           </form>
@@ -854,7 +857,7 @@ export function LeadsPage() {
         <SheetContent side="right" className="w-full sm:max-w-[760px]">
           <SheetHeader className="border-b border-border/70 pb-4">
             <SheetTitle>
-              {detail ? `${detail.first_name} ${detail.last_name}` : "Lead detail"}
+              {detail ? `${detail.first_name} ${detail.last_name}` : t.leads_title}
             </SheetTitle>
             <SheetDescription>
               Review intake data, qualification state and patient conversion readiness.
@@ -896,20 +899,20 @@ export function LeadsPage() {
                 <section className={cardClass("p-5")}>
                   <h3 className="text-sm font-semibold text-slate-950">Contact and origin</h3>
                   <div className="mt-4 grid gap-4 md:grid-cols-2">
-                    <DetailCard label="Email" value={detail.email || "Not set"} />
-                    <DetailCard label="Phone" value={detail.phone || "Not set"} />
-                    <DetailCard label="Source" value={detail.source || "Not set"} />
-                    <DetailCard label="Country" value={detail.country || "Not set"} />
+                    <DetailCard label={t.patients_email} value={detail.email || t.common_not_set} />
+                    <DetailCard label={t.field_phone} value={detail.phone || t.common_not_set} />
+                    <DetailCard label={t.leads_source} value={detail.source || t.common_not_set} />
+                    <DetailCard label={t.providers_country} value={detail.country || t.common_not_set} />
                   </div>
                 </section>
 
                 <section className={cardClass("p-5")}>
                   <h3 className="text-sm font-semibold text-slate-950">Needs and context</h3>
                   <div className="mt-4 grid gap-4 md:grid-cols-2">
-                    <DetailCard label="Languages" value={detail.languages?.join(", ") || "Not set"} />
-                    <DetailCard label="Medical needs" value={detail.needs_medical || "Not set"} />
-                    <DetailCard label="Non-medical needs" value={detail.needs_non_medical || "Not set"} />
-                    <DetailCard label="Converted patient" value={detail.converted_patient_id || "Not converted"} />
+                    <DetailCard label={t.patients_languages} value={detail.languages?.join(", ") || t.common_not_set} />
+                    <DetailCard label={t.leads_needs} value={detail.needs_medical || t.common_not_set} />
+                    <DetailCard label={t.leads_needs} value={detail.needs_non_medical || t.common_not_set} />
+                    <DetailCard label={t.leads_convert} value={detail.converted_patient_id || t.common_not_set} />
                   </div>
                   {detail.notes ? (
                     <div className="mt-4 rounded-2xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700">

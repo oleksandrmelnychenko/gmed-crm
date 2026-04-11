@@ -14,7 +14,7 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
   const token = getAccessToken();
   const headers = new Headers(init.headers);
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  if (!headers.has("Content-Type") && init.body) {
+  if (!headers.has("Content-Type") && init.body && !(init.body instanceof FormData)) {
     headers.set("Content-Type", "application/json");
   }
   const res = await fetch(`${API_BASE}${path}`, { ...init, headers });

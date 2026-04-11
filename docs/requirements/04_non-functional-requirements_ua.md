@@ -1,6 +1,6 @@
 # Нефункціональні вимоги
 
-> Канонічний перелік нефункціональних вимог, узгоджений на основі process map, anamnese flow, user stories, RBAC, KPI та архітектурних матеріалів.
+> Канонічний перелік нефункціональних вимог, узгоджений на основі тих самих джерел, що й функціональний scope (`docs/00_source-of-truth_ua.md`: PDF process map, PDF anamnese, Excel stories/RBAC/KPI) та архітектурних матеріалів. Функціональні user stories див. `docs/requirements/03_product-backlog_ua.md` (синхронізація з Excel: `python scripts/generate_product_backlog_from_excel.py`).
 
 ## 1. Призначення документа
 

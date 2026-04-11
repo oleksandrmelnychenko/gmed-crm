@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO audit_log (user_id, action, entity_type, entity_id) VALUES ($1, 'activate_patient', 'patient', $2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "82c78ff3e09fe1cf2b3f9d230cff2d1b686fcf27bfdebac541b1471a47b250c2"
+}

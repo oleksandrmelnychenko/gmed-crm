@@ -1,6 +1,6 @@
 # Target Architecture (UA)
 
-> Архітектура побудована на основі `docs/requirements/01_process-mapping_ua.md`, `docs/requirements/02_anamnese-flow_ua.md`, `docs/requirements/03_product-backlog_ua.md` та матеріалів у `docs/backlog`.
+> Продуктове **ядро джерел:** `docs/00_source-of-truth_ua.md` (оригінальні PDF + Excel). Функціональний scope у `docs/requirements/03_product-backlog_ua.md` **вирівняний рядок-у-рядок** з аркушем `User Stories` (генерація: `python scripts/generate_product_backlog_from_excel.py`). Інші вимоги: `docs/requirements/01_process-mapping_ua.md`, `02_anamnese-flow_ua.md`, `docs/backlog/`.
 >
 > Це канонічний архітектурний документ у межах `docs/architecture/`.
 

@@ -6,6 +6,9 @@ import {
   Users,
   Building2,
   FileText,
+  Wallet,
+  Files,
+  Inbox,
   Activity,
   Calendar,
   Shield,
@@ -34,11 +37,23 @@ const mainNav: NavItem[] = [
   { to: "/chat", labelKey: "nav_chat", icon: MessageSquare },
 ];
 
+const patientPortalNav: NavItem[] = [
+  { to: "/", labelKey: "nav_dashboard", icon: Home },
+  { to: "/appointments", labelKey: "nav_my_appointments", icon: Calendar },
+  { to: "/documents", labelKey: "nav_my_documents", icon: Files },
+  { to: "/invoices", labelKey: "nav_my_invoices", icon: Wallet },
+  { to: "/privacy", labelKey: "nav_my_privacy", icon: Shield },
+];
+
 const crmNav: NavItem[] = [
+  { to: "/intakes", labelKey: "nav_intakes", icon: Inbox },
   { to: "/leads", labelKey: "leads_title", icon: UserPlus },
   { to: "/patients", labelKey: "patients_title", icon: Users },
   { to: "/providers", labelKey: "nav_providers", icon: Building2 },
   { to: "/orders", labelKey: "orders_title", icon: FileText },
+  { to: "/contracts", labelKey: "Contracts", icon: Wallet },
+  { to: "/invoices", labelKey: "Invoices", icon: Wallet },
+  { to: "/documents", labelKey: "Documents", icon: Files },
 ];
 
 const medicineNav: NavItem[] = [
@@ -67,6 +82,7 @@ export function NavPanel() {
   const tr = t as unknown as Record<string, string>;
   const { collapsed, toggle } = useNavState();
   const isAdmin = user ? ADMIN_ROLES.has(user.role) : false;
+  const isPatientPortal = user?.role === "patient";
 
   return (
     <nav
@@ -92,15 +108,21 @@ export function NavPanel() {
       </div>
 
       {/* Nav groups */}
-      <NavGroup items={mainNav} tr={tr} collapsed={collapsed} />
-      <Divider collapsed={collapsed} />
-      <NavGroup items={crmNav} tr={tr} collapsed={collapsed} />
-      <Divider collapsed={collapsed} />
-      <NavGroup items={medicineNav} tr={tr} collapsed={collapsed} />
-      {isAdmin && (
+      {isPatientPortal ? (
+        <NavGroup items={patientPortalNav} tr={tr} collapsed={collapsed} />
+      ) : (
         <>
+          <NavGroup items={mainNav} tr={tr} collapsed={collapsed} />
           <Divider collapsed={collapsed} />
-          <NavGroup items={adminNav} tr={tr} collapsed={collapsed} />
+          <NavGroup items={crmNav} tr={tr} collapsed={collapsed} />
+          <Divider collapsed={collapsed} />
+          <NavGroup items={medicineNav} tr={tr} collapsed={collapsed} />
+          {isAdmin && (
+            <>
+              <Divider collapsed={collapsed} />
+              <NavGroup items={adminNav} tr={tr} collapsed={collapsed} />
+            </>
+          )}
         </>
       )}
 

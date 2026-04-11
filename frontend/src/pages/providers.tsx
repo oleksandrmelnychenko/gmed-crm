@@ -11,6 +11,8 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Building2,
   CalendarClock,
+  ChevronLeft,
+  ChevronRight,
   LoaderCircle,
   Mail,
   MapPin,
@@ -574,6 +576,8 @@ function ProvidersPage() {
   const [listBusy, setListBusy] = useState(false);
   const [listError, setListError] = useState("");
   const [listVersion, setListVersion] = useState(0);
+  const [page, setPage] = useState(0);
+  const PAGE_SIZE = 20;
 
   const [createOpen, setCreateOpen] = useState(false);
   const [createBusy, setCreateBusy] = useState(false);
@@ -625,6 +629,13 @@ function ProvidersPage() {
       { total: 0, active: 0, doctors: 0, patients: 0, appointments: 0 }
     );
   }, [providers]);
+
+  const totalPages = Math.max(1, Math.ceil(providers.length / PAGE_SIZE));
+  const paginatedProviders = useMemo(
+    () => providers.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE),
+    [providers, page]
+  );
+  useEffect(() => { setPage(0); }, [providers.length]);
 
   const selectedSummary = useMemo(
     () => providers.find((provider) => provider.id === selectedId) ?? null,
@@ -727,8 +738,7 @@ function ProvidersPage() {
   }
 
   function openProvider(id: string) {
-    setSelectedId(id);
-    setDetailOpen(true);
+    navigate(`/providers/${id}`);
     syncQuery({ provider: id });
   }
 
@@ -757,12 +767,8 @@ function ProvidersPage() {
         method: "POST",
         body: JSON.stringify(payload),
       });
-      refreshList();
-      setSelectedId(created.id);
-      setDetailOpen(true);
-      refreshDetail();
       setCreateOpen(false);
-      setCreateForm(blankProviderForm(permissions.forceNonMedical ? "non_medical" : "medical"));
+      navigate(`/providers/${created.id}`);
     } catch (error) {
       setCreateError(error instanceof Error ? error.message : t.common_failed_create);
     } finally {
@@ -1040,7 +1046,14 @@ function ProvidersPage() {
                 <Field label={t.providers_type}>
                   <ShadSelect value={permissions.forceNonMedical ? "non_medical" : filters.providerType} onValueChange={(v) => setFilters((current) => ({ ...current, providerType: v ?? "" }))} disabled={permissions.forceNonMedical}>
                     <SelectTrigger className="w-full h-10 rounded-xl bg-slate-50">
-                      <SelectValue />
+                      <SelectValue>
+                        {(() => {
+                          const v = permissions.forceNonMedical ? "non_medical" : filters.providerType;
+                          if (v === "medical") return t.providers_type_medical;
+                          if (v === "non_medical") return t.providers_type_non_medical;
+                          return t.providers_all;
+                        })()}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="">{t.providers_all}</SelectItem>
@@ -1051,13 +1064,18 @@ function ProvidersPage() {
                 </Field>
 
                 <Field label={t.common_activity}>
-                  <ShadSelect value={filters.activeOnly} onValueChange={(v) => setFilters((current) => ({ ...current, activeOnly: v ?? "true" }))}>
+                  <ShadSelect value={filters.activeOnly} onValueChange={(v) => setFilters((current) => ({ ...current, activeOnly: v ?? "" }))}>
                     <SelectTrigger className="w-full h-10 rounded-xl bg-slate-50">
-                      <SelectValue />
+                      <SelectValue>
+                        {filters.activeOnly === "true" ? t.common_active
+                          : filters.activeOnly === "false" ? t.common_inactive
+                          : t.providers_all}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
+                      <SelectItem value="">{t.providers_all}</SelectItem>
                       <SelectItem value="true">{t.common_active}</SelectItem>
-                      <SelectItem value="false">{t.providers_all}</SelectItem>
+                      <SelectItem value="false">{t.common_inactive}</SelectItem>
                     </SelectContent>
                   </ShadSelect>
                 </Field>
@@ -1136,7 +1154,11 @@ function ProvidersPage() {
               <Field label={t.providers_contract}>
                 <ShadSelect value={filters.hasContract} onValueChange={(v) => setFilters((current) => ({ ...current, hasContract: v ?? "" }))}>
                   <SelectTrigger className="w-full h-10 rounded-xl bg-slate-50">
-                    <SelectValue />
+                    <SelectValue>
+                      {filters.hasContract === "true" ? t.providers_contract_with
+                        : filters.hasContract === "false" ? t.providers_contract_without
+                        : t.providers_all}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="">{t.providers_all}</SelectItem>
@@ -1186,8 +1208,9 @@ function ProvidersPage() {
                 />
               </div>
             ) : (
-              <div className="mt-5 grid gap-4 xl:grid-cols-2">
-                {providers.map((provider) => (
+              <>
+                <div className="mt-5 grid gap-4 xl:grid-cols-2">
+                {paginatedProviders.map((provider) => (
                   <button
                     key={provider.id}
                     type="button"
@@ -1272,7 +1295,29 @@ function ProvidersPage() {
                     </div>
                   </button>
                 ))}
-              </div>
+                </div>
+
+                {totalPages > 1 && (
+                  <div className="mt-5 flex items-center justify-between">
+                  <span className="text-xs text-slate-500">
+                    {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, providers.length)} / {providers.length}
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <Button type="button" variant="outline" size="xs" className="rounded-lg" disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>
+                      <ChevronLeft className="size-3.5" />
+                    </Button>
+                    {Array.from({ length: totalPages }, (_, i) => (
+                      <Button key={i} type="button" variant={i === page ? "default" : "outline"} size="xs" className="rounded-lg min-w-[28px]" onClick={() => setPage(i)}>
+                        {i + 1}
+                      </Button>
+                    ))}
+                    <Button type="button" variant="outline" size="xs" className="rounded-lg" disabled={page >= totalPages - 1} onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}>
+                      <ChevronRight className="size-3.5" />
+                    </Button>
+                  </div>
+                  </div>
+                )}
+              </>
             )}
           </section>
         </div>

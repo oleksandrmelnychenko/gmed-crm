@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use sqlx::PgPool;
 use sqlx::Row;
 use std::sync::Arc;
@@ -104,43 +105,20 @@ pub async fn update_setting(
     value: &str,
     user_id: uuid::Uuid,
 ) -> Result<(), UpdateError> {
-    // Validate: must be a positive integer for token settings
-    let parsed: i64 = value
-        .trim()
-        .parse()
-        .map_err(|_| UpdateError::InvalidValue("Must be a positive integer".into()))?;
-
-    if parsed < 1 {
-        return Err(UpdateError::InvalidValue("Value must be at least 1".into()));
-    }
-
-    // Enforce sane bounds
-    match key {
-        "access_token_minutes" if parsed > 1440 => {
-            return Err(UpdateError::InvalidValue(
-                "Access token cannot exceed 24 hours (1440 min)".into(),
-            ));
-        }
-        "refresh_token_days" if parsed > 365 => {
-            return Err(UpdateError::InvalidValue(
-                "Refresh token cannot exceed 365 days".into(),
-            ));
-        }
-        "max_sessions_per_user" if parsed > 100 => {
-            return Err(UpdateError::InvalidValue(
-                "Max sessions cannot exceed 100".into(),
-            ));
-        }
-        _ => {}
-    }
-
-    let json_value = serde_json::Value::from(parsed);
+    let json_value = match key {
+        "agency_name" => validate_string_setting(value, 160, false, "Agency name")?,
+        "agency_care_of" => validate_string_setting(value, 160, true, "Agency care-of")?,
+        "agency_address" => validate_string_setting(value, 500, true, "Agency address")?,
+        "agency_phone" => validate_string_setting(value, 64, true, "Agency phone")?,
+        "agency_email" => validate_email_setting(value)?,
+        _ => validate_positive_integer_setting(key, value)?,
+    };
 
     let result = sqlx::query(
         "UPDATE system_settings SET value = $2, updated_by = $3, updated_at = now() WHERE key = $1",
     )
     .bind(key)
-    .bind(json_value)
+    .bind(json_value.clone())
     .bind(user_id)
     .execute(pool)
     .await
@@ -155,7 +133,7 @@ pub async fn update_setting(
         "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context)
          VALUES ($1, 'update_setting', 'system_settings', NULL, $2)",
         user_id,
-        serde_json::json!({ "key": key, "value": parsed })
+        serde_json::json!({ "key": key, "value": json_value })
     )
     .execute(pool)
     .await;
@@ -176,4 +154,78 @@ pub enum UpdateError {
     InvalidValue(String),
     NotFound,
     Db(String),
+}
+
+fn validate_positive_integer_setting(key: &str, value: &str) -> Result<Value, UpdateError> {
+    let parsed: i64 = value
+        .trim()
+        .parse()
+        .map_err(|_| UpdateError::InvalidValue("Must be a positive integer".into()))?;
+
+    if parsed < 1 {
+        return Err(UpdateError::InvalidValue("Value must be at least 1".into()));
+    }
+
+    match key {
+        "access_token_minutes" if parsed > 1440 => {
+            return Err(UpdateError::InvalidValue(
+                "Access token cannot exceed 24 hours (1440 min)".into(),
+            ));
+        }
+        "refresh_token_days" if parsed > 365 => {
+            return Err(UpdateError::InvalidValue(
+                "Refresh token cannot exceed 365 days".into(),
+            ));
+        }
+        "max_sessions_per_user" if parsed > 100 => {
+            return Err(UpdateError::InvalidValue(
+                "Max sessions cannot exceed 100".into(),
+            ));
+        }
+        "session_idle_days" if parsed > 365 => {
+            return Err(UpdateError::InvalidValue(
+                "Session idle timeout cannot exceed 365 days".into(),
+            ));
+        }
+        _ => {}
+    }
+
+    Ok(Value::from(parsed))
+}
+
+fn validate_string_setting(
+    value: &str,
+    max_len: usize,
+    allow_empty: bool,
+    field_name: &str,
+) -> Result<Value, UpdateError> {
+    let trimmed = value.trim();
+
+    if trimmed.is_empty() && !allow_empty {
+        return Err(UpdateError::InvalidValue(format!(
+            "{field_name} cannot be empty"
+        )));
+    }
+
+    if trimmed.len() > max_len {
+        return Err(UpdateError::InvalidValue(format!(
+            "{field_name} cannot exceed {max_len} characters"
+        )));
+    }
+
+    Ok(Value::String(trimmed.to_string()))
+}
+
+fn validate_email_setting(value: &str) -> Result<Value, UpdateError> {
+    let trimmed = value.trim();
+
+    if trimmed.is_empty() {
+        return Ok(Value::String(String::new()));
+    }
+
+    if trimmed.len() > 320 || !trimmed.contains('@') {
+        return Err(UpdateError::InvalidValue("Agency email is invalid".into()));
+    }
+
+    Ok(Value::String(trimmed.to_string()))
 }
