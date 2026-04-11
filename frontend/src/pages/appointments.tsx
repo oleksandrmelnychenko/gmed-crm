@@ -2321,7 +2321,7 @@ function StaffAppointmentsPage() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [tr.common_failed_load]);
 
   useEffect(() => {
     let active = true;
@@ -2360,7 +2360,7 @@ function StaffAppointmentsPage() {
     return () => {
       active = false;
     };
-  }, [deferredSearch, filters, appointmentsVersion]);
+  }, [deferredSearch, filters, appointmentsVersion, tr.common_failed_load]);
 
   useEffect(() => {
     if (!createForm.providerId) {
@@ -2819,6 +2819,8 @@ function StaffAppointmentsPage() {
     permissions.canViewCommunications,
     staff,
     providers,
+    tr.appointments_new,
+    tr.phase_followup,
   ]);
 
   const scopedAppointments = appointments.filter((item) =>

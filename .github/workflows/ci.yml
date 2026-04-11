@@ -30,3 +30,42 @@ jobs:
 
       - name: Test
         run: cargo test --workspace
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm --prefix frontend ci
+
+      - name: Lint
+        run: npm --prefix frontend run lint
+
+      - name: Test
+        run: npm --prefix frontend run test
+
+      - name: Build
+        run: npm --prefix frontend run build
+
+  hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Repo hygiene
+        run: python scripts/check_repo_hygiene.py
