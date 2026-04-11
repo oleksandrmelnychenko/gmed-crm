@@ -808,19 +808,6 @@ export function LeadsPage() {
               </LeadField>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2">
-              <LeadField label={t.patients_languages}>
-                <Input value={createForm.languages} onChange={(event) => setCreateForm((current) => ({ ...current, languages: event.target.value }))} placeholder="German, Ukrainian, English" />
-              </LeadField>
-              <LeadField label={t.leads_needs}>
-                <Input value={createForm.needsMedical} onChange={(event) => setCreateForm((current) => ({ ...current, needsMedical: event.target.value }))} placeholder="Diagnostics, surgery, rehab" />
-              </LeadField>
-            </div>
-
-            <LeadField label={t.leads_needs}>
-              <Input value={createForm.needsNonMedical} onChange={(event) => setCreateForm((current) => ({ ...current, needsNonMedical: event.target.value }))} placeholder="Hotel, transfer, visa, concierge" />
-            </LeadField>
-
             <LeadField label={t.patients_notes}>
               <textarea value={createForm.notes} onChange={(event) => setCreateForm((current) => ({ ...current, notes: event.target.value }))} className="min-h-[104px] w-full rounded-xl border border-input bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100" rows={4} />
             </LeadField>
@@ -899,16 +886,208 @@ export function LeadsPage() {
                   </div>
                 </section>
 
+                {detail.intake_source === "visitor_facade" ? (
+                  <section className={cardClass("p-5")}>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant="outline" className="rounded-full border-sky-200 bg-sky-50 text-sky-700">
+                        From website wizard
+                      </Badge>
+                      {detail.flow ? (
+                        <Badge variant="outline" className="rounded-full">
+                          Flow: {detail.flow}
+                        </Badge>
+                      ) : null}
+                      {detail.locale ? (
+                        <Badge variant="outline" className="rounded-full">
+                          Locale: {detail.locale}
+                        </Badge>
+                      ) : null}
+                      {detail.submitted_at ? (
+                        <span className="text-xs text-slate-500">
+                          Submitted {formatDate(detail.submitted_at)}
+                        </span>
+                      ) : null}
+                    </div>
+                  </section>
+                ) : null}
+
                 <section className={cardClass("p-5")}>
-                  <h3 className="text-sm font-semibold text-slate-950">Needs and context</h3>
+                  <h3 className="text-sm font-semibold text-slate-950">Identity</h3>
                   <div className="mt-4 grid gap-4 md:grid-cols-2">
-                    <DetailCard label={t.patients_languages} value={detail.languages?.join(", ") || t.common_not_set} />
-                    <DetailCard label={t.leads_needs} value={detail.needs_medical || t.common_not_set} />
-                    <DetailCard label={t.leads_needs} value={detail.needs_non_medical || t.common_not_set} />
-                    <DetailCard label={t.leads_convert} value={detail.converted_patient_id || t.common_not_set} />
+                    <DetailCard
+                      label="Full name"
+                      value={dashOrValue(
+                        [
+                          detail.first_name,
+                          detail.middle_name,
+                          detail.last_name,
+                          detail.suffix,
+                        ]
+                          .filter(Boolean)
+                          .join(" ")
+                      )}
+                    />
+                    <DetailCard label="Date of birth" value={dashOrValue(detail.date_of_birth)} />
+                    <DetailCard label="Legal sex" value={dashOrValue(detail.legal_sex)} />
+                    <DetailCard label="Primary language" value={dashOrValue(detail.primary_language)} />
+                    <DetailCard label="Needs interpreter" value={yesNo(detail.needs_interpreter)} />
                   </div>
+                </section>
+
+                <section className={cardClass("p-5")}>
+                  <h3 className="text-sm font-semibold text-slate-950">Address</h3>
+                  <div className="mt-4 grid gap-4 md:grid-cols-2">
+                    <DetailCard label="Country" value={dashOrValue(detail.country)} />
+                    <DetailCard label="City" value={dashOrValue(detail.city)} />
+                    <DetailCard label="State / region" value={dashOrValue(detail.state)} />
+                    <DetailCard label="Zip code" value={dashOrValue(detail.zip_code)} />
+                    <DetailCard label="Street" value={dashOrValue(detail.street_address)} />
+                  </div>
+                </section>
+
+                {(detail.location ||
+                  detail.location_detailed ||
+                  detail.wants_membership !== null ||
+                  detail.can_travel !== null ||
+                  detail.has_medical_records ||
+                  detail.has_travel_documents !== null) ? (
+                  <section className={cardClass("p-5")}>
+                    <h3 className="text-sm font-semibold text-slate-950">Eligibility & path</h3>
+                    <div className="mt-4 grid gap-4 md:grid-cols-2">
+                      <DetailCard label="Location" value={dashOrValue(detail.location)} />
+                      <DetailCard label="Location detailed" value={dashOrValue(detail.location_detailed)} />
+                      <DetailCard label="Wants membership" value={yesNo(detail.wants_membership)} />
+                      <DetailCard label="Selected program" value={dashOrValue(detail.selected_program)} />
+                      <DetailCard label="Can travel" value={yesNo(detail.can_travel)} />
+                      <DetailCard label="Has medical records" value={dashOrValue(detail.has_medical_records)} />
+                      <DetailCard label="Records in accepted language" value={yesNo(detail.records_in_accepted_language)} />
+                      <DetailCard label="Has travel documents" value={yesNo(detail.has_travel_documents)} />
+                    </div>
+                  </section>
+                ) : null}
+
+                {(detail.currently_in_treatment !== null ||
+                  detail.has_health_risk_for_travel !== null ||
+                  detail.primary_concern_text ||
+                  detail.additional_concerns) ? (
+                  <section className={cardClass("p-5")}>
+                    <h3 className="text-sm font-semibold text-slate-950">Health & concern</h3>
+                    <div className="mt-4 grid gap-4 md:grid-cols-2">
+                      <DetailCard label="Currently in treatment" value={yesNo(detail.currently_in_treatment)} />
+                      <DetailCard label="Health risk for travel" value={yesNo(detail.has_health_risk_for_travel)} />
+                    </div>
+                    {detail.primary_concern_text ? (
+                      <div className="mt-4 rounded-2xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700 whitespace-pre-wrap">
+                        {detail.primary_concern_text}
+                      </div>
+                    ) : null}
+                    {detail.additional_concerns ? (
+                      <div className="mt-3 rounded-2xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700 whitespace-pre-wrap">
+                        {detail.additional_concerns}
+                      </div>
+                    ) : null}
+                  </section>
+                ) : null}
+
+                {(detail.services?.length ||
+                  detail.has_insurance !== null ||
+                  detail.insurance_covers_germany) ? (
+                  <section className={cardClass("p-5")}>
+                    <h3 className="text-sm font-semibold text-slate-950">Services & insurance</h3>
+                    <div className="mt-4 grid gap-4 md:grid-cols-2">
+                      <DetailCard
+                        label="Services"
+                        value={detail.services && detail.services.length > 0 ? detail.services.join(", ") : t.common_not_set}
+                      />
+                      <DetailCard label="Has insurance" value={yesNo(detail.has_insurance)} />
+                      <DetailCard label="Insurance covers Germany" value={dashOrValue(detail.insurance_covers_germany)} />
+                    </div>
+                  </section>
+                ) : null}
+
+                {(detail.preferred_location ||
+                  detail.visit_timing ||
+                  detail.message) ? (
+                  <section className={cardClass("p-5")}>
+                    <h3 className="text-sm font-semibold text-slate-950">Wrap up</h3>
+                    <div className="mt-4 grid gap-4 md:grid-cols-2">
+                      <DetailCard label="Preferred location" value={dashOrValue(detail.preferred_location)} />
+                      <DetailCard label="Visit timing" value={dashOrValue(detail.visit_timing)} />
+                    </div>
+                    {detail.message ? (
+                      <div className="mt-4 rounded-2xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700 whitespace-pre-wrap">
+                        {detail.message}
+                      </div>
+                    ) : null}
+                  </section>
+                ) : null}
+
+                {detail.intake_source === "visitor_facade" ? (
+                  <section className={cardClass("p-5")}>
+                    <h3 className="text-sm font-semibold text-slate-950">Consents</h3>
+                    <div className="mt-4 grid gap-4 md:grid-cols-2">
+                      <DetailCard label="Automated contact" value={yesNo(detail.consent_automated_contact)} />
+                      <DetailCard label="Healthcare" value={yesNo(detail.consent_healthcare)} />
+                      <DetailCard label="Opt out" value={yesNo(detail.consent_opt_out)} />
+                      <DetailCard label="Privacy practices" value={yesNo(detail.consent_privacy_practices)} />
+                      <DetailCard label="Email consent" value={yesNo(detail.email_consent)} />
+                      <DetailCard label="WhatsApp consent" value={yesNo(detail.whatsapp_consent)} />
+                    </div>
+                  </section>
+                ) : null}
+
+                <section className={cardClass("p-5")}>
+                  <h3 className="text-sm font-semibold text-slate-950">
+                    Attachments ({detail.attachments?.length ?? 0})
+                  </h3>
+                  {detail.attachments && detail.attachments.length > 0 ? (
+                    <ul className="mt-4 space-y-2">
+                      {detail.attachments.map((file) => (
+                        <li
+                          key={file.id}
+                          className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
+                        >
+                          <div>
+                            <div className="font-medium text-slate-800">{file.file_name}</div>
+                            <div className="text-xs text-slate-500">
+                              {dashOrValue(file.content_type)} · {formatSize(file.size_bytes)}
+                            </div>
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={async () => {
+                              if (!detail) return;
+                              try {
+                                const blob = await downloadLeadAttachment(detail.id, file.id);
+                                const url = URL.createObjectURL(blob);
+                                const a = document.createElement("a");
+                                a.href = url;
+                                a.download = file.file_name;
+                                document.body.appendChild(a);
+                                a.click();
+                                a.remove();
+                                URL.revokeObjectURL(url);
+                              } catch (downloadErr) {
+                                setDetailError(
+                                  downloadErr instanceof Error
+                                    ? downloadErr.message
+                                    : "Failed to download attachment"
+                                );
+                              }
+                            }}
+                          >
+                            Download
+                          </Button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="mt-3 text-sm text-slate-500">No files uploaded.</p>
+                  )}
                   {detail.notes ? (
                     <div className="mt-4 rounded-2xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700">
+                      <div className="mb-1 text-xs uppercase tracking-wide text-slate-400">Internal notes</div>
                       {detail.notes}
                     </div>
                   ) : null}
