@@ -210,6 +210,12 @@ struct GeneratedPatientStickerContext {
     generated_at: chrono::DateTime<chrono::Utc>,
 }
 
+struct ReplacementDocumentVersion {
+    document_id: Uuid,
+    version_root_document_id: Uuid,
+    version_number: i32,
+}
+
 struct NewStoredDocument<'a> {
     patient_id: Option<Uuid>,
     order_id: Option<Uuid>,
@@ -225,6 +231,9 @@ struct NewStoredDocument<'a> {
     klinik: Option<&'a str>,
     ursprung: Option<&'a str>,
     notes: Option<&'a str>,
+    version_root_document_id: Option<Uuid>,
+    replaces_document_id: Option<Uuid>,
+    version_number: i32,
     uploaded_by: Uuid,
 }
 
@@ -453,15 +462,25 @@ pub fn router() -> Router<AppState> {
             get(download_my_uploaded_document),
         )
         .route("/documents", get(list_documents))
+        .route("/documents/intake-queue", get(list_document_intake_queue))
         .route("/documents/upload", post(upload_document))
         .route("/documents/templates", get(list_document_templates))
         .route("/documents/generate", post(generate_document))
         .route("/documents/meta/staff", get(list_document_staff))
         .route("/documents/meta/categories", get(list_document_categories))
         .route("/documents/shares/bulk", post(create_bulk_document_shares))
+        .route(
+            "/documents/translation-requests/{request_id}/update",
+            post(update_document_translation_request),
+        )
         .route("/documents/{id}", get(get_document))
+        .route("/documents/{id}/versions", get(list_document_versions))
         .route("/documents/{id}/update", post(update_document))
         .route("/documents/{id}/download", get(download_document))
+        .route(
+            "/documents/{id}/translation-requests",
+            get(list_document_translation_requests).post(create_document_translation_request),
+        )
         .route(
             "/documents/{id}/portal-release",
             post(release_document_to_patient_portal),
@@ -535,6 +554,18 @@ struct PortalReleaseRequest {
     requires_confirmation: Option<bool>,
 }
 
+#[derive(Deserialize)]
+struct CreateDocumentTranslationRequest {
+    requested_language: String,
+    note: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct UpdateDocumentTranslationRequest {
+    status: String,
+    note: Option<String>,
+}
+
 struct ShareableDocumentContext {
     document_id: Uuid,
     patient_id: Option<Uuid>,
@@ -550,6 +581,7 @@ struct GenerateDocumentRequest {
     patient_id: Option<Uuid>,
     order_id: Option<Uuid>,
     appointment_id: Option<Uuid>,
+    replace_document_id: Option<Uuid>,
     auto_name: Option<String>,
     status: Option<String>,
     visibility: Option<String>,
@@ -601,13 +633,288 @@ fn escape_html(value: &str) -> String {
     escaped
 }
 
-fn normalize_document_language(value: Option<&str>) -> &'static str {
-    match value.unwrap_or("de").trim().to_lowercase().as_str() {
-        "de" | "de-de" | "de_at" | "de-at" | "de_ch" | "de-ch" => "de",
-        "uk" | "uk-ua" | "ua" | "ukrainian" => "uk",
-        "en" | "en-gb" | "en-us" | "english" => "en",
-        _ => "de",
+fn normalized_document_hint_source(parts: &[Option<&str>]) -> String {
+    parts
+        .iter()
+        .flatten()
+        .map(|value| value.trim().to_lowercase())
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn contains_any_keyword(haystack: &str, keywords: &[&str]) -> bool {
+    keywords.iter().any(|keyword| haystack.contains(keyword))
+}
+
+fn build_document_classification_suggestion(
+    art: &'static str,
+    category: &'static str,
+    is_medical: bool,
+    confidence: &'static str,
+    rationale: &'static str,
+) -> serde_json::Value {
+    json!({
+        "art": art,
+        "category": category,
+        "is_medical": is_medical,
+        "confidence": confidence,
+        "rationale": rationale,
+    })
+}
+
+fn suggest_document_classification(
+    original_filename: Option<&str>,
+    auto_name: Option<&str>,
+    mime_type: Option<&str>,
+    ursprung: Option<&str>,
+    notes: Option<&str>,
+) -> Option<serde_json::Value> {
+    let hint_source = normalized_document_hint_source(&[
+        original_filename,
+        auto_name,
+        mime_type,
+        ursprung,
+        notes,
+    ]);
+
+    if hint_source.is_empty() {
+        return None;
     }
+
+    if contains_any_keyword(
+        &hint_source,
+        &["passport", "reisepass", "ausweis", "identity", "idcard", "id_card"],
+    ) {
+        return Some(build_document_classification_suggestion(
+            "passport_scan",
+            "identity",
+            false,
+            "high",
+            "Filename or notes indicate an identity or passport document.",
+        ));
+    }
+
+    if contains_any_keyword(
+        &hint_source,
+        &[
+            "consent",
+            "einverstaendnis",
+            "einverständnis",
+            "gdpr",
+            "privacy release",
+        ],
+    ) {
+        return Some(build_document_classification_suggestion(
+            "consent_form",
+            "consent",
+            false,
+            "high",
+            "Filename or notes indicate a consent or release form.",
+        ));
+    }
+
+    if contains_any_keyword(
+        &hint_source,
+        &[
+            "payment proof",
+            "payment_proof",
+            "zahlungsnachweis",
+            "receipt",
+            "quittung",
+        ],
+    ) {
+        return Some(build_document_classification_suggestion(
+            "payment_proof",
+            "finance",
+            false,
+            "high",
+            "Filename or notes indicate a payment receipt or proof.",
+        ));
+    }
+
+    if contains_any_keyword(
+        &hint_source,
+        &["invoice", "rechnung", "bill", "kostenvoranschlag", "quote"],
+    ) {
+        return Some(build_document_classification_suggestion(
+            "invoice_document",
+            "finance",
+            false,
+            "high",
+            "Filename or notes indicate billing or quote paperwork.",
+        ));
+    }
+
+    if contains_any_keyword(
+        &hint_source,
+        &[
+            "insurance",
+            "versicherung",
+            "aok",
+            "tk",
+            "allianz",
+            "policy",
+            "coverage",
+        ],
+    ) {
+        return Some(build_document_classification_suggestion(
+            "insurance_document",
+            "insurance",
+            false,
+            "medium",
+            "Filename or notes indicate insurance paperwork.",
+        ));
+    }
+
+    if contains_any_keyword(
+        &hint_source,
+        &[
+            "arztbrief",
+            "doctor letter",
+            "discharge",
+            "entlass",
+            "epicrisis",
+        ],
+    ) {
+        return Some(build_document_classification_suggestion(
+            "arztbrief",
+            "medical",
+            true,
+            "high",
+            "Filename or notes indicate a doctor letter or discharge summary.",
+        ));
+    }
+
+    if contains_any_keyword(
+        &hint_source,
+        &[
+            "mri",
+            "ct",
+            "radiology",
+            "xray",
+            "x-ray",
+            "ultrasound",
+            "sono",
+        ],
+    ) {
+        return Some(build_document_classification_suggestion(
+            "imaging_report",
+            "medical",
+            true,
+            "medium",
+            "Filename or notes indicate imaging or radiology findings.",
+        ));
+    }
+
+    if contains_any_keyword(
+        &hint_source,
+        &[
+            "befund",
+            "report",
+            "lab",
+            "labor",
+            "pathology",
+            "histology",
+            "findings",
+        ],
+    ) {
+        return Some(build_document_classification_suggestion(
+            "medical_report",
+            "medical",
+            true,
+            "medium",
+            "Filename or notes indicate a medical report or findings sheet.",
+        ));
+    }
+
+    if contains_any_keyword(
+        &hint_source,
+        &["medication", "medikament", "prescription", "rx", "rezept"],
+    ) {
+        return Some(build_document_classification_suggestion(
+            "medication_list",
+            "medical",
+            true,
+            "medium",
+            "Filename or notes indicate medication or prescription content.",
+        ));
+    }
+
+    if contains_any_keyword(
+        &hint_source,
+        &["contract", "vertrag", "agreement", "consignment"],
+    ) {
+        return Some(build_document_classification_suggestion(
+            "contract_document",
+            "administrative",
+            false,
+            "medium",
+            "Filename or notes indicate contractual paperwork.",
+        ));
+    }
+
+    None
+}
+
+fn document_needs_categorization(
+    art: Option<&str>,
+    category: Option<&str>,
+    ursprung: Option<&str>,
+) -> bool {
+    let art = art.unwrap_or_default().trim().to_lowercase();
+    let category = category.unwrap_or_default().trim().to_lowercase();
+    let ursprung = ursprung.unwrap_or_default().trim().to_lowercase();
+
+    category.is_empty()
+        || category == "portal_upload"
+        || matches!(
+            art.as_str(),
+            ""
+                | "document"
+                | "uploaded_document"
+                | "patient_general_upload"
+                | "patient_medical_upload"
+                | "patient_admin_upload"
+        )
+        || ursprung == "patient_portal"
+}
+
+fn normalize_document_language(value: Option<&str>) -> Option<&'static str> {
+    match value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_lowercase)
+        .as_deref()
+    {
+        Some("de") | Some("de-de") | Some("de_at") | Some("de-at") | Some("de_ch")
+        | Some("de-ch") => Some("de"),
+        Some("uk") | Some("uk-ua") | Some("ua") | Some("ukrainian") => Some("uk"),
+        Some("en") | Some("en-gb") | Some("en-us") | Some("english") => Some("en"),
+        _ => None,
+    }
+}
+
+fn resolve_document_language(
+    requested: Option<&str>,
+    patient_languages: &[String],
+    supported_languages: &[&'static str],
+) -> &'static str {
+    if let Some(language) = normalize_document_language(requested)
+        && supported_languages.contains(&language)
+    {
+        return language;
+    }
+
+    for patient_language in patient_languages {
+        if let Some(language) = normalize_document_language(Some(patient_language.as_str()))
+            && supported_languages.contains(&language)
+        {
+            return language;
+        }
+    }
+
+    supported_languages.first().copied().unwrap_or("de")
 }
 
 fn document_template_by_id(template_id: &str) -> Option<DocumentTemplateDefinition> {
@@ -4049,14 +4356,37 @@ fn document_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
     let visibility = row
         .try_get::<String, _>("visibility")
         .unwrap_or_else(|_| "internal".to_string());
+    let art = row.try_get::<Option<String>, _>("art").unwrap_or_default();
+    let category = row
+        .try_get::<Option<String>, _>("category")
+        .unwrap_or_default();
+    let ursprung = row
+        .try_get::<Option<String>, _>("ursprung")
+        .unwrap_or_default();
     let share_status = parse_share_status(&visibility).unwrap_or(ShareStatus::InternalOnly);
     let sensitivity = infer_document_sensitivity(
         row.try_get::<bool, _>("is_medical").unwrap_or(false),
-        row.try_get::<Option<String>, _>("art").unwrap_or_default(),
-        row.try_get::<Option<String>, _>("category")
-            .unwrap_or_default(),
+        art.clone(),
+        category.clone(),
         share_status,
     );
+    let classification_suggestion = suggest_document_classification(
+        row.try_get::<Option<String>, _>("original_filename")
+            .unwrap_or_default()
+            .as_deref(),
+        row.try_get::<Option<String>, _>("auto_name")
+            .unwrap_or_default()
+            .as_deref(),
+        row.try_get::<Option<String>, _>("mime_type")
+            .unwrap_or_default()
+            .as_deref(),
+        ursprung.as_deref(),
+        row.try_get::<Option<String>, _>("notes")
+            .unwrap_or_default()
+            .as_deref(),
+    );
+    let needs_categorization =
+        document_needs_categorization(art.as_deref(), category.as_deref(), ursprung.as_deref());
 
     json!({
         "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
@@ -4069,23 +4399,31 @@ fn document_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "appointment_title": row.try_get::<Option<String>, _>("appointment_title").unwrap_or_default(),
         "auto_name": row.try_get::<String, _>("auto_name").unwrap_or_default(),
         "original_filename": row.try_get::<Option<String>, _>("original_filename").unwrap_or_default(),
-        "art": row.try_get::<String, _>("art").unwrap_or_default(),
-        "category": row.try_get::<Option<String>, _>("category").unwrap_or_default(),
+        "art": art,
+        "category": category,
         "status": row.try_get::<String, _>("status").unwrap_or_default(),
         "visibility": visibility,
         "is_medical": row.try_get::<bool, _>("is_medical").unwrap_or(false),
         "mime_type": row.try_get::<Option<String>, _>("mime_type").unwrap_or_default(),
         "file_size": row.try_get::<Option<i64>, _>("file_size").unwrap_or_default(),
         "klinik": row.try_get::<Option<String>, _>("klinik").unwrap_or_default(),
-        "ursprung": row.try_get::<Option<String>, _>("ursprung").unwrap_or_default(),
+        "ursprung": ursprung,
         "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
         "uploaded_by": row.try_get::<Uuid, _>("uploaded_by").unwrap_or_else(|_| Uuid::nil()),
         "uploaded_by_name": row.try_get::<Option<String>, _>("uploaded_by_name").unwrap_or_default(),
+        "version_root_document_id": row.try_get::<Uuid, _>("version_root_document_id").unwrap_or_else(|_| Uuid::nil()),
+        "replaces_document_id": row.try_get::<Option<Uuid>, _>("replaces_document_id").unwrap_or_default(),
+        "superseded_by_document_id": row.try_get::<Option<Uuid>, _>("superseded_by_document_id").unwrap_or_default(),
+        "version_number": row.try_get::<i32, _>("version_number").unwrap_or(1),
+        "version_count": row.try_get::<i64, _>("version_count").unwrap_or(1),
+        "is_latest_version": row.try_get::<bool, _>("is_latest_version").unwrap_or(true),
         "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").unwrap_or_else(|_| chrono::Utc::now()),
         "updated_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").unwrap_or_else(|_| chrono::Utc::now()),
         "share_count": row.try_get::<i64, _>("share_count").unwrap_or(0),
         "shared_to_current": row.try_get::<bool, _>("shared_to_current").unwrap_or(false),
         "data_sensitivity": sensitivity.display_name(),
+        "needs_categorization": needs_categorization,
+        "classification_suggestion": classification_suggestion,
     })
 }
 
@@ -4108,6 +4446,32 @@ fn document_share_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
     })
 }
 
+fn normalize_translation_request_status(value: &str) -> Option<&'static str> {
+    match value.trim().to_lowercase().as_str() {
+        "pending" => Some("pending"),
+        "in_progress" | "in-progress" => Some("in_progress"),
+        "completed" => Some("completed"),
+        "cancelled" | "canceled" => Some("cancelled"),
+        _ => None,
+    }
+}
+
+fn document_translation_request_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
+    json!({
+        "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
+        "document_id": row.try_get::<Uuid, _>("document_id").unwrap_or_else(|_| Uuid::nil()),
+        "patient_id": row.try_get::<Option<Uuid>, _>("patient_id").unwrap_or_default(),
+        "requested_language": row.try_get::<String, _>("requested_language").unwrap_or_default(),
+        "status": row.try_get::<String, _>("status").unwrap_or_default(),
+        "note": row.try_get::<Option<String>, _>("note").unwrap_or_default(),
+        "requested_by": row.try_get::<Uuid, _>("requested_by").unwrap_or_else(|_| Uuid::nil()),
+        "requested_by_name": row.try_get::<Option<String>, _>("requested_by_name").unwrap_or_default(),
+        "requested_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("requested_at").unwrap_or_else(|_| chrono::Utc::now()),
+        "completed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("completed_at").unwrap_or_default(),
+        "updated_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").unwrap_or_else(|_| chrono::Utc::now()),
+    })
+}
+
 async fn fetch_document_row(
     state: &AppState,
     document_id: Uuid,
@@ -4117,13 +4481,19 @@ async fn fetch_document_row(
         r#"SELECT d.id, d.patient_id, d.order_id, d.appointment_id,
                   d.auto_name, d.original_filename, d.art, d.category, d.status, d.visibility,
                   d.is_medical, d.mime_type, d.file_size, d.storage_key, d.klinik, d.ursprung,
-                  d.notes, d.uploaded_by, d.created_at, d.updated_at,
+                  d.notes, d.version_root_document_id, d.replaces_document_id,
+                  d.version_number, d.uploaded_by, d.created_at, d.updated_at,
                   p.patient_id AS patient_pid,
                   trim(concat_ws(' ', p.first_name, p.last_name)) AS patient_name,
                   o.order_number,
                   a.title AS appointment_title,
                   u.name AS uploaded_by_name,
                   COALESCE((SELECT count(*)::bigint FROM document_shares ds WHERE ds.document_id = d.id AND ds.revoked_at IS NULL), 0) AS share_count,
+                  COALESCE((SELECT count(*)::bigint FROM documents dv WHERE dv.version_root_document_id = d.version_root_document_id), 1) AS version_count,
+                  (SELECT dv.id FROM documents dv WHERE dv.replaces_document_id = d.id ORDER BY dv.created_at DESC LIMIT 1) AS superseded_by_document_id,
+                  NOT EXISTS(
+                    SELECT 1 FROM documents dv WHERE dv.replaces_document_id = d.id
+                  ) AS is_latest_version,
                   EXISTS(
                     SELECT 1
                     FROM document_shares ds
@@ -4145,6 +4515,102 @@ async fn fetch_document_row(
     .map_err(|e| {
         tracing::error!(error = %e, document_id = %document_id, "load document");
         err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load document")
+    })
+}
+
+async fn load_replacement_document_version(
+    state: &AppState,
+    document_id: Uuid,
+    patient_id: Uuid,
+    order_id: Option<Uuid>,
+    appointment_id: Option<Uuid>,
+    template: DocumentTemplateDefinition,
+) -> Result<ReplacementDocumentVersion, axum::response::Response> {
+    let row = match sqlx::query(
+        r#"SELECT d.id, d.patient_id, d.order_id, d.appointment_id, d.art, d.category,
+                  d.status, d.version_root_document_id, d.version_number,
+                  EXISTS(
+                    SELECT 1 FROM documents dv WHERE dv.replaces_document_id = d.id
+                  ) AS already_replaced
+           FROM documents d
+           WHERE d.id = $1"#,
+    )
+    .bind(document_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return Err(err(StatusCode::NOT_FOUND, "Replacement document not found")),
+        Err(e) => {
+            tracing::error!(error = %e, document_id = %document_id, "load replacement document");
+            return Err(err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load replacement document",
+            ));
+        }
+    };
+
+    if row
+        .try_get::<Option<Uuid>, _>("patient_id")
+        .unwrap_or_default()
+        != Some(patient_id)
+    {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Replacement document must belong to the same patient",
+        ));
+    }
+    if row
+        .try_get::<Option<Uuid>, _>("order_id")
+        .unwrap_or_default()
+        != order_id
+    {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Replacement document must keep the same order context",
+        ));
+    }
+    if row
+        .try_get::<Option<Uuid>, _>("appointment_id")
+        .unwrap_or_default()
+        != appointment_id
+    {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Replacement document must keep the same appointment context",
+        ));
+    }
+    if row.try_get::<String, _>("art").unwrap_or_default() != template.art
+        || row
+            .try_get::<Option<String>, _>("category")
+            .unwrap_or_default()
+            .as_deref()
+            != Some(template.category)
+    {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Replacement document must be the same generated template type",
+        ));
+    }
+    if row.try_get::<bool, _>("already_replaced").unwrap_or(false) {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Replacement document already has a newer version",
+        ));
+    }
+    if row.try_get::<String, _>("status").unwrap_or_default() == "archived" {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Archived documents cannot be replaced again",
+        ));
+    }
+
+    Ok(ReplacementDocumentVersion {
+        document_id,
+        version_root_document_id: row
+            .try_get::<Uuid, _>("version_root_document_id")
+            .unwrap_or(document_id),
+        version_number: row.try_get::<i32, _>("version_number").unwrap_or(1),
     })
 }
 
@@ -4363,6 +4829,7 @@ async fn persist_document_file(
     data: &[u8],
     input: &NewStoredDocument<'_>,
 ) -> Result<(Uuid, i64, String), axum::response::Response> {
+    let document_id = Uuid::new_v4();
     let original_filename = if input.original_filename.trim().is_empty() {
         "document.bin".to_string()
     } else {
@@ -4387,16 +4854,19 @@ async fn persist_document_file(
 
     let inserted = match sqlx::query(
         r#"INSERT INTO documents (
-                patient_id, order_id, appointment_id, auto_name, original_filename,
+                id, patient_id, order_id, appointment_id, auto_name, original_filename,
                 art, category, status, visibility, is_medical, mime_type, file_size,
-                storage_key, klinik, ursprung, notes, uploaded_by
+                storage_key, klinik, ursprung, notes, version_root_document_id,
+                replaces_document_id, version_number, uploaded_by
            ) VALUES (
-                $1, $2, $3, $4, $5,
-                $6, $7, $8, $9, $10, $11, $12,
-                $13, $14, $15, $16, $17
+                $1, $2, $3, $4, $5, $6,
+                $7, $8, $9, $10, $11, $12, $13,
+                $14, $15, $16, $17, $18,
+                $19, $20, $21
            )
            RETURNING id"#,
     )
+    .bind(document_id)
     .bind(input.patient_id)
     .bind(input.order_id)
     .bind(input.appointment_id)
@@ -4413,6 +4883,9 @@ async fn persist_document_file(
     .bind(input.klinik)
     .bind(input.ursprung)
     .bind(input.notes)
+    .bind(input.version_root_document_id.unwrap_or(document_id))
+    .bind(input.replaces_document_id)
+    .bind(input.version_number)
     .bind(input.uploaded_by)
     .fetch_one(&state.db)
     .await
@@ -4502,11 +4975,12 @@ async fn generate_document(
         );
     }
 
-    let language = normalize_document_language(body.language.as_deref());
-    if !template.languages.contains(&language) {
+    if body.language.as_deref().is_some()
+        && normalize_document_language(body.language.as_deref()).is_none()
+    {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
-            "Language is not supported by the selected template",
+            "Unknown document language",
         );
     }
 
@@ -4531,6 +5005,7 @@ async fn generate_document(
 
     let patient_row = match sqlx::query(
         r#"SELECT patient_id, title, first_name, last_name, birth_date, gender,
+                  languages,
                   nationality, residence_country, insurance_provider
            FROM patients
            WHERE id = $1"#,
@@ -4569,6 +5044,9 @@ async fn generate_document(
     let patient_title = patient_row
         .try_get::<Option<String>, _>("title")
         .unwrap_or_default();
+    let patient_languages = patient_row
+        .try_get::<Vec<String>, _>("languages")
+        .unwrap_or_default();
     let birth_date = patient_row
         .try_get::<Option<NaiveDate>, _>("birth_date")
         .unwrap_or_default();
@@ -4584,6 +5062,19 @@ async fn generate_document(
     let insurance_provider = patient_row
         .try_get::<Option<String>, _>("insurance_provider")
         .unwrap_or_default();
+    if let Some(requested_language) = normalize_document_language(body.language.as_deref())
+        && !template.languages.contains(&requested_language)
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Language is not supported by the selected template",
+        );
+    }
+    let language = resolve_document_language(
+        body.language.as_deref(),
+        &patient_languages,
+        template.languages,
+    );
 
     let order_number = if let Some(order_uuid) = order_id {
         match sqlx::query_scalar::<_, String>("SELECT order_number FROM orders WHERE id = $1")
@@ -4599,6 +5090,24 @@ async fn generate_document(
                     "Failed to load order context",
                 );
             }
+        }
+    } else {
+        None
+    };
+
+    let replacement = if let Some(replace_document_id) = body.replace_document_id {
+        match load_replacement_document_version(
+            &state,
+            replace_document_id,
+            patient_uuid,
+            order_id,
+            appointment_id,
+            template,
+        )
+        .await
+        {
+            Ok(value) => Some(value),
+            Err(resp) => return resp,
         }
     } else {
         None
@@ -5202,6 +5711,14 @@ async fn generate_document(
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty()),
+        version_root_document_id: replacement
+            .as_ref()
+            .map(|value| value.version_root_document_id),
+        replaces_document_id: replacement.as_ref().map(|value| value.document_id),
+        version_number: replacement
+            .as_ref()
+            .map(|value| value.version_number + 1)
+            .unwrap_or(1),
         uploaded_by: auth.user_id,
     };
 
@@ -5210,6 +5727,42 @@ async fn generate_document(
             Ok(value) => value,
             Err(resp) => return resp,
         };
+
+    if let Some(replaced) = replacement.as_ref() {
+        if let Err(e) = sqlx::query(
+            r#"UPDATE documents
+               SET status = 'archived'
+               WHERE id = $1"#,
+        )
+        .bind(replaced.document_id)
+        .execute(&state.db)
+        .await
+        {
+            tracing::error!(error = %e, replaced_document_id = %replaced.document_id, "archive replaced document");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to archive replaced document",
+            );
+        }
+
+        if let Err(e) = sqlx::query(
+            r#"UPDATE document_shares
+               SET revoked_at = now()
+               WHERE document_id = $1
+                 AND channel = 'patient_portal'
+                 AND revoked_at IS NULL"#,
+        )
+        .bind(replaced.document_id)
+        .execute(&state.db)
+        .await
+        {
+            tracing::error!(error = %e, replaced_document_id = %replaced.document_id, "revoke superseded portal releases");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to finalize replaced document version",
+            );
+        }
+    }
 
     let _ = sqlx::query(
         "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'generate_document_from_template', 'document', $2, $3)",
@@ -5222,6 +5775,8 @@ async fn generate_document(
         "order_id": order_id,
         "appointment_id": appointment_id,
         "language": language,
+        "replace_document_id": replacement.as_ref().map(|value| value.document_id),
+        "version_number": persist_input.version_number,
     }))
     .execute(&state.db)
     .await;
@@ -5233,6 +5788,13 @@ async fn generate_document(
         "original_filename": original_filename,
         "mime_type": template.mime_type,
         "file_size": file_size,
+        "language": language,
+        "version_number": persist_input.version_number,
+        "version_root_document_id": replacement
+            .as_ref()
+            .map(|value| value.version_root_document_id)
+            .unwrap_or(document_id),
+        "replaces_document_id": replacement.as_ref().map(|value| value.document_id),
         "preview_html": preview_html,
     }))
     .into_response()
@@ -5269,13 +5831,19 @@ async fn list_documents(
         r#"SELECT d.id, d.patient_id, d.order_id, d.appointment_id,
                   d.auto_name, d.original_filename, d.art, d.category, d.status, d.visibility,
                   d.is_medical, d.mime_type, d.file_size, d.storage_key, d.klinik, d.ursprung,
-                  d.notes, d.uploaded_by, d.created_at, d.updated_at,
+                  d.notes, d.version_root_document_id, d.replaces_document_id,
+                  d.version_number, d.uploaded_by, d.created_at, d.updated_at,
                   p.patient_id AS patient_pid,
                   trim(concat_ws(' ', p.first_name, p.last_name)) AS patient_name,
                   o.order_number,
                   a.title AS appointment_title,
                   u.name AS uploaded_by_name,
                   COALESCE((SELECT count(*)::bigint FROM document_shares ds WHERE ds.document_id = d.id AND ds.revoked_at IS NULL), 0) AS share_count,
+                  COALESCE((SELECT count(*)::bigint FROM documents dv WHERE dv.version_root_document_id = d.version_root_document_id), 1) AS version_count,
+                  (SELECT dv.id FROM documents dv WHERE dv.replaces_document_id = d.id ORDER BY dv.created_at DESC LIMIT 1) AS superseded_by_document_id,
+                  NOT EXISTS(
+                    SELECT 1 FROM documents dv WHERE dv.replaces_document_id = d.id
+                  ) AS is_latest_version,
                   EXISTS(
                     SELECT 1 FROM document_shares ds
                     WHERE ds.document_id = d.id
@@ -5331,6 +5899,91 @@ async fn list_documents(
     Json(items).into_response()
 }
 
+async fn list_document_intake_queue(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+) -> axum::response::Response {
+    if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+        return resp;
+    }
+
+    let assignment_set = match load_assignment_set(&state, &auth).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+
+    let rows = match sqlx::query(
+        r#"SELECT d.id, d.patient_id, d.order_id, d.appointment_id,
+                  d.auto_name, d.original_filename, d.art, d.category, d.status, d.visibility,
+                  d.is_medical, d.mime_type, d.file_size, d.storage_key, d.klinik, d.ursprung,
+                  d.notes, d.version_root_document_id, d.replaces_document_id,
+                  d.version_number, d.uploaded_by, d.created_at, d.updated_at,
+                  p.patient_id AS patient_pid,
+                  trim(concat_ws(' ', p.first_name, p.last_name)) AS patient_name,
+                  o.order_number,
+                  a.title AS appointment_title,
+                  u.name AS uploaded_by_name,
+                  COALESCE((SELECT count(*)::bigint FROM document_shares ds WHERE ds.document_id = d.id AND ds.revoked_at IS NULL), 0) AS share_count,
+                  COALESCE((SELECT count(*)::bigint FROM documents dv WHERE dv.version_root_document_id = d.version_root_document_id), 1) AS version_count,
+                  (SELECT dv.id FROM documents dv WHERE dv.replaces_document_id = d.id ORDER BY dv.created_at DESC LIMIT 1) AS superseded_by_document_id,
+                  NOT EXISTS(
+                    SELECT 1 FROM documents dv WHERE dv.replaces_document_id = d.id
+                  ) AS is_latest_version,
+                  EXISTS(
+                    SELECT 1 FROM document_shares ds
+                    WHERE ds.document_id = d.id
+                      AND ds.shared_with_user_id = $1
+                      AND ds.revoked_at IS NULL
+                  ) AS shared_to_current
+           FROM documents d
+           LEFT JOIN patients p ON p.id = d.patient_id
+           LEFT JOIN orders o ON o.id = d.order_id
+           LEFT JOIN appointments a ON a.id = d.appointment_id
+           LEFT JOIN users u ON u.id = d.uploaded_by
+           WHERE d.status <> 'archived'
+             AND (
+                COALESCE(d.category, '') = ''
+                OR d.category = 'portal_upload'
+                OR d.art IN (
+                    'document',
+                    'uploaded_document',
+                    'patient_general_upload',
+                    'patient_medical_upload',
+                    'patient_admin_upload'
+                )
+                OR d.ursprung = 'patient_portal'
+             )
+           ORDER BY d.created_at DESC
+           LIMIT 200"#,
+    )
+    .bind(auth.user_id)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::error!(error = %e, "list document intake queue");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load document intake queue",
+            );
+        }
+    };
+
+    let items: Vec<_> = rows
+        .iter()
+        .filter(|row| can_view_document_row(&auth, row, &assignment_set))
+        .map(document_json)
+        .filter(|item| {
+            item.get("needs_categorization")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        })
+        .collect();
+
+    Json(items).into_response()
+}
+
 async fn get_document(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -5363,6 +6016,407 @@ async fn get_document(
     }
 
     Json(document_json(&row)).into_response()
+}
+
+async fn list_document_versions(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(id): Path<Uuid>,
+) -> axum::response::Response {
+    if let Err(resp) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::CeoAssistant,
+        Role::PatientManager,
+        Role::TeamleadInterpreter,
+        Role::Interpreter,
+        Role::Concierge,
+        Role::Billing,
+    ]) {
+        return resp;
+    }
+
+    let assignment_set = match load_assignment_set(&state, &auth).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let row = match fetch_document_row(&state, id, auth.user_id).await {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Document not found"),
+        Err(resp) => return resp,
+    };
+
+    if !can_view_document_row(&auth, &row, &assignment_set) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+
+    let version_root_document_id = row
+        .try_get::<Uuid, _>("version_root_document_id")
+        .unwrap_or(id);
+
+    let rows = match sqlx::query(
+        r#"SELECT d.id, d.patient_id, d.order_id, d.appointment_id,
+                  d.auto_name, d.original_filename, d.art, d.category, d.status, d.visibility,
+                  d.is_medical, d.mime_type, d.file_size, d.storage_key, d.klinik, d.ursprung,
+                  d.notes, d.version_root_document_id, d.replaces_document_id,
+                  d.version_number, d.uploaded_by, d.created_at, d.updated_at,
+                  p.patient_id AS patient_pid,
+                  trim(concat_ws(' ', p.first_name, p.last_name)) AS patient_name,
+                  o.order_number,
+                  a.title AS appointment_title,
+                  u.name AS uploaded_by_name,
+                  COALESCE((SELECT count(*)::bigint FROM document_shares ds WHERE ds.document_id = d.id AND ds.revoked_at IS NULL), 0) AS share_count,
+                  COALESCE((SELECT count(*)::bigint FROM documents dv WHERE dv.version_root_document_id = d.version_root_document_id), 1) AS version_count,
+                  (SELECT dv.id FROM documents dv WHERE dv.replaces_document_id = d.id ORDER BY dv.created_at DESC LIMIT 1) AS superseded_by_document_id,
+                  NOT EXISTS(
+                    SELECT 1 FROM documents dv WHERE dv.replaces_document_id = d.id
+                  ) AS is_latest_version,
+                  EXISTS(
+                    SELECT 1 FROM document_shares ds
+                    WHERE ds.document_id = d.id
+                      AND ds.shared_with_user_id = $2
+                      AND ds.revoked_at IS NULL
+                  ) AS shared_to_current
+           FROM documents d
+           LEFT JOIN patients p ON p.id = d.patient_id
+           LEFT JOIN orders o ON o.id = d.order_id
+           LEFT JOIN appointments a ON a.id = d.appointment_id
+           LEFT JOIN users u ON u.id = d.uploaded_by
+           WHERE d.version_root_document_id = $1
+           ORDER BY d.version_number DESC, d.created_at DESC"#,
+    )
+    .bind(version_root_document_id)
+    .bind(auth.user_id)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::error!(error = %e, document_id = %id, "list document versions");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load document versions",
+            );
+        }
+    };
+
+    let items: Vec<_> = rows
+        .iter()
+        .filter(|version_row| can_view_document_row(&auth, version_row, &assignment_set))
+        .map(document_json)
+        .collect();
+
+    Json(items).into_response()
+}
+
+async fn list_document_translation_requests(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(id): Path<Uuid>,
+) -> axum::response::Response {
+    if let Err(resp) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::CeoAssistant,
+        Role::PatientManager,
+        Role::TeamleadInterpreter,
+        Role::Interpreter,
+        Role::Concierge,
+        Role::Billing,
+    ]) {
+        return resp;
+    }
+
+    let assignment_set = match load_assignment_set(&state, &auth).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let row = match fetch_document_row(&state, id, auth.user_id).await {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Document not found"),
+        Err(resp) => return resp,
+    };
+
+    if !can_view_document_row(&auth, &row, &assignment_set) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+
+    let rows = match sqlx::query(
+        r#"SELECT dtr.id, dtr.document_id, dtr.patient_id, dtr.requested_language,
+                  dtr.status, dtr.note, dtr.requested_by, dtr.requested_at,
+                  dtr.completed_at, dtr.updated_at,
+                  requester.name AS requested_by_name
+           FROM document_translation_requests dtr
+           LEFT JOIN users requester ON requester.id = dtr.requested_by
+           WHERE dtr.document_id = $1
+           ORDER BY dtr.requested_at DESC, dtr.created_at DESC"#,
+    )
+    .bind(id)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::error!(error = %e, document_id = %id, "list document translation requests");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load translation requests",
+            );
+        }
+    };
+
+    Json(
+        rows.into_iter()
+            .map(|request_row| document_translation_request_json(&request_row))
+            .collect::<Vec<_>>(),
+    )
+    .into_response()
+}
+
+async fn create_document_translation_request(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<CreateDocumentTranslationRequest>,
+) -> axum::response::Response {
+    if let Err(resp) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::PatientManager,
+        Role::TeamleadInterpreter,
+        Role::Interpreter,
+        Role::Concierge,
+    ]) {
+        return resp;
+    }
+
+    let assignment_set = match load_assignment_set(&state, &auth).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let row = match fetch_document_row(&state, id, auth.user_id).await {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Document not found"),
+        Err(resp) => return resp,
+    };
+
+    if !can_view_document_row(&auth, &row, &assignment_set) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+
+    let Some(patient_id) = row
+        .try_get::<Option<Uuid>, _>("patient_id")
+        .unwrap_or_default()
+    else {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Translation requests require a patient-linked document",
+        );
+    };
+
+    let Some(requested_language) = normalize_document_language(Some(&body.requested_language))
+    else {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Unknown translation target language",
+        );
+    };
+    let note = body
+        .note
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+
+    let request_id: Uuid = match sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO document_translation_requests (
+                document_id, patient_id, requested_language, status, requested_by, note
+           ) VALUES (
+                $1, $2, $3, 'pending', $4, $5
+           )
+           RETURNING id"#,
+    )
+    .bind(id)
+    .bind(patient_id)
+    .bind(requested_language)
+    .bind(auth.user_id)
+    .bind(note)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(request_id) => request_id,
+        Err(sqlx::Error::Database(db_error))
+            if db_error.constraint() == Some("idx_document_translation_requests_active") =>
+        {
+            return err(
+                StatusCode::CONFLICT,
+                "An active translation request already exists for this language",
+            );
+        }
+        Err(e) => {
+            tracing::error!(error = %e, document_id = %id, "create document translation request");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create translation request",
+            );
+        }
+    };
+
+    let _ = sqlx::query(
+        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'create_document_translation_request', 'document', $2, $3)",
+    )
+    .bind(auth.user_id)
+    .bind(id)
+    .bind(json!({
+        "request_id": request_id,
+        "requested_language": requested_language,
+        "patient_id": patient_id,
+    }))
+    .execute(&state.db)
+    .await;
+
+    let response_row = match sqlx::query(
+        r#"SELECT dtr.id, dtr.document_id, dtr.patient_id, dtr.requested_language,
+                  dtr.status, dtr.note, dtr.requested_by, dtr.requested_at,
+                  dtr.completed_at, dtr.updated_at,
+                  requester.name AS requested_by_name
+           FROM document_translation_requests dtr
+           LEFT JOIN users requester ON requester.id = dtr.requested_by
+           WHERE dtr.id = $1"#,
+    )
+    .bind(request_id)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(row) => row,
+        Err(e) => {
+            tracing::error!(error = %e, request_id = %request_id, "reload document translation request");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load translation request",
+            );
+        }
+    };
+
+    Json(document_translation_request_json(&response_row)).into_response()
+}
+
+async fn update_document_translation_request(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(request_id): Path<Uuid>,
+    Json(body): Json<UpdateDocumentTranslationRequest>,
+) -> axum::response::Response {
+    if let Err(resp) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::PatientManager,
+        Role::TeamleadInterpreter,
+        Role::Concierge,
+    ]) {
+        return resp;
+    }
+
+    let Some(next_status) = normalize_translation_request_status(&body.status) else {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid translation request status",
+        );
+    };
+
+    let request_row = match sqlx::query(
+        r#"SELECT dtr.id, dtr.document_id
+           FROM document_translation_requests dtr
+           WHERE dtr.id = $1"#,
+    )
+    .bind(request_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Translation request not found"),
+        Err(e) => {
+            tracing::error!(error = %e, request_id = %request_id, "load document translation request");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load translation request",
+            );
+        }
+    };
+
+    let document_id = request_row
+        .try_get::<Uuid, _>("document_id")
+        .unwrap_or_else(|_| Uuid::nil());
+    let assignment_set = match load_assignment_set(&state, &auth).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let document_row = match fetch_document_row(&state, document_id, auth.user_id).await {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Document not found"),
+        Err(resp) => return resp,
+    };
+
+    if !can_view_document_row(&auth, &document_row, &assignment_set) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+
+    let note = body
+        .note
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if let Err(e) = sqlx::query(
+        r#"UPDATE document_translation_requests
+           SET status = $2,
+               note = COALESCE($3, note),
+               completed_at = CASE WHEN $2 = 'completed' THEN now() ELSE NULL END
+           WHERE id = $1"#,
+    )
+    .bind(request_id)
+    .bind(next_status)
+    .bind(note)
+    .execute(&state.db)
+    .await
+    {
+        tracing::error!(error = %e, request_id = %request_id, "update document translation request");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update translation request",
+        );
+    }
+
+    let _ = sqlx::query(
+        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'update_document_translation_request', 'document', $2, $3)",
+    )
+    .bind(auth.user_id)
+    .bind(document_id)
+    .bind(json!({
+        "request_id": request_id,
+        "status": next_status,
+    }))
+    .execute(&state.db)
+    .await;
+
+    let response_row = match sqlx::query(
+        r#"SELECT dtr.id, dtr.document_id, dtr.patient_id, dtr.requested_language,
+                  dtr.status, dtr.note, dtr.requested_by, dtr.requested_at,
+                  dtr.completed_at, dtr.updated_at,
+                  requester.name AS requested_by_name
+           FROM document_translation_requests dtr
+           LEFT JOIN users requester ON requester.id = dtr.requested_by
+           WHERE dtr.id = $1"#,
+    )
+    .bind(request_id)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(row) => row,
+        Err(e) => {
+            tracing::error!(error = %e, request_id = %request_id, "reload updated translation request");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load translation request",
+            );
+        }
+    };
+
+    Json(document_translation_request_json(&response_row)).into_response()
 }
 
 async fn download_document(
@@ -5685,6 +6739,9 @@ async fn upload_my_document(
         klinik: None,
         ursprung: Some("patient_portal"),
         notes: notes.as_deref(),
+        version_root_document_id: None,
+        replaces_document_id: None,
+        version_number: 1,
         uploaded_by: auth.user_id,
     };
     let (document_id, file_size, original_filename) =
@@ -5948,6 +7005,9 @@ async fn upload_document(
         klinik: klinik.as_deref(),
         ursprung: ursprung.as_deref(),
         notes: notes.as_deref(),
+        version_root_document_id: None,
+        replaces_document_id: None,
+        version_number: 1,
         uploaded_by: auth.user_id,
     };
     let (document_id, file_size, original_filename) =
@@ -6161,6 +7221,12 @@ async fn release_document_to_patient_portal(
     let current_visibility = row
         .try_get::<String, _>("visibility")
         .unwrap_or_else(|_| "internal".to_string());
+    if row.try_get::<String, _>("status").unwrap_or_default() == "archived" {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Archived document versions cannot be released to the portal",
+        );
+    }
     let auto_name = row.try_get::<String, _>("auto_name").unwrap_or_default();
     let channel =
         match normalize_share_channel(Some(body.channel.as_deref().unwrap_or("patient_portal"))) {

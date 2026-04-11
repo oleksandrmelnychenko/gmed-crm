@@ -71,6 +71,13 @@
   Covers:
   multi-document sharing in one request, with share records created for each selected document.
 
+- `patient_document_alerts_report_missing_required_documents`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:173`
+  `docs/backlog/04_implementation-tasks_ua.md:83`
+  Covers:
+  configurable minimum patient document pack, evaluation against current patient files, missing-document alerts and computed document-pack completeness.
+
 - `ceo_assistant_only_sees_released_medical_documents`
   Source:
   `docs/architecture/02_field-level-access-control.md`
@@ -91,6 +98,24 @@
   `docs/backlog/04_implementation-tasks_ua.md:76`
   Covers:
   template catalog, treatment-plan PDF generation with text blocks, saved PDF document and download flow.
+
+- `document_templates_default_to_patient_language_when_omitted`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:69`
+  Covers:
+  generated treatment-plan templates inherit the patient language when the request does not override it explicitly.
+
+- `document_templates_can_replace_previous_generated_version`
+  Source:
+  `docs/requirements/04_non-functional-requirements_ua.md:94`
+  Covers:
+  generated document replace flow, archived previous version, ordered version history endpoint and explicit version metadata in document detail.
+
+- `document_translation_requests_can_be_created_and_completed`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:149`
+  Covers:
+  document detail can register a translation request, keep it document-bound and move the request through operational statuses.
 
 - `document_templates_can_generate_medication_summary_pdf_document`
   Source:
@@ -136,7 +161,7 @@
 
 ## Not automated yet
 
-- file replace/delete lifecycle
+- file delete lifecycle
 - external provider messaging around documents
 - OCR/categorization pipeline
 - patient-requested revoke of third-party medical sharing outside portal document scope

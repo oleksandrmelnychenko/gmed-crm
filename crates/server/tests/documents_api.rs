@@ -467,6 +467,19 @@ async fn seed_patient_share_consent(
     .unwrap();
 }
 
+async fn configure_required_patient_documents(pool: &PgPool, value: Value) {
+    sqlx::query(
+        r#"UPDATE system_settings
+           SET value = $2::jsonb, updated_at = now()
+           WHERE key = $1"#,
+    )
+    .bind("required_patient_documents")
+    .bind(value)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn seed_document(
     pool: &PgPool,
@@ -478,15 +491,19 @@ async fn seed_document(
     art: &str,
     tag: &str,
 ) -> Uuid {
+    let document_id = Uuid::new_v4();
     sqlx::query_scalar(
         r#"INSERT INTO documents (
-                patient_id, appointment_id, auto_name, original_filename, art, category,
-                status, visibility, is_medical, mime_type, file_size, uploaded_by
+                id, patient_id, appointment_id, auto_name, original_filename, art, category,
+                status, visibility, is_medical, mime_type, file_size, version_root_document_id,
+                version_number, uploaded_by
            ) VALUES (
-                $1, $2, $3, $4, $5, $6,
-                'active', $7, $8, 'application/pdf', 1234, $9
+                $1, $2, $3, $4, $5, $6, $7,
+                'active', $8, $9, 'application/pdf', 1234, $1,
+                1, $10
            ) RETURNING id"#,
     )
+    .bind(document_id)
     .bind(patient_id)
     .bind(appointment_id)
     .bind(format!("Document {tag}"))
@@ -1048,6 +1065,162 @@ async fn bulk_document_share_creates_entries_for_multiple_documents() {
 }
 
 #[tokio::test]
+async fn document_translation_requests_can_be_created_and_completed() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("doc-translation");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let appointment_id =
+        seed_appointment(&pool, patient_id, provider_id, doctor_id, admin_id, &tag).await;
+    let document_id = seed_document(
+        &pool,
+        admin_id,
+        patient_id,
+        appointment_id,
+        "released_internal",
+        true,
+        "arztbrief",
+        &tag,
+    )
+    .await;
+
+    let (status, create_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/translation-requests"),
+        &admin_bearer,
+        Some(json!({
+            "requested_language": "en",
+            "note": "Prepare a patient-facing English summary."
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(create_body["requested_language"], "en");
+    assert_eq!(create_body["status"], "pending");
+    let request_id = create_body["id"].as_str().unwrap().to_string();
+
+    let (status, list_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/translation-requests"),
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = list_body.as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["id"], request_id);
+
+    let (status, update_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/translation-requests/{request_id}/update"),
+        &admin_bearer,
+        Some(json!({
+            "status": "completed"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(update_body["status"], "completed");
+    assert!(update_body["completed_at"].as_str().is_some());
+}
+
+#[tokio::test]
+async fn patient_document_alerts_report_missing_required_documents() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-alerts");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let appointment_id =
+        seed_appointment(&pool, patient_id, provider_id, doctor_id, admin_id, &tag).await;
+
+    configure_required_patient_documents(
+        &pool,
+        json!([
+            {
+                "key": "passport",
+                "label": "Reisepass",
+                "art": ["passport_scan"],
+                "category": ["identity"]
+            },
+            {
+                "key": "consent_form",
+                "label": "Einverständniserklärung",
+                "art": ["consent_form"],
+                "category": ["consent"]
+            }
+        ]),
+    )
+    .await;
+
+    let _passport_document = seed_document(
+        &pool,
+        admin_id,
+        patient_id,
+        appointment_id,
+        "active",
+        false,
+        "passport_scan",
+        &format!("{tag}-passport"),
+    )
+    .await;
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/document-alerts"),
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["configured_rule_count"], 2);
+    assert_eq!(body["document_pack_complete"], false);
+    assert_eq!(body["missing_count"], 1);
+    assert_eq!(
+        body["missing_documents"][0]["label"],
+        "Einverständniserklärung"
+    );
+    assert_eq!(body["required_documents"][0]["fulfilled"], true);
+    assert_eq!(body["required_documents"][1]["fulfilled"], false);
+
+    let _consent_document = seed_document(
+        &pool,
+        admin_id,
+        patient_id,
+        appointment_id,
+        "active",
+        false,
+        "consent_form",
+        &format!("{tag}-consent"),
+    )
+    .await;
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/document-alerts"),
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["document_pack_complete"], true);
+    assert_eq!(body["missing_count"], 0);
+    assert!(body["missing_documents"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn ceo_assistant_only_sees_released_medical_documents() {
     let Some((app, pool, admin_id, _admin_bearer)) = test_context().await else {
         return;
@@ -1259,6 +1432,146 @@ async fn document_templates_can_generate_treatment_plan_pdf_document() {
     assert_eq!(status, StatusCode::OK);
     assert!(bytes.starts_with(b"%PDF-"));
     assert!(bytes.len() > 1000);
+}
+
+#[tokio::test]
+async fn document_templates_default_to_patient_language_when_omitted() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-template-lang");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let appointment_id =
+        seed_appointment(&pool, patient_id, provider_id, doctor_id, admin_id, &tag).await;
+
+    sqlx::query("UPDATE patients SET languages = $2 WHERE id = $1")
+        .bind(patient_id)
+        .bind(vec!["uk".to_string(), "de".to_string()])
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(json!({
+            "template_id": "treatment_plan",
+            "patient_id": patient_id,
+            "appointment_id": appointment_id,
+            "text_block_keys": ["fasting"]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["language"], "uk");
+    let preview_html = body["preview_html"].as_str().unwrap();
+    assert!(preview_html.contains("План обстеження та лікування"));
+    assert!(preview_html.contains("залишайтеся натще"));
+}
+
+#[tokio::test]
+async fn document_templates_can_replace_previous_generated_version() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-template-version");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let appointment_id =
+        seed_appointment(&pool, patient_id, provider_id, doctor_id, admin_id, &tag).await;
+
+    let (status, first_body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(json!({
+            "template_id": "treatment_plan",
+            "patient_id": patient_id,
+            "appointment_id": appointment_id,
+            "language": "de",
+            "introduction": "Version eins."
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let first_document_id = Uuid::parse_str(first_body["id"].as_str().unwrap()).unwrap();
+    assert_eq!(first_body["version_number"], 1);
+
+    let (status, second_body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(json!({
+            "template_id": "treatment_plan",
+            "patient_id": patient_id,
+            "appointment_id": appointment_id,
+            "language": "de",
+            "replace_document_id": first_document_id,
+            "introduction": "Version zwei."
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let second_document_id = Uuid::parse_str(second_body["id"].as_str().unwrap()).unwrap();
+    assert_eq!(second_body["version_number"], 2);
+    assert_eq!(
+        second_body["replaces_document_id"],
+        first_document_id.to_string()
+    );
+
+    let (status, first_detail_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{first_document_id}"),
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(first_detail_body["status"], "archived");
+    assert_eq!(
+        first_detail_body["superseded_by_document_id"],
+        second_document_id.to_string()
+    );
+    assert_eq!(first_detail_body["is_latest_version"], false);
+
+    let (status, second_detail_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{second_document_id}"),
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(second_detail_body["version_number"], 2);
+    assert_eq!(
+        second_detail_body["replaces_document_id"],
+        first_document_id.to_string()
+    );
+    assert_eq!(second_detail_body["version_count"], 2);
+    assert_eq!(second_detail_body["is_latest_version"], true);
+
+    let (status, versions_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{second_document_id}/versions"),
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let versions = versions_body.as_array().unwrap();
+    assert_eq!(versions.len(), 2);
+    assert_eq!(versions[0]["id"], second_document_id.to_string());
+    assert_eq!(versions[1]["id"], first_document_id.to_string());
 }
 
 #[tokio::test]

@@ -73,6 +73,12 @@ type DocumentItem = {
   ursprung: string | null;
   notes: string | null;
   uploaded_by_name: string | null;
+  version_root_document_id: string;
+  replaces_document_id: string | null;
+  superseded_by_document_id: string | null;
+  version_number: number;
+  version_count: number;
+  is_latest_version: boolean;
   created_at: string;
   updated_at: string;
   share_count: number;
@@ -96,6 +102,20 @@ type DocumentShare = {
   revoked_at: string | null;
 };
 
+type TranslationRequest = {
+  id: string;
+  document_id: string;
+  patient_id: string | null;
+  requested_language: string;
+  status: string;
+  note: string | null;
+  requested_by: string;
+  requested_by_name: string | null;
+  requested_at: string;
+  completed_at: string | null;
+  updated_at: string;
+};
+
 type StaffOption = { id: string; name: string; role: string };
 type CategoryOption = { key: string; label: string };
 type CategoriesResponse = { categories: CategoryOption[]; arts: string[] };
@@ -104,6 +124,7 @@ type PatientOption = {
   patient_id: string;
   first_name?: string;
   last_name?: string;
+  languages?: string[];
 };
 type ProviderOption = { id: string; name: string; address_city: string | null };
 type OrderOption = { id: string; order_number: string; patient_pid: string };
@@ -194,6 +215,7 @@ type GenerateFormState = {
   patientId: string;
   orderId: string;
   appointmentId: string;
+  replaceDocumentId: string;
   autoName: string;
   status: DocumentStatus;
   visibility: DocumentVisibility;
@@ -213,6 +235,8 @@ type GenerateDocumentResponse = {
   original_filename: string;
   mime_type: string;
   file_size: number;
+  language?: string;
+  version_number?: number;
   preview_html?: string;
 };
 
@@ -241,6 +265,25 @@ function canViewDocuments(role?: string) {
     "interpreter",
     "concierge",
     "billing",
+  ].includes(role ?? "");
+}
+
+function canRequestTranslations(role?: string) {
+  return [
+    "ceo",
+    "patient_manager",
+    "teamlead_interpreter",
+    "interpreter",
+    "concierge",
+  ].includes(role ?? "");
+}
+
+function canUpdateTranslations(role?: string) {
+  return [
+    "ceo",
+    "patient_manager",
+    "teamlead_interpreter",
+    "concierge",
   ].includes(role ?? "");
 }
 
@@ -301,6 +344,16 @@ function statusBadge(status: string) {
   return "border-amber-200 bg-amber-50 text-amber-700";
 }
 
+function translationStatusBadge(status: string) {
+  if (status === "completed")
+    return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  if (status === "in_progress")
+    return "border-sky-200 bg-sky-50 text-sky-700";
+  if (status === "cancelled")
+    return "border-slate-200 bg-slate-100 text-slate-600";
+  return "border-amber-200 bg-amber-50 text-amber-700";
+}
+
 function visibilityBadge(visibility: string) {
   if (visibility === "released_internal")
     return "border-sky-200 bg-sky-50 text-sky-700";
@@ -321,6 +374,48 @@ function sensitivityBadge(value: string) {
 
 function patientOptionLabel(patient: PatientOption) {
   return `${patient.patient_id} · ${[patient.first_name, patient.last_name].filter(Boolean).join(" ")}`;
+}
+
+function normalizeTemplateLanguage(value?: string | null) {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized) return null;
+  if (
+    ["de", "de-de", "de_at", "de-at", "de_ch", "de-ch"].includes(normalized)
+  ) {
+    return "de";
+  }
+  if (["uk", "uk-ua", "ua", "ukrainian"].includes(normalized)) return "uk";
+  if (["en", "en-gb", "en-us", "english"].includes(normalized)) return "en";
+  return null;
+}
+
+function resolveTemplateLanguage(
+  patientId: string,
+  template: DocumentTemplate | null,
+  patients: PatientOption[],
+) {
+  if (!template) return "de";
+  const patient = patients.find((item) => item.id === patientId);
+  for (const language of patient?.languages ?? []) {
+    const normalized = normalizeTemplateLanguage(language);
+    if (normalized && template.supported_languages.includes(normalized)) {
+      return normalized;
+    }
+  }
+  return template.supported_languages[0] ?? "de";
+}
+
+function templateForDocument(
+  templates: DocumentTemplate[],
+  detail: DocumentItem | null,
+) {
+  if (!detail) return null;
+  return (
+    templates.find(
+      (template) =>
+        template.art === detail.art && template.category === detail.category,
+    ) ?? null
+  );
 }
 
 function emptyUploadForm(patientId = ""): UploadFormState {
@@ -347,6 +442,7 @@ function emptyGenerateForm(patientId = ""): GenerateFormState {
     patientId,
     orderId: "",
     appointmentId: "",
+    replaceDocumentId: "",
     autoName: "",
     status: "draft",
     visibility: "patient_visible",
@@ -459,6 +555,8 @@ function StaffDocumentsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const canView = canViewDocuments(user?.role);
   const canManage = canManageDocuments(user?.role);
+  const canRequestTranslation = canRequestTranslations(user?.role);
+  const canUpdateTranslation = canUpdateTranslations(user?.role);
 
   const [filters, setFilters] = useState<FiltersState>(() => ({
     search: searchParams.get("search") ?? "",
@@ -515,8 +613,18 @@ function StaffDocumentsPage() {
   );
   const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([]);
   const [detail, setDetail] = useState<DocumentItem | null>(null);
+  const [detailVersions, setDetailVersions] = useState<DocumentItem[]>([]);
+  const [translationRequests, setTranslationRequests] = useState<
+    TranslationRequest[]
+  >([]);
   const [detailBusy, setDetailBusy] = useState(false);
   const [detailError, setDetailError] = useState("");
+  const [translationBusy, setTranslationBusy] = useState(false);
+  const [translationError, setTranslationError] = useState("");
+  const [translationForm, setTranslationForm] = useState({
+    requestedLanguage: "en",
+    note: "",
+  });
   const [editForm, setEditForm] = useState<EditFormState | null>(null);
   const [detailOrders, setDetailOrders] = useState<OrderOption[]>([]);
   const [detailAppointments, setDetailAppointments] = useState<
@@ -542,6 +650,10 @@ function StaffDocumentsPage() {
       templates.find((template) => template.id === generateForm.templateId) ??
       null,
     [generateForm.templateId, templates],
+  );
+  const currentDetailTemplate = useMemo(
+    () => templateForDocument(templates, detail),
+    [detail, templates],
   );
   const availableTemplateBlocks = useMemo(() => {
     const allowed = new Set(selectedTemplate?.text_block_keys ?? []);
@@ -649,6 +761,8 @@ function StaffDocumentsPage() {
   useEffect(() => {
     if (!canView || !selectedId) {
       setDetail(null);
+      setDetailVersions([]);
+      setTranslationRequests([]);
       setEditForm(null);
       setShares([]);
       return;
@@ -657,22 +771,34 @@ function StaffDocumentsPage() {
     async function loadDetail() {
       setDetailBusy(true);
       setDetailError("");
+      setTranslationError("");
       try {
-        const [documentResponse, shareResponse] = await Promise.all([
-          apiFetch<DocumentItem>(`/documents/${selectedId}`),
-          canManage
-            ? apiFetch<DocumentShare[]>(
-                `/documents/${selectedId}/shares`,
-              ).catch(() => [])
-            : Promise.resolve([]),
-        ]);
+        const [documentResponse, shareResponse, versionResponse, translationResponse] =
+          await Promise.all([
+            apiFetch<DocumentItem>(`/documents/${selectedId}`),
+            canManage
+              ? apiFetch<DocumentShare[]>(
+                  `/documents/${selectedId}/shares`,
+                ).catch(() => [])
+              : Promise.resolve([]),
+            apiFetch<DocumentItem[]>(`/documents/${selectedId}/versions`).catch(
+              () => [],
+            ),
+            apiFetch<TranslationRequest[]>(
+              `/documents/${selectedId}/translation-requests`,
+            ).catch(() => []),
+          ]);
         if (!active) return;
         setDetail(documentResponse);
+        setDetailVersions(versionResponse);
+        setTranslationRequests(translationResponse);
         setEditForm(detailToEditForm(documentResponse));
         setShares(shareResponse);
       } catch (nextError) {
         if (!active) return;
         setDetail(null);
+        setDetailVersions([]);
+        setTranslationRequests([]);
         setEditForm(null);
         setShares([]);
         setDetailError(
@@ -733,13 +859,16 @@ function StaffDocumentsPage() {
         visibility: current.templateId
           ? current.visibility
           : nextTemplate.default_visibility,
+        language: current.templateId
+          ? current.language
+          : resolveTemplateLanguage(current.patientId, nextTemplate, patients),
         autoName: current.autoName || nextTemplate.default_auto_name,
         textBlockKeys: current.textBlockKeys.filter((key) =>
           allowedBlocks.has(key),
         ),
       };
     });
-  }, [templates]);
+  }, [patients, templates]);
 
   useEffect(() => {
     if (!templateOpen || !generateForm.patientId) {
@@ -766,6 +895,29 @@ function StaffDocumentsPage() {
       active = false;
     };
   }, [generateForm.patientId, templateOpen]);
+
+  useEffect(() => {
+    if (!generateForm.replaceDocumentId) return;
+    if (
+      detail?.id === generateForm.replaceDocumentId &&
+      detail.patient_id === generateForm.patientId &&
+      detail.art === selectedTemplate?.art
+    ) {
+      return;
+    }
+    setGenerateForm((current) =>
+      current.replaceDocumentId
+        ? { ...current, replaceDocumentId: "" }
+        : current,
+    );
+  }, [
+    detail?.art,
+    detail?.id,
+    detail?.patient_id,
+    generateForm.patientId,
+    generateForm.replaceDocumentId,
+    selectedTemplate?.art,
+  ]);
 
   useEffect(() => {
     if (!detail || !editForm?.patientId || !canManage) {
@@ -888,12 +1040,22 @@ function StaffDocumentsPage() {
     const template = templates.find((item) => item.id === templateId);
     setGenerateForm((current) => {
       if (!template) {
-        return { ...current, templateId, textBlockKeys: [] };
+        return {
+          ...current,
+          templateId,
+          replaceDocumentId: "",
+          textBlockKeys: [],
+        };
       }
       const previousTemplate = templates.find(
         (item) => item.id === current.templateId,
       );
       const allowedBlocks = new Set(template.text_block_keys);
+      const nextLanguage = resolveTemplateLanguage(
+        current.patientId,
+        template,
+        patients,
+      );
       return {
         ...current,
         templateId,
@@ -906,12 +1068,50 @@ function StaffDocumentsPage() {
         visibility: template.default_visibility,
         language: template.supported_languages.includes(current.language)
           ? current.language
-          : (template.supported_languages[0] ?? "de"),
+          : nextLanguage,
+        replaceDocumentId:
+          detail &&
+          current.replaceDocumentId === detail.id &&
+          detail.patient_id === current.patientId &&
+          detail.art === template.art
+            ? current.replaceDocumentId
+            : "",
         textBlockKeys: current.textBlockKeys.filter((key) =>
           allowedBlocks.has(key),
         ),
       };
     });
+  }
+
+  function openReplacementTemplate(document: DocumentItem) {
+    const template = templateForDocument(templates, document);
+    if (!template || !document.patient_id) {
+      setNotice("This document type is not linked to a generated template.");
+      return;
+    }
+    setGenerateForm({
+      templateId: template.id,
+      patientId: document.patient_id,
+      orderId: document.order_id ?? "",
+      appointmentId: document.appointment_id ?? "",
+      replaceDocumentId: document.id,
+      autoName: document.auto_name,
+      status:
+        document.status === "archived"
+          ? template.default_status
+          : (document.status as DocumentStatus),
+      visibility: (document.visibility as DocumentVisibility) ?? "patient_visible",
+      language: resolveTemplateLanguage(document.patient_id, template, patients),
+      titleOverride: "",
+      introduction: "",
+      closingNote: "",
+      klinik: document.klinik ?? "",
+      ursprung: document.ursprung ?? "",
+      notes: document.notes ?? "",
+      textBlockKeys: [],
+    });
+    setGenerateError("");
+    setTemplateOpen(true);
   }
 
   async function handleGenerateDocument(event: FormEvent<HTMLFormElement>) {
@@ -941,7 +1141,8 @@ function StaffDocumentsPage() {
             auto_name: generateForm.autoName.trim() || null,
             status: generateForm.status,
             visibility: generateForm.visibility,
-            language: generateForm.language,
+            language: generateForm.language || null,
+            replace_document_id: generateForm.replaceDocumentId || null,
             title_override: generateForm.titleOverride.trim() || null,
             introduction: generateForm.introduction.trim() || null,
             closing_note: generateForm.closingNote.trim() || null,
@@ -969,8 +1170,8 @@ function StaffDocumentsPage() {
       setTemplateOpen(false);
       setNotice(
         previewOpened
-          ? "Template document generated and preview opened."
-          : "Template document generated.",
+          ? `Version ${response.version_number ?? 1} generated and preview opened.`
+          : `Version ${response.version_number ?? 1} generated.`,
       );
       refresh();
       if (response.id) openDocument(response.id);
@@ -997,6 +1198,67 @@ function StaffDocumentsPage() {
           ? nextError.message
           : "Failed to open generated document preview.",
       );
+    }
+  }
+
+  async function reloadTranslationRequests(documentId: string) {
+    const rows = await apiFetch<TranslationRequest[]>(
+      `/documents/${documentId}/translation-requests`,
+    );
+    setTranslationRequests(rows);
+  }
+
+  async function handleCreateTranslationRequest(
+    event: FormEvent<HTMLFormElement>,
+  ) {
+    event.preventDefault();
+    if (!detail) return;
+    setTranslationBusy(true);
+    setTranslationError("");
+    try {
+      await apiFetch(`/documents/${detail.id}/translation-requests`, {
+        method: "POST",
+        body: JSON.stringify({
+          requested_language: translationForm.requestedLanguage,
+          note: translationForm.note.trim() || null,
+        }),
+      });
+      await reloadTranslationRequests(detail.id);
+      setTranslationForm({ requestedLanguage: "en", note: "" });
+      setNotice("Translation request created.");
+    } catch (nextError) {
+      setTranslationError(
+        nextError instanceof Error
+          ? nextError.message
+          : "Failed to create translation request.",
+      );
+    } finally {
+      setTranslationBusy(false);
+    }
+  }
+
+  async function handleUpdateTranslationRequest(
+    requestId: string,
+    status: string,
+  ) {
+    if (!detail) return;
+    setTranslationBusy(true);
+    setTranslationError("");
+    try {
+      await apiFetch(`/documents/translation-requests/${requestId}/update`, {
+        method: "POST",
+        body: JSON.stringify({ status }),
+      });
+      await reloadTranslationRequests(detail.id);
+      setNotice(`Translation request marked as ${status.replaceAll("_", " ")}.`);
+    } catch (nextError) {
+      setTranslationError(
+        nextError instanceof Error
+          ? nextError.message
+          : "Failed to update translation request.",
+      );
+    } finally {
+      setTranslationBusy(false);
     }
   }
 
@@ -1251,7 +1513,13 @@ function StaffDocumentsPage() {
               <Button
                 variant="outline"
                 className="rounded-2xl"
-                onClick={() => setTemplateOpen(true)}
+                onClick={() => {
+                  setGenerateForm((current) => ({
+                    ...current,
+                    replaceDocumentId: "",
+                  }));
+                  setTemplateOpen(true);
+                }}
               >
                 <FileText className="size-4" />
                 Generate from template
@@ -1512,6 +1780,13 @@ function StaffDocumentsPage() {
                       >
                         {item.data_sensitivity}
                       </Badge>
+                      <Badge
+                        variant="outline"
+                        className="rounded-full border-slate-200 bg-white text-slate-700"
+                      >
+                        v{item.version_number}
+                        {item.is_latest_version ? " current" : ""}
+                      </Badge>
                     </div>
                     <h3 className="mt-3 text-lg font-semibold text-slate-950">
                       {item.auto_name}
@@ -1583,6 +1858,13 @@ function StaffDocumentsPage() {
                 </p>
               </div>
             ) : null}
+            {generateForm.replaceDocumentId && detail?.id === generateForm.replaceDocumentId ? (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900">
+                This run will archive the current document as version{" "}
+                {detail.version_number} and store the new file as the next
+                revision.
+              </div>
+            ) : null}
             <div className="grid gap-4 md:grid-cols-2">
               <Field label={t.documents_category} required>
                 <select
@@ -1636,14 +1918,21 @@ function StaffDocumentsPage() {
               <Field label={t.orders_patient} required>
                 <select
                   value={generateForm.patientId}
-                  onChange={(event) =>
+                  onChange={(event) => {
+                    const patientId = event.target.value;
                     setGenerateForm((current) => ({
                       ...current,
-                      patientId: event.target.value,
+                      patientId,
                       orderId: "",
                       appointmentId: "",
-                    }))
-                  }
+                      replaceDocumentId: "",
+                      language: resolveTemplateLanguage(
+                        patientId,
+                        selectedTemplate,
+                        patients,
+                      ),
+                    }));
+                  }}
                   className={selectClassName}
                 >
                   <option value="">Select patient</option>
@@ -2194,8 +2483,22 @@ function StaffDocumentsPage() {
                           .filter(Boolean)
                           .join(" · ")}
                       </p>
+                      <p className="mt-2 text-xs font-medium uppercase tracking-[0.18em] text-slate-500">
+                        Version {detail.version_number} of {detail.version_count}
+                        {detail.is_latest_version ? " · current" : " · historical"}
+                      </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
+                      {canManage && currentDetailTemplate ? (
+                        <Button
+                          variant="outline"
+                          className="rounded-2xl"
+                          onClick={() => openReplacementTemplate(detail)}
+                        >
+                          <FileText className="size-4" />
+                          New version
+                        </Button>
+                      ) : null}
                       {detail.mime_type?.startsWith("text/html") ||
                       detail.mime_type?.startsWith("application/pdf") ? (
                         <Button
@@ -2294,6 +2597,10 @@ function StaffDocumentsPage() {
                       label="Updated"
                       value={formatDateTime(detail.updated_at)}
                     />
+                    <DetailField
+                      label="Version chain"
+                      value={`v${detail.version_number} of ${detail.version_count}`}
+                    />
                   </div>
                   {detail.notes ? (
                     <div className="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
@@ -2301,6 +2608,216 @@ function StaffDocumentsPage() {
                     </div>
                   ) : null}
                 </SectionCard>
+
+                {detailVersions.length > 0 ? (
+                  <SectionCard title="Version history">
+                    <div className="space-y-3">
+                      {detailVersions.map((version) => (
+                        <button
+                          key={version.id}
+                          type="button"
+                          onClick={() => openDocument(version.id)}
+                          className={cn(
+                            "w-full rounded-2xl border px-4 py-3 text-left transition",
+                            version.id === detail.id
+                              ? "border-sky-300 bg-sky-50"
+                              : "border-slate-200 bg-white hover:border-slate-300",
+                          )}
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Badge
+                                  variant="outline"
+                                  className="rounded-full border-slate-200 bg-white text-slate-700"
+                                >
+                                  v{version.version_number}
+                                </Badge>
+                                {!version.is_latest_version ? (
+                                  <Badge
+                                    variant="outline"
+                                    className="rounded-full border-slate-200 bg-slate-100 text-slate-700"
+                                  >
+                                    archived
+                                  </Badge>
+                                ) : null}
+                              </div>
+                              <p className="mt-2 text-sm font-semibold text-slate-950">
+                                {version.auto_name}
+                              </p>
+                              <p className="mt-1 text-xs text-slate-500">
+                                {formatDateTime(version.created_at)}
+                              </p>
+                            </div>
+                            <div className="text-xs text-slate-500">
+                              {version.original_filename || version.art}
+                            </div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </SectionCard>
+                ) : null}
+
+                {detail.patient_id ? (
+                  <SectionCard title="Translation requests">
+                    {translationError ? (
+                      <Banner tone="error">{translationError}</Banner>
+                    ) : null}
+                    {canRequestTranslation ? (
+                      <form
+                        onSubmit={handleCreateTranslationRequest}
+                        className="space-y-4"
+                      >
+                        <div className="grid gap-4 md:grid-cols-2">
+                          <Field label={t.patients_languages} required>
+                            <select
+                              value={translationForm.requestedLanguage}
+                              onChange={(event) =>
+                                setTranslationForm((current) => ({
+                                  ...current,
+                                  requestedLanguage: event.target.value,
+                                }))
+                              }
+                              className={selectClassName}
+                            >
+                              <option value="de">DE</option>
+                              <option value="en">EN</option>
+                              <option value="uk">UK</option>
+                            </select>
+                          </Field>
+                          <div className="flex items-end">
+                            <Button
+                              type="submit"
+                              className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+                              disabled={translationBusy}
+                            >
+                              {translationBusy ? (
+                                <LoaderCircle className="size-4 animate-spin" />
+                              ) : (
+                                <FileText className="size-4" />
+                              )}
+                              Request translation
+                            </Button>
+                          </div>
+                        </div>
+                        <Field label={t.patients_notes}>
+                          <textarea
+                            value={translationForm.note}
+                            onChange={(event) =>
+                              setTranslationForm((current) => ({
+                                ...current,
+                                note: event.target.value,
+                              }))
+                            }
+                            className={textareaClassName}
+                            placeholder="Scope, deadline or delivery notes"
+                          />
+                        </Field>
+                      </form>
+                    ) : null}
+                    {translationRequests.length === 0 ? (
+                      <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
+                        No translation requests recorded for this document.
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {translationRequests.map((request) => (
+                          <div
+                            key={request.id}
+                            className="rounded-2xl border border-slate-200 bg-white px-4 py-4"
+                          >
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <Badge
+                                    variant="outline"
+                                    className={cn(
+                                      "rounded-full",
+                                      translationStatusBadge(request.status),
+                                    )}
+                                  >
+                                    {request.status.replaceAll("_", " ")}
+                                  </Badge>
+                                  <Badge
+                                    variant="outline"
+                                    className="rounded-full border-slate-200 bg-white text-slate-700"
+                                  >
+                                    {request.requested_language.toUpperCase()}
+                                  </Badge>
+                                </div>
+                                <p className="mt-2 text-sm font-semibold text-slate-950">
+                                  {request.requested_by_name || "Unknown requester"}
+                                </p>
+                                <p className="mt-1 text-xs text-slate-500">
+                                  {formatDateTime(request.requested_at)}
+                                  {request.completed_at
+                                    ? ` · completed ${formatDateTime(request.completed_at)}`
+                                    : ""}
+                                </p>
+                              </div>
+                              {canUpdateTranslation &&
+                              request.status !== "completed" &&
+                              request.status !== "cancelled" ? (
+                                <div className="flex flex-wrap gap-2">
+                                  {request.status !== "in_progress" ? (
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      className="rounded-xl"
+                                      disabled={translationBusy}
+                                      onClick={() =>
+                                        void handleUpdateTranslationRequest(
+                                          request.id,
+                                          "in_progress",
+                                        )
+                                      }
+                                    >
+                                      Start
+                                    </Button>
+                                  ) : null}
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="rounded-xl"
+                                    disabled={translationBusy}
+                                    onClick={() =>
+                                      void handleUpdateTranslationRequest(
+                                        request.id,
+                                        "completed",
+                                      )
+                                    }
+                                  >
+                                    Complete
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="rounded-xl"
+                                    disabled={translationBusy}
+                                    onClick={() =>
+                                      void handleUpdateTranslationRequest(
+                                        request.id,
+                                        "cancelled",
+                                      )
+                                    }
+                                  >
+                                    Cancel
+                                  </Button>
+                                </div>
+                              ) : null}
+                            </div>
+                            {request.note ? (
+                              <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                                {request.note}
+                              </div>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </SectionCard>
+                ) : null}
 
                 {canManage && editForm ? (
                   <SectionCard title={t.common_provider}>

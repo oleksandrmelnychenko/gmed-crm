@@ -3668,15 +3668,19 @@ async fn patient_profile_nested_endpoints_return_only_linked_records() {
     )
     .await;
 
+    let document_id_seed = Uuid::new_v4();
     let document_id: Uuid = sqlx::query_scalar(
         r#"INSERT INTO documents (
-                patient_id, order_id, appointment_id, auto_name, original_filename,
-                art, category, status, visibility, is_medical, uploaded_by
+                id, patient_id, order_id, appointment_id, auto_name, original_filename,
+                art, category, status, visibility, is_medical, version_root_document_id,
+                version_number, uploaded_by
            ) VALUES (
-                $1, $2, $3, $4, $5,
-                $6, $7, $8, $9, $10, $11
+                $1, $2, $3, $4, $5, $6,
+                $7, $8, $9, $10, $11, $1,
+                1, $12
            ) RETURNING id"#,
     )
+    .bind(document_id_seed)
     .bind(patient_id)
     .bind(order_id)
     .bind(appointment_id)
@@ -3691,15 +3695,19 @@ async fn patient_profile_nested_endpoints_return_only_linked_records() {
     .fetch_one(&pool)
     .await
     .unwrap();
+    let hidden_document_id_seed = Uuid::new_v4();
     let hidden_document_id: Uuid = sqlx::query_scalar(
         r#"INSERT INTO documents (
-                patient_id, order_id, appointment_id, auto_name, original_filename,
-                art, category, status, visibility, is_medical, uploaded_by
+                id, patient_id, order_id, appointment_id, auto_name, original_filename,
+                art, category, status, visibility, is_medical, version_root_document_id,
+                version_number, uploaded_by
            ) VALUES (
-                $1, $2, $3, $4, $5,
-                $6, $7, $8, $9, $10, $11
+                $1, $2, $3, $4, $5, $6,
+                $7, $8, $9, $10, $11, $1,
+                1, $12
            ) RETURNING id"#,
     )
+    .bind(hidden_document_id_seed)
     .bind(other_patient_id)
     .bind(hidden_order_id)
     .bind(hidden_appointment_id)
@@ -4158,15 +4166,19 @@ async fn patient_timeline_aggregates_events_in_descending_order() {
         "2030-01-03",
     )
     .await;
+    let document_id_seed = Uuid::new_v4();
     let document_id: Uuid = sqlx::query_scalar(
         r#"INSERT INTO documents (
-                patient_id, order_id, appointment_id, auto_name, original_filename,
-                art, category, status, visibility, is_medical, uploaded_by
+                id, patient_id, order_id, appointment_id, auto_name, original_filename,
+                art, category, status, visibility, is_medical, version_root_document_id,
+                version_number, uploaded_by
            ) VALUES (
-                $1, $2, $3, $4, $5,
-                $6, $7, $8, $9, $10, $11
+                $1, $2, $3, $4, $5, $6,
+                $7, $8, $9, $10, $11, $1,
+                1, $12
            ) RETURNING id"#,
     )
+    .bind(document_id_seed)
     .bind(patient_id)
     .bind(order_id)
     .bind(appointment_id)
