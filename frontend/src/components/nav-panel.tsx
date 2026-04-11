@@ -8,7 +8,6 @@ import {
   FileText,
   Wallet,
   Files,
-  Inbox,
   Activity,
   Calendar,
   Shield,
@@ -46,7 +45,6 @@ const patientPortalNav: NavItem[] = [
 ];
 
 const crmNav: NavItem[] = [
-  { to: "/intakes", labelKey: "nav_intakes", icon: Inbox },
   { to: "/leads", labelKey: "leads_title", icon: UserPlus },
   { to: "/patients", labelKey: "patients_title", icon: Users },
   { to: "/providers", labelKey: "nav_providers", icon: Building2 },

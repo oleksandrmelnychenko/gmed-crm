@@ -1,11 +1,14 @@
 use axum::{
     Json, Router,
-    extract::{Extension, Path, Query, State},
-    http::StatusCode,
+    body::Body,
+    extract::{Extension, Multipart, Path, Query, State},
+    http::{HeaderMap, StatusCode},
     response::IntoResponse,
     routing::{get, post},
 };
+use chrono::NaiveDate;
 use serde::Deserialize;
+use serde_json::{Value, json};
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -13,13 +16,44 @@ use crate::auth::middleware::AuthUser;
 use crate::state::AppState;
 use gmed_domain::role::Role;
 
+const MAX_ATTACHMENT_BYTES: usize = 25 * 1024 * 1024;
+const MAX_BUNDLE_BYTES: usize = 512 * 1024;
+const MAX_ATTACHMENTS: usize = 20;
+
+// ----------------------------------------------------------------------------
+// Router
+// ----------------------------------------------------------------------------
+
+pub fn public_router() -> Router<AppState> {
+    Router::new().route("/public/lead-intake", post(ingest_lead_intake))
+}
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/leads", get(list_leads).post(create_lead))
         .route("/leads/{lead_id}", get(get_lead))
         .route("/leads/{lead_id}/qualify", post(qualify_lead))
         .route("/leads/{lead_id}/convert", post(convert_lead))
+        .route(
+            "/leads/{lead_id}/attachments/{attachment_id}",
+            get(download_attachment),
+        )
 }
+
+fn err(status: StatusCode, message: &str) -> axum::response::Response {
+    (
+        status,
+        Json(json!({
+            "error": status.canonical_reason().unwrap_or("error"),
+            "message": message,
+        })),
+    )
+        .into_response()
+}
+
+// ----------------------------------------------------------------------------
+// Authenticated CRUD
+// ----------------------------------------------------------------------------
 
 #[derive(Deserialize)]
 struct CreateLeadRequest {
@@ -29,9 +63,6 @@ struct CreateLeadRequest {
     phone: Option<String>,
     source: Option<String>,
     country: Option<String>,
-    languages: Option<Vec<String>>,
-    needs_medical: Option<String>,
-    needs_non_medical: Option<String>,
     notes: Option<String>,
 }
 
@@ -46,6 +77,8 @@ struct ListLeadsQuery {
     status: Option<String>,
     source: Option<String>,
     country: Option<String>,
+    intake_source: Option<String>,
+    flow: Option<String>,
     include_archived: Option<bool>,
 }
 
@@ -71,7 +104,9 @@ async fn list_leads(
 
     match sqlx::query(
         r#"SELECT id, first_name, last_name, email, phone, source, country,
-                  qualification_status, compliance_status, created_at
+                  intake_source, flow, qualification_status, compliance_status,
+                  submitted_at, created_at,
+                  (SELECT COUNT(*) FROM lead_attachments a WHERE a.lead_id = leads.id) AS attachment_count
            FROM leads
            WHERE ($1::bool = true OR qualification_status != 'archived')
              AND ($2::text IS NULL OR qualification_status = $2)
@@ -86,6 +121,8 @@ async fn list_leads(
              )
              AND ($4::text = '%%' OR COALESCE(source, '') ILIKE $4)
              AND ($5::text = '%%' OR COALESCE(country, '') ILIKE $5)
+             AND ($6::text IS NULL OR intake_source = $6)
+             AND ($7::text IS NULL OR flow = $7)
            ORDER BY created_at DESC
            LIMIT 200"#,
     )
@@ -94,13 +131,15 @@ async fn list_leads(
     .bind(search_pattern)
     .bind(source_pattern)
     .bind(country_pattern)
+    .bind(query.intake_source)
+    .bind(query.flow)
     .fetch_all(&state.db)
     .await
     {
         Ok(rows) => {
             let mut leads = Vec::with_capacity(rows.len());
             for r in rows {
-                leads.push(serde_json::json!({
+                leads.push(json!({
                     "id": r.try_get::<Uuid, _>("id").unwrap_or_default(),
                     "first_name": r.try_get::<String, _>("first_name").unwrap_or_default(),
                     "last_name": r.try_get::<String, _>("last_name").unwrap_or_default(),
@@ -108,9 +147,19 @@ async fn list_leads(
                     "phone": r.try_get::<Option<String>, _>("phone").unwrap_or_default(),
                     "source": r.try_get::<Option<String>, _>("source").unwrap_or_default(),
                     "country": r.try_get::<Option<String>, _>("country").unwrap_or_default(),
+                    "intake_source": r.try_get::<Option<String>, _>("intake_source").unwrap_or_default(),
+                    "flow": r.try_get::<Option<String>, _>("flow").unwrap_or_default(),
                     "qualification_status": r.try_get::<String, _>("qualification_status").unwrap_or_default(),
                     "compliance_status": r.try_get::<String, _>("compliance_status").unwrap_or_default(),
-                    "created_at": r.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
+                    "submitted_at": r
+                        .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("submitted_at")
+                        .unwrap_or_default()
+                        .map(|v| v.to_rfc3339()),
+                    "created_at": r
+                        .try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
+                        .map(|v| v.to_rfc3339())
+                        .unwrap_or_default(),
+                    "attachment_count": r.try_get::<i64, _>("attachment_count").unwrap_or(0),
                 }));
             }
             Json(leads).into_response()
@@ -138,24 +187,43 @@ async fn create_lead(
         return e;
     }
 
-    if body.first_name.is_empty() || body.last_name.is_empty() {
+    if body.first_name.trim().is_empty() || body.last_name.trim().is_empty() {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Name required");
     }
 
-    let langs = body.languages.unwrap_or_default();
-
-    match sqlx::query!(
-        "INSERT INTO leads (first_name, last_name, email, phone, source, country, languages, needs_medical, needs_non_medical, notes, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id, created_at",
-        body.first_name, body.last_name, body.email, body.phone, body.source, body.country,
-        &langs, body.needs_medical, body.needs_non_medical, body.notes, auth.user_id
-    ).fetch_one(&state.db).await {
-        Ok(r) => {
-            let _ = sqlx::query!("INSERT INTO audit_log (user_id, action, entity_type, entity_id) VALUES ($1, 'create_lead', 'lead', $2)", auth.user_id, r.id).execute(&state.db).await;
-            tracing::info!(by = %auth.user_id, lead = %r.id, "Lead created");
-            (StatusCode::CREATED, Json(serde_json::json!({"id": r.id, "created_at": r.created_at}))).into_response()
+    match sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO leads (
+                first_name, last_name, email, phone, source, country,
+                notes, created_by, intake_source
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'manual')
+           RETURNING id"#,
+    )
+    .bind(body.first_name.trim())
+    .bind(body.last_name.trim())
+    .bind(body.email.as_deref())
+    .bind(body.phone.as_deref())
+    .bind(body.source.as_deref())
+    .bind(body.country.as_deref())
+    .bind(body.notes.as_deref())
+    .bind(auth.user_id)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(id) => {
+            let _ = sqlx::query(
+                "INSERT INTO audit_log (user_id, action, entity_type, entity_id) VALUES ($1, 'create_lead', 'lead', $2)",
+            )
+            .bind(auth.user_id)
+            .bind(id)
+            .execute(&state.db)
+            .await;
+            tracing::info!(by = %auth.user_id, lead = %id, "Lead created manually");
+            (StatusCode::CREATED, Json(json!({ "id": id }))).into_response()
         }
-        Err(e) => { tracing::error!(error = %e, "create lead"); err(StatusCode::INTERNAL_SERVER_ERROR, "Failed") }
+        Err(e) => {
+            tracing::error!(error = %e, "create lead");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+        }
     }
 }
 
@@ -168,22 +236,237 @@ async fn get_lead(
         return e;
     }
 
-    match sqlx::query!(
-        "SELECT id, first_name, last_name, email, phone, source, country, languages, needs_medical, needs_non_medical,
-                compliance_status, qualification_status, converted_patient_id, notes, created_at, updated_at
-         FROM leads WHERE id = $1", lead_id
-    ).fetch_optional(&state.db).await {
-        Ok(Some(r)) => Json(serde_json::json!({
-            "id": r.id, "first_name": r.first_name, "last_name": r.last_name,
-            "email": r.email, "phone": r.phone, "source": r.source, "country": r.country,
-            "languages": r.languages, "needs_medical": r.needs_medical, "needs_non_medical": r.needs_non_medical,
-            "compliance_status": r.compliance_status, "qualification_status": r.qualification_status,
-            "converted_patient_id": r.converted_patient_id, "notes": r.notes,
-            "created_at": r.created_at, "updated_at": r.updated_at,
-        })).into_response(),
-        Ok(None) => err(StatusCode::NOT_FOUND, "Lead not found"),
-        Err(e) => { tracing::error!(error = %e, "get lead"); err(StatusCode::INTERNAL_SERVER_ERROR, "Failed") }
-    }
+    let row = match sqlx::query(
+        r#"SELECT id, first_name, middle_name, last_name, suffix,
+                  date_of_birth, legal_sex,
+                  email, email_consent, phone, primary_phone_type, phones,
+                  whatsapp_consent, whatsapp_number,
+                  source, country, street_address, city, state, zip_code,
+                  primary_language, needs_interpreter,
+                  location, location_detailed, wants_membership, selected_program,
+                  can_travel, has_medical_records, records_in_accepted_language,
+                  has_travel_documents, currently_in_treatment, has_health_risk_for_travel,
+                  primary_concern_text, additional_concerns,
+                  services, has_insurance, insurance_covers_germany,
+                  preferred_location, visit_timing, message,
+                  consent_automated_contact, consent_healthcare,
+                  consent_opt_out, consent_privacy_practices,
+                  raw_payload, intake_source, flow, locale, submitted_at,
+                  compliance_status, qualification_status, converted_patient_id,
+                  notes, user_agent, created_at, updated_at
+           FROM leads
+           WHERE id = $1"#,
+    )
+    .bind(lead_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Lead not found"),
+        Err(e) => {
+            tracing::error!(error = %e, "get lead");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+
+    let attachments = match sqlx::query(
+        r#"SELECT id, file_name, content_type, size_bytes, uploaded_at
+           FROM lead_attachments
+           WHERE lead_id = $1
+           ORDER BY uploaded_at ASC"#,
+    )
+    .bind(lead_id)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows
+            .into_iter()
+            .map(|r| {
+                json!({
+                    "id": r.try_get::<Uuid, _>("id").unwrap_or_default(),
+                    "file_name": r.try_get::<String, _>("file_name").unwrap_or_default(),
+                    "content_type": r.try_get::<Option<String>, _>("content_type").unwrap_or_default(),
+                    "size_bytes": r.try_get::<i64, _>("size_bytes").unwrap_or(0),
+                    "uploaded_at": r
+                        .try_get::<chrono::DateTime<chrono::Utc>, _>("uploaded_at")
+                        .map(|v| v.to_rfc3339())
+                        .unwrap_or_default(),
+                })
+            })
+            .collect::<Vec<_>>(),
+        Err(e) => {
+            tracing::error!(error = %e, "load lead attachments");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+
+    let mut obj = serde_json::Map::new();
+    let rfc = |v: Option<chrono::DateTime<chrono::Utc>>| {
+        v.map(|dt| Value::String(dt.to_rfc3339()))
+            .unwrap_or(Value::Null)
+    };
+    let s_req =
+        |row: &sqlx::postgres::PgRow, col: &str| row.try_get::<String, _>(col).unwrap_or_default();
+    let s_opt = |row: &sqlx::postgres::PgRow, col: &str| {
+        row.try_get::<Option<String>, _>(col)
+            .ok()
+            .flatten()
+            .map(Value::String)
+            .unwrap_or(Value::Null)
+    };
+    let b_opt = |row: &sqlx::postgres::PgRow, col: &str| {
+        row.try_get::<Option<bool>, _>(col)
+            .ok()
+            .flatten()
+            .map(Value::Bool)
+            .unwrap_or(Value::Null)
+    };
+    let b_req =
+        |row: &sqlx::postgres::PgRow, col: &str| row.try_get::<bool, _>(col).unwrap_or(false);
+
+    obj.insert(
+        "id".into(),
+        json!(row.try_get::<Uuid, _>("id").unwrap_or_default()),
+    );
+    obj.insert("first_name".into(), Value::String(s_req(&row, "first_name")));
+    obj.insert("middle_name".into(), s_opt(&row, "middle_name"));
+    obj.insert("last_name".into(), Value::String(s_req(&row, "last_name")));
+    obj.insert("suffix".into(), s_opt(&row, "suffix"));
+    obj.insert(
+        "date_of_birth".into(),
+        row.try_get::<Option<NaiveDate>, _>("date_of_birth")
+            .ok()
+            .flatten()
+            .map(|d| Value::String(d.format("%Y-%m-%d").to_string()))
+            .unwrap_or(Value::Null),
+    );
+    obj.insert("legal_sex".into(), s_opt(&row, "legal_sex"));
+    obj.insert("email".into(), s_opt(&row, "email"));
+    obj.insert("email_consent".into(), b_opt(&row, "email_consent"));
+    obj.insert("phone".into(), s_opt(&row, "phone"));
+    obj.insert("primary_phone_type".into(), s_opt(&row, "primary_phone_type"));
+    obj.insert(
+        "phones".into(),
+        row.try_get::<Value, _>("phones").unwrap_or(Value::Null),
+    );
+    obj.insert("whatsapp_consent".into(), b_opt(&row, "whatsapp_consent"));
+    obj.insert("whatsapp_number".into(), s_opt(&row, "whatsapp_number"));
+    obj.insert("source".into(), s_opt(&row, "source"));
+    obj.insert("country".into(), s_opt(&row, "country"));
+    obj.insert("street_address".into(), s_opt(&row, "street_address"));
+    obj.insert("city".into(), s_opt(&row, "city"));
+    obj.insert("state".into(), s_opt(&row, "state"));
+    obj.insert("zip_code".into(), s_opt(&row, "zip_code"));
+    obj.insert("primary_language".into(), s_opt(&row, "primary_language"));
+    obj.insert("needs_interpreter".into(), b_opt(&row, "needs_interpreter"));
+    obj.insert("location".into(), s_opt(&row, "location"));
+    obj.insert("location_detailed".into(), s_opt(&row, "location_detailed"));
+    obj.insert("wants_membership".into(), b_opt(&row, "wants_membership"));
+    obj.insert("selected_program".into(), s_opt(&row, "selected_program"));
+    obj.insert("can_travel".into(), b_opt(&row, "can_travel"));
+    obj.insert(
+        "has_medical_records".into(),
+        s_opt(&row, "has_medical_records"),
+    );
+    obj.insert(
+        "records_in_accepted_language".into(),
+        b_opt(&row, "records_in_accepted_language"),
+    );
+    obj.insert("has_travel_documents".into(), b_opt(&row, "has_travel_documents"));
+    obj.insert(
+        "currently_in_treatment".into(),
+        b_opt(&row, "currently_in_treatment"),
+    );
+    obj.insert(
+        "has_health_risk_for_travel".into(),
+        b_opt(&row, "has_health_risk_for_travel"),
+    );
+    obj.insert(
+        "primary_concern_text".into(),
+        s_opt(&row, "primary_concern_text"),
+    );
+    obj.insert("additional_concerns".into(), s_opt(&row, "additional_concerns"));
+    obj.insert(
+        "services".into(),
+        json!(
+            row.try_get::<Vec<String>, _>("services")
+                .unwrap_or_default()
+        ),
+    );
+    obj.insert("has_insurance".into(), b_opt(&row, "has_insurance"));
+    obj.insert(
+        "insurance_covers_germany".into(),
+        s_opt(&row, "insurance_covers_germany"),
+    );
+    obj.insert("preferred_location".into(), s_opt(&row, "preferred_location"));
+    obj.insert("visit_timing".into(), s_opt(&row, "visit_timing"));
+    obj.insert("message".into(), s_opt(&row, "message"));
+    obj.insert(
+        "consent_automated_contact".into(),
+        Value::Bool(b_req(&row, "consent_automated_contact")),
+    );
+    obj.insert(
+        "consent_healthcare".into(),
+        Value::Bool(b_req(&row, "consent_healthcare")),
+    );
+    obj.insert(
+        "consent_opt_out".into(),
+        Value::Bool(b_req(&row, "consent_opt_out")),
+    );
+    obj.insert(
+        "consent_privacy_practices".into(),
+        Value::Bool(b_req(&row, "consent_privacy_practices")),
+    );
+    obj.insert(
+        "raw_payload".into(),
+        row.try_get::<Option<Value>, _>("raw_payload")
+            .ok()
+            .flatten()
+            .unwrap_or(Value::Null),
+    );
+    obj.insert("intake_source".into(), s_opt(&row, "intake_source"));
+    obj.insert("flow".into(), s_opt(&row, "flow"));
+    obj.insert("locale".into(), s_opt(&row, "locale"));
+    obj.insert(
+        "submitted_at".into(),
+        rfc(row
+            .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("submitted_at")
+            .ok()
+            .flatten()),
+    );
+    obj.insert(
+        "compliance_status".into(),
+        Value::String(s_req(&row, "compliance_status")),
+    );
+    obj.insert(
+        "qualification_status".into(),
+        Value::String(s_req(&row, "qualification_status")),
+    );
+    obj.insert(
+        "converted_patient_id".into(),
+        row.try_get::<Option<Uuid>, _>("converted_patient_id")
+            .ok()
+            .flatten()
+            .map(|id| json!(id))
+            .unwrap_or(Value::Null),
+    );
+    obj.insert("notes".into(), s_opt(&row, "notes"));
+    obj.insert("user_agent".into(), s_opt(&row, "user_agent"));
+    obj.insert(
+        "created_at".into(),
+        rfc(row
+            .try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
+            .ok()),
+    );
+    obj.insert(
+        "updated_at".into(),
+        rfc(row
+            .try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at")
+            .ok()),
+    );
+    obj.insert("attachments".into(), Value::Array(attachments));
+
+    Json(Value::Object(obj)).into_response()
 }
 
 async fn qualify_lead(
@@ -197,27 +480,26 @@ async fn qualify_lead(
     }
 
     match body.status.as_str() {
-        "new" => {}
-        "in_progress" => {}
-        "qualified" => {}
-        "not_qualified" => {}
-        "archived" => {}
+        "new" | "in_progress" | "qualified" | "not_qualified" | "archived" => {}
         _ => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid status"),
     }
 
-    match sqlx::query!(
-        "UPDATE leads SET qualification_status = $2 WHERE id = $1",
-        lead_id,
-        body.status
-    )
-    .execute(&state.db)
-    .await
+    match sqlx::query("UPDATE leads SET qualification_status = $2 WHERE id = $1")
+        .bind(lead_id)
+        .bind(&body.status)
+        .execute(&state.db)
+        .await
     {
         Ok(r) if r.rows_affected() > 0 => {
-            let _ = sqlx::query!("INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'qualify_lead', 'lead', $2, $3)",
-                auth.user_id, lead_id, serde_json::json!({"status": body.status})
-            ).execute(&state.db).await;
-            Json(serde_json::json!({"ok": true})).into_response()
+            let _ = sqlx::query(
+                "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'qualify_lead', 'lead', $2, $3)",
+            )
+            .bind(auth.user_id)
+            .bind(lead_id)
+            .bind(json!({ "status": body.status }))
+            .execute(&state.db)
+            .await;
+            Json(json!({ "ok": true })).into_response()
         }
         Ok(_) => err(StatusCode::NOT_FOUND, "Lead not found"),
         Err(e) => {
@@ -236,65 +518,531 @@ async fn convert_lead(
         return e;
     }
 
-    let lead = match sqlx::query!(
-        "SELECT id, first_name, last_name, email, phone, country, languages, qualification_status, converted_patient_id FROM leads WHERE id = $1",
-        lead_id
-    ).fetch_optional(&state.db).await {
+    let lead = match sqlx::query(
+        r#"SELECT id, first_name, last_name, email, phone, country, primary_language,
+                  date_of_birth, legal_sex, qualification_status, converted_patient_id
+           FROM leads WHERE id = $1"#,
+    )
+    .bind(lead_id)
+    .fetch_optional(&state.db)
+    .await
+    {
         Ok(Some(l)) => l,
         Ok(None) => return err(StatusCode::NOT_FOUND, "Lead not found"),
-        Err(e) => { tracing::error!(error = %e, "convert lead"); return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"); }
+        Err(e) => {
+            tracing::error!(error = %e, "convert lead");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
     };
 
-    if lead.converted_patient_id.is_some() {
+    let converted_patient_id: Option<Uuid> = lead.try_get("converted_patient_id").ok().flatten();
+    if converted_patient_id.is_some() {
         return err(StatusCode::CONFLICT, "Lead already converted");
     }
 
-    if lead.qualification_status != "qualified" {
+    let qualification_status: String = lead.try_get("qualification_status").unwrap_or_default();
+    if qualification_status != "qualified" {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Lead must be qualified before conversion",
         );
     }
 
-    let seq: i64 = sqlx::query_scalar!("SELECT nextval('patient_id_seq') AS \"v!\"")
+    let date_of_birth: Option<NaiveDate> = lead.try_get("date_of_birth").ok().flatten();
+    let Some(birth_date) = date_of_birth else {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Lead is missing date_of_birth; cannot convert to patient",
+        );
+    };
+
+    let legal_sex: Option<String> = lead.try_get("legal_sex").ok().flatten();
+    let gender = match legal_sex.as_deref() {
+        Some("female") => "female",
+        Some("male") => "male",
+        Some("diverse") | Some("no_entry") => "diverse",
+        _ => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Lead is missing legal_sex; cannot convert to patient",
+            );
+        }
+    };
+
+    let seq: i64 = sqlx::query_scalar::<_, i64>(r#"SELECT nextval('patient_id_seq')"#)
         .fetch_one(&state.db)
         .await
         .unwrap_or(0);
     let pid = format!("P-{}-{:04}", chrono::Utc::now().format("%Y%m%d"), seq);
 
-    let patient = match sqlx::query!(
-        "INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, email, phone_primary, nationality, languages, created_by)
-         VALUES ($1, $2, $3, '1900-01-01', 'diverse', $4, $5, $6, $7, $8) RETURNING id",
-        pid, lead.first_name, lead.last_name, lead.email, lead.phone, lead.country, &lead.languages, auth.user_id
-    ).fetch_one(&state.db).await {
-        Ok(p) => p,
-        Err(e) => { tracing::error!(error = %e, "create patient from lead"); return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"); }
+    let first_name: String = lead.try_get("first_name").unwrap_or_default();
+    let last_name: String = lead.try_get("last_name").unwrap_or_default();
+    let email: Option<String> = lead.try_get("email").ok().flatten();
+    let phone: Option<String> = lead.try_get("phone").ok().flatten();
+    let country: Option<String> = lead.try_get("country").ok().flatten();
+    let primary_language: Option<String> = lead.try_get("primary_language").ok().flatten();
+    let languages: Vec<String> = primary_language.into_iter().collect();
+
+    let patient_id = match sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender,
+                                 email, phone_primary, nationality, languages, created_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id"#,
+    )
+    .bind(&pid)
+    .bind(&first_name)
+    .bind(&last_name)
+    .bind(birth_date)
+    .bind(gender)
+    .bind(email)
+    .bind(phone)
+    .bind(country)
+    .bind(&languages)
+    .bind(auth.user_id)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(id) => id,
+        Err(e) => {
+            tracing::error!(error = %e, "create patient from lead");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
     };
 
-    let _ = sqlx::query!("UPDATE leads SET qualification_status = 'converted', converted_patient_id = $2 WHERE id = $1", lead_id, patient.id)
-        .execute(&state.db).await;
-
-    let _ = sqlx::query!(
-        "INSERT INTO patient_assignments (patient_id, user_id, assigned_by) VALUES ($1, $2, $2)",
-        patient.id,
-        auth.user_id
+    let _ = sqlx::query(
+        "UPDATE leads SET qualification_status = 'converted', converted_patient_id = $2 WHERE id = $1",
     )
+    .bind(lead_id)
+    .bind(patient_id)
     .execute(&state.db)
     .await;
 
-    let _ = sqlx::query!("INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'convert_lead', 'lead', $2, $3)",
-        auth.user_id, lead_id, serde_json::json!({"patient_id": patient.id, "patient_pid": pid})
-    ).execute(&state.db).await;
+    let _ = sqlx::query(
+        "INSERT INTO patient_assignments (patient_id, user_id, assigned_by) VALUES ($1, $2, $2)",
+    )
+    .bind(patient_id)
+    .bind(auth.user_id)
+    .execute(&state.db)
+    .await;
 
-    tracing::info!(by = %auth.user_id, lead = %lead_id, patient = %patient.id, "Lead converted to patient");
+    let _ = sqlx::query(
+        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'convert_lead', 'lead', $2, $3)",
+    )
+    .bind(auth.user_id)
+    .bind(lead_id)
+    .bind(json!({ "patient_id": patient_id, "patient_pid": pid }))
+    .execute(&state.db)
+    .await;
 
-    Json(serde_json::json!({
-        "patient_id": patient.id,
+    tracing::info!(by = %auth.user_id, lead = %lead_id, patient = %patient_id, "Lead converted to patient");
+
+    Json(json!({
+        "patient_id": patient_id,
         "patient_pid": pid,
     }))
     .into_response()
 }
 
-fn err(status: StatusCode, message: &str) -> axum::response::Response {
-    (status, Json(serde_json::json!({ "error": status.canonical_reason().unwrap_or("error"), "message": message }))).into_response()
+async fn download_attachment(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((lead_id, attachment_id)): Path<(Uuid, Uuid)>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Sales]) {
+        return e;
+    }
+
+    match sqlx::query(
+        r#"SELECT file_name, content_type, data
+           FROM lead_attachments
+           WHERE id = $1 AND lead_id = $2"#,
+    )
+    .bind(attachment_id)
+    .bind(lead_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => {
+            let file_name: String = row.try_get("file_name").unwrap_or_default();
+            let content_type: Option<String> = row.try_get("content_type").ok().flatten();
+            let data: Vec<u8> = row.try_get("data").unwrap_or_default();
+
+            let mime = content_type.unwrap_or_else(|| "application/octet-stream".to_string());
+            let disposition = format!("attachment; filename=\"{}\"", file_name.replace('"', "'"));
+
+            axum::response::Response::builder()
+                .header("content-type", mime)
+                .header("content-disposition", disposition)
+                .body(Body::from(data))
+                .unwrap()
+                .into_response()
+        }
+        Ok(None) => err(StatusCode::NOT_FOUND, "Attachment not found"),
+        Err(e) => {
+            tracing::error!(error = %e, "download lead attachment");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+        }
+    }
+}
+
+// ----------------------------------------------------------------------------
+// Public intake from the visitor-facade wizard
+// ----------------------------------------------------------------------------
+
+fn required_env(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .and_then(|v| if v.trim().is_empty() { None } else { Some(v) })
+}
+
+#[allow(clippy::result_large_err)]
+fn check_shared_token(headers: &HeaderMap) -> Result<(), axum::response::Response> {
+    let Some(expected) = required_env("LEAD_INTAKE_TOKEN") else {
+        tracing::error!("LEAD_INTAKE_TOKEN not configured");
+        return Err(err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Intake endpoint not configured",
+        ));
+    };
+    let provided = headers
+        .get("x-intake-token")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    if provided != expected.as_str() {
+        return Err(err(StatusCode::UNAUTHORIZED, "Invalid intake token"));
+    }
+    Ok(())
+}
+
+fn str_opt(v: &Value) -> Option<String> {
+    let s = v.as_str()?.trim();
+    if s.is_empty() {
+        None
+    } else {
+        Some(s.to_string())
+    }
+}
+
+fn yes_no_to_bool(v: &Value) -> Option<bool> {
+    match v.as_str()?.trim().to_ascii_lowercase().as_str() {
+        "yes" | "true" => Some(true),
+        "no" | "false" => Some(false),
+        _ => None,
+    }
+}
+
+fn bool_opt(v: &Value) -> Option<bool> {
+    v.as_bool()
+}
+
+fn date_opt(v: &Value) -> Option<NaiveDate> {
+    let s = v.as_str()?.trim();
+    if s.is_empty() {
+        return None;
+    }
+    NaiveDate::parse_from_str(s, "%Y-%m-%d").ok()
+}
+
+fn string_array(v: &Value) -> Vec<String> {
+    v.as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|item| item.as_str().map(|s| s.trim().to_string()))
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn first_phone(phones: &Value) -> (Option<String>, Option<String>) {
+    let Some(arr) = phones.as_array() else {
+        return (None, None);
+    };
+    let Some(first) = arr.first() else {
+        return (None, None);
+    };
+    let number = first.get("number").and_then(str_opt);
+    let kind = first.get("type").and_then(str_opt);
+    (number, kind)
+}
+
+struct ParsedIntake {
+    bundle: Value,
+    files: Vec<ParsedFile>,
+}
+
+struct ParsedFile {
+    file_name: String,
+    content_type: Option<String>,
+    data: Vec<u8>,
+}
+
+async fn parse_multipart(
+    mut multipart: Multipart,
+) -> Result<ParsedIntake, axum::response::Response> {
+    let mut bundle_raw: Option<String> = None;
+    let mut files: Vec<ParsedFile> = Vec::new();
+
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| err(StatusCode::BAD_REQUEST, &format!("Invalid multipart: {e}")))?
+    {
+        let name = field.name().unwrap_or_default().to_string();
+        match name.as_str() {
+            "bundle" => {
+                let bytes = field
+                    .bytes()
+                    .await
+                    .map_err(|_| err(StatusCode::BAD_REQUEST, "Invalid bundle field"))?;
+                if bytes.len() > MAX_BUNDLE_BYTES {
+                    return Err(err(StatusCode::PAYLOAD_TOO_LARGE, "Bundle too large"));
+                }
+                let text = String::from_utf8(bytes.to_vec())
+                    .map_err(|_| err(StatusCode::BAD_REQUEST, "Bundle must be UTF-8"))?;
+                bundle_raw = Some(text);
+            }
+            "files" => {
+                if files.len() >= MAX_ATTACHMENTS {
+                    return Err(err(StatusCode::PAYLOAD_TOO_LARGE, "Too many attachments"));
+                }
+                let file_name = field
+                    .file_name()
+                    .map(|s| s.to_string())
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or_else(|| format!("attachment-{}", files.len() + 1));
+                let content_type = field.content_type().map(|s| s.to_string());
+                let bytes = field
+                    .bytes()
+                    .await
+                    .map_err(|_| err(StatusCode::BAD_REQUEST, "Failed to read attachment"))?;
+                if bytes.is_empty() {
+                    continue;
+                }
+                if bytes.len() > MAX_ATTACHMENT_BYTES {
+                    return Err(err(
+                        StatusCode::PAYLOAD_TOO_LARGE,
+                        "Attachment exceeds 25MB limit",
+                    ));
+                }
+                files.push(ParsedFile {
+                    file_name,
+                    content_type,
+                    data: bytes.to_vec(),
+                });
+            }
+            _ => {
+                let _ = field.bytes().await;
+            }
+        }
+    }
+
+    let bundle_raw =
+        bundle_raw.ok_or_else(|| err(StatusCode::BAD_REQUEST, "Missing bundle field"))?;
+    let bundle: Value = serde_json::from_str(&bundle_raw)
+        .map_err(|_| err(StatusCode::BAD_REQUEST, "Bundle is not valid JSON"))?;
+
+    if !bundle.is_object() || !bundle.get("payload").is_some_and(|p| p.is_object()) {
+        return Err(err(StatusCode::BAD_REQUEST, "Bundle payload missing"));
+    }
+
+    Ok(ParsedIntake { bundle, files })
+}
+
+async fn ingest_lead_intake(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    multipart: Multipart,
+) -> axum::response::Response {
+    if let Err(resp) = check_shared_token(&headers) {
+        return resp;
+    }
+
+    let parsed = match parse_multipart(multipart).await {
+        Ok(p) => p,
+        Err(resp) => return resp,
+    };
+
+    let payload = &parsed.bundle["payload"];
+    let first_name = str_opt(&payload["firstName"]).unwrap_or_default();
+    let last_name = str_opt(&payload["lastName"]).unwrap_or_default();
+
+    if first_name.is_empty() || last_name.is_empty() {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "First and last name are required",
+        );
+    }
+
+    let (primary_phone, primary_phone_type) = first_phone(&payload["phones"]);
+    let services = string_array(&payload["services"]);
+    let phones_json = if payload["phones"].is_array() {
+        payload["phones"].clone()
+    } else {
+        json!([])
+    };
+
+    let submitted_at = parsed.bundle.get("submittedAt").and_then(str_opt);
+    let flow = parsed.bundle.get("flow").and_then(str_opt);
+    let locale = parsed.bundle.get("locale").and_then(str_opt);
+
+    let user_agent = headers
+        .get(axum::http::header::USER_AGENT)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+
+    let remote_ip = headers
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.split(',').next())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    let submitted_at_parsed = submitted_at
+        .as_deref()
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|dt| dt.with_timezone(&chrono::Utc));
+
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, "lead intake: begin tx");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
+        }
+    };
+
+    let insert = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO leads (
+            intake_source, flow, locale, submitted_at, source,
+            first_name, middle_name, last_name, suffix, date_of_birth, legal_sex,
+            email, email_consent, phone, primary_phone_type, phones,
+            whatsapp_consent, whatsapp_number,
+            country, street_address, city, state, zip_code,
+            primary_language, needs_interpreter,
+            location, location_detailed, wants_membership, selected_program,
+            can_travel, has_medical_records, records_in_accepted_language, has_travel_documents,
+            currently_in_treatment, has_health_risk_for_travel,
+            primary_concern_text, additional_concerns,
+            services, has_insurance, insurance_covers_germany,
+            preferred_location, visit_timing, message,
+            consent_automated_contact, consent_healthcare,
+            consent_opt_out, consent_privacy_practices,
+            raw_payload, remote_ip, user_agent, qualification_status
+        ) VALUES (
+            'visitor_facade', $1, $2, $3, 'Website Wizard',
+            $4, $5, $6, $7, $8, $9,
+            $10, $11, $12, $13, $14,
+            $15, $16,
+            $17, $18, $19, $20, $21,
+            $22, $23,
+            $24, $25, $26, $27,
+            $28, $29, $30, $31,
+            $32, $33,
+            $34, $35,
+            $36, $37, $38,
+            $39, $40, $41,
+            $42, $43, $44, $45,
+            $46, $47::inet, $48, 'new'
+        ) RETURNING id"#,
+    )
+    .bind(flow)
+    .bind(locale)
+    .bind(submitted_at_parsed)
+    .bind(&first_name)
+    .bind(str_opt(&payload["middleName"]))
+    .bind(&last_name)
+    .bind(str_opt(&payload["suffix"]))
+    .bind(date_opt(&payload["dateOfBirth"]))
+    .bind(str_opt(&payload["legalSex"]))
+    .bind(str_opt(&payload["email"]))
+    .bind(bool_opt(&payload["emailConsent"]))
+    .bind(primary_phone)
+    .bind(primary_phone_type)
+    .bind(phones_json)
+    .bind(bool_opt(&payload["whatsappConsent"]))
+    .bind(str_opt(&payload["whatsappNumber"]))
+    .bind(str_opt(&payload["country"]))
+    .bind(str_opt(&payload["streetAddress"]))
+    .bind(str_opt(&payload["city"]))
+    .bind(str_opt(&payload["state"]))
+    .bind(str_opt(&payload["zipCode"]))
+    .bind(str_opt(&payload["primaryLanguage"]))
+    .bind(yes_no_to_bool(&payload["needsInterpreter"]))
+    .bind(str_opt(&payload["location"]))
+    .bind(str_opt(&payload["locationDetailed"]))
+    .bind(yes_no_to_bool(&payload["wantsMembership"]))
+    .bind(str_opt(&payload["selectedProgram"]))
+    .bind(yes_no_to_bool(&payload["canTravel"]))
+    .bind(str_opt(&payload["hasMedicalRecords"]))
+    .bind(yes_no_to_bool(&payload["recordsInAcceptedLanguage"]))
+    .bind(yes_no_to_bool(&payload["hasTravelDocuments"]))
+    .bind(yes_no_to_bool(&payload["currentlyInTreatment"]))
+    .bind(yes_no_to_bool(&payload["hasHealthRiskForTravel"]))
+    .bind(str_opt(&payload["primaryConcernText"]))
+    .bind(str_opt(&payload["additionalConcerns"]))
+    .bind(services)
+    .bind(yes_no_to_bool(&payload["hasInsurance"]))
+    .bind(str_opt(&payload["insuranceCoversGermany"]))
+    .bind(str_opt(&payload["preferredLocation"]))
+    .bind(str_opt(&payload["visitTiming"]))
+    .bind(str_opt(&payload["message"]))
+    .bind(payload["consentAutomatedContact"].as_bool().unwrap_or(false))
+    .bind(payload["consentHealthcare"].as_bool().unwrap_or(false))
+    .bind(payload["consentOptOut"].as_bool().unwrap_or(false))
+    .bind(payload["consentPrivacyPractices"].as_bool().unwrap_or(false))
+    .bind(&parsed.bundle)
+    .bind(remote_ip)
+    .bind(user_agent)
+    .fetch_one(&mut *tx)
+    .await;
+
+    let lead_id = match insert {
+        Ok(id) => id,
+        Err(e) => {
+            tracing::error!(error = %e, "lead intake: insert");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to store lead");
+        }
+    };
+
+    for file in &parsed.files {
+        let attach = sqlx::query(
+            r#"INSERT INTO lead_attachments
+                (lead_id, file_name, content_type, size_bytes, data)
+               VALUES ($1, $2, $3, $4, $5)"#,
+        )
+        .bind(lead_id)
+        .bind(&file.file_name)
+        .bind(&file.content_type)
+        .bind(file.data.len() as i64)
+        .bind(&file.data)
+        .execute(&mut *tx)
+        .await;
+
+        if let Err(e) = attach {
+            tracing::error!(error = %e, lead = %lead_id, "lead intake: attachment insert");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to store attachment",
+            );
+        }
+    }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, "lead intake: commit");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
+    }
+
+    tracing::info!(
+        lead_id = %lead_id,
+        attachments = parsed.files.len(),
+        "lead intake stored from visitor facade"
+    );
+
+    (
+        StatusCode::CREATED,
+        Json(json!({
+            "lead_id": lead_id,
+            "attachment_count": parsed.files.len(),
+        })),
+    )
+        .into_response()
 }

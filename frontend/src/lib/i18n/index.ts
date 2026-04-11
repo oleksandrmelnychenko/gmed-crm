@@ -205,7 +205,6 @@ export interface Translations {
   nav_crm: string;
   nav_medicine: string;
   nav_providers: string;
-  nav_intakes: string;
 
   dash_pipeline: string;
   dash_daily_ops: string;

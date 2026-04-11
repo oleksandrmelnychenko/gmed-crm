@@ -68,7 +68,6 @@ function roleDisplay(role: string) {
 
 function notificationHref(item: Notification) {
   if (!item.entity_id || !item.entity_type) return null;
-  if (item.entity_type === "visitor_intake") return `/intakes?intake=${item.entity_id}`;
   if (item.entity_type === "lead") return `/leads?lead=${item.entity_id}`;
   if (item.entity_type === "patient") return `/patients?patient=${item.entity_id}`;
   if (item.entity_type === "provider") return `/providers?provider=${item.entity_id}`;

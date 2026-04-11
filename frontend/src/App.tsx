@@ -36,12 +36,6 @@ const LeadsPage = lazy(() =>
   })),
 );
 
-const IntakesPage = lazy(() =>
-  import("@/pages/intakes").then((module) => ({
-    default: module.IntakesPage,
-  })),
-);
-
 const OrdersPage = lazy(() =>
   import("@/pages/orders").then((module) => ({
     default: module.OrdersPage,
@@ -162,7 +156,6 @@ export default function App() {
                 <Route index element={<DashboardPage />} />
                 <Route path="chat" element={<ChatPage />} />
                 <Route path="leads" element={<LeadsPage />} />
-                <Route path="intakes" element={<IntakesPage />} />
                 <Route path="patients" element={<PatientsPage />} />
                 <Route path="patients/:id" element={<PatientDetailPage />} />
                 <Route path="providers" element={<ProvidersPage />} />

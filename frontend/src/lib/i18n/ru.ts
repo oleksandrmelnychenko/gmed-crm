@@ -252,7 +252,6 @@ export const ru: Translations = {
   nav_crm: "CRM",
   nav_medicine: "МЕДИЦИНА",
   nav_providers: "Клиники",
-  nav_intakes: "Заявки",
 
   dash_pipeline: "Пайплайн",
   dash_daily_ops: "Ежедневные операции",

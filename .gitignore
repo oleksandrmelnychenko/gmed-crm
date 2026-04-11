@@ -7,3 +7,5 @@
 node_modules/
 *.log
 .agent-extract/
+/.claude/settings.local.json
+/target-patient-slice/

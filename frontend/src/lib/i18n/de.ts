@@ -252,7 +252,6 @@ export const de: Translations = {
   nav_crm: "CRM",
   nav_medicine: "MEDIZIN",
   nav_providers: "Kliniken",
-  nav_intakes: "Anfragen",
 
   dash_pipeline: "Pipeline",
   dash_daily_ops: "Tagesbetrieb",

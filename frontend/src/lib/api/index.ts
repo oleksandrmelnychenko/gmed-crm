@@ -17,4 +17,3 @@ export * as appointments from "./appointments";
 export * as messages from "./messages";
 export * as notifications from "./notifications";
 export * as admin from "./admin";
-export * as visitorIntakes from "./visitor-intakes";

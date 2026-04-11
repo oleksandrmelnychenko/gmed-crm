@@ -23,7 +23,6 @@ pub mod stats;
 pub mod tasks;
 pub mod user_notifications;
 pub mod users;
-pub mod visitor_intake;
 
 use crate::state::AppState;
 use axum::Router;
@@ -31,7 +30,7 @@ use axum::Router;
 pub fn public_router() -> Router<AppState> {
     Router::new()
         .merge(auth::public_router())
-        .merge(visitor_intake::public_router())
+        .merge(leads::public_router())
 }
 
 pub fn protected_router() -> Router<AppState> {
@@ -60,5 +59,4 @@ pub fn protected_router() -> Router<AppState> {
         .merge(announcements::router())
         .merge(user_notifications::router())
         .merge(messages::router())
-        .merge(visitor_intake::router())
 }
