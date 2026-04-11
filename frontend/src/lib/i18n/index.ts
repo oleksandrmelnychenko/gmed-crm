@@ -226,6 +226,9 @@ export interface Translations {
   settings_agency_phone: string;
   settings_agency_email: string;
   settings_agency_hint: string;
+  settings_document_requirements: string;
+  settings_document_requirements_hint: string;
+  settings_required_patient_documents: string;
   settings_sessions: string;
   settings_active_sessions: string;
   settings_logout_user: string;

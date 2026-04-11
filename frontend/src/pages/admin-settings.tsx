@@ -116,6 +116,15 @@ const AGENCY_SETTING_FIELDS: SettingFieldMeta[] = [
   },
 ];
 
+const DOCUMENT_REQUIREMENT_SETTING_FIELDS: SettingFieldMeta[] = [
+  {
+    key: "required_patient_documents",
+    labelKey: "settings_required_patient_documents",
+    inputType: "textarea",
+    rows: 12,
+  },
+];
+
 function compactDt(value: string): string {
   return value.split("T")[0] ?? value;
 }
@@ -295,6 +304,21 @@ export function AdminSettingsPage() {
             </div>
             <div className="grid gap-4 lg:grid-cols-2">
               {AGENCY_SETTING_FIELDS.map(renderSettingField)}
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl border p-6 space-y-4">
+            <div>
+              <h2 className="text-lg font-medium">
+                {tr.settings_document_requirements ?? "Required documents"}
+              </h2>
+              <p className="text-muted-foreground mt-1 text-sm">
+                {tr.settings_document_requirements_hint ??
+                  "Configure the minimum patient document pack used for missing-document alerts."}
+              </p>
+            </div>
+            <div className="grid gap-4">
+              {DOCUMENT_REQUIREMENT_SETTING_FIELDS.map(renderSettingField)}
             </div>
           </div>
 

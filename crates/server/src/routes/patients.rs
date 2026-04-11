@@ -33,6 +33,10 @@ pub fn router() -> Router<AppState> {
             get(list_patient_documents),
         )
         .route(
+            "/patients/{patient_id}/document-alerts",
+            get(get_patient_document_alerts),
+        )
+        .route(
             "/patients/{patient_id}/framework-contracts",
             get(list_patient_framework_contracts),
         )
@@ -148,6 +152,14 @@ struct UpsertRelationRequest {
 #[derive(Deserialize)]
 struct PatientLabelQuery {
     format: Option<String>,
+}
+
+#[derive(Clone)]
+struct RequiredPatientDocumentRule {
+    key: String,
+    label: String,
+    art: Vec<String>,
+    category: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1222,6 +1234,252 @@ async fn list_patient_documents(
         .collect::<Vec<_>>();
 
     Ok(Json(items))
+}
+
+#[allow(clippy::result_large_err)]
+fn parse_required_patient_document_rules(
+    value: &Value,
+) -> Result<Vec<RequiredPatientDocumentRule>, axum::response::Response> {
+    let items = value.as_array().ok_or_else(|| {
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Required patient document settings are invalid",
+        )
+    })?;
+
+    let mut rules = Vec::with_capacity(items.len());
+    for item in items {
+        let object = item.as_object().ok_or_else(|| {
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Required patient document settings are invalid",
+            )
+        })?;
+
+        let key = object
+            .get("key")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Required patient document settings are invalid",
+                )
+            })?
+            .to_string();
+        let label = object
+            .get("label")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Required patient document settings are invalid",
+                )
+            })?
+            .to_string();
+
+        let collect_values = |field: &str| -> Result<Vec<String>, axum::response::Response> {
+            object
+                .get(field)
+                .map(|value| {
+                    value
+                        .as_array()
+                        .ok_or_else(|| {
+                            err(
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                "Required patient document settings are invalid",
+                            )
+                        })?
+                        .iter()
+                        .map(|item| {
+                            item.as_str()
+                                .map(str::trim)
+                                .filter(|value| !value.is_empty())
+                                .map(ToOwned::to_owned)
+                                .ok_or_else(|| {
+                                    err(
+                                        StatusCode::INTERNAL_SERVER_ERROR,
+                                        "Required patient document settings are invalid",
+                                    )
+                                })
+                        })
+                        .collect::<Result<Vec<_>, _>>()
+                })
+                .transpose()
+                .map(|value| value.unwrap_or_default())
+        };
+
+        rules.push(RequiredPatientDocumentRule {
+            key,
+            label,
+            art: collect_values("art")?,
+            category: collect_values("category")?,
+        });
+    }
+
+    Ok(rules)
+}
+
+async fn load_required_patient_document_rules(
+    state: &AppState,
+) -> Result<Vec<RequiredPatientDocumentRule>, axum::response::Response> {
+    let row = sqlx::query(
+        r#"SELECT value
+           FROM system_settings
+           WHERE key = 'required_patient_documents'"#,
+    )
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "Failed to load required patient documents setting");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load required patient document settings",
+        )
+    })?;
+
+    let Some(row) = row else {
+        return Ok(Vec::new());
+    };
+
+    let value = row.try_get::<Value, _>("value").map_err(|_| {
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Required patient document settings are invalid",
+        )
+    })?;
+
+    parse_required_patient_document_rules(&value)
+}
+
+async fn get_patient_document_alerts(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_uuid): Path<Uuid>,
+) -> Result<Json<Value>, axum::response::Response> {
+    auth.require_any_role(&[
+        Role::Ceo,
+        Role::PatientManager,
+        Role::Billing,
+        Role::TeamleadInterpreter,
+        Role::Interpreter,
+        Role::Concierge,
+    ])?;
+    ensure_patient_visible(&state, &auth, patient_uuid).await?;
+
+    let rules = load_required_patient_document_rules(&state).await?;
+
+    let patient_row = sqlx::query(
+        r#"SELECT legal_status
+           FROM patients
+           WHERE id = $1"#,
+    )
+    .bind(patient_uuid)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "Failed to load patient legal status for document alerts");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load patient document alerts",
+        )
+    })?;
+
+    let stored_document_pack_complete = patient_row
+        .try_get::<Value, _>("legal_status")
+        .ok()
+        .and_then(|value| value.get("document_pack_complete").and_then(Value::as_bool))
+        .unwrap_or(false);
+
+    let document_rows = sqlx::query(
+        r#"SELECT d.id,
+                  COALESCE(d.original_filename, d.auto_name, 'Document') AS filename,
+                  d.art,
+                  d.category,
+                  d.status
+           FROM documents d
+           WHERE d.patient_id = $1
+             AND d.status IN ('draft', 'active')
+           ORDER BY d.created_at DESC"#,
+    )
+    .bind(patient_uuid)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "Failed to load patient documents for alerts");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load patient document alerts",
+        )
+    })?;
+
+    let mut evaluated_rules = Vec::with_capacity(rules.len());
+    let mut missing_documents = Vec::new();
+    for rule in &rules {
+        let mut matching_documents = Vec::new();
+
+        for row in &document_rows {
+            let art = row
+                .try_get::<String, _>("art")
+                .unwrap_or_default()
+                .trim()
+                .to_lowercase()
+                .replace([' ', '-'], "_");
+            let category = row
+                .try_get::<Option<String>, _>("category")
+                .unwrap_or_default()
+                .unwrap_or_default()
+                .trim()
+                .to_lowercase()
+                .replace([' ', '-'], "_");
+
+            let matches_art = !rule.art.is_empty() && rule.art.iter().any(|value| value == &art);
+            let matches_category = !rule.category.is_empty()
+                && !category.is_empty()
+                && rule.category.iter().any(|value| value == &category);
+
+            if matches_art || matches_category {
+                matching_documents.push(json!({
+                    "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
+                    "filename": row.try_get::<String, _>("filename").unwrap_or_default(),
+                    "art": row.try_get::<String, _>("art").unwrap_or_default(),
+                    "category": row.try_get::<Option<String>, _>("category").unwrap_or_default(),
+                    "status": row.try_get::<String, _>("status").unwrap_or_default(),
+                }));
+            }
+        }
+
+        let fulfilled = !matching_documents.is_empty();
+        if !fulfilled {
+            missing_documents.push(json!({
+                "key": rule.key,
+                "label": rule.label,
+            }));
+        }
+
+        evaluated_rules.push(json!({
+            "key": rule.key,
+            "label": rule.label,
+            "fulfilled": fulfilled,
+            "matching_documents": matching_documents,
+        }));
+    }
+
+    let missing_count = missing_documents.len();
+    let document_pack_complete = missing_count == 0;
+
+    Ok(Json(json!({
+        "configured_rule_count": rules.len(),
+        "document_pack_complete": document_pack_complete,
+        "stored_document_pack_complete": stored_document_pack_complete,
+        "out_of_sync": stored_document_pack_complete != document_pack_complete,
+        "required_documents": evaluated_rules,
+        "missing_documents": missing_documents,
+        "missing_count": missing_count,
+    })))
 }
 
 async fn list_patient_framework_contracts(

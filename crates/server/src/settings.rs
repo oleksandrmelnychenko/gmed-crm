@@ -111,6 +111,7 @@ pub async fn update_setting(
         "agency_address" => validate_string_setting(value, 500, true, "Agency address")?,
         "agency_phone" => validate_string_setting(value, 64, true, "Agency phone")?,
         "agency_email" => validate_email_setting(value)?,
+        "required_patient_documents" => validate_required_patient_documents_setting(value)?,
         _ => validate_positive_integer_setting(key, value)?,
     };
 
@@ -228,4 +229,107 @@ fn validate_email_setting(value: &str) -> Result<Value, UpdateError> {
     }
 
     Ok(Value::String(trimmed.to_string()))
+}
+
+fn validate_required_patient_documents_setting(value: &str) -> Result<Value, UpdateError> {
+    let parsed: Value = serde_json::from_str(value.trim()).map_err(|_| {
+        UpdateError::InvalidValue("Required patient documents must be a valid JSON array".into())
+    })?;
+
+    let items = parsed.as_array().ok_or_else(|| {
+        UpdateError::InvalidValue("Required patient documents must be a JSON array".into())
+    })?;
+
+    let mut normalized = Vec::with_capacity(items.len());
+    for item in items {
+        let object = item.as_object().ok_or_else(|| {
+            UpdateError::InvalidValue(
+                "Each required patient document rule must be a JSON object".into(),
+            )
+        })?;
+
+        let raw_key = object
+            .get("key")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                UpdateError::InvalidValue(
+                    "Each required patient document rule must include a key".into(),
+                )
+            })?;
+        let key = raw_key.to_lowercase().replace([' ', '-'], "_");
+        if key.len() > 80
+            || !key
+                .chars()
+                .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_')
+        {
+            return Err(UpdateError::InvalidValue(
+                "Required patient document keys must use letters, digits, spaces or hyphens".into(),
+            ));
+        }
+
+        let label = object
+            .get("label")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                UpdateError::InvalidValue(
+                    "Each required patient document rule must include a label".into(),
+                )
+            })?;
+        if label.len() > 120 {
+            return Err(UpdateError::InvalidValue(
+                "Required patient document labels cannot exceed 120 characters".into(),
+            ));
+        }
+
+        let normalize_matchers = |field_name: &str| -> Result<Vec<String>, UpdateError> {
+            let Some(value) = object.get(field_name) else {
+                return Ok(Vec::new());
+            };
+            let items = value.as_array().ok_or_else(|| {
+                UpdateError::InvalidValue(format!(
+                    "Required patient document field '{field_name}' must be an array"
+                ))
+            })?;
+
+            let mut normalized_items = Vec::new();
+            for item in items {
+                let entry = item
+                        .as_str()
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .ok_or_else(|| {
+                            UpdateError::InvalidValue(format!(
+                                "Required patient document field '{field_name}' must contain only strings"
+                            ))
+                        })?;
+                let normalized_entry = entry.to_lowercase().replace([' ', '-'], "_");
+                if !normalized_items.contains(&normalized_entry) {
+                    normalized_items.push(normalized_entry);
+                }
+            }
+            Ok(normalized_items)
+        };
+
+        let art = normalize_matchers("art")?;
+        let category = normalize_matchers("category")?;
+        if art.is_empty() && category.is_empty() {
+            return Err(UpdateError::InvalidValue(
+                "Each required patient document rule must define at least one art or category matcher"
+                    .into(),
+            ));
+        }
+
+        normalized.push(serde_json::json!({
+            "key": key,
+            "label": label,
+            "art": art,
+            "category": category,
+        }));
+    }
+
+    Ok(Value::Array(normalized))
 }

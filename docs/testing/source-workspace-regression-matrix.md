@@ -79,6 +79,13 @@
   Covers:
   patient profile persists structured legal and compliance state for DSGVO, Schweigepflicht, identity verification, document completeness and contract readiness.
 
+- `patient_document_alerts_report_missing_required_documents`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:173`
+  `docs/diagrams/system-diagrams.md:734`
+  Covers:
+  patient workspace can evaluate the configured minimum document set and surface which required files are still missing for the current patient.
+
 - `patient_detail_view_audit_logs_visible_fields_for_role_filtered_payload`
   Source:
   `docs/architecture/02_field-level-access-control.md:7`

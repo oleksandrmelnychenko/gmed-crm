@@ -92,6 +92,7 @@ async fn settings_list_ok_for_it_admin() {
     assert!(arr.iter().any(|s| s["key"] == "refresh_token_days"));
     assert!(arr.iter().any(|s| s["key"] == "agency_name"));
     assert!(arr.iter().any(|s| s["key"] == "agency_email"));
+    assert!(arr.iter().any(|s| s["key"] == "required_patient_documents"));
 }
 
 #[tokio::test]
@@ -198,6 +199,20 @@ async fn settings_update_accepts_agency_profile_values() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["ok"], true);
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/admin/settings/required_patient_documents",
+        &admin,
+        Some(json!({"value": r#"[
+          {"key":"passport","label":"Reisepass","art":["passport_scan"],"category":["identity"]},
+          {"key":"consent_form","label":"Einverständniserklärung","art":["consent_form"],"category":["consent"]}
+        ]"#})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["ok"], true);
 }
 
 #[tokio::test]
@@ -209,6 +224,20 @@ async fn settings_update_rejects_invalid_agency_email() {
         "/api/v1/admin/settings/agency_email",
         &auth_header("it_admin"),
         Some(json!({"value": "invalid-email"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn settings_update_rejects_invalid_required_patient_documents_json() {
+    let Some(app) = test_app().await else { return };
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        "/api/v1/admin/settings/required_patient_documents",
+        &auth_header("it_admin"),
+        Some(json!({"value": r#"{"key":"passport"}"#})),
     )
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);

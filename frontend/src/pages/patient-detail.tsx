@@ -181,6 +181,29 @@ type DocumentItem = {
   created_at: string;
 };
 
+type DocumentAlertRule = {
+  key: string;
+  label: string;
+  fulfilled: boolean;
+  matching_documents: Array<{
+    id: string;
+    filename: string;
+    art: string;
+    category?: string | null;
+    status: string;
+  }>;
+};
+
+type DocumentAlerts = {
+  configured_rule_count: number;
+  document_pack_complete: boolean;
+  stored_document_pack_complete: boolean;
+  out_of_sync: boolean;
+  required_documents: DocumentAlertRule[];
+  missing_documents: Array<{ key: string; label: string }>;
+  missing_count: number;
+};
+
 type ContractItem = {
   id: string;
   contract_number: string;
@@ -586,6 +609,7 @@ export function PatientDetailPage() {
   const [relations, setRelations] = useState<RelationItem[]>([]);
   const [timeline, setTimeline] = useState<TimelineItem[]>([]);
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
+  const [documentAlerts, setDocumentAlerts] = useState<DocumentAlerts | null>(null);
   const [contracts, setContracts] = useState<ContractItem[]>([]);
   const [invoices, setInvoices] = useState<InvoiceItem[]>([]);
   const [tabLoading, setTabLoading] = useState(false);
@@ -792,15 +816,17 @@ export function PatientDetailPage() {
             break;
           }
           case "documents": {
-            const [result, patientOrders, patientAppointments] = await Promise.all([
+            const [result, patientOrders, patientAppointments, alerts] = await Promise.all([
               apiFetch<DocumentItem[]>(`/patients/${id}/documents`),
               apiFetch<OrderItem[]>(`/patients/${id}/orders`).catch(() => []),
               apiFetch<AppointmentItem[]>(`/patients/${id}/appointments`).catch(() => []),
+              apiFetch<DocumentAlerts>(`/patients/${id}/document-alerts`).catch(() => null),
             ]);
             if (!cancelled) {
               setDocuments(result);
               setOrders(patientOrders);
               setAppointments(patientAppointments);
+              setDocumentAlerts(alerts);
             }
             break;
           }
@@ -828,7 +854,10 @@ export function PatientDetailPage() {
         if (activeTab === "cases") setCases([]);
         if (activeTab === "orders") setOrders([]);
         if (activeTab === "appointments") setAppointments([]);
-        if (activeTab === "documents") setDocuments([]);
+        if (activeTab === "documents") {
+          setDocuments([]);
+          setDocumentAlerts(null);
+        }
         if (activeTab === "contracts") setContracts([]);
         if (activeTab === "invoices") setInvoices([]);
         if (activeTab === "timeline") setTimeline([]);
@@ -1833,6 +1862,59 @@ export function PatientDetailPage() {
               ) : null}
             </div>
           </div>
+          {!tabLoading && documentAlerts && documentAlerts.configured_rule_count > 0 ? (
+            <div
+              className={cn(
+                "mb-4 rounded-[1.6rem] border px-5 py-4",
+                documentAlerts.document_pack_complete
+                  ? "border-emerald-200 bg-emerald-50"
+                  : "border-amber-200 bg-amber-50"
+              )}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                    Required documents
+                  </p>
+                  <h4 className="mt-1 text-sm font-semibold text-slate-950">
+                    {documentAlerts.document_pack_complete
+                      ? "Minimum document pack is complete"
+                      : `${documentAlerts.missing_count} required document${documentAlerts.missing_count === 1 ? "" : "s"} missing`}
+                  </h4>
+                </div>
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    "rounded-full text-[10px]",
+                    documentAlerts.document_pack_complete
+                      ? "border-emerald-200 bg-emerald-100 text-emerald-800"
+                      : "border-amber-200 bg-amber-100 text-amber-800"
+                  )}
+                >
+                  {documentAlerts.required_documents.filter((item) => item.fulfilled).length}/
+                  {documentAlerts.configured_rule_count} fulfilled
+                </Badge>
+              </div>
+              {documentAlerts.missing_count > 0 ? (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {documentAlerts.missing_documents.map((item) => (
+                    <Badge
+                      key={item.key}
+                      variant="outline"
+                      className="rounded-full border-amber-300 bg-white text-amber-800"
+                    >
+                      {item.label}
+                    </Badge>
+                  ))}
+                </div>
+              ) : null}
+              {documentAlerts.out_of_sync ? (
+                <p className="mt-3 text-xs text-slate-600">
+                  The stored compliance flag for “Document pack complete” is not aligned with the current document inventory.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
           {tabLoading ? (
             <div className="flex items-center justify-center py-16"><LoaderCircle className="size-5 animate-spin text-slate-400" /></div>
           ) : documents.length === 0 ? (
