@@ -328,7 +328,10 @@ async fn get_lead(
         "id".into(),
         json!(row.try_get::<Uuid, _>("id").unwrap_or_default()),
     );
-    obj.insert("first_name".into(), Value::String(s_req(&row, "first_name")));
+    obj.insert(
+        "first_name".into(),
+        Value::String(s_req(&row, "first_name")),
+    );
     obj.insert("middle_name".into(), s_opt(&row, "middle_name"));
     obj.insert("last_name".into(), Value::String(s_req(&row, "last_name")));
     obj.insert("suffix".into(), s_opt(&row, "suffix"));
@@ -344,7 +347,10 @@ async fn get_lead(
     obj.insert("email".into(), s_opt(&row, "email"));
     obj.insert("email_consent".into(), b_opt(&row, "email_consent"));
     obj.insert("phone".into(), s_opt(&row, "phone"));
-    obj.insert("primary_phone_type".into(), s_opt(&row, "primary_phone_type"));
+    obj.insert(
+        "primary_phone_type".into(),
+        s_opt(&row, "primary_phone_type"),
+    );
     obj.insert(
         "phones".into(),
         row.try_get::<Value, _>("phones").unwrap_or(Value::Null),
@@ -372,7 +378,10 @@ async fn get_lead(
         "records_in_accepted_language".into(),
         b_opt(&row, "records_in_accepted_language"),
     );
-    obj.insert("has_travel_documents".into(), b_opt(&row, "has_travel_documents"));
+    obj.insert(
+        "has_travel_documents".into(),
+        b_opt(&row, "has_travel_documents"),
+    );
     obj.insert(
         "currently_in_treatment".into(),
         b_opt(&row, "currently_in_treatment"),
@@ -385,7 +394,10 @@ async fn get_lead(
         "primary_concern_text".into(),
         s_opt(&row, "primary_concern_text"),
     );
-    obj.insert("additional_concerns".into(), s_opt(&row, "additional_concerns"));
+    obj.insert(
+        "additional_concerns".into(),
+        s_opt(&row, "additional_concerns"),
+    );
     obj.insert(
         "services".into(),
         json!(
@@ -398,7 +410,10 @@ async fn get_lead(
         "insurance_covers_germany".into(),
         s_opt(&row, "insurance_covers_germany"),
     );
-    obj.insert("preferred_location".into(), s_opt(&row, "preferred_location"));
+    obj.insert(
+        "preferred_location".into(),
+        s_opt(&row, "preferred_location"),
+    );
     obj.insert("visit_timing".into(), s_opt(&row, "visit_timing"));
     obj.insert("message".into(), s_opt(&row, "message"));
     obj.insert(
@@ -985,10 +1000,18 @@ async fn ingest_lead_intake(
     .bind(str_opt(&payload["preferredLocation"]))
     .bind(str_opt(&payload["visitTiming"]))
     .bind(str_opt(&payload["message"]))
-    .bind(payload["consentAutomatedContact"].as_bool().unwrap_or(false))
+    .bind(
+        payload["consentAutomatedContact"]
+            .as_bool()
+            .unwrap_or(false),
+    )
     .bind(payload["consentHealthcare"].as_bool().unwrap_or(false))
     .bind(payload["consentOptOut"].as_bool().unwrap_or(false))
-    .bind(payload["consentPrivacyPractices"].as_bool().unwrap_or(false))
+    .bind(
+        payload["consentPrivacyPractices"]
+            .as_bool()
+            .unwrap_or(false),
+    )
     .bind(&parsed.bundle)
     .bind(remote_ip)
     .bind(user_agent)

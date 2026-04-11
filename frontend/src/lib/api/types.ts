@@ -117,8 +117,84 @@ export interface Lead {
   phone: string | null;
   source: string | null;
   country: string | null;
+  intake_source: string | null;
+  flow: string | null;
   qualification_status: string;
+  compliance_status?: string;
+  submitted_at: string | null;
   created_at: string;
+  attachment_count?: number;
+}
+
+export interface LeadAttachment {
+  id: string;
+  file_name: string;
+  content_type: string | null;
+  size_bytes: number;
+  uploaded_at: string;
+}
+
+export interface LeadPhoneEntry {
+  number: string;
+  type?: string;
+}
+
+export interface LeadDetail extends Lead {
+  middle_name: string | null;
+  suffix: string | null;
+  date_of_birth: string | null;
+  legal_sex: string | null;
+
+  email_consent: boolean | null;
+  primary_phone_type: string | null;
+  phones: LeadPhoneEntry[] | null;
+  whatsapp_consent: boolean | null;
+  whatsapp_number: string | null;
+
+  street_address: string | null;
+  city: string | null;
+  state: string | null;
+  zip_code: string | null;
+
+  primary_language: string | null;
+  needs_interpreter: boolean | null;
+
+  location: string | null;
+  location_detailed: string | null;
+  wants_membership: boolean | null;
+  selected_program: string | null;
+  can_travel: boolean | null;
+  has_medical_records: string | null;
+  records_in_accepted_language: boolean | null;
+  has_travel_documents: boolean | null;
+
+  currently_in_treatment: boolean | null;
+  has_health_risk_for_travel: boolean | null;
+
+  primary_concern_text: string | null;
+  additional_concerns: string | null;
+
+  services: string[];
+  has_insurance: boolean | null;
+  insurance_covers_germany: string | null;
+
+  preferred_location: string | null;
+  visit_timing: string | null;
+  message: string | null;
+
+  consent_automated_contact: boolean;
+  consent_healthcare: boolean;
+  consent_opt_out: boolean;
+  consent_privacy_practices: boolean;
+
+  raw_payload: unknown;
+  locale: string | null;
+  converted_patient_id: string | null;
+  notes: string | null;
+  user_agent: string | null;
+  updated_at: string;
+
+  attachments: LeadAttachment[];
 }
 
 export interface StatusCount {
@@ -133,7 +209,7 @@ export interface CreateLeadBody {
   phone?: string | null;
   source?: string | null;
   country?: string | null;
-  needs_medical?: string | null;
+  notes?: string | null;
 }
 
 export interface QualifyLeadBody {
