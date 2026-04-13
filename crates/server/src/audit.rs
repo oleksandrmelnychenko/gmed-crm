@@ -51,6 +51,48 @@
 //! the same hash within a deployment (useful for pattern detection),
 //! but the raw IP — which is PII under GDPR Art. 4 — never crosses the
 //! process boundary.
+//!
+//! # Migration policy for handler-side inserts
+//!
+//! The repository currently contains a population of direct
+//! `INSERT INTO audit_log` statements inside handler bodies. These were
+//! the only way to audit before this module existed, and they are being
+//! ratcheted down to zero — see `scripts/check_repo_hygiene.py`, which
+//! fails CI if the count ever increases.
+//!
+//! **New code must not add manual inserts.** Use [`AuditContext`] via an
+//! `Extension<AuditContext>` extractor and call the `set_*` helpers;
+//! [`middleware`] will pick up the enrichment and submit a single row.
+//!
+//! ## Correctness rules for migrating existing inserts
+//!
+//! Not every existing insert can be mechanically translated — the
+//! middleware writes the event *after* the HTTP response is produced,
+//! outside any handler-owned transaction. That changes delivery
+//! semantics in two ways:
+//!
+//! 1. **Transactional coupling.** If a handler wraps business-logic
+//!    mutations and an `INSERT INTO audit_log` in a single SQL
+//!    transaction and the transaction rolls back, today's code drops
+//!    the audit row with it. Migrating that call to [`AuditContext`]
+//!    breaks the coupling: the middleware fires even on rollback, so
+//!    the audit row claims the mutation happened when it did not.
+//!    **Leave such inserts alone and mark them with a
+//!    `TODO(audit-migrate)` comment.**
+//!
+//! 2. **Before/after diff snapshots.** Diff-style audits load a snapshot
+//!    before the mutation, apply the mutation, load a second snapshot,
+//!    and insert both as `old_value` / `new_value`. These translate to
+//!    [`AuditContext::set_old_value`] + [`AuditContext::set_new_value`]
+//!    — **only if** the handler's success path is the only one that
+//!    should surface an audit row. If an error after the first snapshot
+//!    must still be audited, leave the manual insert.
+//!
+//! 3. **Coverage by middleware is already guaranteed.** A handler that
+//!    does nothing still produces an `action = "http_request"` row —
+//!    enrichment is optional. Migration is about replacing the
+//!    semantically-rich manual row with a semantically-rich enriched
+//!    row, not about adding coverage.
 
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
@@ -84,6 +126,8 @@ pub struct AuditEvent {
     pub entity_type: String,
     pub entity_id: Option<Uuid>,
     pub context: Value,
+    pub old_value: Option<Value>,
+    pub new_value: Option<Value>,
     pub ip_hash: Option<String>,
 }
 
@@ -98,6 +142,9 @@ struct AuditAnnotation {
     entity_type: Option<String>,
     entity_id: Option<Uuid>,
     action: Option<String>,
+    context: Option<Value>,
+    old_value: Option<Value>,
+    new_value: Option<Value>,
 }
 
 impl AuditContext {
@@ -119,6 +166,36 @@ impl AuditContext {
             .lock()
             .expect("audit annotation mutex poisoned")
             .action = Some(action.into());
+    }
+
+    /// Provide a handler-specific context JSON blob. The middleware
+    /// merges this object on top of the base `{method, route, status,
+    /// latency_ms}` that it always writes, so handler keys win on
+    /// collision but never displace the infrastructure fields unless
+    /// the handler intentionally overrides them.
+    pub fn set_context(&self, context: Value) {
+        self.0
+            .lock()
+            .expect("audit annotation mutex poisoned")
+            .context = Some(context);
+    }
+
+    /// Attach an `old_value` snapshot for a diff-style audit. Pair with
+    /// [`Self::set_new_value`]. See the module docs for the correctness
+    /// rules that apply to this pattern.
+    pub fn set_old_value(&self, value: Value) {
+        self.0
+            .lock()
+            .expect("audit annotation mutex poisoned")
+            .old_value = Some(value);
+    }
+
+    /// Attach a `new_value` snapshot for a diff-style audit.
+    pub fn set_new_value(&self, value: Value) {
+        self.0
+            .lock()
+            .expect("audit annotation mutex poisoned")
+            .new_value = Some(value);
     }
 
     fn take(&self) -> AuditAnnotation {
@@ -203,6 +280,8 @@ pub fn auth_event(
         entity_type: "auth".to_string(),
         entity_id: user_id,
         context,
+        old_value: None,
+        new_value: None,
         ip_hash,
     }
 }
@@ -231,17 +310,23 @@ pub fn spawn_writer(pool: DbPool, ip_salt: String) -> AuditSender {
 }
 
 async fn write_event(pool: &DbPool, event: &AuditEvent) -> Result<(), sqlx::Error> {
+    // NOTE: this is the one intentional `INSERT INTO audit_log` allowed
+    // by the hygiene ratchet — it is the single writer for the module.
+    // Every handler-side insert that still exists is subject to the
+    // migration policy documented at the top of this module.
     sqlx::query(
         r#"
         INSERT INTO audit_log
-            (user_id, action, entity_type, entity_id, context, ip_address)
-        VALUES ($1, $2, $3, $4, $5, $6)
+            (user_id, action, entity_type, entity_id, old_value, new_value, context, ip_address)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         "#,
     )
     .bind(event.user_id)
     .bind(&event.action)
     .bind(&event.entity_type)
     .bind(event.entity_id)
+    .bind(event.old_value.as_ref())
+    .bind(event.new_value.as_ref())
     .bind(&event.context)
     .bind(event.ip_hash.as_deref())
     .execute(pool)
@@ -288,6 +373,11 @@ pub async fn middleware(
     let latency_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
 
     let annotation = context.take();
+    let base_context = build_context_json(&method, &route, response.status().as_u16(), latency_ms);
+    let merged_context = match annotation.context {
+        Some(overlay) => merge_json_objects(base_context, overlay),
+        None => base_context,
+    };
     let event = AuditEvent {
         user_id,
         action: annotation.action.unwrap_or_else(|| HTTP_ACTION.to_string()),
@@ -295,7 +385,9 @@ pub async fn middleware(
             .entity_type
             .unwrap_or_else(|| HTTP_ENTITY_TYPE.to_string()),
         entity_id: annotation.entity_id,
-        context: build_context_json(&method, &route, response.status().as_u16(), latency_ms),
+        context: merged_context,
+        old_value: annotation.old_value,
+        new_value: annotation.new_value,
         ip_hash: peer_ip.map(|ip| state.audit_sender.hash_ip(ip)),
     };
     state.audit_sender.try_send(event);
@@ -310,6 +402,22 @@ fn build_context_json(method: &Method, route: &str, status: u16, latency_ms: u64
         "status": status,
         "latency_ms": latency_ms,
     })
+}
+
+/// Shallow object merge: `overlay` keys win over `base` keys. If either
+/// side is not an object the overlay wins wholesale, which matches the
+/// behaviour a caller who provided a non-object handler context would
+/// intuitively expect.
+fn merge_json_objects(base: Value, overlay: Value) -> Value {
+    match (base, overlay) {
+        (Value::Object(mut base_map), Value::Object(overlay_map)) => {
+            for (k, v) in overlay_map {
+                base_map.insert(k, v);
+            }
+            Value::Object(base_map)
+        }
+        (_, overlay) => overlay,
+    }
 }
 
 /// Re-export as an extractor-friendly alias so handlers can write
@@ -384,6 +492,8 @@ mod tests {
                 entity_type: "t".into(),
                 entity_id: None,
                 context: json!({ "i": i }),
+                old_value: None,
+                new_value: None,
                 ip_hash: None,
             });
         }
@@ -441,5 +551,53 @@ mod tests {
         let event = auth_event("login_failure", None, None, json!({}));
         assert_eq!(event.user_id, None);
         assert_eq!(event.entity_id, None);
+    }
+
+    #[test]
+    fn audit_context_stores_context_old_and_new_value() {
+        let ctx = AuditContext::new();
+        ctx.set_context(json!({ "viewed_sections": ["diagnosis", "notes"] }));
+        ctx.set_old_value(json!({ "status": "draft" }));
+        ctx.set_new_value(json!({ "status": "signed" }));
+        let taken = ctx.take();
+        assert_eq!(
+            taken.context,
+            Some(json!({ "viewed_sections": ["diagnosis", "notes"] }))
+        );
+        assert_eq!(taken.old_value, Some(json!({ "status": "draft" })));
+        assert_eq!(taken.new_value, Some(json!({ "status": "signed" })));
+    }
+
+    #[test]
+    fn merge_json_objects_overlays_handler_keys_on_base() {
+        let base = json!({ "method": "GET", "route": "/x", "status": 200 });
+        let overlay = json!({ "status": 418, "handler_field": "value" });
+        let merged = merge_json_objects(base, overlay);
+        assert_eq!(merged["method"], "GET");
+        assert_eq!(merged["route"], "/x");
+        // Handler intentionally overrode the status field.
+        assert_eq!(merged["status"], 418);
+        assert_eq!(merged["handler_field"], "value");
+    }
+
+    #[test]
+    fn merge_json_objects_with_non_object_overlay_keeps_overlay() {
+        let merged = merge_json_objects(json!({ "a": 1 }), json!("not an object"));
+        assert_eq!(merged, json!("not an object"));
+    }
+
+    #[test]
+    fn merge_json_objects_with_non_object_base_keeps_overlay() {
+        let merged = merge_json_objects(json!(42), json!({ "a": 1 }));
+        // Base is a scalar — the overlay wins wholesale because there is
+        // nothing sensible to merge the object into.
+        assert_eq!(merged, json!({ "a": 1 }));
+    }
+
+    #[test]
+    fn auth_event_sets_old_and_new_value_to_none() {
+        let event = auth_event("login_success", Some(Uuid::new_v4()), None, json!({}));
+        assert!(event.old_value.is_none());
+        assert!(event.new_value.is_none());
     }
 }
