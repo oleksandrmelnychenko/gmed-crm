@@ -243,6 +243,13 @@
   Covers:
   browser-level staff document detail can trigger portal release and revoke actions through the same UI controls used in daily operations, with visible success feedback for both transitions.
 
+- `patient can confirm portal document receipt`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:164`
+  `docs/requirements/04_non-functional-requirements_ua.md:53`
+  Covers:
+  browser-level patient portal document workspace can confirm receipt of a released file, reduce the pending-confirmation counter and surface the confirmed state back in the same card.
+
 - `patient_can_upload_document_for_self_and_download_it`
   Source:
   `docs/requirements/03_product-backlog_ua.md:203`
@@ -250,12 +257,27 @@
   Covers:
   patient portal supports self-upload for internal care-team intake, keeps the upload patient-bound and lets the patient re-download the submitted file.
 
+- `patient can upload own document and download released plus uploaded files`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:160`
+  `docs/requirements/03_product-backlog_ua.md:203`
+  `docs/backlog/04_implementation-tasks_ua.md:282`
+  Covers:
+  browser-level patient portal document workspace can download an already released file, submit a new self-upload through the same form used in daily operations and immediately download that newly created portal upload back from the list.
+
 - `deleting_document_file_revokes_shares_and_removes_stored_file`
   Source:
   `docs/requirements/04_non-functional-requirements_ua.md:84`
   `docs/requirements/04_non-functional-requirements_ua.md:94`
   Covers:
   controlled document file-delete lifecycle archives the document row, revokes active shares, removes the stored binary from disk and blocks further download access without erasing audit/history metadata.
+
+- `staff can delete a stored document file and keep metadata trail`
+  Source:
+  `docs/requirements/04_non-functional-requirements_ua.md:84`
+  `docs/requirements/04_non-functional-requirements_ua.md:94`
+  Covers:
+  browser-level document detail can open the delete-file dialog, submit a mandatory deletion reason, surface the deleted-file banner and keep the download action disabled while metadata and reason remain visible.
 
 - `third_party_revoke_request_can_be_executed_by_patient_manager_and_revokes_only_external_consents_and_provider_document_shares`
   Source:

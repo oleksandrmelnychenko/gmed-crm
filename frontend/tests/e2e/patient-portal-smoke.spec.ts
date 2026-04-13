@@ -8,10 +8,20 @@ function json(route: Route, body: unknown, status = 200) {
   });
 }
 
+function multipartField(body: Buffer | null, name: string) {
+  if (!body) return null;
+  const text = body.toString("utf8");
+  const match = text.match(
+    new RegExp(`name="${name}"\\r\\n\\r\\n([\\s\\S]*?)\\r\\n--`, "i"),
+  );
+  return match?.[1]?.trim() ?? null;
+}
+
 async function installPatientPortalMocks(page: Page) {
   let paymentProofUploadedAt: string | null = null;
   const paymentProofTimestamp = "2026-04-10T09:15:00Z";
   let nextPrivacyRequestIndex = 1;
+  let nextPortalUploadIndex = 1;
   let privacyRequests = [
     {
       id: "00000000-0000-0000-0000-000000009801",
@@ -24,6 +34,59 @@ async function installPatientPortalMocks(page: Page) {
       requested_at: "2026-04-04T10:00:00Z",
       reviewed_at: "2026-04-05T10:00:00Z",
       executed_at: null,
+    },
+  ];
+  let releasedDocuments = [
+    {
+      id: "00000000-0000-0000-0000-000000009401",
+      patient_id: "00000000-0000-0000-0000-000000009001",
+      order_id: null,
+      appointment_id: "00000000-0000-0000-0000-000000009101",
+      auto_name: "Released discharge note",
+      original_filename: "discharge-note.pdf",
+      art: "medical_report",
+      category: "report",
+      status: "active",
+      visibility: "patient_visible",
+      is_medical: true,
+      mime_type: "application/pdf",
+      file_size: 4096,
+      klinik: "Clinic Cologne",
+      ursprung: "provider",
+      notes: "Released for portal access.",
+      share_id: "00000000-0000-0000-0000-000000009402",
+      channel: "patient_portal",
+      requires_confirmation: true,
+      confirmed: false,
+      confirmed_at: null,
+      shared_at: "2026-04-02T10:00:00Z",
+      shared_by_name: "Admin GMED",
+      created_at: "2026-04-01T09:00:00Z",
+      updated_at: "2026-04-02T10:00:00Z",
+    },
+  ];
+  let uploadedDocuments = [
+    {
+      id: "00000000-0000-0000-0000-000000009403",
+      patient_id: "00000000-0000-0000-0000-000000009001",
+      order_id: null,
+      appointment_id: null,
+      order_number: null,
+      appointment_title: null,
+      auto_name: "Passport copy",
+      original_filename: "passport.pdf",
+      art: "general",
+      category: "identity",
+      status: "active",
+      visibility: "internal",
+      is_medical: false,
+      mime_type: "application/pdf",
+      file_size: 2048,
+      klinik: null,
+      ursprung: "patient_portal",
+      notes: "Uploaded from portal.",
+      created_at: "2026-04-03T10:00:00Z",
+      updated_at: "2026-04-03T10:00:00Z",
     },
   ];
 
@@ -135,62 +198,27 @@ async function installPatientPortalMocks(page: Page) {
     }
 
     if (path === "/me/documents") {
-      return json(route, [
-        {
-          id: "00000000-0000-0000-0000-000000009401",
-          patient_id: "00000000-0000-0000-0000-000000009001",
-          order_id: null,
-          appointment_id: "00000000-0000-0000-0000-000000009101",
-          auto_name: "Released discharge note",
-          original_filename: "discharge-note.pdf",
-          art: "medical_report",
-          category: "report",
-          status: "active",
-          visibility: "patient_visible",
-          is_medical: true,
-          mime_type: "application/pdf",
-          file_size: 4096,
-          klinik: "Clinic Cologne",
-          ursprung: "provider",
-          notes: "Released for portal access.",
-          share_id: "00000000-0000-0000-0000-000000009402",
-          channel: "patient_portal",
-          requires_confirmation: true,
-          confirmed: false,
-          confirmed_at: null,
-          shared_at: "2026-04-02T10:00:00Z",
-          shared_by_name: "Admin GMED",
-          created_at: "2026-04-01T09:00:00Z",
-          updated_at: "2026-04-02T10:00:00Z",
-        },
-      ]);
+      return json(route, releasedDocuments);
+    }
+
+    if (
+      path === "/me/documents/00000000-0000-0000-0000-000000009401/confirm" &&
+      route.request().method() === "POST"
+    ) {
+      releasedDocuments = releasedDocuments.map((item) =>
+        item.id === "00000000-0000-0000-0000-000000009401"
+          ? {
+              ...item,
+              confirmed: true,
+              confirmed_at: "2026-04-13T12:00:00Z",
+            }
+          : item,
+      );
+      return json(route, { ok: true });
     }
 
     if (path === "/me/documents/uploads") {
-      return json(route, [
-        {
-          id: "00000000-0000-0000-0000-000000009403",
-          patient_id: "00000000-0000-0000-0000-000000009001",
-          order_id: null,
-          appointment_id: null,
-          order_number: null,
-          appointment_title: null,
-          auto_name: "Passport copy",
-          original_filename: "passport.pdf",
-          art: "general",
-          category: "identity",
-          status: "active",
-          visibility: "internal",
-          is_medical: false,
-          mime_type: "application/pdf",
-          file_size: 2048,
-          klinik: null,
-          ursprung: "patient_portal",
-          notes: "Uploaded from portal.",
-          created_at: "2026-04-03T10:00:00Z",
-          updated_at: "2026-04-03T10:00:00Z",
-        },
-      ]);
+      return json(route, uploadedDocuments);
     }
 
     if (path === "/me/document-alerts") {
@@ -250,8 +278,59 @@ async function installPatientPortalMocks(page: Page) {
     }
 
     if (path === "/me/documents/upload" && route.request().method() === "POST") {
-      paymentProofUploadedAt = paymentProofTimestamp;
+      const body = route.request().postDataBuffer();
+      const uploadKind = multipartField(body, "upload_kind");
+
+      if (uploadKind === "payment_proof") {
+        paymentProofUploadedAt = paymentProofTimestamp;
+        return json(route, { ok: true });
+      }
+
+      const autoName =
+        multipartField(body, "auto_name") || `Portal upload ${nextPortalUploadIndex}`;
+      const notes = multipartField(body, "notes");
+      const createdAt = `2026-04-1${nextPortalUploadIndex}T11:00:00Z`;
+      const createdUpload = {
+        id: `00000000-0000-0000-0000-0000000094${10 + nextPortalUploadIndex}`,
+        patient_id: "00000000-0000-0000-0000-000000009001",
+        order_id: null,
+        appointment_id: null,
+        order_number: null,
+        appointment_title: null,
+        auto_name: autoName,
+        original_filename: "portal-upload.pdf",
+        art: uploadKind || "general",
+        category: uploadKind === "insurance_document" ? "insurance" : "general",
+        status: "active",
+        visibility: "internal",
+        is_medical: uploadKind === "medical_record",
+        mime_type: "application/pdf",
+        file_size: 3072,
+        klinik: null,
+        ursprung: "patient_portal",
+        notes,
+        created_at: createdAt,
+        updated_at: createdAt,
+      };
+      nextPortalUploadIndex += 1;
+      uploadedDocuments = [createdUpload, ...uploadedDocuments];
       return json(route, { ok: true });
+    }
+
+    if (path === "/me/documents/00000000-0000-0000-0000-000000009401/download") {
+      return route.fulfill({
+        status: 200,
+        contentType: "application/pdf",
+        body: Buffer.from("%PDF-1.4 released-document"),
+      });
+    }
+
+    if (path.startsWith("/me/documents/uploads/") && path.endsWith("/download")) {
+      return route.fulfill({
+        status: 200,
+        contentType: "application/pdf",
+        body: Buffer.from("%PDF-1.4 uploaded-document"),
+      });
     }
 
     if (path === "/me/export") {
@@ -418,5 +497,66 @@ test.describe("patient portal smoke flows", () => {
       submittedRequest.getByText("Revoke third-party sharing"),
     ).toBeVisible();
     await expect(page.getByText(/Open requests:\s*2/i)).toBeVisible();
+  });
+
+  test("patient can confirm portal document receipt", async ({ page }) => {
+    await page.goto("/documents");
+    await expect(page).toHaveURL(/\/documents$/);
+    await expect(page.getByText(/Pending confirmations:\s*1/i)).toBeVisible();
+
+    const releasedCard = page
+      .locator("article")
+      .filter({ hasText: "Released discharge note" });
+
+    await page.getByRole("button", { name: /Confirm receipt/i }).click();
+
+    await expect(page.getByText("Document receipt confirmed.")).toBeVisible();
+    await expect(page.getByText(/Pending confirmations:\s*0/i)).toBeVisible();
+    await expect(releasedCard.getByText("Confirmed")).toBeVisible();
+  });
+
+  test("patient can upload own document and download released plus uploaded files", async ({
+    page,
+  }) => {
+    await page.goto("/documents");
+    await expect(page).toHaveURL(/\/documents$/);
+
+    const releasedCard = page
+      .locator("article")
+      .filter({ hasText: "Released discharge note" });
+    const releasedDownloadRequest = page.waitForRequest((request) =>
+      request.method() === "GET" &&
+      request.url().includes("/api/v1/me/documents/00000000-0000-0000-0000-000000009401/download"),
+    );
+    await releasedCard.getByRole("button", { name: /^Download$/i }).click();
+    await releasedDownloadRequest;
+
+    await page.getByLabel("Upload type").selectOption("insurance_document");
+    await page.getByLabel("Title").fill("Insurance card April");
+    await page
+      .getByLabel("File")
+      .setInputFiles({
+        name: "insurance-card.pdf",
+        mimeType: "application/pdf",
+        buffer: Buffer.from("insurance-card"),
+      });
+    await page.getByLabel("Note").fill("Front and back scanned.");
+    await page.getByRole("button", { name: /Send upload/i }).click();
+
+    await expect(page.getByText("Upload sent to the care team.")).toBeVisible();
+    await expect(page.getByText(/My uploads:\s*2/i)).toBeVisible();
+
+    const uploadedCard = page
+      .locator("article")
+      .filter({ hasText: "Insurance card April" });
+    await expect(uploadedCard).toBeVisible();
+    await expect(uploadedCard.getByText("Front and back scanned.")).toBeVisible();
+
+    const uploadDownloadRequest = page.waitForRequest((request) =>
+      request.method() === "GET" &&
+      request.url().includes("/api/v1/me/documents/uploads/00000000-0000-0000-0000-000000009411/download"),
+    );
+    await uploadedCard.getByRole("button", { name: /^Download$/i }).click();
+    await uploadDownloadRequest;
   });
 });

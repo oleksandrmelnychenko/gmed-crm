@@ -495,6 +495,35 @@ async function installStaffApiMocks(page: Page) {
     }
 
     if (
+      path === `/documents/${documentId}/delete` &&
+      route.request().method() === "POST"
+    ) {
+      const payload = JSON.parse(route.request().postData() ?? "{}") as {
+        reason?: string | null;
+      };
+      const updatedDocument = buildDocument({
+        ...documents.find((item) => item.id === documentId),
+        has_stored_file: false,
+        status: "archived",
+        file_deleted_at: "2026-04-13T12:30:00Z",
+        file_deleted_by: "00000000-0000-0000-0000-000000000001",
+        file_deleted_by_name: "Admin GMED",
+        file_delete_reason: payload.reason ?? null,
+        visibility: "internal",
+        share_count: 0,
+      });
+      documents = documents.map((item) =>
+        item.id === documentId ? updatedDocument : item,
+      );
+      portalShareActive = false;
+      providerShares = [];
+      return json(route, {
+        ok: true,
+        document: updatedDocument,
+      });
+    }
+
+    if (
       path === `/documents/${documentId}/shares` &&
       route.request().method() === "POST"
     ) {
@@ -788,5 +817,37 @@ test.describe("staff smoke flows", () => {
       page.locator('[role="status"]').filter({ hasText: /Freigabe widerrufen\./i }),
     ).toBeVisible();
     await expect(sheet.getByText("Revoked")).toBeVisible();
+  });
+
+  test("staff can delete a stored document file and keep metadata trail", async ({
+    page,
+  }) => {
+    await page.goto("/documents");
+    await expect(page.getByText("MRI report")).toBeVisible();
+
+    await page.getByText("MRI report").click();
+    const sheet = page.getByRole("dialog");
+    await expect(
+      sheet.getByRole("heading", { name: "MRI report" }),
+    ).toBeVisible();
+
+    await sheet.getByRole("button", { name: /Datei löschen/i }).click();
+    const deleteDialog = page.getByRole("dialog").filter({
+      has: page.getByRole("heading", { name: /Datei löschen/i }),
+    });
+    await expect(deleteDialog).toBeVisible();
+    await deleteDialog
+      .getByPlaceholder(/Warum wird die gespeicherte Datei entfernt/i)
+      .fill("Patient requested binary removal after handoff.");
+    await deleteDialog
+      .getByRole("button", { name: /Datei endgültig löschen/i })
+      .click();
+
+    await expect(
+      page.locator('[role="status"]').filter({ hasText: /Die gespeicherte Datei wurde entfernt\./i }),
+    ).toBeVisible();
+    await expect(sheet.getByText(/Gespeicherte Datei entfernt/i)).toBeVisible();
+    await expect(sheet.getByText("Patient requested binary removal after handoff.")).toBeVisible();
+    await expect(sheet.getByRole("button", { name: /Herunterladen/i })).toBeDisabled();
   });
 });
