@@ -32,8 +32,10 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/leads", get(list_leads).post(create_lead))
         .route("/leads/{lead_id}", get(get_lead))
+        .route("/leads/{lead_id}/update", post(update_lead))
         .route("/leads/{lead_id}/qualify", post(qualify_lead))
         .route("/leads/{lead_id}/convert", post(convert_lead))
+        .route("/leads/{lead_id}/failed-flow", post(resolve_failed_lead))
         .route(
             "/leads/{lead_id}/attachments/{attachment_id}",
             get(download_attachment),
@@ -72,6 +74,27 @@ struct QualifyRequest {
 }
 
 #[derive(Deserialize)]
+struct FailedLeadResolutionRequest {
+    resolution: String,
+    reason: String,
+    note: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct UpdateLeadRequest {
+    email: Option<String>,
+    phone: Option<String>,
+    country: Option<String>,
+    primary_language: Option<String>,
+    date_of_birth: Option<String>,
+    legal_sex: Option<String>,
+    compliance_status: Option<String>,
+    consent_healthcare: Option<bool>,
+    consent_privacy_practices: Option<bool>,
+    notes: Option<String>,
+}
+
+#[derive(Deserialize)]
 struct ListLeadsQuery {
     search: Option<String>,
     status: Option<String>,
@@ -106,6 +129,7 @@ async fn list_leads(
         r#"SELECT id, first_name, last_name, email, phone, source, country,
                   intake_source, flow, qualification_status, compliance_status,
                   submitted_at, created_at,
+                  failed_outcome_status, failed_reason, failed_processed_at,
                   (SELECT COUNT(*) FROM lead_attachments a WHERE a.lead_id = leads.id) AS attachment_count
            FROM leads
            WHERE ($1::bool = true OR qualification_status != 'archived')
@@ -151,6 +175,16 @@ async fn list_leads(
                     "flow": r.try_get::<Option<String>, _>("flow").unwrap_or_default(),
                     "qualification_status": r.try_get::<String, _>("qualification_status").unwrap_or_default(),
                     "compliance_status": r.try_get::<String, _>("compliance_status").unwrap_or_default(),
+                    "failed_outcome": {
+                        "status": r
+                            .try_get::<String, _>("failed_outcome_status")
+                            .unwrap_or_else(|_| "none".to_string()),
+                        "reason": r.try_get::<Option<String>, _>("failed_reason").unwrap_or_default(),
+                        "processed_at": r
+                            .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("failed_processed_at")
+                            .unwrap_or_default()
+                            .map(|value| value.to_rfc3339()),
+                    },
                     "submitted_at": r
                         .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("submitted_at")
                         .unwrap_or_default()
@@ -176,6 +210,253 @@ fn is_valid_lead_status(value: &str) -> bool {
         value,
         "new" | "in_progress" | "qualified" | "not_qualified" | "converted" | "archived"
     )
+}
+
+fn is_valid_compliance_status(value: &str) -> bool {
+    matches!(value, "pending" | "documents_sent" | "signed" | "rejected")
+}
+
+fn is_valid_legal_sex(value: &str) -> bool {
+    matches!(value, "female" | "male" | "diverse" | "no_entry")
+}
+
+fn is_valid_failed_lead_resolution(value: &str) -> bool {
+    matches!(value, "archive" | "delete")
+}
+
+fn current_lead_stage(qualification_status: &str, failed_outcome_status: &str) -> String {
+    if failed_outcome_status == "delete_anonymized" {
+        "deleted".to_string()
+    } else {
+        qualification_status.to_string()
+    }
+}
+
+fn failed_outcome_payload(row: &sqlx::postgres::PgRow) -> Value {
+    json!({
+        "status": row
+            .try_get::<String, _>("failed_outcome_status")
+            .unwrap_or_else(|_| "none".to_string()),
+        "from_status": row.try_get::<Option<String>, _>("failed_from_status").unwrap_or_default(),
+        "reason": row.try_get::<Option<String>, _>("failed_reason").unwrap_or_default(),
+        "note": row.try_get::<Option<String>, _>("failed_note").unwrap_or_default(),
+        "processed_at": row
+            .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("failed_processed_at")
+            .unwrap_or_default()
+            .map(|value| value.to_rfc3339()),
+        "processed_by": row.try_get::<Option<Uuid>, _>("failed_processed_by").unwrap_or_default(),
+    })
+}
+
+struct LeadConversionReadiness {
+    qualification_ready: bool,
+    conversion_ready: bool,
+    qualification_reasons: Vec<String>,
+    conversion_reasons: Vec<String>,
+    payload: Value,
+}
+
+fn build_lead_conversion_readiness(row: &sqlx::postgres::PgRow) -> LeadConversionReadiness {
+    let qualification_status: String = row.try_get("qualification_status").unwrap_or_default();
+    let compliance_status: String = row.try_get("compliance_status").unwrap_or_default();
+    let converted_patient_id: Option<Uuid> =
+        row.try_get("converted_patient_id").unwrap_or_default();
+    let date_of_birth: Option<NaiveDate> = row.try_get("date_of_birth").unwrap_or_default();
+    let legal_sex: Option<String> = row.try_get("legal_sex").unwrap_or_default();
+    let email: Option<String> = row.try_get("email").unwrap_or_default();
+    let phone: Option<String> = row.try_get("phone").unwrap_or_default();
+    let consent_privacy_practices: bool = row.try_get("consent_privacy_practices").unwrap_or(false);
+    let consent_healthcare: bool = row.try_get("consent_healthcare").unwrap_or(false);
+
+    let lead_qualified = qualification_status == "qualified";
+    let compliance_completed = compliance_status == "signed";
+    let birth_date_present = date_of_birth.is_some();
+    let legal_sex_present = legal_sex.as_deref().is_some_and(is_valid_legal_sex);
+    let primary_contact_present = email
+        .as_deref()
+        .is_some_and(|value| !value.trim().is_empty())
+        || phone
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty());
+
+    let checks = vec![
+        json!({
+            "key": "lead_qualified",
+            "label": "Lead qualified",
+            "passed": lead_qualified,
+            "blocking_for": "conversion",
+        }),
+        json!({
+            "key": "compliance_completed",
+            "label": "Compliance completed",
+            "passed": compliance_completed,
+            "blocking_for": "qualification",
+        }),
+        json!({
+            "key": "birth_date_present",
+            "label": "Birth date captured",
+            "passed": birth_date_present,
+            "blocking_for": "qualification",
+        }),
+        json!({
+            "key": "legal_sex_present",
+            "label": "Legal sex captured",
+            "passed": legal_sex_present,
+            "blocking_for": "qualification",
+        }),
+        json!({
+            "key": "primary_contact_present",
+            "label": "Primary contact available",
+            "passed": primary_contact_present,
+            "blocking_for": "qualification",
+        }),
+        json!({
+            "key": "privacy_consent",
+            "label": "Privacy practices accepted",
+            "passed": consent_privacy_practices,
+            "blocking_for": "qualification",
+        }),
+        json!({
+            "key": "healthcare_consent",
+            "label": "Healthcare consent captured",
+            "passed": consent_healthcare,
+            "blocking_for": "qualification",
+        }),
+    ];
+
+    let mut qualification_reasons = Vec::new();
+    if !compliance_completed {
+        qualification_reasons.push("Compliance is not signed yet".to_string());
+    }
+    if !birth_date_present {
+        qualification_reasons.push("Birth date is missing".to_string());
+    }
+    if !legal_sex_present {
+        qualification_reasons.push("Legal sex is missing".to_string());
+    }
+    if !primary_contact_present {
+        qualification_reasons.push("Email or phone is required".to_string());
+    }
+    if !consent_privacy_practices {
+        qualification_reasons.push("Privacy practices consent is missing".to_string());
+    }
+    if !consent_healthcare {
+        qualification_reasons.push("Healthcare consent is missing".to_string());
+    }
+
+    let qualification_ready = qualification_reasons.is_empty();
+    let mut conversion_reasons = qualification_reasons.clone();
+    if !lead_qualified {
+        conversion_reasons.insert(0, "Lead must be qualified before conversion".to_string());
+    }
+    if converted_patient_id.is_some() {
+        conversion_reasons.push("Lead is already converted".to_string());
+    }
+    let conversion_ready = conversion_reasons.is_empty();
+
+    LeadConversionReadiness {
+        qualification_ready,
+        conversion_ready,
+        qualification_reasons: qualification_reasons.clone(),
+        conversion_reasons: conversion_reasons.clone(),
+        payload: json!({
+            "qualification_ready": qualification_ready,
+            "conversion_ready": conversion_ready,
+            "qualification_reasons": qualification_reasons,
+            "blocking_reasons": conversion_reasons,
+            "checks": checks,
+        }),
+    }
+}
+
+async fn load_lead_conversion_readiness(
+    state: &AppState,
+    lead_id: Uuid,
+) -> Result<Option<LeadConversionReadiness>, axum::response::Response> {
+    let row = sqlx::query(
+        r#"SELECT qualification_status,
+                  compliance_status,
+                  converted_patient_id,
+                  date_of_birth,
+                  legal_sex,
+                  email,
+                  phone,
+                  consent_privacy_practices,
+                  consent_healthcare
+           FROM leads
+           WHERE id = $1"#,
+    )
+    .bind(lead_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, lead_id = %lead_id, "load lead readiness");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load lead readiness",
+        )
+    })?;
+
+    Ok(row.as_ref().map(build_lead_conversion_readiness))
+}
+
+async fn load_lead_lifecycle(
+    state: &AppState,
+    lead_id: Uuid,
+    qualification_status: &str,
+    failed_outcome_status: &str,
+    converted_patient_id: Option<Uuid>,
+    created_at: chrono::DateTime<chrono::Utc>,
+    failed_processed_at: Option<chrono::DateTime<chrono::Utc>>,
+) -> Result<Value, axum::response::Response> {
+    let mut history =
+        crate::routes::workflow_lifecycle::load_history(state, "lead", lead_id).await?;
+    let current_stage = current_lead_stage(qualification_status, failed_outcome_status);
+
+    if history.is_empty() {
+        let fallback_created_at = failed_processed_at.unwrap_or(created_at);
+        history.push(json!({
+            "from_stage": Value::Null,
+            "to_stage": current_stage,
+            "transition_kind": "created",
+            "note": Value::Null,
+            "metadata": {},
+            "changed_by": Value::Null,
+            "created_at": fallback_created_at.to_rfc3339(),
+        }));
+    }
+
+    Ok(json!({
+        "current_stage": current_lead_stage(qualification_status, failed_outcome_status),
+        "stage_entered_at": crate::routes::workflow_lifecycle::stage_entered_at(&history, &current_lead_stage(qualification_status, failed_outcome_status))
+            .or_else(|| failed_processed_at.map(|value| value.to_rfc3339()))
+            .or_else(|| Some(created_at.to_rfc3339())),
+        "can_convert": failed_outcome_status == "none"
+            && converted_patient_id.is_none()
+            && qualification_status == "qualified",
+        "can_resolve_failed": failed_outcome_status != "delete_anonymized"
+            && converted_patient_id.is_none(),
+        "history": history,
+    }))
+}
+
+fn lead_gate_err(
+    message: &str,
+    blocking_reasons: &[String],
+    readiness: &Value,
+) -> axum::response::Response {
+    (
+        StatusCode::UNPROCESSABLE_ENTITY,
+        Json(json!({
+            "error": StatusCode::UNPROCESSABLE_ENTITY
+                .canonical_reason()
+                .unwrap_or("error"),
+            "message": message,
+            "blocking_reasons": blocking_reasons,
+            "readiness": readiness,
+        })),
+    )
+        .into_response()
 }
 
 async fn create_lead(
@@ -217,6 +498,26 @@ async fn create_lead(
             .bind(id)
             .execute(&state.db)
             .await;
+            if let Err(resp) = crate::routes::workflow_lifecycle::record_event(
+                &state,
+                crate::routes::workflow_lifecycle::RecordEvent {
+                    entity_type: "lead",
+                    entity_id: id,
+                    from_stage: None,
+                    to_stage: "new",
+                    transition_kind: "created",
+                    changed_by: Some(auth.user_id),
+                    note: None,
+                    metadata: json!({
+                        "source": body.source,
+                        "intake_source": "manual",
+                    }),
+                },
+            )
+            .await
+            {
+                return resp;
+            }
             tracing::info!(by = %auth.user_id, lead = %id, "Lead created manually");
             (StatusCode::CREATED, Json(json!({ "id": id }))).into_response()
         }
@@ -253,6 +554,8 @@ async fn get_lead(
                   consent_opt_out, consent_privacy_practices,
                   raw_payload, intake_source, flow, locale, submitted_at,
                   compliance_status, qualification_status, converted_patient_id,
+                  failed_outcome_status, failed_from_status, failed_reason, failed_note,
+                  failed_processed_at, failed_processed_by,
                   notes, user_agent, created_at, updated_at
            FROM leads
            WHERE id = $1"#,
@@ -479,9 +782,163 @@ async fn get_lead(
             .try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at")
             .ok()),
     );
+    let readiness = build_lead_conversion_readiness(&row);
+    let qualification_status = s_req(&row, "qualification_status");
+    let failed_outcome_status = row
+        .try_get::<String, _>("failed_outcome_status")
+        .unwrap_or_else(|_| "none".to_string());
+    let converted_patient_id = row
+        .try_get::<Option<Uuid>, _>("converted_patient_id")
+        .ok()
+        .flatten();
+    let created_at = row
+        .try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
+        .unwrap_or_else(|_| chrono::Utc::now());
+    let failed_processed_at = row
+        .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("failed_processed_at")
+        .unwrap_or_default();
+    let lifecycle = match load_lead_lifecycle(
+        &state,
+        lead_id,
+        &qualification_status,
+        &failed_outcome_status,
+        converted_patient_id,
+        created_at,
+        failed_processed_at,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
     obj.insert("attachments".into(), Value::Array(attachments));
+    obj.insert("readiness".into(), readiness.payload);
+    obj.insert("failed_outcome".into(), failed_outcome_payload(&row));
+    obj.insert("lifecycle".into(), lifecycle);
 
     Json(Value::Object(obj)).into_response()
+}
+
+async fn update_lead(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(lead_id): Path<Uuid>,
+    Json(body): Json<UpdateLeadRequest>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Sales]) {
+        return e;
+    }
+
+    let compliance_status = body.compliance_status.as_deref().map(str::to_lowercase);
+    if let Some(ref value) = compliance_status
+        && !is_valid_compliance_status(value)
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid compliance_status",
+        );
+    }
+
+    let legal_sex = body.legal_sex.as_deref().map(str::to_lowercase);
+    if let Some(ref value) = legal_sex
+        && !is_valid_legal_sex(value)
+    {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid legal_sex");
+    }
+
+    let date_of_birth = match body.date_of_birth.as_deref() {
+        Some(value) if !value.trim().is_empty() => {
+            match NaiveDate::parse_from_str(value.trim(), "%Y-%m-%d") {
+                Ok(value) => Some(value),
+                Err(_) => {
+                    return err(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        "Invalid date_of_birth (YYYY-MM-DD)",
+                    );
+                }
+            }
+        }
+        _ => None,
+    };
+
+    if body.email.is_none()
+        && body.phone.is_none()
+        && body.country.is_none()
+        && body.primary_language.is_none()
+        && body.date_of_birth.is_none()
+        && body.legal_sex.is_none()
+        && body.compliance_status.is_none()
+        && body.consent_healthcare.is_none()
+        && body.consent_privacy_practices.is_none()
+        && body.notes.is_none()
+    {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "No lead changes supplied");
+    }
+
+    match sqlx::query(
+        r#"UPDATE leads
+           SET email = COALESCE($2, email),
+               phone = COALESCE($3, phone),
+               country = COALESCE($4, country),
+               primary_language = COALESCE($5, primary_language),
+               date_of_birth = COALESCE($6, date_of_birth),
+               legal_sex = COALESCE($7, legal_sex),
+               compliance_status = COALESCE($8, compliance_status),
+               consent_healthcare = COALESCE($9, consent_healthcare),
+               consent_privacy_practices = COALESCE($10, consent_privacy_practices),
+               notes = COALESCE($11, notes)
+           WHERE id = $1"#,
+    )
+    .bind(lead_id)
+    .bind(body.email.as_deref())
+    .bind(body.phone.as_deref())
+    .bind(body.country.as_deref())
+    .bind(body.primary_language.as_deref())
+    .bind(date_of_birth)
+    .bind(legal_sex)
+    .bind(compliance_status)
+    .bind(body.consent_healthcare)
+    .bind(body.consent_privacy_practices)
+    .bind(body.notes.as_deref())
+    .execute(&state.db)
+    .await
+    {
+        Ok(result) if result.rows_affected() > 0 => {
+            let readiness = match load_lead_conversion_readiness(&state, lead_id).await {
+                Ok(Some(value)) => value,
+                Ok(None) => return err(StatusCode::NOT_FOUND, "Lead not found"),
+                Err(resp) => return resp,
+            };
+
+            let _ = sqlx::query(
+                "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context)
+                 VALUES ($1, 'update_lead', 'lead', $2, $3)",
+            )
+            .bind(auth.user_id)
+            .bind(lead_id)
+            .bind(json!({
+                "compliance_status": body.compliance_status,
+                "date_of_birth": body.date_of_birth,
+                "legal_sex": body.legal_sex,
+                "contact_updated": body.email.is_some() || body.phone.is_some(),
+                "consent_healthcare": body.consent_healthcare,
+                "consent_privacy_practices": body.consent_privacy_practices,
+            }))
+            .execute(&state.db)
+            .await;
+
+            Json(json!({
+                "ok": true,
+                "readiness": readiness.payload,
+            }))
+            .into_response()
+        }
+        Ok(_) => err(StatusCode::NOT_FOUND, "Lead not found"),
+        Err(e) => {
+            tracing::error!(error = %e, lead_id = %lead_id, "update lead");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+        }
+    }
 }
 
 async fn qualify_lead(
@@ -495,8 +952,63 @@ async fn qualify_lead(
     }
 
     match body.status.as_str() {
-        "new" | "in_progress" | "qualified" | "not_qualified" | "archived" => {}
+        "new" | "in_progress" | "qualified" | "not_qualified" => {}
         _ => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid status"),
+    }
+
+    let current = match sqlx::query(
+        r#"SELECT qualification_status, converted_patient_id, failed_outcome_status
+           FROM leads
+           WHERE id = $1"#,
+    )
+    .bind(lead_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Lead not found"),
+        Err(e) => {
+            tracing::error!(error = %e, lead_id = %lead_id, "load lead before qualify");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+
+    let current_status: String = current.try_get("qualification_status").unwrap_or_default();
+    let converted_patient_id: Option<Uuid> =
+        current.try_get("converted_patient_id").unwrap_or_default();
+    let failed_outcome_status: String = current
+        .try_get("failed_outcome_status")
+        .unwrap_or_else(|_| "none".to_string());
+
+    if converted_patient_id.is_some() {
+        return err(StatusCode::CONFLICT, "Lead is already converted");
+    }
+    if failed_outcome_status == "delete_anonymized" {
+        return err(
+            StatusCode::CONFLICT,
+            "Lead payload is already deleted via failed-lead workflow",
+        );
+    }
+    if current_status == "archived" && body.status != current_status {
+        return err(
+            StatusCode::CONFLICT,
+            "Archived leads must be handled through the failed-lead workflow",
+        );
+    }
+
+    if body.status == "qualified" {
+        let readiness = match load_lead_conversion_readiness(&state, lead_id).await {
+            Ok(Some(value)) => value,
+            Ok(None) => return err(StatusCode::NOT_FOUND, "Lead not found"),
+            Err(resp) => return resp,
+        };
+        if !readiness.qualification_ready {
+            return lead_gate_err(
+                "Lead is not qualification-ready",
+                &readiness.qualification_reasons,
+                &readiness.payload,
+            );
+        }
     }
 
     match sqlx::query("UPDATE leads SET qualification_status = $2 WHERE id = $1")
@@ -511,9 +1023,29 @@ async fn qualify_lead(
             )
             .bind(auth.user_id)
             .bind(lead_id)
-            .bind(json!({ "status": body.status }))
+            .bind(json!({ "status": body.status.clone() }))
             .execute(&state.db)
             .await;
+            if current_status != body.status
+                && let Err(resp) = crate::routes::workflow_lifecycle::record_event(
+                    &state,
+                    crate::routes::workflow_lifecycle::RecordEvent {
+                        entity_type: "lead",
+                        entity_id: lead_id,
+                        from_stage: Some(current_status.as_str()),
+                        to_stage: &body.status,
+                        transition_kind: "status_change",
+                        changed_by: Some(auth.user_id),
+                        note: None,
+                        metadata: json!({
+                            "status": body.status.clone(),
+                        }),
+                    },
+                )
+                .await
+            {
+                return resp;
+            }
             Json(json!({ "ok": true })).into_response()
         }
         Ok(_) => err(StatusCode::NOT_FOUND, "Lead not found"),
@@ -535,7 +1067,8 @@ async fn convert_lead(
 
     let lead = match sqlx::query(
         r#"SELECT id, first_name, last_name, email, phone, country, primary_language,
-                  date_of_birth, legal_sex, qualification_status, converted_patient_id
+                  date_of_birth, legal_sex, qualification_status, converted_patient_id,
+                  failed_outcome_status
            FROM leads WHERE id = $1"#,
     )
     .bind(lead_id)
@@ -554,12 +1087,26 @@ async fn convert_lead(
     if converted_patient_id.is_some() {
         return err(StatusCode::CONFLICT, "Lead already converted");
     }
-
-    let qualification_status: String = lead.try_get("qualification_status").unwrap_or_default();
-    if qualification_status != "qualified" {
+    let failed_outcome_status: String = lead
+        .try_get("failed_outcome_status")
+        .unwrap_or_else(|_| "none".to_string());
+    if failed_outcome_status != "none" {
         return err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "Lead must be qualified before conversion",
+            StatusCode::CONFLICT,
+            "Failed leads cannot be converted into patients",
+        );
+    }
+
+    let readiness = match load_lead_conversion_readiness(&state, lead_id).await {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Lead not found"),
+        Err(resp) => return resp,
+    };
+    if !readiness.conversion_ready {
+        return lead_gate_err(
+            "Lead is not conversion-ready",
+            &readiness.conversion_reasons,
+            &readiness.payload,
         );
     }
 
@@ -639,14 +1186,45 @@ async fn convert_lead(
     .execute(&state.db)
     .await;
 
+    if let Err(resp) = crate::routes::workflow_checklists::ensure_default_patient_workflow(
+        &state,
+        patient_id,
+        Some(auth.user_id),
+    )
+    .await
+    {
+        return resp;
+    }
+
     let _ = sqlx::query(
         "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'convert_lead', 'lead', $2, $3)",
     )
     .bind(auth.user_id)
     .bind(lead_id)
-    .bind(json!({ "patient_id": patient_id, "patient_pid": pid }))
+    .bind(json!({ "patient_id": patient_id, "patient_pid": pid.clone() }))
     .execute(&state.db)
     .await;
+    let previous_status: String = lead.try_get("qualification_status").unwrap_or_default();
+    if let Err(resp) = crate::routes::workflow_lifecycle::record_event(
+        &state,
+        crate::routes::workflow_lifecycle::RecordEvent {
+            entity_type: "lead",
+            entity_id: lead_id,
+            from_stage: Some(previous_status.as_str()),
+            to_stage: "converted",
+            transition_kind: "converted",
+            changed_by: Some(auth.user_id),
+            note: Some("Lead converted to patient"),
+            metadata: json!({
+                "patient_id": patient_id,
+                "patient_pid": pid.clone(),
+            }),
+        },
+    )
+    .await
+    {
+        return resp;
+    }
 
     tracing::info!(by = %auth.user_id, lead = %lead_id, patient = %patient_id, "Lead converted to patient");
 
@@ -655,6 +1233,307 @@ async fn convert_lead(
         "patient_pid": pid,
     }))
     .into_response()
+}
+
+async fn resolve_failed_lead(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(lead_id): Path<Uuid>,
+    Json(body): Json<FailedLeadResolutionRequest>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Sales, Role::Ceo]) {
+        return e;
+    }
+
+    let resolution = body.resolution.trim().to_lowercase();
+    if !is_valid_failed_lead_resolution(&resolution) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid failed lead resolution",
+        );
+    }
+
+    let reason = body.reason.trim();
+    if reason.is_empty() {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Failure reason is required",
+        );
+    }
+
+    if resolution == "delete" && !matches!(auth.role, Role::PatientManager | Role::Ceo) {
+        return err(
+            StatusCode::FORBIDDEN,
+            "Only patient managers or CEO may delete failed leads",
+        );
+    }
+
+    let current = match sqlx::query(
+        r#"SELECT qualification_status,
+                  converted_patient_id,
+                  failed_outcome_status
+           FROM leads
+           WHERE id = $1"#,
+    )
+    .bind(lead_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Lead not found"),
+        Err(e) => {
+            tracing::error!(error = %e, lead_id = %lead_id, "load failed-lead context");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to resolve failed lead",
+            );
+        }
+    };
+
+    let current_status: String = current.try_get("qualification_status").unwrap_or_default();
+    let converted_patient_id: Option<Uuid> =
+        current.try_get("converted_patient_id").unwrap_or_default();
+    let failed_outcome_status: String = current
+        .try_get("failed_outcome_status")
+        .unwrap_or_else(|_| "none".to_string());
+
+    if converted_patient_id.is_some() {
+        return err(
+            StatusCode::CONFLICT,
+            "Converted leads cannot enter the failed-lead workflow",
+        );
+    }
+    if failed_outcome_status != "none" {
+        return err(
+            StatusCode::CONFLICT,
+            "Failed-lead workflow was already processed for this lead",
+        );
+    }
+
+    let note = body
+        .note
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let outcome_status = if resolution == "archive" {
+        "archived"
+    } else {
+        "delete_anonymized"
+    };
+    let lifecycle_stage = if resolution == "archive" {
+        "archived"
+    } else {
+        "deleted"
+    };
+
+    let update_result = if resolution == "archive" {
+        sqlx::query(
+            r#"UPDATE leads
+               SET qualification_status = 'archived',
+                   failed_outcome_status = 'archived',
+                   failed_from_status = $2,
+                   failed_reason = $3,
+                   failed_note = $4,
+                   failed_processed_at = now(),
+                   failed_processed_by = $5
+               WHERE id = $1"#,
+        )
+        .bind(lead_id)
+        .bind(current_status.clone())
+        .bind(reason)
+        .bind(note)
+        .bind(auth.user_id)
+        .execute(&state.db)
+        .await
+    } else {
+        let deleted_result = sqlx::query(
+            r#"UPDATE leads
+               SET first_name = 'Deleted',
+                   middle_name = NULL,
+                   last_name = 'Lead',
+                   suffix = NULL,
+                   date_of_birth = NULL,
+                   legal_sex = NULL,
+                   email = NULL,
+                   email_consent = NULL,
+                   phone = NULL,
+                   primary_phone_type = NULL,
+                   phones = '[]'::jsonb,
+                   whatsapp_consent = NULL,
+                   whatsapp_number = NULL,
+                   source = 'Deleted',
+                   country = NULL,
+                   street_address = NULL,
+                   city = NULL,
+                   state = NULL,
+                   zip_code = NULL,
+                   primary_language = NULL,
+                   needs_interpreter = NULL,
+                   location = NULL,
+                   location_detailed = NULL,
+                   wants_membership = NULL,
+                   selected_program = NULL,
+                   can_travel = NULL,
+                   has_medical_records = NULL,
+                   records_in_accepted_language = NULL,
+                   has_travel_documents = NULL,
+                   currently_in_treatment = NULL,
+                   has_health_risk_for_travel = NULL,
+                   primary_concern_text = NULL,
+                   additional_concerns = NULL,
+                   services = '{}'::text[],
+                   has_insurance = NULL,
+                   insurance_covers_germany = NULL,
+                   preferred_location = NULL,
+                   visit_timing = NULL,
+                   message = NULL,
+                   consent_automated_contact = false,
+                   consent_healthcare = false,
+                   consent_opt_out = false,
+                   consent_privacy_practices = false,
+                   raw_payload = NULL,
+                   remote_ip = NULL,
+                   user_agent = NULL,
+                   notes = NULL,
+                   qualification_status = 'archived',
+                   failed_outcome_status = 'delete_anonymized',
+                   failed_from_status = $2,
+                   failed_reason = $3,
+                   failed_note = $4,
+                   failed_processed_at = now(),
+                   failed_processed_by = $5
+               WHERE id = $1"#,
+        )
+        .bind(lead_id)
+        .bind(current_status.clone())
+        .bind(reason)
+        .bind(note)
+        .bind(auth.user_id)
+        .execute(&state.db)
+        .await;
+
+        if let Ok(result) = &deleted_result
+            && result.rows_affected() > 0
+        {
+            let _ = sqlx::query("DELETE FROM lead_attachments WHERE lead_id = $1")
+                .bind(lead_id)
+                .execute(&state.db)
+                .await;
+        }
+
+        deleted_result
+    };
+
+    match update_result {
+        Ok(result) if result.rows_affected() > 0 => {
+            let _ = sqlx::query(
+                "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context)
+                 VALUES ($1, 'resolve_failed_lead', 'lead', $2, $3)",
+            )
+            .bind(auth.user_id)
+            .bind(lead_id)
+            .bind(json!({
+                "resolution": resolution.clone(),
+                "reason": reason,
+                "note": note,
+                "failed_from_status": current_status.clone(),
+            }))
+            .execute(&state.db)
+            .await;
+
+            if let Err(resp) = crate::routes::workflow_lifecycle::record_event(
+                &state,
+                crate::routes::workflow_lifecycle::RecordEvent {
+                    entity_type: "lead",
+                    entity_id: lead_id,
+                    from_stage: Some(current_status.as_str()),
+                    to_stage: lifecycle_stage,
+                    transition_kind: if resolution == "archive" {
+                        "archived"
+                    } else {
+                        "deleted"
+                    },
+                    changed_by: Some(auth.user_id),
+                    note: Some(reason),
+                    metadata: json!({
+                        "resolution": outcome_status,
+                        "note": note,
+                    }),
+                },
+            )
+            .await
+            {
+                return resp;
+            }
+
+            let refreshed = match sqlx::query(
+                r#"SELECT qualification_status,
+                          converted_patient_id,
+                          failed_outcome_status,
+                          failed_from_status,
+                          failed_reason,
+                          failed_note,
+                          failed_processed_at,
+                          failed_processed_by,
+                          created_at
+                   FROM leads
+                   WHERE id = $1"#,
+            )
+            .bind(lead_id)
+            .fetch_one(&state.db)
+            .await
+            {
+                Ok(row) => row,
+                Err(e) => {
+                    tracing::error!(error = %e, lead_id = %lead_id, "reload failed lead");
+                    return err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to resolve failed lead",
+                    );
+                }
+            };
+
+            let lifecycle = match load_lead_lifecycle(
+                &state,
+                lead_id,
+                &refreshed
+                    .try_get::<String, _>("qualification_status")
+                    .unwrap_or_default(),
+                &refreshed
+                    .try_get::<String, _>("failed_outcome_status")
+                    .unwrap_or_else(|_| "none".to_string()),
+                refreshed
+                    .try_get::<Option<Uuid>, _>("converted_patient_id")
+                    .unwrap_or_default(),
+                refreshed
+                    .try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
+                    .unwrap_or_else(|_| chrono::Utc::now()),
+                refreshed
+                    .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("failed_processed_at")
+                    .unwrap_or_default(),
+            )
+            .await
+            {
+                Ok(value) => value,
+                Err(resp) => return resp,
+            };
+
+            Json(json!({
+                "ok": true,
+                "failed_outcome": failed_outcome_payload(&refreshed),
+                "lifecycle": lifecycle,
+            }))
+            .into_response()
+        }
+        Ok(_) => err(StatusCode::NOT_FOUND, "Lead not found"),
+        Err(e) => {
+            tracing::error!(error = %e, lead_id = %lead_id, resolution, "resolve failed lead");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to resolve failed lead",
+            )
+        }
+    }
 }
 
 async fn download_attachment(
@@ -1059,6 +1938,28 @@ async fn ingest_lead_intake(
         attachments = parsed.files.len(),
         "lead intake stored from visitor facade"
     );
+
+    if let Err(resp) = crate::routes::workflow_lifecycle::record_event(
+        &state,
+        crate::routes::workflow_lifecycle::RecordEvent {
+            entity_type: "lead",
+            entity_id: lead_id,
+            from_stage: None,
+            to_stage: "new",
+            transition_kind: "created",
+            changed_by: None,
+            note: Some("Lead created from visitor facade"),
+            metadata: json!({
+                "source": "Website Wizard",
+                "intake_source": "visitor_facade",
+                "attachment_count": parsed.files.len(),
+            }),
+        },
+    )
+    .await
+    {
+        return resp;
+    }
 
     (
         StatusCode::CREATED,

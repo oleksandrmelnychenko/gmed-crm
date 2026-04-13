@@ -21,6 +21,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/patients", get(list_patients).post(create_patient))
         .route("/patients/{patient_id}", get(get_patient))
+        .route("/patients/{patient_id}/recheck", get(get_patient_recheck))
         .route("/patients/{patient_id}/assignments", get(list_assignments))
         .route("/patients/{patient_id}/cases", get(list_patient_cases))
         .route("/patients/{patient_id}/orders", get(list_patient_orders))
@@ -85,6 +86,7 @@ struct CreatePatientRequest {
     nationality: Option<String>,
     residence_country: Option<String>,
     languages: Option<Vec<String>>,
+    functional_labels: Option<Vec<String>>,
     phone_primary: Option<String>,
     phone_secondary: Option<String>,
     email: Option<String>,
@@ -112,6 +114,7 @@ struct UpdatePatientRequest {
     nationality: Option<String>,
     residence_country: Option<String>,
     languages: Option<Vec<String>>,
+    functional_labels: Option<Vec<String>>,
     address_street: Option<String>,
     address_city: Option<String>,
     address_zip: Option<String>,
@@ -162,6 +165,24 @@ struct RequiredPatientDocumentRule {
     category: Vec<String>,
 }
 
+#[derive(Clone)]
+pub(crate) struct PatientDocumentAlertsSummary {
+    configured_rule_count: usize,
+    document_pack_complete: bool,
+    stored_document_pack_complete: bool,
+    out_of_sync: bool,
+    required_documents: Vec<Value>,
+    missing_documents: Vec<Value>,
+    missing_count: usize,
+}
+
+#[derive(Clone)]
+pub(crate) struct PatientRecheckReadiness {
+    pub(crate) can_create_order: bool,
+    pub(crate) blocking_reasons: Vec<String>,
+    pub(crate) payload: Value,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PatientLabelFormat {
     pub(crate) id: &'static str,
@@ -198,6 +219,14 @@ pub(crate) const PATIENT_LABEL_FORMATS: [PatientLabelFormat; 3] = [
         width_mm: 70,
         height_mm: 37,
     },
+];
+
+const ALLOWED_PATIENT_FUNCTIONAL_LABELS: [&str; 5] = [
+    "vip",
+    "high_risk",
+    "mobility_support",
+    "fall_risk",
+    "complex_coordination",
 ];
 
 fn validate_create(req: &CreatePatientRequest) -> Result<(), &'static str> {
@@ -430,7 +459,7 @@ async fn list_patients(
     let rows = sqlx::query(
         r#"SELECT p.id, p.patient_id, p.title, p.first_name, p.last_name,
                   p.birth_date, p.gender, p.nationality, p.residence_country,
-                  p.languages, p.phone_primary, p.email,
+                  p.languages, p.functional_labels, p.phone_primary, p.email,
                   p.insurance_provider, p.insurance_type,
                   p.is_active, p.created_at
            FROM patients p
@@ -515,6 +544,7 @@ async fn list_patients(
                         nationality: r.try_get("nationality").unwrap_or_default(),
                         residence_country: r.try_get("residence_country").unwrap_or_default(),
                         languages: r.try_get("languages").unwrap_or_default(),
+                        functional_labels: r.try_get("functional_labels").unwrap_or_default(),
                         phone_primary: r.try_get("phone_primary").unwrap_or_default(),
                         email: r.try_get("email").unwrap_or_default(),
                         insurance_provider: r.try_get("insurance_provider").unwrap_or_default(),
@@ -558,7 +588,7 @@ async fn get_patient(
     match sqlx::query!(
         r#"SELECT id, patient_id, title, first_name, last_name,
                   birth_date, gender, nationality, residence_country,
-                  languages, phone_primary, phone_secondary, email,
+                  languages, functional_labels, phone_primary, phone_secondary, email,
                   address_street, address_city, address_zip, address_country,
                   insurance_provider, insurance_number, insurance_type,
                   emergency_contact_name, emergency_contact_phone, emergency_contact_relation,
@@ -589,6 +619,7 @@ async fn get_patient(
                     nationality: r.nationality,
                     residence_country: r.residence_country,
                     languages: r.languages,
+                    functional_labels: r.functional_labels,
                     phone_primary: r.phone_primary,
                     phone_secondary: r.phone_secondary,
                     email: r.email,
@@ -666,11 +697,16 @@ async fn create_patient(
 
     let pid = generate_patient_id(seq);
     let langs = body.languages.unwrap_or_default();
+    let functional_labels = match normalize_functional_labels(body.functional_labels) {
+        Ok(Some(labels)) => labels,
+        Ok(None) => Vec::new(),
+        Err(response) => return Err(response),
+    };
 
     let row = sqlx::query!(
         r#"INSERT INTO patients (
             patient_id, title, first_name, last_name, birth_date, gender,
-            nationality, residence_country, languages,
+            nationality, residence_country, languages, functional_labels,
             phone_primary, phone_secondary, email,
             address_street, address_city, address_zip, address_country,
             insurance_provider, insurance_number, insurance_type,
@@ -679,7 +715,7 @@ async fn create_patient(
         ) VALUES (
             $1, $2, $3, $4, $5, $6, $7, $8, $9,
             $10, $11, $12, $13, $14, $15, $16,
-            $17, $18, $19, $20, $21, $22, $23, $24
+            $17, $18, $19, $20, $21, $22, $23, $24, $25
         ) RETURNING id, patient_id, created_at"#,
         pid,
         body.title,
@@ -690,6 +726,7 @@ async fn create_patient(
         body.nationality,
         body.residence_country,
         &langs,
+        &functional_labels,
         body.phone_primary,
         body.phone_secondary,
         body.email,
@@ -724,6 +761,13 @@ async fn create_patient(
     .execute(&state.db)
     .await
     .ok();
+
+    crate::routes::workflow_checklists::ensure_default_patient_workflow(
+        &state,
+        row.id,
+        Some(auth.user_id),
+    )
+    .await?;
 
     let _ = sqlx::query!(
         "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context)
@@ -795,7 +839,12 @@ async fn update_patient(
         },
         None => None,
     };
+    let functional_labels = match normalize_functional_labels(body.functional_labels) {
+        Ok(labels) => labels,
+        Err(response) => return response,
+    };
     let legal_status_updated = legal_status.is_some();
+    let functional_labels_updated = functional_labels.is_some();
     let contract_status = legal_status
         .as_ref()
         .and_then(|value| value.0.get("contract_status"))
@@ -816,18 +865,19 @@ async fn update_patient(
             nationality = COALESCE($8, nationality),
             residence_country = COALESCE($9, residence_country),
             languages = COALESCE($10, languages),
-            address_street = COALESCE($11, address_street),
-            address_city = COALESCE($12, address_city),
-            address_zip = COALESCE($13, address_zip),
-            address_country = COALESCE($14, address_country),
-            insurance_provider = COALESCE($15, insurance_provider),
-            insurance_number = COALESCE($16, insurance_number),
-            insurance_type = COALESCE($17, insurance_type),
-            emergency_contact_name = COALESCE($18, emergency_contact_name),
-            emergency_contact_phone = COALESCE($19, emergency_contact_phone),
-            emergency_contact_relation = COALESCE($20, emergency_contact_relation),
-            legal_status = COALESCE($21::jsonb, legal_status),
-            notes = COALESCE($22, notes),
+            functional_labels = COALESCE($11, functional_labels),
+            address_street = COALESCE($12, address_street),
+            address_city = COALESCE($13, address_city),
+            address_zip = COALESCE($14, address_zip),
+            address_country = COALESCE($15, address_country),
+            insurance_provider = COALESCE($16, insurance_provider),
+            insurance_number = COALESCE($17, insurance_number),
+            insurance_type = COALESCE($18, insurance_type),
+            emergency_contact_name = COALESCE($19, emergency_contact_name),
+            emergency_contact_phone = COALESCE($20, emergency_contact_phone),
+            emergency_contact_relation = COALESCE($21, emergency_contact_relation),
+            legal_status = COALESCE($22::jsonb, legal_status),
+            notes = COALESCE($23, notes),
             updated_at = now()
         WHERE id = $1"#,
     )
@@ -841,6 +891,7 @@ async fn update_patient(
     .bind(body.nationality)
     .bind(body.residence_country)
     .bind(body.languages)
+    .bind(functional_labels)
     .bind(body.address_street)
     .bind(body.address_city)
     .bind(body.address_zip)
@@ -858,6 +909,7 @@ async fn update_patient(
 
     let audit_context = serde_json::json!({
         "legal_status_updated": legal_status_updated,
+        "functional_labels_updated": functional_labels_updated,
         "contract_status": contract_status,
         "compliance_completed": compliance_completed,
     });
@@ -1355,22 +1407,11 @@ async fn load_required_patient_document_rules(
     parse_required_patient_document_rules(&value)
 }
 
-async fn get_patient_document_alerts(
-    State(state): State<AppState>,
-    Extension(auth): Extension<AuthUser>,
-    Path(patient_uuid): Path<Uuid>,
-) -> Result<Json<Value>, axum::response::Response> {
-    auth.require_any_role(&[
-        Role::Ceo,
-        Role::PatientManager,
-        Role::Billing,
-        Role::TeamleadInterpreter,
-        Role::Interpreter,
-        Role::Concierge,
-    ])?;
-    ensure_patient_visible(&state, &auth, patient_uuid).await?;
-
-    let rules = load_required_patient_document_rules(&state).await?;
+pub(crate) async fn load_patient_document_alerts_summary(
+    state: &AppState,
+    patient_uuid: Uuid,
+) -> Result<PatientDocumentAlertsSummary, axum::response::Response> {
+    let rules = load_required_patient_document_rules(state).await?;
 
     let patient_row = sqlx::query(
         r#"SELECT legal_status
@@ -1378,7 +1419,7 @@ async fn get_patient_document_alerts(
            WHERE id = $1"#,
     )
     .bind(patient_uuid)
-    .fetch_one(&state.db)
+    .fetch_optional(&state.db)
     .await
     .map_err(|e| {
         tracing::error!(error = %e, patient_id = %patient_uuid, "Failed to load patient legal status for document alerts");
@@ -1387,6 +1428,10 @@ async fn get_patient_document_alerts(
             "Failed to load patient document alerts",
         )
     })?;
+
+    let Some(patient_row) = patient_row else {
+        return Err(err(StatusCode::NOT_FOUND, "Patient not found"));
+    };
 
     let stored_document_pack_complete = patient_row
         .try_get::<Value, _>("legal_status")
@@ -1471,15 +1516,449 @@ async fn get_patient_document_alerts(
     let missing_count = missing_documents.len();
     let document_pack_complete = missing_count == 0;
 
-    Ok(Json(json!({
-        "configured_rule_count": rules.len(),
-        "document_pack_complete": document_pack_complete,
-        "stored_document_pack_complete": stored_document_pack_complete,
-        "out_of_sync": stored_document_pack_complete != document_pack_complete,
-        "required_documents": evaluated_rules,
-        "missing_documents": missing_documents,
-        "missing_count": missing_count,
-    })))
+    Ok(PatientDocumentAlertsSummary {
+        configured_rule_count: rules.len(),
+        document_pack_complete,
+        stored_document_pack_complete,
+        out_of_sync: stored_document_pack_complete != document_pack_complete,
+        required_documents: evaluated_rules,
+        missing_documents,
+        missing_count,
+    })
+}
+
+pub(crate) fn patient_document_alerts_payload(summary: &PatientDocumentAlertsSummary) -> Value {
+    json!({
+        "configured_rule_count": summary.configured_rule_count,
+        "document_pack_complete": summary.document_pack_complete,
+        "stored_document_pack_complete": summary.stored_document_pack_complete,
+        "out_of_sync": summary.out_of_sync,
+        "required_documents": summary.required_documents,
+        "missing_documents": summary.missing_documents,
+        "missing_count": summary.missing_count,
+    })
+}
+
+pub(crate) async fn load_patient_recheck_readiness(
+    state: &AppState,
+    patient_uuid: Uuid,
+) -> Result<Option<PatientRecheckReadiness>, axum::response::Response> {
+    let patient_row = sqlx::query(
+        r#"SELECT id,
+                  patient_id,
+                  first_name,
+                  last_name,
+                  birth_date,
+                  gender,
+                  residence_country,
+                  address_country,
+                  languages,
+                  phone_primary,
+                  email,
+                  legal_status
+           FROM patients
+           WHERE id = $1"#,
+    )
+    .bind(patient_uuid)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "Failed to load patient re-check context");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load patient re-check",
+        )
+    })?;
+
+    let Some(patient_row) = patient_row else {
+        return Ok(None);
+    };
+
+    let patient_pid = patient_row
+        .try_get::<String, _>("patient_id")
+        .unwrap_or_default();
+    let first_name = patient_row
+        .try_get::<String, _>("first_name")
+        .unwrap_or_default();
+    let last_name = patient_row
+        .try_get::<String, _>("last_name")
+        .unwrap_or_default();
+    let birth_date = patient_row
+        .try_get::<chrono::NaiveDate, _>("birth_date")
+        .ok()
+        .map(|value| value.to_string());
+    let gender = patient_row
+        .try_get::<String, _>("gender")
+        .unwrap_or_default();
+    let residence_country = patient_row
+        .try_get::<Option<String>, _>("residence_country")
+        .unwrap_or_default();
+    let address_country = patient_row
+        .try_get::<Option<String>, _>("address_country")
+        .unwrap_or_default();
+    let languages = patient_row
+        .try_get::<Vec<String>, _>("languages")
+        .unwrap_or_default();
+    let phone_primary = patient_row
+        .try_get::<Option<String>, _>("phone_primary")
+        .unwrap_or_default();
+    let email = patient_row
+        .try_get::<Option<String>, _>("email")
+        .unwrap_or_default();
+    let legal_status = patient_row
+        .try_get::<Value, _>("legal_status")
+        .unwrap_or_else(|_| json!({}));
+    let patient_name = format!("{first_name} {last_name}").trim().to_string();
+
+    let existing_context = sqlx::query(
+        r#"SELECT EXISTS(SELECT 1 FROM orders WHERE patient_id = $1) AS has_orders,
+                  EXISTS(SELECT 1 FROM cases WHERE patient_id = $1) AS has_cases,
+                  EXISTS(SELECT 1 FROM appointments WHERE patient_id = $1) AS has_appointments,
+                  EXISTS(SELECT 1 FROM framework_contracts WHERE patient_id = $1) AS has_contracts,
+                  EXISTS(SELECT 1 FROM invoices WHERE patient_id = $1) AS has_invoices"#,
+    )
+    .bind(patient_uuid)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "Failed to load existing customer context for re-check");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load patient re-check",
+        )
+    })?;
+    let requires_recheck = existing_context
+        .try_get::<bool, _>("has_orders")
+        .unwrap_or(false)
+        || existing_context
+            .try_get::<bool, _>("has_cases")
+            .unwrap_or(false)
+        || existing_context
+            .try_get::<bool, _>("has_appointments")
+            .unwrap_or(false)
+        || existing_context
+            .try_get::<bool, _>("has_contracts")
+            .unwrap_or(false)
+        || existing_context
+            .try_get::<bool, _>("has_invoices")
+            .unwrap_or(false);
+
+    if !requires_recheck {
+        return Ok(Some(PatientRecheckReadiness {
+            can_create_order: true,
+            blocking_reasons: Vec::new(),
+            payload: json!({
+                "requires_recheck": false,
+                "can_create_order": true,
+                "base_data_ready": true,
+                "compliance_ready": true,
+                "identity_ready": true,
+                "document_pack_ready": true,
+                "contract_ready": true,
+                "debt_hold": false,
+                "overdue_invoice_count": 0,
+                "base_data_missing_fields": [],
+                "blocking_reasons": [],
+                "checks": [],
+                "reason": "Existing-customer re-check is not required before the first operational order",
+                "patient": {
+                    "id": patient_uuid,
+                    "patient_id": patient_pid,
+                    "name": patient_name,
+                    "birth_date": birth_date,
+                    "gender": gender,
+                    "phone_primary": phone_primary,
+                    "email": email,
+                    "residence_country": residence_country,
+                    "address_country": address_country,
+                    "languages": languages,
+                },
+                "legal_status": legal_status,
+                "document_alerts": {
+                    "configured_rule_count": 0,
+                    "document_pack_complete": true,
+                    "stored_document_pack_complete": true,
+                    "out_of_sync": false,
+                    "required_documents": [],
+                    "missing_documents": [],
+                    "missing_count": 0,
+                },
+                "latest_framework_contract": Value::Null,
+            }),
+        }));
+    }
+
+    let primary_contact_present = phone_primary
+        .as_deref()
+        .is_some_and(|value| !value.trim().is_empty())
+        || email
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty());
+    let country_present = residence_country
+        .as_deref()
+        .is_some_and(|value| !value.trim().is_empty())
+        || address_country
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty());
+    let language_present = !languages.is_empty();
+    let base_data_ready = primary_contact_present && country_present && language_present;
+
+    let dsgvo_signed = legal_status
+        .get("dsgvo_signed")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let identity_verified = legal_status
+        .get("identity_verified")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let compliance_completed = legal_status
+        .get("compliance_completed")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let stored_contract_status = legal_status
+        .get("contract_status")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let compliance_ready = compliance_completed && dsgvo_signed;
+
+    let document_alerts = load_patient_document_alerts_summary(state, patient_uuid).await?;
+    let document_pack_ready = document_alerts.document_pack_complete;
+
+    let contract_rows = sqlx::query(
+        r#"SELECT id,
+                  contract_number,
+                  status,
+                  signed_at,
+                  valid_from,
+                  valid_to,
+                  created_at
+           FROM framework_contracts
+           WHERE patient_id = $1
+           ORDER BY COALESCE(valid_to, 'infinity'::date) DESC,
+                    COALESCE(signed_at, created_at) DESC"#,
+    )
+    .bind(patient_uuid)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "Failed to load framework contracts for re-check");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load patient re-check",
+        )
+    })?;
+
+    let today = chrono::Utc::now().date_naive();
+    let latest_framework_contract = contract_rows.first().map(|row| {
+        json!({
+            "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
+            "contract_number": row.try_get::<String, _>("contract_number").unwrap_or_default(),
+            "status": row.try_get::<String, _>("status").unwrap_or_default(),
+            "signed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("signed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+            "valid_from": row.try_get::<Option<chrono::NaiveDate>, _>("valid_from").unwrap_or_default().map(|value| value.to_string()),
+            "valid_to": row.try_get::<Option<chrono::NaiveDate>, _>("valid_to").unwrap_or_default().map(|value| value.to_string()),
+        })
+    });
+    let valid_framework_contract = contract_rows.iter().any(|row| {
+        let status = row.try_get::<String, _>("status").unwrap_or_default();
+        let valid_from = row
+            .try_get::<Option<chrono::NaiveDate>, _>("valid_from")
+            .unwrap_or_default();
+        let valid_to = row
+            .try_get::<Option<chrono::NaiveDate>, _>("valid_to")
+            .unwrap_or_default();
+        status == "signed"
+            && valid_from.map(|value| value <= today).unwrap_or(true)
+            && valid_to.map(|value| value >= today).unwrap_or(true)
+    });
+
+    let contract_ready = stored_contract_status == "signed" || valid_framework_contract;
+
+    let debt_management =
+        crate::routes::debt_management::load_patient_debt_management_state(state, patient_uuid)
+            .await?;
+    let overdue_invoice_count = debt_management.overdue_invoice_count;
+    let debt_hold = debt_management.blocking;
+
+    let mut base_data_missing_fields = Vec::new();
+    if !primary_contact_present {
+        base_data_missing_fields.push("primary_contact".to_string());
+    }
+    if !country_present {
+        base_data_missing_fields.push("country".to_string());
+    }
+    if !language_present {
+        base_data_missing_fields.push("language".to_string());
+    }
+
+    let checks = vec![
+        json!({
+            "key": "base_data",
+            "label": "Base data valid",
+            "passed": base_data_ready,
+            "blocking_for": "create_order",
+        }),
+        json!({
+            "key": "compliance",
+            "label": "Compliance documents valid",
+            "passed": compliance_ready,
+            "blocking_for": "create_order",
+        }),
+        json!({
+            "key": "identity",
+            "label": "Identity verified",
+            "passed": identity_verified,
+            "blocking_for": "create_order",
+        }),
+        json!({
+            "key": "document_pack",
+            "label": "Required patient documents complete",
+            "passed": document_pack_ready,
+            "blocking_for": "create_order",
+        }),
+        json!({
+            "key": "contract",
+            "label": "Contract documents valid",
+            "passed": contract_ready,
+            "blocking_for": "create_order",
+        }),
+        json!({
+            "key": "debt_clear",
+            "label": "Debt-management hold cleared",
+            "passed": !debt_hold,
+            "blocking_for": "create_order",
+        }),
+    ];
+
+    let mut blocking_reasons = Vec::new();
+    if !base_data_ready {
+        if !primary_contact_present {
+            blocking_reasons.push("Primary contact is missing".to_string());
+        }
+        if !country_present {
+            blocking_reasons.push("Residence or address country is missing".to_string());
+        }
+        if !language_present {
+            blocking_reasons.push("Preferred language is missing".to_string());
+        }
+    }
+    if !compliance_ready {
+        if !compliance_completed {
+            blocking_reasons.push("Compliance status is not completed".to_string());
+        }
+        if !dsgvo_signed {
+            blocking_reasons.push("DSGVO/compliance documents are not signed".to_string());
+        }
+    }
+    if !identity_verified {
+        blocking_reasons.push("Identity is not verified".to_string());
+    }
+    if !document_pack_ready {
+        blocking_reasons.push(format!(
+            "{} required patient document(s) are missing",
+            document_alerts.missing_count
+        ));
+    }
+    if !contract_ready {
+        blocking_reasons.push("Valid contract documentation is missing".to_string());
+    }
+    if debt_hold {
+        blocking_reasons.push(
+            debt_management
+                .blocking_reason
+                .clone()
+                .unwrap_or_else(|| "Patient is still in debt-management hold".to_string()),
+        );
+    }
+
+    let can_create_order = blocking_reasons.is_empty();
+
+    Ok(Some(PatientRecheckReadiness {
+        can_create_order,
+        blocking_reasons: blocking_reasons.clone(),
+        payload: json!({
+            "requires_recheck": true,
+            "can_create_order": can_create_order,
+            "base_data_ready": base_data_ready,
+            "compliance_ready": compliance_ready,
+            "identity_ready": identity_verified,
+            "document_pack_ready": document_pack_ready,
+            "contract_ready": contract_ready,
+            "debt_hold": debt_hold,
+            "overdue_invoice_count": overdue_invoice_count,
+            "debt_management": debt_management.payload,
+            "outstanding_balance": debt_management.outstanding_balance.round_dp(2).normalize().to_string(),
+            "base_data_missing_fields": base_data_missing_fields,
+            "blocking_reasons": blocking_reasons,
+            "checks": checks,
+            "patient": {
+                "id": patient_uuid,
+                "patient_id": patient_pid,
+                "name": patient_name,
+                "birth_date": birth_date,
+                "gender": gender,
+                "phone_primary": phone_primary,
+                "email": email,
+                "residence_country": residence_country,
+                "address_country": address_country,
+                "languages": languages,
+            },
+            "legal_status": {
+                "dsgvo_signed": dsgvo_signed,
+                "identity_verified": identity_verified,
+                "compliance_completed": compliance_completed,
+                "contract_status": stored_contract_status,
+            },
+            "document_alerts": patient_document_alerts_payload(&document_alerts),
+            "latest_framework_contract": latest_framework_contract,
+        }),
+    }))
+}
+
+async fn get_patient_document_alerts(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_uuid): Path<Uuid>,
+) -> Result<Json<Value>, axum::response::Response> {
+    auth.require_any_role(&[
+        Role::Ceo,
+        Role::PatientManager,
+        Role::Billing,
+        Role::TeamleadInterpreter,
+        Role::Interpreter,
+        Role::Concierge,
+    ])?;
+    ensure_patient_visible(&state, &auth, patient_uuid).await?;
+    let summary = load_patient_document_alerts_summary(&state, patient_uuid).await?;
+    Ok(Json(patient_document_alerts_payload(&summary)))
+}
+
+async fn get_patient_recheck(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_uuid): Path<Uuid>,
+) -> Result<Json<Value>, axum::response::Response> {
+    auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Billing])?;
+    ensure_patient_visible(&state, &auth, patient_uuid).await?;
+
+    let Some(readiness) = load_patient_recheck_readiness(&state, patient_uuid).await? else {
+        return Err(err(StatusCode::NOT_FOUND, "Patient not found"));
+    };
+
+    let _ = sqlx::query(
+        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'view_patient_recheck', 'patient', $2, $3)",
+    )
+    .bind(auth.user_id)
+    .bind(patient_uuid)
+    .bind(json!({
+        "can_create_order": readiness.can_create_order,
+        "blocking_reasons": readiness.blocking_reasons.clone(),
+    }))
+    .execute(&state.db)
+    .await;
+
+    Ok(Json(readiness.payload))
 }
 
 async fn list_patient_framework_contracts(
@@ -1928,11 +2407,23 @@ async fn delete_relation(
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
+#[derive(Deserialize)]
+struct PatientTimelineQuery {
+    entity_type: Option<String>,
+    category: Option<String>,
+    source: Option<String>,
+    search: Option<String>,
+    range: Option<String>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+}
+
 async fn get_patient_timeline(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(patient_uuid): Path<Uuid>,
-) -> Result<Json<Vec<Value>>, axum::response::Response> {
+    Query(query): Query<PatientTimelineQuery>,
+) -> Result<Json<Value>, axum::response::Response> {
     auth.require_any_role(&[
         Role::Ceo,
         Role::PatientManager,
@@ -1943,147 +2434,238 @@ async fn get_patient_timeline(
     ])?;
     ensure_patient_visible(&state, &auth, patient_uuid).await?;
 
-    let rows = sqlx::query(
-        r#"SELECT *
-           FROM (
-                SELECT 'appointment'::text AS entity_type,
-                       a.id AS entity_id,
-                       a.title AS title,
-                       COALESCE(a.appointment_type, 'medical') AS category,
-                       a.status AS status,
-                       ((a.date::timestamp + COALESCE(a.time_start, time '00:00')) AT TIME ZONE 'UTC') AS happened_at,
-                       concat_ws(' · ', p.name, d.name) AS source_label
-                FROM appointments a
-                LEFT JOIN providers p ON p.id = a.provider_id
-                LEFT JOIN provider_doctors d ON d.id = a.doctor_id
-                WHERE a.patient_id = $1
+    let limit = query.limit.unwrap_or(50).clamp(1, 200);
+    let offset = query.offset.unwrap_or(0).max(0);
+    let entity_type = query
+        .entity_type
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let category = query
+        .category
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let source = query
+        .source
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let search_pattern = format!("%{}%", query.search.as_deref().unwrap_or("").trim());
+    let range_cutoff = match query.range.as_deref().unwrap_or("all") {
+        "all" => None,
+        "30d" => Some(chrono::Utc::now() - chrono::Duration::days(30)),
+        "90d" => Some(chrono::Utc::now() - chrono::Duration::days(90)),
+        "180d" => Some(chrono::Utc::now() - chrono::Duration::days(180)),
+        "365d" => Some(chrono::Utc::now() - chrono::Duration::days(365)),
+        _ => {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Invalid timeline range filter",
+            ));
+        }
+    };
 
-                UNION ALL
+    let events_cte = r#"WITH events AS (
+            SELECT 'appointment'::text AS entity_type,
+                   a.id AS entity_id,
+                   a.title AS title,
+                   COALESCE(a.appointment_type, 'medical') AS category,
+                   a.status AS status,
+                   ((a.date::timestamp + COALESCE(a.time_start, time '00:00')) AT TIME ZONE 'UTC') AS happened_at,
+                   concat_ws(' · ', p.name, d.name) AS source_label
+            FROM appointments a
+            LEFT JOIN providers p ON p.id = a.provider_id
+            LEFT JOIN provider_doctors d ON d.id = a.doctor_id
+            WHERE a.patient_id = $1
 
-                SELECT 'case'::text AS entity_type,
-                       c.id AS entity_id,
-                       COALESCE(c.hauptanfragegrund, c.case_id) AS title,
-                       'anamnesis'::text AS category,
-                       c.status AS status,
-                       c.created_at AS happened_at,
-                       c.case_id AS source_label
-                FROM cases c
-                WHERE c.patient_id = $1
+            UNION ALL
 
-                UNION ALL
+            SELECT 'case'::text AS entity_type,
+                   c.id AS entity_id,
+                   COALESCE(c.hauptanfragegrund, c.case_id) AS title,
+                   'anamnesis'::text AS category,
+                   c.status AS status,
+                   c.created_at AS happened_at,
+                   c.case_id AS source_label
+            FROM cases c
+            WHERE c.patient_id = $1
 
-                SELECT 'order'::text AS entity_type,
-                       o.id AS entity_id,
-                       o.order_number AS title,
-                       o.phase AS category,
-                       o.status AS status,
-                       o.created_at AS happened_at,
-                       COALESCE(o.needs_description, o.order_number) AS source_label
-                FROM orders o
-                WHERE o.patient_id = $1
+            UNION ALL
 
-                UNION ALL
+            SELECT 'order'::text AS entity_type,
+                   o.id AS entity_id,
+                   o.order_number AS title,
+                   o.phase AS category,
+                   o.status AS status,
+                   o.created_at AS happened_at,
+                   COALESCE(o.needs_description, o.order_number) AS source_label
+            FROM orders o
+            WHERE o.patient_id = $1
 
-                SELECT 'service'::text AS entity_type,
-                       ol.id AS entity_id,
-                       ol.description AS title,
-                       'leistung'::text AS category,
-                       ol.status AS status,
-                       COALESCE(ol.approved_at, ol.delivered_at, ol.created_at) AS happened_at,
-                       concat_ws(' · ', o.order_number, p.name, d.name) AS source_label
-                FROM order_leistungen ol
-                JOIN orders o ON o.id = ol.order_id
-                LEFT JOIN providers p ON p.id = ol.provider_id
-                LEFT JOIN provider_doctors d ON d.id = ol.doctor_id
-                WHERE o.patient_id = $1
+            UNION ALL
 
-                UNION ALL
+            SELECT 'service'::text AS entity_type,
+                   ol.id AS entity_id,
+                   ol.description AS title,
+                   'leistung'::text AS category,
+                   ol.status AS status,
+                   COALESCE(ol.approved_at, ol.delivered_at, ol.created_at) AS happened_at,
+                   concat_ws(' · ', o.order_number, p.name, d.name) AS source_label
+            FROM order_leistungen ol
+            JOIN orders o ON o.id = ol.order_id
+            LEFT JOIN providers p ON p.id = ol.provider_id
+            LEFT JOIN provider_doctors d ON d.id = ol.doctor_id
+            WHERE o.patient_id = $1
 
-                SELECT 'document'::text AS entity_type,
-                       d.id AS entity_id,
-                       COALESCE(d.auto_name, d.original_filename, 'Document') AS title,
-                       COALESCE(d.category, d.art, 'document') AS category,
-                       d.status AS status,
-                       d.created_at AS happened_at,
-                       d.visibility AS source_label
-                FROM documents d
-                WHERE d.patient_id = $1
+            UNION ALL
 
-                UNION ALL
+            SELECT 'document'::text AS entity_type,
+                   d.id AS entity_id,
+                   COALESCE(d.auto_name, d.original_filename, 'Document') AS title,
+                   COALESCE(d.category, d.art, 'document') AS category,
+                   d.status AS status,
+                   d.created_at AS happened_at,
+                   d.visibility AS source_label
+            FROM documents d
+            WHERE d.patient_id = $1
 
-                SELECT 'contract'::text AS entity_type,
-                       fc.id AS entity_id,
-                       fc.contract_number AS title,
-                       'framework_contract'::text AS category,
-                       fc.status AS status,
-                       COALESCE(fc.signed_at, fc.created_at) AS happened_at,
-                       NULL::text AS source_label
-                FROM framework_contracts fc
-                WHERE fc.patient_id = $1
+            UNION ALL
 
-                UNION ALL
+            SELECT 'contract'::text AS entity_type,
+                   fc.id AS entity_id,
+                   fc.contract_number AS title,
+                   'framework_contract'::text AS category,
+                   fc.status AS status,
+                   COALESCE(fc.signed_at, fc.created_at) AS happened_at,
+                   NULL::text AS source_label
+            FROM framework_contracts fc
+            WHERE fc.patient_id = $1
 
-                SELECT 'invoice'::text AS entity_type,
-                       i.id AS entity_id,
-                       i.invoice_number AS title,
-                       i.invoice_type AS category,
-                       i.status AS status,
-                       i.issued_at AS happened_at,
-                       NULL::text AS source_label
-                FROM invoices i
-                WHERE i.patient_id = $1
+            UNION ALL
 
-                UNION ALL
+            SELECT 'invoice'::text AS entity_type,
+                   i.id AS entity_id,
+                   i.invoice_number AS title,
+                   i.invoice_type AS category,
+                   i.status AS status,
+                   i.issued_at AS happened_at,
+                   NULL::text AS source_label
+            FROM invoices i
+            WHERE i.patient_id = $1
 
-                SELECT 'compliance'::text AS entity_type,
-                       COALESCE(al.entity_id, $1) AS entity_id,
-                       CASE
-                           WHEN al.action = 'dsgvo_data_export' THEN 'DSGVO data export'
-                           WHEN al.action = 'dsgvo_anonymize' THEN 'Patient anonymized'
-                           WHEN al.action = 'privacy_request_created' AND COALESCE(al.context->>'request_type', 'erasure') = 'restriction' THEN 'Processing restriction requested'
-                           WHEN al.action = 'privacy_request_created' AND COALESCE(al.context->>'request_type', 'erasure') = 'third_party_revoke' THEN 'Third-party sharing revocation requested'
-                           WHEN al.action = 'privacy_request_created' THEN 'Privacy erasure requested'
-                           WHEN al.action = 'privacy_request_reviewed' THEN 'Privacy request reviewed'
-                           WHEN al.action = 'privacy_request_executed' AND COALESCE(al.context->>'request_type', 'erasure') = 'restriction' THEN 'Processing restriction applied'
-                           WHEN al.action = 'privacy_request_executed' AND COALESCE(al.context->>'request_type', 'erasure') = 'third_party_revoke' THEN 'Third-party sharing revoked'
-                           WHEN al.action = 'privacy_request_executed' THEN 'Privacy request executed'
-                           WHEN al.action = 'consent_granted' THEN 'Consent granted'
-                           WHEN al.action = 'consent_revoked' THEN 'Consent revoked'
-                           ELSE 'Legal/compliance status updated'
-                       END AS title,
-                       CASE
-                           WHEN al.action = 'dsgvo_data_export' THEN 'dsgvo_export'
-                           WHEN al.action = 'dsgvo_anonymize' THEN 'dsgvo_anonymize'
-                           WHEN al.action LIKE 'privacy_request_%' THEN 'privacy_request'
-                           WHEN al.action IN ('consent_granted', 'consent_revoked') THEN 'consent'
-                           ELSE 'legal_status'
-                       END AS category,
-                       'completed'::text AS status,
-                       al.created_at AS happened_at,
-                       concat_ws(' · ', u.name, COALESCE(al.context->>'consent_type', al.context->>'request_type', al.context->>'review_action', al.context->>'article')) AS source_label
-                FROM audit_log al
-                LEFT JOIN users u ON u.id = al.user_id
-                WHERE al.entity_type = 'patient'
-                  AND al.entity_id = $1
-                  AND (
-                        al.action IN (
-                            'dsgvo_data_export',
-                            'dsgvo_anonymize',
-                            'consent_granted',
-                            'consent_revoked',
-                            'privacy_request_created',
-                            'privacy_request_reviewed',
-                            'privacy_request_executed'
-                        )
-                        OR (
-                            al.action = 'update_patient'
-                            AND COALESCE((al.context->>'legal_status_updated')::boolean, false)
-                        )
-                  )
-           ) events
-           ORDER BY happened_at DESC, entity_type, entity_id"#,
-    )
+            UNION ALL
+
+            SELECT 'compliance'::text AS entity_type,
+                   COALESCE(al.entity_id, $1) AS entity_id,
+                   CASE
+                       WHEN al.action = 'dsgvo_data_export' THEN 'DSGVO data export'
+                       WHEN al.action = 'dsgvo_anonymize' THEN 'Patient anonymized'
+                       WHEN al.action = 'privacy_request_created' AND COALESCE(al.context->>'request_type', 'erasure') = 'restriction' THEN 'Processing restriction requested'
+                       WHEN al.action = 'privacy_request_created' AND COALESCE(al.context->>'request_type', 'erasure') = 'third_party_revoke' THEN 'Third-party sharing revocation requested'
+                       WHEN al.action = 'privacy_request_created' THEN 'Privacy erasure requested'
+                       WHEN al.action = 'privacy_request_reviewed' THEN 'Privacy request reviewed'
+                       WHEN al.action = 'privacy_request_executed' AND COALESCE(al.context->>'request_type', 'erasure') = 'restriction' THEN 'Processing restriction applied'
+                       WHEN al.action = 'privacy_request_executed' AND COALESCE(al.context->>'request_type', 'erasure') = 'third_party_revoke' THEN 'Third-party sharing revoked'
+                       WHEN al.action = 'privacy_request_executed' THEN 'Privacy request executed'
+                       WHEN al.action = 'consent_granted' THEN 'Consent granted'
+                       WHEN al.action = 'consent_revoked' THEN 'Consent revoked'
+                       WHEN al.action = 'feedback_submitted' THEN 'Patient feedback submitted'
+                       WHEN al.action = 'feedback_reviewed' THEN 'Patient feedback reviewed'
+                       WHEN al.action = 'workflow_checklist_item_created' THEN 'Workflow checklist item created'
+                       WHEN al.action = 'workflow_checklist_item_completed' THEN 'Workflow checklist item completed'
+                       ELSE 'Legal/compliance status updated'
+                   END AS title,
+                   CASE
+                       WHEN al.action = 'dsgvo_data_export' THEN 'dsgvo_export'
+                       WHEN al.action = 'dsgvo_anonymize' THEN 'dsgvo_anonymize'
+                       WHEN al.action LIKE 'privacy_request_%' THEN 'privacy_request'
+                       WHEN al.action IN ('consent_granted', 'consent_revoked') THEN 'consent'
+                       WHEN al.action LIKE 'feedback_%' THEN 'feedback'
+                       WHEN al.action LIKE 'workflow_checklist_item_%' THEN 'workflow'
+                       ELSE 'legal_status'
+                   END AS category,
+                   'completed'::text AS status,
+                   al.created_at AS happened_at,
+                   concat_ws(' · ', u.name, COALESCE(al.context->>'consent_type', al.context->>'request_type', al.context->>'review_action', al.context->>'article')) AS source_label
+            FROM audit_log al
+            LEFT JOIN users u ON u.id = al.user_id
+            WHERE al.entity_type = 'patient'
+              AND al.entity_id = $1
+              AND (
+                    al.action IN (
+                        'dsgvo_data_export',
+                        'dsgvo_anonymize',
+                        'consent_granted',
+                        'consent_revoked',
+                        'feedback_submitted',
+                        'feedback_reviewed',
+                        'workflow_checklist_item_created',
+                        'workflow_checklist_item_completed',
+                        'privacy_request_created',
+                        'privacy_request_reviewed',
+                        'privacy_request_executed'
+                    )
+                    OR (
+                        al.action = 'update_patient'
+                        AND COALESCE((al.context->>'legal_status_updated')::boolean, false)
+                    )
+              )
+        )"#;
+
+    let filter_clause = r#"
+        WHERE ($2::text IS NULL OR entity_type = $2)
+          AND ($3::text IS NULL OR category = $3)
+          AND ($4::text IS NULL OR LOWER(COALESCE(source_label, '')) = LOWER($4))
+          AND ($5::text = '%%'
+                OR title ILIKE $5
+                OR category ILIKE $5
+                OR status ILIKE $5
+                OR entity_type ILIKE $5
+                OR COALESCE(source_label, '') ILIKE $5)
+          AND ($6::timestamptz IS NULL OR happened_at >= $6)
+    "#;
+
+    let count_sql = format!(
+        "{events_cte}
+         SELECT COUNT(*) AS total
+         FROM events
+         {filter_clause}"
+    );
+    let total: i64 = sqlx::query_scalar(&count_sql)
+        .bind(patient_uuid)
+        .bind(entity_type)
+        .bind(category)
+        .bind(source)
+        .bind(&search_pattern)
+        .bind(range_cutoff)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "Failed to count patient timeline");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load patient timeline",
+            )
+        })?;
+
+    let rows_sql = format!(
+        "{events_cte}
+         SELECT entity_type, entity_id, title, category, status, happened_at, source_label
+         FROM events
+         {filter_clause}
+         ORDER BY happened_at DESC, entity_type, entity_id
+         LIMIT $7 OFFSET $8"
+    );
+    let rows = sqlx::query(&rows_sql)
     .bind(patient_uuid)
+    .bind(entity_type)
+    .bind(category)
+    .bind(source)
+    .bind(&search_pattern)
+    .bind(range_cutoff)
+    .bind(limit)
+    .bind(offset)
     .fetch_all(&state.db)
     .await
     .map_err(|e| {
@@ -2109,7 +2691,13 @@ async fn get_patient_timeline(
         })
         .collect::<Vec<_>>();
 
-    Ok(Json(items))
+    Ok(Json(serde_json::json!({
+        "items": items,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "has_more": offset + (items.len() as i64) < total,
+    })))
 }
 
 async fn assign_patient(
@@ -2443,6 +3031,7 @@ struct PatientSummaryInput {
     nationality: Option<String>,
     residence_country: Option<String>,
     languages: Vec<String>,
+    functional_labels: Vec<String>,
     phone_primary: Option<String>,
     email: Option<String>,
     insurance_provider: Option<String>,
@@ -2463,6 +3052,7 @@ struct PatientDetailInput {
     nationality: Option<String>,
     residence_country: Option<String>,
     languages: Vec<String>,
+    functional_labels: Vec<String>,
     phone_primary: Option<String>,
     phone_secondary: Option<String>,
     email: Option<String>,
@@ -2517,6 +3107,7 @@ fn build_patient_summary_json(
         patient.residence_country,
     );
     insert_languages_field(&mut data, auth, policies, patient.languages);
+    insert_functional_labels_field(&mut data, auth, policies, patient.functional_labels);
     insert_insurance_fields(
         &mut data,
         auth,
@@ -2548,6 +3139,7 @@ fn build_patient_detail_json(
             nationality: patient.nationality.clone(),
             residence_country: patient.residence_country.clone(),
             languages: patient.languages.clone(),
+            functional_labels: patient.functional_labels.clone(),
             phone_primary: patient.phone_primary.clone(),
             email: patient.email.clone(),
             insurance_provider: patient.insurance_provider.clone(),
@@ -2749,6 +3341,23 @@ fn insert_languages_field(
     }
 }
 
+fn insert_functional_labels_field(
+    data: &mut Map<String, Value>,
+    auth: &AuthUser,
+    policies: &HashMap<String, FieldPolicy>,
+    functional_labels: Vec<String>,
+) {
+    match field_access(policies, "functional_labels", auth.role == Role::Ceo) {
+        Some(FieldAccess::Visible) | Some(FieldAccess::Masked) => {
+            data.insert(
+                "functional_labels".to_string(),
+                Value::Array(functional_labels.into_iter().map(Value::String).collect()),
+            );
+        }
+        Some(FieldAccess::Hidden) | None => {}
+    }
+}
+
 fn insert_insurance_fields(
     data: &mut Map<String, Value>,
     auth: &AuthUser,
@@ -2825,6 +3434,34 @@ fn mask_text(value: &str) -> String {
         Some(first) => format!("{first}***"),
         None => String::new(),
     }
+}
+
+#[allow(clippy::result_large_err)]
+fn normalize_functional_labels(
+    value: Option<Vec<String>>,
+) -> Result<Option<Vec<String>>, axum::response::Response> {
+    let Some(values) = value else {
+        return Ok(None);
+    };
+
+    let mut normalized = Vec::new();
+    for raw in values {
+        let label = raw.trim().to_lowercase().replace([' ', '-'], "_");
+        if label.is_empty() {
+            continue;
+        }
+        if !ALLOWED_PATIENT_FUNCTIONAL_LABELS.contains(&label.as_str()) {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Invalid functional label",
+            ));
+        }
+        if !normalized.iter().any(|existing| existing == &label) {
+            normalized.push(label);
+        }
+    }
+
+    Ok(Some(normalized))
 }
 
 #[derive(Deserialize)]

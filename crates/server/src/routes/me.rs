@@ -3,7 +3,7 @@ use std::path::Path as FsPath;
 use axum::{
     Json, Router,
     body::Body,
-    extract::{Extension, Path, State},
+    extract::{Extension, Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
@@ -14,6 +14,9 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use crate::auth::middleware::AuthUser;
+use crate::routes::patients::{
+    load_patient_document_alerts_summary, patient_document_alerts_payload,
+};
 use crate::state::AppState;
 use gmed_domain::role::Role;
 
@@ -22,10 +25,12 @@ const DOCUMENT_UPLOAD_DIR: &str = "uploads/documents";
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/me", get(get_me))
+        .route("/me/export", get(export_my_data))
         .route(
             "/me/privacy-requests",
             get(list_my_privacy_requests).post(create_my_privacy_request),
         )
+        .route("/me/document-alerts", get(list_my_document_alerts))
         .route("/me/documents", get(list_my_documents))
         .route("/me/documents/{id}/download", get(download_my_document))
         .route(
@@ -80,6 +85,11 @@ async fn get_me(
 struct CreateMyPrivacyRequestRequest {
     request_type: String,
     reason: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
+struct ExportMyDataQuery {
+    format: Option<String>,
 }
 
 async fn list_my_privacy_requests(
@@ -199,6 +209,12 @@ async fn create_my_privacy_request(
     .await
     {
         Ok(id) => id,
+        Err(sqlx::Error::Database(db_err)) if db_err.code().as_deref() == Some("23505") => {
+            return err(
+                StatusCode::CONFLICT,
+                "An open privacy request of this type already exists",
+            );
+        }
         Err(e) => {
             tracing::error!(error = %e, user_id = %auth.user_id, patient_id = %patient_id, "create self privacy request");
             return err(
@@ -275,6 +291,59 @@ async fn create_my_privacy_request(
     });
 
     (StatusCode::CREATED, Json(response)).into_response()
+}
+
+async fn export_my_data(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Query(query): Query<ExportMyDataQuery>,
+) -> axum::response::Response {
+    if let Err(resp) = auth.require_any_role(&[Role::Patient]) {
+        return resp;
+    }
+
+    let patient_id = match resolve_self_patient_id(&state, auth.user_id).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+
+    let format =
+        match crate::routes::admin_compliance::parse_patient_export_format(query.format.as_deref())
+        {
+            Ok(value) => value,
+            Err(resp) => return resp,
+        };
+
+    match crate::routes::admin_compliance::export_patient_data_response(
+        &state,
+        patient_id,
+        auth.user_id,
+        format,
+    )
+    .await
+    {
+        Ok(response) => response,
+        Err(resp) => resp,
+    }
+}
+
+async fn list_my_document_alerts(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+) -> axum::response::Response {
+    if let Err(resp) = auth.require_any_role(&[Role::Patient]) {
+        return resp;
+    }
+
+    let patient_id = match resolve_self_patient_id(&state, auth.user_id).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+
+    match load_patient_document_alerts_summary(&state, patient_id).await {
+        Ok(summary) => Json(patient_document_alerts_payload(&summary)).into_response(),
+        Err(resp) => resp,
+    }
 }
 
 async fn list_my_documents(

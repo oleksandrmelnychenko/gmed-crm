@@ -11,11 +11,20 @@ use uuid::Uuid;
 
 use crate::access;
 use crate::auth::middleware::AuthUser;
+use crate::routes::me::resolve_self_patient_id;
 use crate::state::AppState;
 use gmed_domain::role::Role;
 
 pub fn router() -> Router<AppState> {
     Router::new()
+        .route(
+            "/me/concierge-services",
+            get(list_my_concierge_services).post(create_my_concierge_service),
+        )
+        .route(
+            "/me/concierge-services/{service_id}/cancel",
+            post(cancel_my_concierge_service),
+        )
         .route(
             "/concierge-services",
             get(list_concierge_services).post(create_concierge_service),
@@ -83,6 +92,19 @@ struct UpdateConciergeServiceRequest {
     billing_notes: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct CreateMyConciergeServiceRequest {
+    service_kind: String,
+    title: String,
+    vendor_name: Option<String>,
+    vendor_contact: Option<String>,
+    starts_at: Option<String>,
+    ends_at: Option<String>,
+    cost_estimate: Option<f64>,
+    currency: Option<String>,
+    service_notes: Option<String>,
+}
+
 struct NonMedicalAppointmentContext {
     patient_id: Uuid,
     provider_id: Option<Uuid>,
@@ -121,10 +143,11 @@ pub(crate) async fn bootstrap_default_service(
     sqlx::query(
         r#"INSERT INTO concierge_services (
                 patient_id, appointment_id, provider_id, assigned_concierge_id, service_kind,
-                title, status, starts_at, ends_at, billing_status, service_notes, created_by
+                title, status, starts_at, ends_at, billing_status, service_notes, request_source,
+                created_by
            ) VALUES (
                 $1, $2, $3, $4, $5,
-                $6, 'planned', $7, $8, 'draft', $9, $10
+                $6, 'planned', $7, $8, 'draft', $9, 'appointment_bootstrap', $10
            )"#,
     )
     .bind(ctx.patient_id)
@@ -174,10 +197,11 @@ pub(crate) async fn mark_services_ready_for_billing(
         sqlx::query(
             r#"INSERT INTO concierge_services (
                     patient_id, appointment_id, provider_id, assigned_concierge_id, service_kind,
-                    title, status, starts_at, ends_at, billing_status, service_notes, completed_at, created_by
+                    title, status, starts_at, ends_at, billing_status, service_notes, completed_at,
+                    request_source, created_by
                ) VALUES (
                     $1, $2, $3, $4, $5,
-                    $6, 'completed', $7, $8, 'ready', $9, now(), $10
+                    $6, 'completed', $7, $8, 'ready', $9, now(), 'appointment_bootstrap', $10
                )"#,
         )
         .bind(ctx.patient_id)
@@ -241,6 +265,305 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
         .into_response()
 }
 
+async fn list_my_concierge_services(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+) -> axum::response::Response {
+    if let Err(resp) = auth.require_any_role(&[Role::Patient]) {
+        return resp;
+    }
+
+    let patient_id = match resolve_self_patient_id(&state, auth.user_id).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+
+    match sqlx::query(
+        r#"SELECT cs.id, cs.patient_id, cs.appointment_id, cs.provider_id, cs.assigned_concierge_id,
+                  cs.service_kind, cs.title, cs.status, cs.booking_reference, cs.vendor_name,
+                  cs.vendor_contact, cs.starts_at, cs.ends_at, cs.cost_estimate, cs.actual_cost,
+                  cs.currency, cs.billing_status, cs.service_notes, cs.billing_notes,
+                  cs.completed_at, cs.billed_at, cs.created_at, cs.updated_at, cs.request_source,
+                  p.patient_id AS patient_code, p.first_name, p.last_name,
+                  pr.name AS provider_name,
+                  u.name AS assigned_concierge_name,
+                  a.title AS appointment_title
+           FROM concierge_services cs
+           JOIN patients p ON p.id = cs.patient_id
+           LEFT JOIN providers pr ON pr.id = cs.provider_id
+           LEFT JOIN users u ON u.id = cs.assigned_concierge_id
+           LEFT JOIN appointments a ON a.id = cs.appointment_id
+           WHERE cs.patient_id = $1
+           ORDER BY COALESCE(cs.starts_at, cs.created_at) DESC, cs.created_at DESC"#,
+    )
+    .bind(patient_id)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => Json(
+            rows.into_iter()
+                .map(|row| build_portal_service_json(&row))
+                .collect::<Vec<_>>(),
+        )
+        .into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, user_id = %auth.user_id, patient_id = %patient_id, "list my concierge services");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load concierge services",
+            )
+        }
+    }
+}
+
+async fn create_my_concierge_service(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Json(body): Json<CreateMyConciergeServiceRequest>,
+) -> axum::response::Response {
+    if let Err(resp) = auth.require_any_role(&[Role::Patient]) {
+        return resp;
+    }
+
+    if body.title.trim().is_empty() || body.title.len() > 255 {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Service title is required (max 255)",
+        );
+    }
+    let service_kind = body.service_kind.trim().to_string();
+    if !is_valid_service_kind(&service_kind) {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid service_kind");
+    }
+
+    let patient_id = match resolve_self_patient_id(&state, auth.user_id).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+
+    let starts_at = match parse_optional_datetime(body.starts_at.as_deref()) {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    let ends_at = match parse_optional_datetime(body.ends_at.as_deref()) {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+
+    if let (Some(starts_at), Some(ends_at)) = (starts_at, ends_at)
+        && ends_at <= starts_at
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "ends_at must be later than starts_at",
+        );
+    }
+
+    let currency = body.currency.unwrap_or_else(|| "EUR".to_string());
+    if currency.trim().len() != 3 {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "currency must be 3 letters",
+        );
+    }
+
+    let assigned_concierge_id = match load_first_assigned_concierge_id(&state, patient_id).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let normalized_vendor_name = normalize_optional_text(body.vendor_name.as_deref());
+    let normalized_vendor_contact = normalize_optional_text(body.vendor_contact.as_deref());
+    let normalized_notes = normalize_optional_text(body.service_notes.as_deref());
+
+    let service_id = match sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO concierge_services (
+                patient_id, appointment_id, provider_id, assigned_concierge_id, service_kind,
+                title, status, booking_reference, vendor_name, vendor_contact,
+                starts_at, ends_at, cost_estimate, actual_cost, currency,
+                billing_status, service_notes, billing_notes, request_source, created_by
+           ) VALUES (
+                $1, NULL, NULL, $2, $3,
+                $4, 'planned', NULL, $5, $6,
+                $7, $8, $9, NULL, $10,
+                'draft', $11, NULL, 'patient_portal', $12
+           )
+           RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(assigned_concierge_id)
+    .bind(service_kind.as_str())
+    .bind(body.title.trim())
+    .bind(normalized_vendor_name.clone())
+    .bind(normalized_vendor_contact.clone())
+    .bind(starts_at)
+    .bind(ends_at)
+    .bind(body.cost_estimate)
+    .bind(currency.to_uppercase())
+    .bind(normalized_notes.clone())
+    .bind(auth.user_id)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(id) => id,
+        Err(e) => {
+            tracing::error!(error = %e, user_id = %auth.user_id, patient_id = %patient_id, "create patient portal concierge service");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create concierge service request",
+            );
+        }
+    };
+
+    let _ = sqlx::query(
+        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context)
+         VALUES ($1, 'create_patient_portal_concierge_service', 'concierge_service', $2, $3)",
+    )
+    .bind(auth.user_id)
+    .bind(service_id)
+    .bind(serde_json::json!({
+        "patient_id": patient_id,
+        "service_kind": service_kind.clone(),
+        "assigned_concierge_id": assigned_concierge_id,
+        "request_source": "patient_portal",
+        "created_via": "patient_self_service",
+    }))
+    .execute(&state.db)
+    .await;
+
+    let patient_label = load_patient_label(&state, patient_id)
+        .await
+        .unwrap_or_else(|| "Patient".to_string());
+    let timing_hint = starts_at
+        .map(|value| value.format("%Y-%m-%d %H:%M UTC").to_string())
+        .unwrap_or_else(|| "No preferred slot".to_string());
+    let _ = sqlx::query(
+        r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
+           SELECT DISTINCT pa.user_id, 'concierge_service_request', $2, $3, 'concierge_service', $1
+           FROM patient_assignments pa
+           JOIN users u ON u.id = pa.user_id
+           WHERE pa.patient_id = $4
+             AND pa.revoked_at IS NULL
+             AND u.is_active = true
+             AND u.role IN ('patient_manager', 'concierge')"#,
+    )
+    .bind(service_id)
+    .bind(format!("Patient service request: {patient_label}"))
+    .bind(format!(
+        "Requested {} support for '{}'. Preferred slot: {}.",
+        service_kind_label(&service_kind),
+        body.title.trim(),
+        timing_hint
+    ))
+    .bind(patient_id)
+    .execute(&state.db)
+    .await;
+
+    match load_service_row(&state, service_id).await {
+        Ok(Some(service)) => (
+            StatusCode::CREATED,
+            Json(build_portal_service_json(&service)),
+        )
+            .into_response(),
+        Ok(None) => err(StatusCode::NOT_FOUND, "Concierge service not found"),
+        Err(resp) => resp,
+    }
+}
+
+async fn cancel_my_concierge_service(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(service_id): Path<Uuid>,
+) -> axum::response::Response {
+    if let Err(resp) = auth.require_any_role(&[Role::Patient]) {
+        return resp;
+    }
+
+    let patient_id = match resolve_self_patient_id(&state, auth.user_id).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+
+    let existing = match load_service_row(&state, service_id).await {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Concierge service not found"),
+        Err(resp) => return resp,
+    };
+
+    let row_patient_id = match existing.try_get::<Uuid, _>("patient_id") {
+        Ok(value) => value,
+        Err(_) => {
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate concierge service",
+            );
+        }
+    };
+    if row_patient_id != patient_id {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+
+    let request_source = existing
+        .try_get::<String, _>("request_source")
+        .unwrap_or_else(|_| "staff".to_string());
+    let status = existing
+        .try_get::<String, _>("status")
+        .unwrap_or_else(|_| "planned".to_string());
+    let booking_reference = existing
+        .try_get::<Option<String>, _>("booking_reference")
+        .unwrap_or_default();
+
+    if request_source != "patient_portal" {
+        return err(
+            StatusCode::CONFLICT,
+            "Only patient-portal requests can be cancelled here",
+        );
+    }
+    if status != "planned" || booking_reference.is_some() {
+        return err(
+            StatusCode::CONFLICT,
+            "Service request is already being processed and can no longer be cancelled",
+        );
+    }
+
+    match sqlx::query(
+        r#"UPDATE concierge_services
+           SET status = 'cancelled'
+           WHERE id = $1"#,
+    )
+    .bind(service_id)
+    .execute(&state.db)
+    .await
+    {
+        Ok(_) => {
+            let _ = sqlx::query(
+                "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context)
+                 VALUES ($1, 'cancel_patient_portal_concierge_service', 'concierge_service', $2, $3)",
+            )
+            .bind(auth.user_id)
+            .bind(service_id)
+            .bind(serde_json::json!({
+                "patient_id": patient_id,
+                "request_source": "patient_portal",
+            }))
+            .execute(&state.db)
+            .await;
+
+            match load_service_row(&state, service_id).await {
+                Ok(Some(service)) => Json(build_portal_service_json(&service)).into_response(),
+                Ok(None) => err(StatusCode::NOT_FOUND, "Concierge service not found"),
+                Err(resp) => resp,
+            }
+        }
+        Err(e) => {
+            tracing::error!(error = %e, user_id = %auth.user_id, service_id = %service_id, "cancel patient concierge service");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to cancel concierge service request",
+            )
+        }
+    }
+}
+
 async fn list_concierge_services(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -283,7 +606,7 @@ async fn list_concierge_services(
         r#"SELECT cs.id, cs.patient_id, cs.appointment_id, cs.provider_id, cs.assigned_concierge_id,
                   cs.service_kind, cs.title, cs.status, cs.booking_reference, cs.vendor_name,
                   cs.vendor_contact, cs.starts_at, cs.ends_at, cs.cost_estimate, cs.actual_cost,
-                  cs.currency, cs.billing_status, cs.service_notes, cs.billing_notes,
+                  cs.currency, cs.billing_status, cs.service_notes, cs.billing_notes, cs.request_source,
                   cs.completed_at, cs.billed_at, cs.created_at, cs.updated_at,
                   p.patient_id AS patient_code, p.first_name, p.last_name,
                   pr.name AS provider_name,
@@ -506,12 +829,12 @@ async fn create_concierge_service(
                 patient_id, appointment_id, provider_id, assigned_concierge_id, service_kind,
                 title, status, booking_reference, vendor_name, vendor_contact,
                 starts_at, ends_at, cost_estimate, actual_cost, currency,
-                billing_status, service_notes, billing_notes, created_by
+                billing_status, service_notes, billing_notes, request_source, created_by
            ) VALUES (
                 $1, $2, $3, $4, $5,
                 $6, 'planned', $7, $8, $9,
                 $10, $11, $12, $13, $14,
-                'draft', $15, $16, $17
+                'draft', $15, $16, 'staff', $17
            ) RETURNING id"#,
     )
     .bind(body.patient_id)
@@ -778,7 +1101,7 @@ async fn load_service_row(
         r#"SELECT cs.id, cs.patient_id, cs.appointment_id, cs.provider_id, cs.assigned_concierge_id,
                   cs.service_kind, cs.title, cs.status, cs.booking_reference, cs.vendor_name,
                   cs.vendor_contact, cs.starts_at, cs.ends_at, cs.cost_estimate, cs.actual_cost,
-                  cs.currency, cs.billing_status, cs.service_notes, cs.billing_notes,
+                  cs.currency, cs.billing_status, cs.service_notes, cs.billing_notes, cs.request_source,
                   cs.completed_at, cs.billed_at, cs.created_at, cs.updated_at,
                   p.patient_id AS patient_code, p.first_name, p.last_name,
                   pr.name AS provider_name,
@@ -1106,6 +1429,68 @@ fn derive_service_kind(category: Option<&str>, title: &str) -> String {
     }
 }
 
+fn service_kind_label(value: &str) -> &'static str {
+    match value {
+        "hotel" => "hotel",
+        "transfer" => "transfer",
+        "vip_terminal" => "VIP terminal",
+        "flight" => "flight",
+        "chauffeur" => "chauffeur",
+        "translation_support" => "translation support",
+        _ => "additional",
+    }
+}
+
+fn normalize_optional_text(value: Option<&str>) -> Option<String> {
+    let trimmed = value?.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn can_patient_cancel_service(row: &sqlx::postgres::PgRow) -> bool {
+    row.try_get::<String, _>("request_source")
+        .map(|value| value == "patient_portal")
+        .unwrap_or(false)
+        && row
+            .try_get::<String, _>("status")
+            .map(|value| value == "planned")
+            .unwrap_or(false)
+        && row
+            .try_get::<Option<String>, _>("booking_reference")
+            .unwrap_or_default()
+            .is_none()
+}
+
+fn build_portal_service_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
+    serde_json::json!({
+        "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+        "appointment_id": row.try_get::<Option<Uuid>, _>("appointment_id").unwrap_or_default(),
+        "appointment_title": row.try_get::<Option<String>, _>("appointment_title").unwrap_or_default(),
+        "provider_id": row.try_get::<Option<Uuid>, _>("provider_id").unwrap_or_default(),
+        "provider_name": row.try_get::<Option<String>, _>("provider_name").unwrap_or_default(),
+        "assigned_concierge_name": row.try_get::<Option<String>, _>("assigned_concierge_name").unwrap_or_default(),
+        "service_kind": row.try_get::<String, _>("service_kind").unwrap_or_default(),
+        "title": row.try_get::<String, _>("title").unwrap_or_default(),
+        "status": row.try_get::<String, _>("status").unwrap_or_default(),
+        "booking_reference": row.try_get::<Option<String>, _>("booking_reference").unwrap_or_default(),
+        "vendor_name": row.try_get::<Option<String>, _>("vendor_name").unwrap_or_default(),
+        "vendor_contact": row.try_get::<Option<String>, _>("vendor_contact").unwrap_or_default(),
+        "starts_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("starts_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+        "ends_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("ends_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+        "cost_estimate": row.try_get::<Option<rust_decimal::Decimal>, _>("cost_estimate").unwrap_or_default().map(|value| value.round_dp(2).to_string()),
+        "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
+        "service_notes": row.try_get::<Option<String>, _>("service_notes").unwrap_or_default(),
+        "request_source": row.try_get::<String, _>("request_source").unwrap_or_else(|_| "staff".to_string()),
+        "completed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("completed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+        "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+        "updated_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+        "can_cancel": can_patient_cancel_service(row),
+    })
+}
+
 fn build_service_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
     let patient_name = format!(
         "{} {}",
@@ -1138,9 +1523,34 @@ fn build_service_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "billing_status": row.try_get::<String, _>("billing_status").unwrap_or_default(),
         "service_notes": row.try_get::<Option<String>, _>("service_notes").unwrap_or_default(),
         "billing_notes": row.try_get::<Option<String>, _>("billing_notes").unwrap_or_default(),
+        "request_source": row.try_get::<String, _>("request_source").unwrap_or_else(|_| "staff".to_string()),
         "completed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("completed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
         "billed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("billed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
         "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
         "updated_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+    })
+}
+
+async fn load_patient_label(state: &AppState, patient_id: Uuid) -> Option<String> {
+    sqlx::query(
+        r#"SELECT patient_id, trim(concat_ws(' ', first_name, last_name)) AS patient_name
+           FROM patients
+           WHERE id = $1"#,
+    )
+    .bind(patient_id)
+    .fetch_optional(&state.db)
+    .await
+    .ok()
+    .flatten()
+    .map(|row| {
+        let pid = row.try_get::<String, _>("patient_id").unwrap_or_default();
+        let name = row.try_get::<String, _>("patient_name").unwrap_or_default();
+        if pid.is_empty() {
+            name
+        } else if name.is_empty() {
+            pid
+        } else {
+            format!("{pid} · {name}")
+        }
     })
 }

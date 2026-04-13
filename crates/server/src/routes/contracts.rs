@@ -37,6 +37,7 @@ pub fn router() -> Router<AppState> {
             get(list_order_quotes).post(create_quote),
         )
         .route("/quotes/{quote_id}", get(get_quote))
+        .route("/quotes/{quote_id}/versions", get(list_quote_versions))
         .route("/quotes/{quote_id}/status", post(update_quote_status))
 }
 
@@ -129,6 +130,23 @@ struct QuoteTotals {
     total_gross: Decimal,
 }
 
+struct QuoteVersionSnapshotInput {
+    quote_id: Uuid,
+    order_id: Uuid,
+    quote_number: String,
+    status: String,
+    total_net: Decimal,
+    total_vat: Decimal,
+    total_gross: Decimal,
+    valid_until: Option<NaiveDate>,
+    paid_amount: Decimal,
+    paid_at: Option<DateTime<Utc>>,
+    line_items: Value,
+    notes: Option<String>,
+    change_reason: Option<String>,
+    created_by: Uuid,
+}
+
 fn is_valid_contract_status(value: &str) -> bool {
     matches!(
         value,
@@ -171,6 +189,54 @@ fn parse_optional_datetime(value: Option<&str>) -> Result<Option<DateTime<Utc>>,
 
 fn decimal_to_string(value: Decimal) -> String {
     value.round_dp(2).normalize().to_string()
+}
+
+async fn insert_quote_version_snapshot(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    snapshot: &QuoteVersionSnapshotInput,
+) -> Result<i32, sqlx::Error> {
+    sqlx::query("SELECT id FROM quotes WHERE id = $1 FOR UPDATE")
+        .bind(snapshot.quote_id)
+        .execute(&mut **tx)
+        .await?;
+
+    let version_number: i32 = sqlx::query_scalar(
+        "SELECT COALESCE(MAX(version_number), 0) + 1 FROM quote_versions WHERE quote_id = $1",
+    )
+    .bind(snapshot.quote_id)
+    .fetch_one(&mut **tx)
+    .await?;
+
+    sqlx::query(
+        r#"INSERT INTO quote_versions (
+                quote_id, version_number, order_id, quote_number, status,
+                total_net, total_vat, total_gross, valid_until, paid_amount, paid_at,
+                line_items, notes, change_reason, created_by
+           ) VALUES (
+                $1, $2, $3, $4, $5,
+                $6, $7, $8, $9, $10, $11,
+                $12, $13, $14, $15
+           )"#,
+    )
+    .bind(snapshot.quote_id)
+    .bind(version_number)
+    .bind(snapshot.order_id)
+    .bind(snapshot.quote_number.as_str())
+    .bind(snapshot.status.as_str())
+    .bind(snapshot.total_net)
+    .bind(snapshot.total_vat)
+    .bind(snapshot.total_gross)
+    .bind(snapshot.valid_until)
+    .bind(snapshot.paid_amount)
+    .bind(snapshot.paid_at)
+    .bind(snapshot.line_items.clone())
+    .bind(snapshot.notes.clone())
+    .bind(snapshot.change_reason.clone())
+    .bind(snapshot.created_by)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(version_number)
 }
 
 fn compute_quote_totals(items: &[QuoteLineItem]) -> QuoteTotals {
@@ -782,6 +848,8 @@ async fn load_quote_detail(
         r#"SELECT q.id, q.order_id, q.quote_number, q.total_net, q.total_vat, q.total_gross,
                   q.status, q.valid_until, q.paid_amount, q.paid_at, q.line_items, q.notes,
                   q.created_at, q.updated_at,
+                  COALESCE((SELECT count(*)::bigint FROM quote_versions qv WHERE qv.quote_id = q.id), 0) AS version_count,
+                  COALESCE((SELECT max(version_number) FROM quote_versions qv WHERE qv.quote_id = q.id), 0) AS current_version_number,
                   o.patient_id, o.order_number, o.contract_id,
                   p.first_name, p.last_name, p.patient_id AS patient_pid
            FROM quotes q
@@ -830,6 +898,8 @@ async fn load_quote_detail(
         "paid_at": row.try_get::<Option<DateTime<Utc>>, _>("paid_at").unwrap_or_default().map(|v| v.to_rfc3339()),
         "line_items": row.try_get::<Value, _>("line_items").unwrap_or_else(|_| serde_json::json!([])),
         "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
+        "version_count": row.try_get::<i64, _>("version_count").unwrap_or(0),
+        "current_version_number": row.try_get::<i32, _>("current_version_number").unwrap_or(0),
         "created_at": row.try_get::<DateTime<Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
         "updated_at": row.try_get::<DateTime<Utc>, _>("updated_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
     })))
@@ -1006,7 +1076,15 @@ async fn create_quote(
         }
     };
 
-    match sqlx::query(
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, "begin quote create transaction");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create quote");
+        }
+    };
+
+    let row = match sqlx::query(
         r#"INSERT INTO quotes (
                 order_id, quote_number, total_net, total_vat, total_gross,
                 valid_until, line_items, notes, created_by
@@ -1021,62 +1099,101 @@ async fn create_quote(
     .bind(totals.total_vat)
     .bind(totals.total_gross)
     .bind(valid_until)
-    .bind(line_items_value)
+    .bind(line_items_value.clone())
     .bind(body.notes.clone())
     .bind(auth.user_id)
-    .fetch_one(&state.db)
+    .fetch_one(&mut *tx)
     .await
     {
-        Ok(row) => {
-            let quote_id = row.try_get::<Uuid, _>("id").unwrap_or_default();
-
-            let _ = sqlx::query("UPDATE orders SET total_estimated = $2 WHERE id = $1")
-                .bind(order_id)
-                .bind(totals.total_gross)
-                .execute(&state.db)
-                .await;
-
-            let _ = sqlx::query(
-                "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, $2, 'quote', $3, $4)",
-            )
-            .bind(auth.user_id)
-            .bind("create_quote")
-            .bind(quote_id)
-            .bind(serde_json::json!({
-                "quote_number": quote_number,
-                "order_id": order_id,
-                "order_number": order_ctx.order_number,
-                "total_gross": decimal_to_string(totals.total_gross),
-            }))
-            .execute(&state.db)
-            .await;
-
-            (
-                StatusCode::CREATED,
-                Json(serde_json::json!({
-                    "id": quote_id,
-                    "quote_number": quote_number,
-                    "order_id": order_id,
-                    "contract_id": order_ctx.contract_id,
-                    "patient_id": order_ctx.patient_id,
-                    "status": "draft",
-                    "total_net": decimal_to_string(totals.total_net),
-                    "total_vat": decimal_to_string(totals.total_vat),
-                    "total_gross": decimal_to_string(totals.total_gross),
-                    "valid_until": valid_until.map(|v| v.to_string()),
-                    "line_items": line_items,
-                    "notes": body.notes,
-                    "created_at": row.try_get::<DateTime<Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
-                    "updated_at": row.try_get::<DateTime<Utc>, _>("updated_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
-                })),
-            )
-                .into_response()
-        }
+        Ok(row) => row,
         Err(e) => {
             tracing::error!(error = %e, "create quote");
-            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create quote")
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create quote");
         }
+    };
+
+    let quote_id = row.try_get::<Uuid, _>("id").unwrap_or_default();
+    let snapshot = QuoteVersionSnapshotInput {
+        quote_id,
+        order_id,
+        quote_number: quote_number.clone(),
+        status: "draft".to_string(),
+        total_net: totals.total_net,
+        total_vat: totals.total_vat,
+        total_gross: totals.total_gross,
+        valid_until,
+        paid_amount: Decimal::ZERO,
+        paid_at: None,
+        line_items: line_items_value,
+        notes: body.notes.clone(),
+        change_reason: Some("initial_snapshot".to_string()),
+        created_by: auth.user_id,
+    };
+
+    if let Err(e) = insert_quote_version_snapshot(&mut tx, &snapshot).await {
+        tracing::error!(error = %e, quote_id = %quote_id, "insert initial quote version snapshot");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to persist quote version",
+        );
     }
+
+    if let Err(e) = sqlx::query("UPDATE orders SET total_estimated = $2 WHERE id = $1")
+        .bind(order_id)
+        .bind(totals.total_gross)
+        .execute(&mut *tx)
+        .await
+    {
+        tracing::error!(error = %e, order_id = %order_id, "update order total_estimated from quote");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create quote");
+    }
+
+    if let Err(e) = sqlx::query(
+        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, $2, 'quote', $3, $4)",
+    )
+    .bind(auth.user_id)
+    .bind("create_quote")
+    .bind(quote_id)
+    .bind(serde_json::json!({
+        "quote_number": quote_number,
+        "order_id": order_id,
+        "order_number": order_ctx.order_number,
+        "total_gross": decimal_to_string(totals.total_gross),
+    }))
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(error = %e, quote_id = %quote_id, "audit quote creation");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create quote");
+    }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, quote_id = %quote_id, "commit quote create transaction");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create quote");
+    }
+
+    (
+        StatusCode::CREATED,
+        Json(serde_json::json!({
+            "id": quote_id,
+            "quote_number": quote_number,
+            "order_id": order_id,
+            "contract_id": order_ctx.contract_id,
+            "patient_id": order_ctx.patient_id,
+            "status": "draft",
+            "total_net": decimal_to_string(totals.total_net),
+            "total_vat": decimal_to_string(totals.total_vat),
+            "total_gross": decimal_to_string(totals.total_gross),
+            "valid_until": valid_until.map(|v| v.to_string()),
+            "line_items": line_items,
+            "notes": body.notes,
+            "version_count": 1,
+            "current_version_number": 1,
+            "created_at": row.try_get::<DateTime<Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
+            "updated_at": row.try_get::<DateTime<Utc>, _>("updated_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
+        })),
+    )
+        .into_response()
 }
 
 async fn get_quote(
@@ -1092,6 +1209,82 @@ async fn get_quote(
         Ok(Some(value)) => Json(value).into_response(),
         Ok(None) => err(StatusCode::NOT_FOUND, "Quote not found"),
         Err(resp) => resp,
+    }
+}
+
+async fn list_quote_versions(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(quote_id): Path<Uuid>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Billing]) {
+        return e;
+    }
+
+    let patient_id = match load_quote_patient_id(&state, quote_id).await {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Quote not found"),
+        Err(resp) => return resp,
+    };
+
+    match ensure_patient_access(&state, &auth, patient_id).await {
+        Ok(()) => {}
+        Err(resp) => return resp,
+    }
+
+    match sqlx::query(
+        r#"SELECT qv.id, qv.version_number, qv.order_id, qv.quote_number, qv.status,
+                  qv.total_net, qv.total_vat, qv.total_gross, qv.valid_until, qv.paid_amount,
+                  qv.paid_at, qv.line_items, qv.notes, qv.change_reason, qv.created_at,
+                  u.name AS created_by_name, u.role AS created_by_role
+           FROM quote_versions qv
+           JOIN users u ON u.id = qv.created_by
+           WHERE qv.quote_id = $1
+           ORDER BY qv.version_number DESC, qv.created_at DESC"#,
+    )
+    .bind(quote_id)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => Json(
+            rows.into_iter()
+                .map(|row| {
+                    let line_items = row
+                        .try_get::<Value, _>("line_items")
+                        .unwrap_or_else(|_| serde_json::json!([]));
+                    let line_item_count = line_items.as_array().map(|items| items.len()).unwrap_or(0);
+                    serde_json::json!({
+                        "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                        "quote_id": quote_id,
+                        "version_number": row.try_get::<i32, _>("version_number").unwrap_or(0),
+                        "order_id": row.try_get::<Uuid, _>("order_id").unwrap_or_default(),
+                        "quote_number": row.try_get::<String, _>("quote_number").unwrap_or_default(),
+                        "status": row.try_get::<String, _>("status").unwrap_or_default(),
+                        "total_net": decimal_to_string(row.try_get::<Decimal, _>("total_net").unwrap_or(Decimal::ZERO)),
+                        "total_vat": decimal_to_string(row.try_get::<Decimal, _>("total_vat").unwrap_or(Decimal::ZERO)),
+                        "total_gross": decimal_to_string(row.try_get::<Decimal, _>("total_gross").unwrap_or(Decimal::ZERO)),
+                        "valid_until": row.try_get::<Option<NaiveDate>, _>("valid_until").unwrap_or_default().map(|v| v.to_string()),
+                        "paid_amount": decimal_to_string(row.try_get::<Decimal, _>("paid_amount").unwrap_or(Decimal::ZERO)),
+                        "paid_at": row.try_get::<Option<DateTime<Utc>>, _>("paid_at").unwrap_or_default().map(|v| v.to_rfc3339()),
+                        "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
+                        "change_reason": row.try_get::<Option<String>, _>("change_reason").unwrap_or_default(),
+                        "line_items": line_items,
+                        "line_item_count": line_item_count,
+                        "created_at": row.try_get::<DateTime<Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
+                        "created_by_name": row.try_get::<String, _>("created_by_name").unwrap_or_default(),
+                        "created_by_role": row.try_get::<String, _>("created_by_role").unwrap_or_default(),
+                    })
+                })
+                .collect::<Vec<_>>(),
+        )
+        .into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, quote_id = %quote_id, "list quote versions");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to list quote versions",
+            )
+        }
     }
 }
 
@@ -1134,7 +1327,15 @@ async fn update_quote_status(
         _ => None,
     };
 
-    match sqlx::query(
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, "begin quote status update transaction");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update quote");
+        }
+    };
+
+    let updated_row = match sqlx::query(
         r#"UPDATE quotes
            SET status = $2,
                paid_amount = COALESCE($3, paid_amount),
@@ -1144,40 +1345,98 @@ async fn update_quote_status(
                    ELSE paid_at
                END,
                notes = COALESCE($5, notes)
-           WHERE id = $1"#,
+           WHERE id = $1
+           RETURNING order_id, quote_number, status, total_net, total_vat, total_gross,
+                     valid_until, paid_amount, paid_at, line_items, notes"#,
     )
     .bind(quote_id)
     .bind(body.status.clone())
     .bind(paid_amount)
     .bind(paid_at)
     .bind(body.notes.clone())
-    .execute(&state.db)
+    .fetch_optional(&mut *tx)
     .await
     {
-        Ok(result) if result.rows_affected() > 0 => {
-            let _ = sqlx::query(
-                "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, $2, 'quote', $3, $4)",
-            )
-            .bind(auth.user_id)
-            .bind("update_quote_status")
-            .bind(quote_id)
-            .bind(serde_json::json!({
-                "status": body.status,
-                "paid_amount": paid_amount.map(decimal_to_string),
-            }))
-            .execute(&state.db)
-            .await;
-
-            match load_quote_detail(&state, quote_id, &auth).await {
-                Ok(Some(value)) => Json(value).into_response(),
-                Ok(None) => err(StatusCode::NOT_FOUND, "Quote not found"),
-                Err(resp) => resp,
-            }
-        }
-        Ok(_) => err(StatusCode::NOT_FOUND, "Quote not found"),
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Quote not found"),
         Err(e) => {
-            tracing::error!(error = %e, "update quote status");
-            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update quote")
+            tracing::error!(error = %e, quote_id = %quote_id, "update quote status");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update quote");
         }
+    };
+
+    let snapshot = QuoteVersionSnapshotInput {
+        quote_id,
+        order_id: updated_row
+            .try_get::<Uuid, _>("order_id")
+            .unwrap_or_default(),
+        quote_number: updated_row
+            .try_get::<String, _>("quote_number")
+            .unwrap_or_default(),
+        status: updated_row
+            .try_get::<String, _>("status")
+            .unwrap_or_default(),
+        total_net: updated_row
+            .try_get::<Decimal, _>("total_net")
+            .unwrap_or(Decimal::ZERO),
+        total_vat: updated_row
+            .try_get::<Decimal, _>("total_vat")
+            .unwrap_or(Decimal::ZERO),
+        total_gross: updated_row
+            .try_get::<Decimal, _>("total_gross")
+            .unwrap_or(Decimal::ZERO),
+        valid_until: updated_row
+            .try_get::<Option<NaiveDate>, _>("valid_until")
+            .unwrap_or_default(),
+        paid_amount: updated_row
+            .try_get::<Decimal, _>("paid_amount")
+            .unwrap_or(Decimal::ZERO),
+        paid_at: updated_row
+            .try_get::<Option<DateTime<Utc>>, _>("paid_at")
+            .unwrap_or_default(),
+        line_items: updated_row
+            .try_get::<Value, _>("line_items")
+            .unwrap_or_else(|_| serde_json::json!([])),
+        notes: updated_row
+            .try_get::<Option<String>, _>("notes")
+            .unwrap_or_default(),
+        change_reason: Some("status_update".to_string()),
+        created_by: auth.user_id,
+    };
+
+    if let Err(e) = insert_quote_version_snapshot(&mut tx, &snapshot).await {
+        tracing::error!(error = %e, quote_id = %quote_id, "insert quote version snapshot");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to persist quote version",
+        );
+    }
+
+    if let Err(e) = sqlx::query(
+        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, $2, 'quote', $3, $4)",
+    )
+    .bind(auth.user_id)
+    .bind("update_quote_status")
+    .bind(quote_id)
+    .bind(serde_json::json!({
+        "status": body.status,
+        "paid_amount": paid_amount.map(decimal_to_string),
+    }))
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(error = %e, quote_id = %quote_id, "audit quote status update");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update quote");
+    }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, quote_id = %quote_id, "commit quote status update");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update quote");
+    }
+
+    match load_quote_detail(&state, quote_id, &auth).await {
+        Ok(Some(value)) => Json(value).into_response(),
+        Ok(None) => err(StatusCode::NOT_FOUND, "Quote not found"),
+        Err(resp) => resp,
     }
 }

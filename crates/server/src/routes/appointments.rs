@@ -5,7 +5,10 @@ use axum::{
     response::IntoResponse,
     routing::{get, post},
 };
+use chrono::Datelike;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use uuid::Uuid;
 
 use crate::access;
@@ -98,6 +101,10 @@ struct CreateAppointment {
     location: Option<String>,
     category: Option<String>,
     notes: Option<String>,
+    recurrence_frequency: Option<String>,
+    recurrence_interval: Option<i32>,
+    recurrence_count: Option<i32>,
+    recurrence_until: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -111,6 +118,13 @@ struct UpdateAppointment {
     time_start: Option<String>,
     time_end: Option<String>,
     location: Option<String>,
+}
+
+struct AppointmentRecurrence {
+    frequency: String,
+    interval: i32,
+    count: Option<i32>,
+    until: Option<chrono::NaiveDate>,
 }
 
 #[derive(Deserialize)]
@@ -1196,11 +1210,35 @@ async fn list_appointments(
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
     let search_pattern = format!("%{}%", query.search.unwrap_or_default());
+    let assignment_set = if access::requires_patient_assignment(auth.role) {
+        match access::load_active_patient_assignment_set(&state.db, auth.user_id).await {
+            Ok(value) => Some(value),
+            Err(e) => {
+                tracing::error!(error = %e, user_id = %auth.user_id, "load appointment assignment set");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to validate appointment access",
+                );
+            }
+        }
+    } else {
+        None
+    };
 
     match sqlx::query(
         r#"SELECT a.id, a.title, a.date, a.time_start, a.time_end, a.appointment_type, a.status,
                   a.location, a.interpreter_response, a.checklist_phase, a.patient_id, a.interpreter_id,
                   a.provider_id, a.doctor_id, a.owner_user_id,
+                  a.recurrence_series_id, a.recurrence_frequency, a.recurrence_interval,
+                  a.recurrence_count, a.recurrence_until, a.recurrence_index,
+                  CASE
+                      WHEN a.recurrence_series_id IS NULL THEN 1
+                      ELSE (
+                          SELECT COUNT(*)
+                          FROM appointments series
+                          WHERE series.recurrence_series_id = a.recurrence_series_id
+                      )
+                  END AS recurrence_series_size,
                   p.first_name, p.last_name, p.patient_id AS patient_code,
                   pr.name AS provider_name,
                   d.name AS doctor_name,
@@ -1268,19 +1306,14 @@ async fn list_appointments(
                     Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"),
                 };
 
-                match can_access_appointment(
-                    &state,
+                if !can_access_appointment_row(
                     &auth,
-                    appointment_id,
-                    Some(patient_id),
+                    patient_id,
                     interpreter_id,
                     owner_user_id,
-                )
-                .await
-                {
-                    Ok(true) => {}
-                    Ok(false) => continue,
-                    Err(resp) => return resp,
+                    assignment_set.as_ref(),
+                ) {
+                    continue;
                 }
 
                 items.push(build_appointment_list_json(&auth, &r, appointment_id, patient_id));
@@ -1328,11 +1361,35 @@ async fn list_attention_items(
     let search_pattern = format!("%{}%", query.search.unwrap_or_default());
     let today = chrono::Utc::now().date_naive();
     let preparation_window_end = today + chrono::Days::new(2);
+    let assignment_set = if access::requires_patient_assignment(auth.role) {
+        match access::load_active_patient_assignment_set(&state.db, auth.user_id).await {
+            Ok(value) => Some(value),
+            Err(e) => {
+                tracing::error!(error = %e, user_id = %auth.user_id, "load appointment attention assignment set");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to validate appointment access",
+                );
+            }
+        }
+    } else {
+        None
+    };
 
     match sqlx::query(
         r#"SELECT a.id, a.title, a.date, a.time_start, a.time_end, a.appointment_type, a.status,
                   a.location, a.interpreter_response, a.checklist_phase, a.patient_id, a.interpreter_id,
                   a.provider_id, a.doctor_id, a.owner_user_id,
+                  a.recurrence_series_id, a.recurrence_frequency, a.recurrence_interval,
+                  a.recurrence_count, a.recurrence_until, a.recurrence_index,
+                  CASE
+                      WHEN a.recurrence_series_id IS NULL THEN 1
+                      ELSE (
+                          SELECT COUNT(*)
+                          FROM appointments series
+                          WHERE series.recurrence_series_id = a.recurrence_series_id
+                      )
+                  END AS recurrence_series_size,
                   p.first_name, p.last_name, p.patient_id AS patient_code,
                   pr.name AS provider_name,
                   d.name AS doctor_name,
@@ -1437,19 +1494,14 @@ async fn list_attention_items(
                     Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"),
                 };
 
-                match can_access_appointment(
-                    &state,
+                if !can_access_appointment_row(
                     &auth,
-                    appointment_id,
-                    Some(patient_id),
+                    patient_id,
                     interpreter_id,
                     owner_user_id,
-                )
-                .await
-                {
-                    Ok(true) => {}
-                    Ok(false) => continue,
-                    Err(resp) => return resp,
+                    assignment_set.as_ref(),
+                ) {
+                    continue;
                 }
 
                 let appointment_date: chrono::NaiveDate = match row.try_get("date") {
@@ -1793,6 +1845,15 @@ async fn create_appointment(
         );
     }
 
+    let recurrence = match parse_appointment_recurrence(&body, date) {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let appointment_dates = match build_recurrence_dates(date, recurrence.as_ref()) {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+
     let CreateAppointment {
         patient_id,
         provider_id,
@@ -1808,113 +1869,197 @@ async fn create_appointment(
         location,
         category,
         notes,
+        recurrence_frequency: _,
+        recurrence_interval: _,
+        recurrence_count: _,
+        recurrence_until: _,
     } = body;
     let owner_user_id = resolve_owner_user_id_for_write(&auth, owner_user_id);
+    let mut tx = match state.db.begin().await {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, "create appointment: begin tx");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
 
-    match sqlx::query(
-        "INSERT INTO appointments (patient_id, provider_id, doctor_id, owner_user_id, interpreter_id, order_id, appointment_type, title, date, time_start, time_end, location, category, notes, created_by, interpreter_response)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
-         RETURNING id, created_at",
-    )
-    .bind(patient_id)
-    .bind(provider_id)
-    .bind(doctor_id)
-    .bind(owner_user_id)
-    .bind(interpreter_id)
-    .bind(order_id)
-    .bind(&appointment_type)
-    .bind(&title)
-    .bind(date)
-    .bind(time_start)
-    .bind(time_end)
-    .bind(location)
-    .bind(category)
-    .bind(notes)
-    .bind(auth.user_id)
-    .bind(interpreter_id.map(|_| "pending"))
-    .fetch_one(&state.db)
-    .await
-    {
-        Ok(r) => {
-            let appointment_id: Uuid = match r.try_get("id") {
-                Ok(value) => value,
-                Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"),
-            };
-            let created_at = r
+    let root_appointment_id = Uuid::new_v4();
+    let recurrence_series_id = recurrence.as_ref().map(|_| root_appointment_id);
+    let mut created_at = String::new();
+    let mut created_appointments = Vec::with_capacity(appointment_dates.len());
+
+    for (index, occurrence_date) in appointment_dates.iter().copied().enumerate() {
+        if let Err(resp) = acquire_appointment_schedule_locks(
+            &mut tx,
+            patient_id,
+            interpreter_id,
+            doctor_id,
+            occurrence_date,
+        )
+        .await
+        {
+            return resp;
+        }
+        if let Err(resp) = ensure_no_overlapping_appointments_in_tx(
+            &mut tx,
+            patient_id,
+            interpreter_id,
+            doctor_id,
+            occurrence_date,
+            time_start,
+            time_end,
+            None,
+        )
+        .await
+        {
+            return resp;
+        }
+
+        let appointment_id = if index == 0 {
+            root_appointment_id
+        } else {
+            Uuid::new_v4()
+        };
+
+        let insert_result = sqlx::query(
+            "INSERT INTO appointments (id, patient_id, provider_id, doctor_id, owner_user_id, interpreter_id, order_id, appointment_type, title, date, time_start, time_end, location, category, notes, recurrence_series_id, recurrence_frequency, recurrence_interval, recurrence_count, recurrence_until, recurrence_index, created_by, interpreter_response)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
+             RETURNING created_at",
+        )
+        .bind(appointment_id)
+        .bind(patient_id)
+        .bind(provider_id)
+        .bind(doctor_id)
+        .bind(owner_user_id)
+        .bind(interpreter_id)
+        .bind(order_id)
+        .bind(&appointment_type)
+        .bind(&title)
+        .bind(occurrence_date)
+        .bind(time_start)
+        .bind(time_end)
+        .bind(location.as_deref())
+        .bind(category.as_deref())
+        .bind(notes.as_deref())
+        .bind(recurrence_series_id)
+        .bind(recurrence.as_ref().map(|value| value.frequency.as_str()))
+        .bind(recurrence.as_ref().map(|value| value.interval))
+        .bind(recurrence.as_ref().and_then(|value| value.count))
+        .bind(recurrence.as_ref().and_then(|value| value.until))
+        .bind(index as i32)
+        .bind(auth.user_id)
+        .bind(interpreter_id.map(|_| "pending"))
+        .fetch_one(&mut *tx)
+        .await;
+
+        let row = match insert_result {
+            Ok(value) => value,
+            Err(e) => {
+                tracing::error!(error = %e, appointment_id = %appointment_id, "create appointment: insert");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        };
+
+        if index == 0 {
+            created_at = row
                 .try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
-                .map(|v| v.to_rfc3339())
+                .map(|value| value.to_rfc3339())
                 .unwrap_or_default();
+        }
 
-            if let Some(interpreter_id) = interpreter_id {
-                let _ = sqlx::query!(
-                    "INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
-                     VALUES ($1, $2, $3)
-                     ON CONFLICT (patient_id, user_id) DO UPDATE SET revoked_at = NULL, assigned_by = $3, assigned_at = now()",
-                    patient_id,
-                    interpreter_id,
-                    auth.user_id
-                )
-                .execute(&state.db)
-                .await;
+        created_appointments.push((appointment_id, occurrence_date));
+    }
 
-                let _ = create_reminder_record(
-                    &state,
-                    appointment_id,
-                    interpreter_id,
-                    chrono::Utc::now(),
-                    format!("New assignment: {title}"),
-                    Some(format!("Appointment on {}", date)),
-                )
-                .await;
-            }
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, "create appointment: commit");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
 
-            if appointment_type == "non_medical"
-                && let Err(resp) = bootstrap_concierge_workflow(
-                    &state,
-                    auth.user_id,
-                    appointment_id,
-                    patient_id,
-                    &title,
-                    date,
-                    time_start,
-                )
-                .await
-            {
-                return resp;
-            }
-            if appointment_type == "non_medical"
-                && let Err(resp) = crate::routes::concierge_services::bootstrap_default_service(
-                    &state,
-                    auth.user_id,
-                    appointment_id,
-                )
-                .await
-            {
-                return resp;
-            }
+    if let Some(interpreter_id) = interpreter_id {
+        let _ = sqlx::query!(
+            "INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
+             VALUES ($1, $2, $3)
+             ON CONFLICT (patient_id, user_id) DO UPDATE SET revoked_at = NULL, assigned_by = $3, assigned_at = now()",
+            patient_id,
+            interpreter_id,
+            auth.user_id
+        )
+        .execute(&state.db)
+        .await;
+    }
 
-            let conflicts = match build_conflicts_payload(
+    for (appointment_id, occurrence_date) in &created_appointments {
+        if let Some(interpreter_id) = interpreter_id {
+            let _ = create_reminder_record(
                 &state,
-                &auth,
-                patient_id,
+                *appointment_id,
                 interpreter_id,
-                date,
+                chrono::Utc::now(),
+                format!("New assignment: {title}"),
+                Some(format!("Appointment on {}", occurrence_date)),
+            )
+            .await;
+        }
+
+        if appointment_type == "non_medical"
+            && let Err(resp) = bootstrap_concierge_workflow(
+                &state,
+                auth.user_id,
+                *appointment_id,
+                patient_id,
+                &title,
+                *occurrence_date,
                 time_start,
-                time_end,
-                Some(appointment_id),
             )
             .await
-            {
-                Ok(value) => value,
-                Err(resp) => return resp,
-            };
-
-            let _ = sqlx::query!("INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'create_appointment', 'appointment', $2, $3)", auth.user_id, appointment_id, serde_json::json!({"provider_id": provider_id, "doctor_id": doctor_id, "owner_user_id": owner_user_id, "interpreter_id": interpreter_id})).execute(&state.db).await;
-            tracing::info!(by = %auth.user_id, apt = %appointment_id, "Appointment created");
-            (StatusCode::CREATED, Json(serde_json::json!({"id": appointment_id, "created_at": created_at, "conflicts": conflicts}))).into_response()
+        {
+            return resp;
         }
-        Err(e) => { tracing::error!(error = %e, "create appointment"); err(StatusCode::INTERNAL_SERVER_ERROR, "Failed") }
+        if appointment_type == "non_medical"
+            && let Err(resp) = crate::routes::concierge_services::bootstrap_default_service(
+                &state,
+                auth.user_id,
+                *appointment_id,
+            )
+            .await
+        {
+            return resp;
+        }
     }
+
+    let mut conflict_payloads = Vec::with_capacity(created_appointments.len());
+    for (appointment_id, occurrence_date) in &created_appointments {
+        let conflicts = match build_conflicts_payload(
+            &state,
+            &auth,
+            patient_id,
+            interpreter_id,
+            *occurrence_date,
+            time_start,
+            time_end,
+            Some(*appointment_id),
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(resp) => return resp,
+        };
+        conflict_payloads.push(conflicts);
+    }
+    let conflicts = merge_conflicts_payload(&conflict_payloads);
+
+    let _ = sqlx::query!("INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'create_appointment', 'appointment', $2, $3)", auth.user_id, root_appointment_id, serde_json::json!({"provider_id": provider_id, "doctor_id": doctor_id, "owner_user_id": owner_user_id, "interpreter_id": interpreter_id, "series_created_count": created_appointments.len(), "recurrence_frequency": recurrence.as_ref().map(|value| value.frequency.as_str()), "recurrence_interval": recurrence.as_ref().map(|value| value.interval), "recurrence_count": recurrence.as_ref().and_then(|value| value.count), "recurrence_until": recurrence.as_ref().and_then(|value| value.until.map(|date| date.to_string()))})).execute(&state.db).await;
+    tracing::info!(by = %auth.user_id, apt = %root_appointment_id, series_created_count = created_appointments.len(), "Appointment created");
+    (
+        StatusCode::CREATED,
+        Json(serde_json::json!({
+            "id": root_appointment_id,
+            "created_at": created_at,
+            "conflicts": conflicts,
+            "series_created_count": created_appointments.len(),
+        })),
+    )
+        .into_response()
 }
 
 fn is_valid_appointment_type(value: &str) -> bool {
@@ -1926,6 +2071,265 @@ fn is_valid_appointment_status(value: &str) -> bool {
         value,
         "planned" | "confirmed" | "in_progress" | "completed" | "cancelled"
     )
+}
+
+fn is_valid_recurrence_frequency(value: &str) -> bool {
+    matches!(value, "daily" | "weekly" | "monthly")
+}
+
+#[allow(clippy::result_large_err)]
+fn parse_appointment_recurrence(
+    body: &CreateAppointment,
+    start_date: chrono::NaiveDate,
+) -> Result<Option<AppointmentRecurrence>, axum::response::Response> {
+    let has_frequency = body
+        .recurrence_frequency
+        .as_ref()
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false);
+    let has_other_fields = body.recurrence_interval.is_some()
+        || body.recurrence_count.is_some()
+        || body
+            .recurrence_until
+            .as_ref()
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false);
+
+    if !has_frequency {
+        if has_other_fields {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "recurrence_frequency is required when recurrence fields are provided",
+            ));
+        }
+        return Ok(None);
+    }
+
+    let frequency = body
+        .recurrence_frequency
+        .as_deref()
+        .unwrap_or_default()
+        .trim()
+        .to_lowercase();
+    if !is_valid_recurrence_frequency(&frequency) {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "recurrence_frequency must be daily, weekly or monthly",
+        ));
+    }
+
+    let interval = body.recurrence_interval.unwrap_or(1);
+    if interval <= 0 {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "recurrence_interval must be greater than 0",
+        ));
+    }
+
+    let count = match body.recurrence_count {
+        Some(value) if value < 2 => {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "recurrence_count must be at least 2 when recurrence is enabled",
+            ));
+        }
+        Some(value) if value > 90 => {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "recurrence_count cannot exceed 90 appointments",
+            ));
+        }
+        value => value,
+    };
+
+    let until = match body.recurrence_until.as_deref() {
+        Some(raw) if !raw.trim().is_empty() => {
+            match chrono::NaiveDate::parse_from_str(raw, "%Y-%m-%d") {
+                Ok(value) => {
+                    if value <= start_date {
+                        return Err(err(
+                            StatusCode::UNPROCESSABLE_ENTITY,
+                            "recurrence_until must be later than the first appointment date",
+                        ));
+                    }
+                    if value > start_date + chrono::Days::new(365) {
+                        return Err(err(
+                            StatusCode::UNPROCESSABLE_ENTITY,
+                            "recurrence_until cannot be more than 365 days after the first appointment",
+                        ));
+                    }
+                    Some(value)
+                }
+                Err(_) => {
+                    return Err(err(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        "Invalid recurrence_until (YYYY-MM-DD)",
+                    ));
+                }
+            }
+        }
+        _ => None,
+    };
+
+    if count.is_none() && until.is_none() {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "recurrence_count or recurrence_until is required when recurrence is enabled",
+        ));
+    }
+
+    Ok(Some(AppointmentRecurrence {
+        frequency,
+        interval,
+        count,
+        until,
+    }))
+}
+
+fn advance_recurrence_date(
+    value: chrono::NaiveDate,
+    frequency: &str,
+    interval: i32,
+) -> Option<chrono::NaiveDate> {
+    match frequency {
+        "daily" => value.checked_add_days(chrono::Days::new(interval as u64)),
+        "weekly" => value.checked_add_days(chrono::Days::new((interval as u64) * 7)),
+        "monthly" => value.checked_add_months(chrono::Months::new(interval as u32)),
+        _ => None,
+    }
+}
+
+fn build_monthly_recurrence_date(
+    start_date: chrono::NaiveDate,
+    occurrence_index: i32,
+    interval: i32,
+) -> Option<chrono::NaiveDate> {
+    let total_month_offset = occurrence_index.checked_mul(interval)?;
+    let absolute_month = start_date.month0() as i32 + total_month_offset;
+    let year = start_date.year() + absolute_month.div_euclid(12);
+    let month0 = absolute_month.rem_euclid(12) as u32;
+    let month = month0 + 1;
+    let month_start = chrono::NaiveDate::from_ymd_opt(year, month, 1)?;
+    let next_month_start = if month == 12 {
+        chrono::NaiveDate::from_ymd_opt(year + 1, 1, 1)?
+    } else {
+        chrono::NaiveDate::from_ymd_opt(year, month + 1, 1)?
+    };
+    let last_day = (next_month_start - chrono::Days::new(1)).day();
+    chrono::NaiveDate::from_ymd_opt(year, month, start_date.day().min(last_day))
+        .or(Some(month_start))
+}
+
+#[allow(clippy::result_large_err)]
+fn build_recurrence_dates(
+    start_date: chrono::NaiveDate,
+    recurrence: Option<&AppointmentRecurrence>,
+) -> Result<Vec<chrono::NaiveDate>, axum::response::Response> {
+    const MAX_RECURRING_APPOINTMENTS: usize = 90;
+
+    let Some(recurrence) = recurrence else {
+        return Ok(vec![start_date]);
+    };
+
+    let mut dates = vec![start_date];
+    let mut current = start_date;
+
+    loop {
+        if let Some(count) = recurrence.count
+            && dates.len() >= count as usize
+        {
+            break;
+        }
+
+        let occurrence_index = dates.len() as i32;
+        let Some(next_date) = (if recurrence.frequency == "monthly" {
+            build_monthly_recurrence_date(start_date, occurrence_index, recurrence.interval)
+        } else {
+            advance_recurrence_date(current, &recurrence.frequency, recurrence.interval)
+        }) else {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Failed to calculate recurring appointment dates",
+            ));
+        };
+
+        if let Some(until) = recurrence.until
+            && next_date > until
+        {
+            break;
+        }
+
+        dates.push(next_date);
+        current = next_date;
+
+        if dates.len() > MAX_RECURRING_APPOINTMENTS {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Recurring appointment series cannot exceed 90 appointments",
+            ));
+        }
+    }
+
+    if dates.len() < 2 {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Recurring appointment settings did not create any additional occurrences",
+        ));
+    }
+
+    Ok(dates)
+}
+
+fn merge_conflict_items(
+    target: &mut Vec<serde_json::Value>,
+    seen_ids: &mut HashSet<String>,
+    payload: &serde_json::Value,
+) {
+    let Some(items) = payload.as_array() else {
+        return;
+    };
+
+    for item in items {
+        let dedupe_key = item
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| item.to_string());
+        if seen_ids.insert(dedupe_key) {
+            target.push(item.clone());
+        }
+    }
+}
+
+fn merge_conflicts_payload(payloads: &[serde_json::Value]) -> serde_json::Value {
+    let mut patient_conflicts = Vec::new();
+    let mut interpreter_conflicts = Vec::new();
+    let mut patient_seen = HashSet::new();
+    let mut interpreter_seen = HashSet::new();
+
+    for payload in payloads {
+        merge_conflict_items(
+            &mut patient_conflicts,
+            &mut patient_seen,
+            &payload["patient_conflicts"],
+        );
+        merge_conflict_items(
+            &mut interpreter_conflicts,
+            &mut interpreter_seen,
+            &payload["interpreter_conflicts"],
+        );
+    }
+
+    let patient_conflict_count = patient_conflicts.len();
+    let interpreter_conflict_count = interpreter_conflicts.len();
+
+    serde_json::json!({
+        "patient_conflict_count": patient_conflict_count,
+        "interpreter_conflict_count": interpreter_conflict_count,
+        "has_conflicts": patient_conflict_count > 0 || interpreter_conflict_count > 0,
+        "patient_conflicts": patient_conflicts,
+        "interpreter_conflicts": interpreter_conflicts,
+    })
 }
 
 fn is_valid_communication_target(value: &str) -> bool {
@@ -2002,6 +2406,16 @@ async fn get_appointment(
                   a.appointment_type, a.title, a.date, a.time_start, a.time_end, a.location,
                   a.category, a.status, a.interpreter_response, a.checklist_phase,
                   a.preparation_notes, a.followup_notes, a.notes, a.created_at,
+                  a.recurrence_series_id, a.recurrence_frequency, a.recurrence_interval,
+                  a.recurrence_count, a.recurrence_until, a.recurrence_index,
+                  CASE
+                      WHEN a.recurrence_series_id IS NULL THEN 1
+                      ELSE (
+                          SELECT COUNT(*)
+                          FROM appointments series
+                          WHERE series.recurrence_series_id = a.recurrence_series_id
+                      )
+                  END AS recurrence_series_size,
                   p.first_name, p.last_name, p.patient_id AS patient_code,
                   pr.name AS provider_name,
                   d.name AS doctor_name,
@@ -2249,6 +2663,38 @@ async fn update_appointment(
         Some(_) => current_interpreter_response.as_deref(),
         None => None,
     };
+    let mut tx = match state.db.begin().await {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, appointment_id = %apt_id, "update appointment: begin tx");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if let Err(resp) = acquire_appointment_schedule_locks(
+        &mut tx,
+        patient_id,
+        body.interpreter_id,
+        body.doctor_id,
+        date,
+    )
+    .await
+    {
+        return resp;
+    }
+    if let Err(resp) = ensure_no_overlapping_appointments_in_tx(
+        &mut tx,
+        patient_id,
+        body.interpreter_id,
+        body.doctor_id,
+        date,
+        time_start,
+        time_end,
+        Some(apt_id),
+    )
+    .await
+    {
+        return resp;
+    }
 
     match sqlx::query(
         r#"UPDATE appointments
@@ -2275,7 +2721,7 @@ async fn update_appointment(
     .bind(time_end)
     .bind(&location)
     .bind(interpreter_response)
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await
     {
         Ok(result) if result.rows_affected() > 0 => {}
@@ -2284,6 +2730,10 @@ async fn update_appointment(
             tracing::error!(error = %e, appointment_id = %apt_id, "update appointment");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
+    }
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, appointment_id = %apt_id, "update appointment: commit");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
 
     if let Some(interpreter_id) = body.interpreter_id
@@ -2390,6 +2840,28 @@ async fn update_status(
         "completed" => {}
         "cancelled" => {}
         _ => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid status"),
+    }
+    if body.status == "completed" {
+        let open_checklist_count: i64 = match sqlx::query_scalar(
+            "SELECT COUNT(*) FROM appointment_checklists WHERE appointment_id = $1 AND NOT is_completed",
+        )
+        .bind(apt_id)
+        .fetch_one(&state.db)
+        .await
+        {
+            Ok(value) => value,
+            Err(e) => {
+            tracing::error!(error = %e, appointment_id = %apt_id, "check open appointment checklist items");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        };
+
+        if open_checklist_count > 0 {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Appointment has open checklist items and cannot be completed",
+            );
+        }
     }
     match sqlx::query!(
         "UPDATE appointments SET status = $2 WHERE id = $1",
@@ -3776,6 +4248,13 @@ fn build_appointment_list_json(
         "owner_role": if blocked { None::<String> } else { row.try_get::<Option<String>, _>("owner_role").unwrap_or_default() },
         "interpreter_id": if blocked { None::<Uuid> } else { row.try_get::<Option<Uuid>, _>("interpreter_id").unwrap_or_default() },
         "interpreter_name": if blocked { None::<String> } else { row.try_get::<Option<String>, _>("interpreter_name").unwrap_or_default() },
+        "recurrence_series_id": if blocked { None::<Uuid> } else { row.try_get::<Option<Uuid>, _>("recurrence_series_id").unwrap_or_default() },
+        "recurrence_frequency": if blocked { None::<String> } else { row.try_get::<Option<String>, _>("recurrence_frequency").unwrap_or_default() },
+        "recurrence_interval": if blocked { None::<i32> } else { row.try_get::<Option<i32>, _>("recurrence_interval").unwrap_or_default() },
+        "recurrence_count": if blocked { None::<i32> } else { row.try_get::<Option<i32>, _>("recurrence_count").unwrap_or_default() },
+        "recurrence_until": if blocked { None::<String> } else { row.try_get::<Option<chrono::NaiveDate>, _>("recurrence_until").unwrap_or_default().map(|v| v.to_string()) },
+        "recurrence_index": if blocked { 0 } else { row.try_get::<i32, _>("recurrence_index").unwrap_or(0) },
+        "recurrence_series_size": if blocked { 1 } else { row.try_get::<i64, _>("recurrence_series_size").map(|value| value as i32).unwrap_or(1) },
         "is_blocked": blocked,
         "visibility_mode": if blocked { "blocked" } else { "full" },
     })
@@ -3826,6 +4305,13 @@ fn build_appointment_detail_json(
         "owner_name": if blocked { None::<String> } else { row.try_get::<Option<String>, _>("owner_name").unwrap_or_default() },
         "owner_role": if blocked { None::<String> } else { row.try_get::<Option<String>, _>("owner_role").unwrap_or_default() },
         "order_id": if blocked { None::<Uuid> } else { row.try_get::<Option<Uuid>, _>("order_id").unwrap_or_default() },
+        "recurrence_series_id": if blocked { None::<Uuid> } else { row.try_get::<Option<Uuid>, _>("recurrence_series_id").unwrap_or_default() },
+        "recurrence_frequency": if blocked { None::<String> } else { row.try_get::<Option<String>, _>("recurrence_frequency").unwrap_or_default() },
+        "recurrence_interval": if blocked { None::<i32> } else { row.try_get::<Option<i32>, _>("recurrence_interval").unwrap_or_default() },
+        "recurrence_count": if blocked { None::<i32> } else { row.try_get::<Option<i32>, _>("recurrence_count").unwrap_or_default() },
+        "recurrence_until": if blocked { None::<String> } else { row.try_get::<Option<chrono::NaiveDate>, _>("recurrence_until").unwrap_or_default().map(|v| v.to_string()) },
+        "recurrence_index": if blocked { 0 } else { row.try_get::<i32, _>("recurrence_index").unwrap_or(0) },
+        "recurrence_series_size": if blocked { 1 } else { row.try_get::<i64, _>("recurrence_series_size").map(|value| value as i32).unwrap_or(1) },
         "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
         "is_blocked": blocked,
         "visibility_mode": if blocked { "blocked" } else { "full" },
@@ -3950,12 +4436,193 @@ fn overlaps(
     other_start: Option<chrono::NaiveTime>,
     other_end: Option<chrono::NaiveTime>,
 ) -> bool {
+    let target_all_day = target_start.is_none() && target_end.is_none();
+    let other_all_day = other_start.is_none() && other_end.is_none();
+    if target_all_day && other_all_day {
+        return true;
+    }
+
     match (target_start, target_end, other_start, other_end) {
         (Some(target_start), Some(target_end), Some(other_start), Some(other_end)) => {
             target_start < other_end && other_start < target_end
         }
-        _ => true,
+        _ => false,
     }
+}
+
+fn appointment_lock_key(namespace: u8, resource_id: Uuid, date: chrono::NaiveDate) -> i64 {
+    let mut hasher = Sha256::new();
+    hasher.update([namespace]);
+    hasher.update(resource_id.as_bytes());
+    hasher.update(date.to_string().as_bytes());
+
+    let digest = hasher.finalize();
+    let mut bytes = [0u8; 8];
+    bytes.copy_from_slice(&digest[..8]);
+    i64::from_be_bytes(bytes)
+}
+
+async fn acquire_appointment_schedule_locks(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    patient_id: Uuid,
+    interpreter_id: Option<Uuid>,
+    doctor_id: Option<Uuid>,
+    date: chrono::NaiveDate,
+) -> Result<(), axum::response::Response> {
+    let mut keys = vec![appointment_lock_key(1, patient_id, date)];
+    if let Some(interpreter_id) = interpreter_id {
+        keys.push(appointment_lock_key(2, interpreter_id, date));
+    }
+    if let Some(doctor_id) = doctor_id {
+        keys.push(appointment_lock_key(3, doctor_id, date));
+    }
+    keys.sort_unstable();
+    keys.dedup();
+
+    for key in keys {
+        sqlx::query("SELECT pg_advisory_xact_lock($1)")
+            .bind(key)
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, advisory_key = key, date = %date, "acquire appointment advisory lock");
+                err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to validate appointment schedule",
+                )
+            })?;
+    }
+
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn ensure_no_overlapping_appointments_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    patient_id: Uuid,
+    interpreter_id: Option<Uuid>,
+    doctor_id: Option<Uuid>,
+    date: chrono::NaiveDate,
+    time_start: Option<chrono::NaiveTime>,
+    time_end: Option<chrono::NaiveTime>,
+    exclude_appointment_id: Option<Uuid>,
+) -> Result<(), axum::response::Response> {
+    let rows = sqlx::query(
+        r#"SELECT id, patient_id, interpreter_id, doctor_id, time_start, time_end
+           FROM appointments
+           WHERE date = $1
+             AND status <> 'cancelled'
+             AND (
+                patient_id = $2
+                OR ($3::uuid IS NOT NULL AND interpreter_id = $3)
+                OR ($4::uuid IS NOT NULL AND doctor_id = $4)
+             )
+             AND ($5::uuid IS NULL OR id <> $5)
+           FOR UPDATE"#,
+    )
+    .bind(date)
+    .bind(patient_id)
+    .bind(interpreter_id)
+    .bind(doctor_id)
+    .bind(exclude_appointment_id)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(|e| {
+        tracing::error!(
+            error = %e,
+            patient_id = %patient_id,
+            interpreter_id = ?interpreter_id,
+            doctor_id = ?doctor_id,
+            date = %date,
+            "load blocking appointment conflicts"
+        );
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate appointment schedule",
+        )
+    })?;
+
+    for row in rows {
+        let other_start = row
+            .try_get::<Option<chrono::NaiveTime>, _>("time_start")
+            .unwrap_or_default();
+        let other_end = row
+            .try_get::<Option<chrono::NaiveTime>, _>("time_end")
+            .unwrap_or_default();
+        if !overlaps(time_start, time_end, other_start, other_end) {
+            continue;
+        }
+
+        let mut scopes = Vec::new();
+        if row
+            .try_get::<Uuid, _>("patient_id")
+            .unwrap_or_else(|_| Uuid::nil())
+            == patient_id
+        {
+            scopes.push("patient");
+        }
+        if interpreter_id.is_some()
+            && row
+                .try_get::<Option<Uuid>, _>("interpreter_id")
+                .unwrap_or_default()
+                == interpreter_id
+        {
+            scopes.push("interpreter");
+        }
+        if doctor_id.is_some()
+            && row
+                .try_get::<Option<Uuid>, _>("doctor_id")
+                .unwrap_or_default()
+                == doctor_id
+        {
+            scopes.push("doctor");
+        }
+        scopes.sort_unstable();
+        scopes.dedup();
+
+        let message = if scopes.is_empty() {
+            "Appointment conflicts with an existing booking".to_string()
+        } else {
+            format!(
+                "Appointment conflicts with an existing {} booking",
+                scopes.join("/")
+            )
+        };
+        return Err(err(StatusCode::CONFLICT, &message));
+    }
+
+    Ok(())
+}
+
+fn can_access_appointment_row(
+    auth: &AuthUser,
+    patient_id: Uuid,
+    interpreter_id: Option<Uuid>,
+    owner_user_id: Option<Uuid>,
+    assignment_set: Option<&HashSet<Uuid>>,
+) -> bool {
+    if auth.role == Role::Ceo {
+        return true;
+    }
+    if matches!(auth.role, Role::Interpreter | Role::TeamleadInterpreter)
+        && interpreter_id == Some(auth.user_id)
+    {
+        return true;
+    }
+    if matches!(
+        auth.role,
+        Role::PatientManager | Role::TeamleadInterpreter | Role::Concierge
+    ) && owner_user_id == Some(auth.user_id)
+    {
+        return true;
+    }
+    if access::requires_patient_assignment(auth.role) {
+        return assignment_set
+            .map(|value| value.contains(&patient_id))
+            .unwrap_or(false);
+    }
+
+    true
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use gmed_db::DbPool;
 use gmed_domain::role::Role;
 use sqlx::Row;
@@ -46,6 +48,26 @@ pub async fn has_active_patient_assignment(
     .await?;
 
     row.try_get(0)
+}
+
+pub async fn load_active_patient_assignment_set(
+    pool: &DbPool,
+    user_id: Uuid,
+) -> Result<HashSet<Uuid>, sqlx::Error> {
+    let rows = sqlx::query(
+        r#"SELECT patient_id
+           FROM patient_assignments
+           WHERE user_id = $1
+             AND revoked_at IS NULL"#,
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .filter_map(|row| row.try_get::<Uuid, _>("patient_id").ok())
+        .collect())
 }
 
 pub fn mask_email(value: &str) -> String {

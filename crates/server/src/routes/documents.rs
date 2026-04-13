@@ -24,6 +24,8 @@ use uuid::Uuid;
 use crate::{
     access,
     auth::middleware::AuthUser,
+    file_scan::{FileScanOutcome, scan_upload_bytes},
+    file_sniff::validate_upload_magic_bytes,
     routes::{
         me::resolve_self_patient_id,
         patients::{
@@ -43,6 +45,13 @@ use gmed_domain::{
     role::Role,
 };
 
+#[cfg(windows)]
+use windows::{
+    Graphics::Imaging::BitmapDecoder,
+    Media::Ocr::OcrEngine,
+    Storage::Streams::{DataWriter, InMemoryRandomAccessStream},
+};
+
 const MAX_FILE_SIZE: usize = 25 * 1024 * 1024;
 const UPLOAD_DIR: &str = "uploads/documents";
 const PDF_PAGE_WIDTH_MM: f32 = 210.0;
@@ -53,6 +62,12 @@ const PDF_TOP_MARGIN_MM: f32 = 18.0;
 const PDF_BOTTOM_MARGIN_MM: f32 = 16.0;
 const PDF_FOOTER_GAP_MM: f32 = 10.0;
 const PDF_CONTENT_WIDTH_MM: f32 = PDF_PAGE_WIDTH_MM - PDF_LEFT_MARGIN_MM - PDF_RIGHT_MARGIN_MM;
+const IMAGE_OCR_UNAVAILABLE_MESSAGE: &str = "Image OCR is not available in this environment. Enable Windows OCR support or install the tesseract CLI, otherwise manual transcription is required.";
+const IMAGE_OCR_NO_TEXT_MESSAGE: &str = "OCR did not detect readable text in the image.";
+const IMAGE_OCR_FAILED_MESSAGE: &str = "Image OCR failed.";
+const PDF_TEXT_NO_TEXT_MESSAGE: &str =
+    "The PDF does not expose extractable text. Manual transcription is required.";
+const PDF_TEXT_FAILED_MESSAGE: &str = "PDF text extraction failed.";
 const TREATMENT_PLAN_ARIAL_TTF: &[u8] =
     include_bytes!("../../../../docs/comparison/fonts/arial.ttf");
 const TREATMENT_PLAN_ARIAL_BOLD_TTF: &[u8] =
@@ -474,6 +489,14 @@ pub fn router() -> Router<AppState> {
             post(update_document_translation_request),
         )
         .route("/documents/{id}", get(get_document))
+        .route(
+            "/documents/{id}/text-extraction",
+            get(get_document_text_extraction),
+        )
+        .route(
+            "/documents/{id}/text-extraction/run",
+            post(run_document_text_extraction),
+        )
         .route("/documents/{id}/versions", get(list_document_versions))
         .route("/documents/{id}/update", post(update_document))
         .route("/documents/{id}/download", get(download_document))
@@ -564,6 +587,9 @@ struct CreateDocumentTranslationRequest {
 struct UpdateDocumentTranslationRequest {
     status: String,
     note: Option<String>,
+    source_language: Option<String>,
+    source_text: Option<String>,
+    translated_text: Option<String>,
 }
 
 struct ShareableDocumentContext {
@@ -684,7 +710,14 @@ fn suggest_document_classification(
 
     if contains_any_keyword(
         &hint_source,
-        &["passport", "reisepass", "ausweis", "identity", "idcard", "id_card"],
+        &[
+            "passport",
+            "reisepass",
+            "ausweis",
+            "identity",
+            "idcard",
+            "id_card",
+        ],
     ) {
         return Some(build_document_classification_suggestion(
             "passport_scan",
@@ -870,14 +903,413 @@ fn document_needs_categorization(
         || category == "portal_upload"
         || matches!(
             art.as_str(),
-            ""
-                | "document"
+            "" | "document"
                 | "uploaded_document"
                 | "patient_general_upload"
                 | "patient_medical_upload"
                 | "patient_admin_upload"
         )
         || ursprung == "patient_portal"
+}
+
+fn is_interpreter_review_document(
+    uploaded_by_role: Option<&str>,
+    ursprung: Option<&str>,
+    status: Option<&str>,
+) -> bool {
+    matches!(uploaded_by_role, Some("interpreter"))
+        && matches!(ursprung, Some("interpreter_upload"))
+        && matches!(status, Some("draft"))
+}
+
+fn is_document_intake_queue_candidate(row: &sqlx::postgres::PgRow) -> bool {
+    let art = row.try_get::<Option<String>, _>("art").unwrap_or_default();
+    let category = row
+        .try_get::<Option<String>, _>("category")
+        .unwrap_or_default();
+    let ursprung = row
+        .try_get::<Option<String>, _>("ursprung")
+        .unwrap_or_default();
+    let status = row
+        .try_get::<Option<String>, _>("status")
+        .unwrap_or_default();
+    let uploaded_by_role = row
+        .try_get::<Option<String>, _>("uploaded_by_role")
+        .unwrap_or_default();
+
+    document_needs_categorization(art.as_deref(), category.as_deref(), ursprung.as_deref())
+        || is_interpreter_review_document(
+            uploaded_by_role.as_deref(),
+            ursprung.as_deref(),
+            status.as_deref(),
+        )
+}
+
+fn classification_suggestion_art(value: &Value) -> Option<&str> {
+    value.get("art").and_then(Value::as_str)
+}
+
+fn classification_suggestion_category(value: &Value) -> Option<&str> {
+    value.get("category").and_then(Value::as_str)
+}
+
+fn classification_suggestion_is_medical(value: &Value) -> Option<bool> {
+    value.get("is_medical").and_then(Value::as_bool)
+}
+
+fn document_fields_imply_medical(art: &str, category: Option<&str>) -> bool {
+    let searchable = format!(
+        "{} {}",
+        art.trim().to_lowercase(),
+        category.unwrap_or_default().trim().to_lowercase()
+    );
+
+    searchable.contains("medical")
+        || searchable.contains("arztbrief")
+        || searchable.contains("befund")
+        || searchable.contains("report")
+        || searchable.contains("imaging")
+        || searchable.contains("radiology")
+        || searchable.contains("medication")
+        || searchable.contains("prescription")
+        || searchable.contains("discharge")
+        || searchable.contains("epicrisis")
+}
+
+enum DocumentTextExtractionResult {
+    Completed {
+        method: &'static str,
+        extracted_text: String,
+    },
+    Unsupported {
+        method: &'static str,
+        message: &'static str,
+    },
+    Failed {
+        method: &'static str,
+        message: &'static str,
+    },
+}
+
+fn document_text_extraction_message(status: &str, method: Option<&str>) -> Option<&'static str> {
+    match (status, method.unwrap_or_default()) {
+        ("unsupported", "ocr_unavailable") => Some(IMAGE_OCR_UNAVAILABLE_MESSAGE),
+        ("unsupported", "windows_ocr") => Some(IMAGE_OCR_NO_TEXT_MESSAGE),
+        ("unsupported", "tesseract_cli") => Some(IMAGE_OCR_NO_TEXT_MESSAGE),
+        ("unsupported", "pdf_text") => Some(PDF_TEXT_NO_TEXT_MESSAGE),
+        ("unsupported", "unsupported_binary") => {
+            Some("Text extraction is not supported for this document type.")
+        }
+        ("failed", "windows_ocr") => Some(IMAGE_OCR_FAILED_MESSAGE),
+        ("failed", "tesseract_cli") => Some(IMAGE_OCR_FAILED_MESSAGE),
+        ("failed", "pdf_text") => Some(PDF_TEXT_FAILED_MESSAGE),
+        ("failed", _) => Some("Document text extraction failed."),
+        _ => None,
+    }
+}
+
+fn document_file_extension(original_filename: Option<&str>) -> Option<String> {
+    original_filename
+        .and_then(|value| FsPath::new(value).extension())
+        .and_then(|value| value.to_str())
+        .map(|value| value.trim().to_lowercase())
+        .filter(|value| !value.is_empty())
+}
+
+fn normalize_extracted_text(value: &str) -> Option<String> {
+    let mut normalized = String::with_capacity(value.len());
+    let mut previous_blank_line = false;
+
+    for raw_line in value.replace("\r\n", "\n").replace('\r', "\n").lines() {
+        let line = raw_line.replace('\0', "").trim().to_string();
+        if line.is_empty() {
+            if !previous_blank_line && !normalized.is_empty() {
+                normalized.push('\n');
+            }
+            previous_blank_line = true;
+            continue;
+        }
+
+        if !normalized.is_empty() && !normalized.ends_with('\n') {
+            normalized.push('\n');
+        }
+        normalized.push_str(&line);
+        previous_blank_line = false;
+    }
+
+    let trimmed = normalized.trim().to_string();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
+}
+
+fn strip_html_tags(value: &str) -> String {
+    let mut output = String::with_capacity(value.len());
+    let mut in_tag = false;
+    let mut previous_was_space = false;
+
+    for ch in value.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' => {
+                in_tag = false;
+                if !previous_was_space && !output.ends_with('\n') {
+                    output.push(' ');
+                    previous_was_space = true;
+                }
+            }
+            _ if in_tag => {}
+            ch if ch.is_whitespace() => {
+                if !previous_was_space {
+                    output.push(if ch == '\n' { '\n' } else { ' ' });
+                    previous_was_space = true;
+                }
+            }
+            _ => {
+                output.push(ch);
+                previous_was_space = false;
+            }
+        }
+    }
+
+    output
+}
+
+#[cfg(windows)]
+async fn extract_text_from_image_bytes_windows(
+    bytes: &[u8],
+) -> Result<Option<String>, &'static str> {
+    let stream = InMemoryRandomAccessStream::new().map_err(|_| IMAGE_OCR_UNAVAILABLE_MESSAGE)?;
+    let writer =
+        DataWriter::CreateDataWriter(&stream).map_err(|_| IMAGE_OCR_UNAVAILABLE_MESSAGE)?;
+    writer
+        .WriteBytes(bytes)
+        .map_err(|_| IMAGE_OCR_FAILED_MESSAGE)?;
+    writer
+        .StoreAsync()
+        .map_err(|_| IMAGE_OCR_FAILED_MESSAGE)?
+        .await
+        .map_err(|_| IMAGE_OCR_FAILED_MESSAGE)?;
+    stream.Seek(0).map_err(|_| IMAGE_OCR_FAILED_MESSAGE)?;
+    let decoder = BitmapDecoder::CreateAsync(&stream)
+        .map_err(|_| IMAGE_OCR_FAILED_MESSAGE)?
+        .await
+        .map_err(|_| IMAGE_OCR_FAILED_MESSAGE)?;
+    let software_bitmap = decoder
+        .GetSoftwareBitmapAsync()
+        .map_err(|_| IMAGE_OCR_FAILED_MESSAGE)?
+        .await
+        .map_err(|_| IMAGE_OCR_FAILED_MESSAGE)?;
+    let engine = OcrEngine::TryCreateFromUserProfileLanguages()
+        .map_err(|_| IMAGE_OCR_UNAVAILABLE_MESSAGE)?;
+    let result: windows::Media::Ocr::OcrResult = engine
+        .RecognizeAsync(&software_bitmap)
+        .map_err(|_| IMAGE_OCR_FAILED_MESSAGE)?
+        .await
+        .map_err(|_| IMAGE_OCR_FAILED_MESSAGE)?;
+    let text = result
+        .Text()
+        .map_err(|_| IMAGE_OCR_FAILED_MESSAGE)?
+        .to_string();
+    Ok(normalize_extracted_text(&text))
+}
+
+#[cfg(not(windows))]
+async fn extract_text_from_image_bytes_windows(
+    _bytes: &[u8],
+) -> Result<Option<String>, &'static str> {
+    Err(IMAGE_OCR_UNAVAILABLE_MESSAGE)
+}
+
+async fn extract_text_from_image_bytes_tesseract(
+    bytes: &[u8],
+    original_filename: Option<&str>,
+) -> Result<Option<String>, &'static str> {
+    let extension = document_file_extension(original_filename).unwrap_or_else(|| "png".to_string());
+    let input_bytes = bytes.to_vec();
+
+    tokio::task::spawn_blocking(move || {
+        let mut temp_path = std::env::temp_dir();
+        temp_path.push(format!("gmed-doc-ocr-{}.{}", Uuid::new_v4(), extension));
+
+        let result = (|| -> Result<Option<String>, &'static str> {
+            std::fs::write(&temp_path, &input_bytes).map_err(|_| IMAGE_OCR_FAILED_MESSAGE)?;
+
+            let executables: &[&str] = if cfg!(windows) {
+                &["tesseract.exe", "tesseract"]
+            } else {
+                &["tesseract"]
+            };
+
+            for executable in executables {
+                match std::process::Command::new(executable)
+                    .arg(&temp_path)
+                    .arg("stdout")
+                    .arg("--psm")
+                    .arg("6")
+                    .output()
+                {
+                    Ok(output) => {
+                        if output.status.success() {
+                            let text = String::from_utf8_lossy(&output.stdout);
+                            return Ok(normalize_extracted_text(&text));
+                        }
+
+                        return Err(IMAGE_OCR_FAILED_MESSAGE);
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                    Err(_) => return Err(IMAGE_OCR_FAILED_MESSAGE),
+                }
+            }
+
+            Err(IMAGE_OCR_UNAVAILABLE_MESSAGE)
+        })();
+
+        let _ = std::fs::remove_file(&temp_path);
+        result
+    })
+    .await
+    .unwrap_or(Err(IMAGE_OCR_FAILED_MESSAGE))
+}
+
+async fn extract_text_from_image_bytes(
+    bytes: &[u8],
+    original_filename: Option<&str>,
+) -> (&'static str, Result<Option<String>, &'static str>) {
+    #[cfg(windows)]
+    {
+        match extract_text_from_image_bytes_windows(bytes).await {
+            Ok(Some(extracted_text)) => ("windows_ocr", Ok(Some(extracted_text))),
+            Ok(None) => {
+                match extract_text_from_image_bytes_tesseract(bytes, original_filename).await {
+                    Ok(Some(extracted_text)) => ("tesseract_cli", Ok(Some(extracted_text))),
+                    Ok(None) => ("windows_ocr", Ok(None)),
+                    Err(_) => ("windows_ocr", Ok(None)),
+                }
+            }
+            Err(message) if message == IMAGE_OCR_UNAVAILABLE_MESSAGE => {
+                match extract_text_from_image_bytes_tesseract(bytes, original_filename).await {
+                    Ok(result) => ("tesseract_cli", Ok(result)),
+                    Err(fallback_message) if fallback_message == IMAGE_OCR_UNAVAILABLE_MESSAGE => {
+                        ("ocr_unavailable", Err(IMAGE_OCR_UNAVAILABLE_MESSAGE))
+                    }
+                    Err(fallback_message) => ("tesseract_cli", Err(fallback_message)),
+                }
+            }
+            Err(message) => {
+                match extract_text_from_image_bytes_tesseract(bytes, original_filename).await {
+                    Ok(result) => ("tesseract_cli", Ok(result)),
+                    Err(_) => ("windows_ocr", Err(message)),
+                }
+            }
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        match extract_text_from_image_bytes_tesseract(bytes, original_filename).await {
+            Ok(result) => ("tesseract_cli", Ok(result)),
+            Err(message) if message == IMAGE_OCR_UNAVAILABLE_MESSAGE => {
+                ("ocr_unavailable", Err(IMAGE_OCR_UNAVAILABLE_MESSAGE))
+            }
+            Err(message) => ("tesseract_cli", Err(message)),
+        }
+    }
+}
+
+async fn extract_document_text_from_bytes(
+    mime_type: Option<&str>,
+    original_filename: Option<&str>,
+    bytes: &[u8],
+) -> DocumentTextExtractionResult {
+    let mime = mime_type.unwrap_or_default().trim().to_lowercase();
+    let extension = document_file_extension(original_filename);
+
+    let is_html = mime.contains("html") || matches!(extension.as_deref(), Some("html" | "htm"));
+    let is_pdf = mime == "application/pdf" || matches!(extension.as_deref(), Some("pdf"));
+    let is_image = mime.starts_with("image/")
+        || matches!(
+            extension.as_deref(),
+            Some("png" | "jpg" | "jpeg" | "bmp" | "tif" | "tiff" | "gif" | "webp")
+        );
+    let is_text_like = mime.starts_with("text/")
+        || matches!(
+            extension.as_deref(),
+            Some("txt" | "md" | "csv" | "tsv" | "json" | "xml" | "yaml" | "yml" | "log")
+        );
+
+    if is_html {
+        let text = strip_html_tags(&String::from_utf8_lossy(bytes));
+        return match normalize_extracted_text(&text) {
+            Some(extracted_text) => DocumentTextExtractionResult::Completed {
+                method: "html_text",
+                extracted_text,
+            },
+            None => DocumentTextExtractionResult::Unsupported {
+                method: "html_text",
+                message: "No extractable text found in the HTML document.",
+            },
+        };
+    }
+
+    if is_text_like {
+        return match normalize_extracted_text(&String::from_utf8_lossy(bytes)) {
+            Some(extracted_text) => DocumentTextExtractionResult::Completed {
+                method: "text_utf8",
+                extracted_text,
+            },
+            None => DocumentTextExtractionResult::Unsupported {
+                method: "text_utf8",
+                message: "No extractable text found in the uploaded document.",
+            },
+        };
+    }
+
+    if is_pdf {
+        return match pdf_extract::extract_text_from_mem(bytes) {
+            Ok(text) => match normalize_extracted_text(&text) {
+                Some(extracted_text) => DocumentTextExtractionResult::Completed {
+                    method: "pdf_text",
+                    extracted_text,
+                },
+                None => DocumentTextExtractionResult::Unsupported {
+                    method: "pdf_text",
+                    message: PDF_TEXT_NO_TEXT_MESSAGE,
+                },
+            },
+            Err(_) => DocumentTextExtractionResult::Failed {
+                method: "pdf_text",
+                message: PDF_TEXT_FAILED_MESSAGE,
+            },
+        };
+    }
+
+    if is_image {
+        let (method, extraction_result) =
+            extract_text_from_image_bytes(bytes, original_filename).await;
+
+        return match extraction_result {
+            Ok(Some(extracted_text)) => DocumentTextExtractionResult::Completed {
+                method,
+                extracted_text,
+            },
+            Ok(None) => DocumentTextExtractionResult::Unsupported {
+                method,
+                message: IMAGE_OCR_NO_TEXT_MESSAGE,
+            },
+            Err(message) if method == "ocr_unavailable" => {
+                DocumentTextExtractionResult::Unsupported { method, message }
+            }
+            Err(message) => DocumentTextExtractionResult::Failed { method, message },
+        };
+    }
+
+    DocumentTextExtractionResult::Unsupported {
+        method: "unsupported_binary",
+        message: "Text extraction is not supported for this document type.",
+    }
 }
 
 fn normalize_document_language(value: Option<&str>) -> Option<&'static str> {
@@ -4006,6 +4438,7 @@ async fn has_active_patient_share_consent(
                  AND consent_type = $3
                  AND granted = true
                  AND revoked_at IS NULL
+                 AND (expires_at IS NULL OR expires_at > now())
            )"#,
     )
     .bind(patient_id)
@@ -4118,6 +4551,21 @@ async fn validate_document_share_target(
         );
         if !decision.allowed {
             return Err(err(StatusCode::UNPROCESSABLE_ENTITY, decision.reason));
+        }
+
+        if document.sensitivity == DataSensitivity::Medical && provider_type == "medical" {
+            let specialty_matches = provider_matches_medical_document_specialty(
+                state,
+                provider_id,
+                document.appointment_id,
+            )
+            .await?;
+            if !specialty_matches {
+                return Err(err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Selected provider specialty does not match the medical document context",
+                ));
+            }
         }
     }
 
@@ -4464,11 +4912,47 @@ fn document_translation_request_json(row: &sqlx::postgres::PgRow) -> serde_json:
         "requested_language": row.try_get::<String, _>("requested_language").unwrap_or_default(),
         "status": row.try_get::<String, _>("status").unwrap_or_default(),
         "note": row.try_get::<Option<String>, _>("note").unwrap_or_default(),
+        "source_language": row.try_get::<Option<String>, _>("source_language").unwrap_or_default(),
+        "source_text": row.try_get::<Option<String>, _>("source_text").unwrap_or_default(),
+        "translated_text": row.try_get::<Option<String>, _>("translated_text").unwrap_or_default(),
         "requested_by": row.try_get::<Uuid, _>("requested_by").unwrap_or_else(|_| Uuid::nil()),
         "requested_by_name": row.try_get::<Option<String>, _>("requested_by_name").unwrap_or_default(),
+        "translated_by": row.try_get::<Option<Uuid>, _>("translated_by").unwrap_or_default(),
+        "translated_by_name": row.try_get::<Option<String>, _>("translated_by_name").unwrap_or_default(),
+        "translated_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("translated_at").unwrap_or_default(),
         "requested_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("requested_at").unwrap_or_else(|_| chrono::Utc::now()),
         "completed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("completed_at").unwrap_or_default(),
         "updated_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").unwrap_or_else(|_| chrono::Utc::now()),
+    })
+}
+
+fn document_text_extraction_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
+    let status = row
+        .try_get::<String, _>("text_extraction_status")
+        .unwrap_or_else(|_| "not_started".to_string());
+    let method = row
+        .try_get::<Option<String>, _>("text_extraction_method")
+        .unwrap_or_default();
+
+    json!({
+        "status": status,
+        "method": method,
+        "message": document_text_extraction_message(
+            row.try_get::<String, _>("text_extraction_status")
+                .unwrap_or_else(|_| "not_started".to_string())
+                .as_str(),
+            method.as_deref(),
+        ),
+        "extracted_text": row.try_get::<Option<String>, _>("extracted_text").unwrap_or_default(),
+        "has_text": row
+            .try_get::<Option<String>, _>("extracted_text")
+            .unwrap_or_default()
+            .as_ref()
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false),
+        "extracted_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("text_extracted_at").unwrap_or_default(),
+        "extracted_by": row.try_get::<Option<Uuid>, _>("text_extracted_by").unwrap_or_default(),
+        "extracted_by_name": row.try_get::<Option<String>, _>("text_extracted_by_name").unwrap_or_default(),
     })
 }
 
@@ -4481,13 +4965,16 @@ async fn fetch_document_row(
         r#"SELECT d.id, d.patient_id, d.order_id, d.appointment_id,
                   d.auto_name, d.original_filename, d.art, d.category, d.status, d.visibility,
                   d.is_medical, d.mime_type, d.file_size, d.storage_key, d.klinik, d.ursprung,
-                  d.notes, d.version_root_document_id, d.replaces_document_id,
+                  d.notes, d.extracted_text, d.text_extraction_status, d.text_extraction_method,
+                  d.text_extracted_at, d.text_extracted_by, d.version_root_document_id, d.replaces_document_id,
                   d.version_number, d.uploaded_by, d.created_at, d.updated_at,
                   p.patient_id AS patient_pid,
                   trim(concat_ws(' ', p.first_name, p.last_name)) AS patient_name,
                   o.order_number,
                   a.title AS appointment_title,
                   u.name AS uploaded_by_name,
+                  u.role AS uploaded_by_role,
+                  extractor.name AS text_extracted_by_name,
                   COALESCE((SELECT count(*)::bigint FROM document_shares ds WHERE ds.document_id = d.id AND ds.revoked_at IS NULL), 0) AS share_count,
                   COALESCE((SELECT count(*)::bigint FROM documents dv WHERE dv.version_root_document_id = d.version_root_document_id), 1) AS version_count,
                   (SELECT dv.id FROM documents dv WHERE dv.replaces_document_id = d.id ORDER BY dv.created_at DESC LIMIT 1) AS superseded_by_document_id,
@@ -4506,6 +4993,7 @@ async fn fetch_document_row(
            LEFT JOIN orders o ON o.id = d.order_id
            LEFT JOIN appointments a ON a.id = d.appointment_id
            LEFT JOIN users u ON u.id = d.uploaded_by
+           LEFT JOIN users extractor ON extractor.id = d.text_extracted_by
            WHERE d.id = $1"#,
     )
     .bind(document_id)
@@ -4516,6 +5004,110 @@ async fn fetch_document_row(
         tracing::error!(error = %e, document_id = %document_id, "load document");
         err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load document")
     })
+}
+
+async fn store_document_text_extraction_result(
+    state: &AppState,
+    document_id: Uuid,
+    actor_id: Uuid,
+    result: &DocumentTextExtractionResult,
+) -> Result<(), axum::response::Response> {
+    let (status, method, extracted_text) = match result {
+        DocumentTextExtractionResult::Completed {
+            method,
+            extracted_text,
+        } => ("completed", *method, Some(extracted_text.as_str())),
+        DocumentTextExtractionResult::Unsupported { method, .. } => ("unsupported", *method, None),
+        DocumentTextExtractionResult::Failed { method, .. } => ("failed", *method, None),
+    };
+
+    sqlx::query(
+        r#"UPDATE documents
+           SET extracted_text = $2,
+               text_extraction_status = $3,
+               text_extraction_method = $4,
+               text_extracted_at = now(),
+               text_extracted_by = $5
+           WHERE id = $1"#,
+    )
+    .bind(document_id)
+    .bind(extracted_text)
+    .bind(status)
+    .bind(method)
+    .bind(actor_id)
+    .execute(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, document_id = %document_id, "store document text extraction");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to store document text extraction",
+        )
+    })?;
+
+    if let DocumentTextExtractionResult::Completed { extracted_text, .. } = result {
+        let _ = sqlx::query(
+            r#"UPDATE document_translation_requests
+               SET source_text = $2
+               WHERE document_id = $1
+                 AND status IN ('pending', 'in_progress')
+                 AND COALESCE(trim(source_text), '') = ''"#,
+        )
+        .bind(document_id)
+        .bind(extracted_text)
+        .execute(&state.db)
+        .await;
+    }
+
+    Ok(())
+}
+
+async fn extract_document_text_and_store(
+    state: &AppState,
+    document_id: Uuid,
+    original_filename: Option<&str>,
+    mime_type: Option<&str>,
+    storage_key: &str,
+    actor_id: Uuid,
+) -> Result<DocumentTextExtractionResult, axum::response::Response> {
+    let path = FsPath::new(UPLOAD_DIR).join(storage_key);
+    let bytes = tokio::fs::read(&path).await.map_err(|e| {
+        tracing::error!(error = %e, document_id = %document_id, storage_key = %storage_key, "read document file for text extraction");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to read document file for text extraction",
+        )
+    })?;
+
+    let result = extract_document_text_from_bytes(mime_type, original_filename, &bytes).await;
+    store_document_text_extraction_result(state, document_id, actor_id, &result).await?;
+    Ok(result)
+}
+
+async fn best_effort_extract_document_text_and_store(
+    state: &AppState,
+    document_id: Uuid,
+    original_filename: Option<&str>,
+    mime_type: Option<&str>,
+    storage_key: &str,
+    actor_id: Uuid,
+) {
+    if let Err(resp) = extract_document_text_and_store(
+        state,
+        document_id,
+        original_filename,
+        mime_type,
+        storage_key,
+        actor_id,
+    )
+    .await
+    {
+        tracing::warn!(
+            document_id = %document_id,
+            status = %resp.status(),
+            "best-effort document text extraction failed"
+        );
+    }
 }
 
 async fn load_replacement_document_version(
@@ -4684,6 +5276,67 @@ fn can_view_document_row(
     .allowed
 }
 
+fn can_review_document_intake_row(
+    auth: &AuthUser,
+    row: &sqlx::postgres::PgRow,
+    assignment_set: &HashSet<Uuid>,
+) -> bool {
+    if !can_view_document_row(auth, row, assignment_set) {
+        return false;
+    }
+
+    match auth.role {
+        Role::Ceo | Role::PatientManager => true,
+        Role::TeamleadInterpreter => {
+            let uploaded_by_role = row
+                .try_get::<Option<String>, _>("uploaded_by_role")
+                .unwrap_or_default();
+            let ursprung = row
+                .try_get::<Option<String>, _>("ursprung")
+                .unwrap_or_default();
+            let status = row
+                .try_get::<Option<String>, _>("status")
+                .unwrap_or_default();
+            is_interpreter_review_document(
+                uploaded_by_role.as_deref(),
+                ursprung.as_deref(),
+                status.as_deref(),
+            )
+        }
+        _ => false,
+    }
+}
+
+#[allow(clippy::result_large_err)]
+fn validate_teamlead_document_review_update(
+    body: &UpdateDocumentRequest,
+) -> Result<(), axum::response::Response> {
+    if body.patient_id.is_some()
+        || body.order_id.is_some()
+        || body.appointment_id.is_some()
+        || body.auto_name.is_some()
+        || body.visibility.is_some()
+        || body.klinik.is_some()
+        || body.ursprung.is_some()
+    {
+        return Err(err(
+            StatusCode::FORBIDDEN,
+            "Teamlead review may update only document classification fields",
+        ));
+    }
+
+    if let Some(status) = body.status.as_deref()
+        && status != "active"
+    {
+        return Err(err(
+            StatusCode::FORBIDDEN,
+            "Teamlead review may only release the document into active status",
+        ));
+    }
+
+    Ok(())
+}
+
 async fn validate_document_context(
     state: &AppState,
     mut patient_id: Option<Uuid>,
@@ -4766,6 +5419,32 @@ async fn provider_in_order_or_appointment(
     order_id: Option<Uuid>,
     appointment_id: Option<Uuid>,
 ) -> Result<bool, axum::response::Response> {
+    if let Some(appointment_id) = appointment_id {
+        let row = sqlx::query(
+            r#"SELECT EXISTS(
+                    SELECT 1 FROM appointments
+                    WHERE id = $1 AND provider_id = $2
+                )"#,
+        )
+        .bind(appointment_id)
+        .bind(provider_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, appointment_id = %appointment_id, provider_id = %provider_id, "validate provider share appointment context");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate provider share context",
+            )
+        })?;
+        return row.try_get(0).map_err(|_| {
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate provider share context",
+            )
+        });
+    }
+
     if let Some(order_id) = order_id {
         let row = sqlx::query(
             r#"SELECT EXISTS(
@@ -4795,40 +5474,78 @@ async fn provider_in_order_or_appointment(
         });
     }
 
-    if let Some(appointment_id) = appointment_id {
-        let row = sqlx::query(
-            r#"SELECT EXISTS(
-                    SELECT 1 FROM appointments
-                    WHERE id = $1 AND provider_id = $2
-                )"#,
-        )
-        .bind(appointment_id)
-        .bind(provider_id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, appointment_id = %appointment_id, provider_id = %provider_id, "validate provider share appointment context");
-            err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to validate provider share context",
-            )
-        })?;
-        return row.try_get(0).map_err(|_| {
-            err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to validate provider share context",
-            )
-        });
-    }
-
     Ok(true)
+}
+
+async fn provider_matches_medical_document_specialty(
+    state: &AppState,
+    provider_id: Uuid,
+    appointment_id: Option<Uuid>,
+) -> Result<bool, axum::response::Response> {
+    let Some(appointment_id) = appointment_id else {
+        return Ok(true);
+    };
+
+    let appointment_specialty = sqlx::query(
+        r#"SELECT COALESCE(
+                    NULLIF(lower(trim(doctor.fachbereich)), ''),
+                    NULLIF(lower(trim(provider.fachbereich)), '')
+               ) AS appointment_specialty
+           FROM appointments a
+           LEFT JOIN provider_doctors doctor ON doctor.id = a.doctor_id
+           LEFT JOIN providers provider ON provider.id = a.provider_id
+           WHERE a.id = $1"#,
+    )
+    .bind(appointment_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, appointment_id = %appointment_id, provider_id = %provider_id, "load appointment specialty context");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate provider specialty context",
+        )
+    })?;
+
+    let Some(appointment_specialty) = appointment_specialty.and_then(|row| {
+        row.try_get::<Option<String>, _>("appointment_specialty")
+            .ok()
+            .flatten()
+    }) else {
+        return Ok(true);
+    };
+
+    sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(
+               SELECT 1
+               FROM providers p
+               WHERE p.id = $1
+                 AND lower(trim(COALESCE(p.fachbereich, ''))) = $2
+           ) OR EXISTS(
+               SELECT 1
+               FROM provider_doctors d
+               WHERE d.provider_id = $1
+                 AND lower(trim(COALESCE(d.fachbereich, ''))) = $2
+           )"#,
+    )
+    .bind(provider_id)
+    .bind(appointment_specialty)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, appointment_id = %appointment_id, provider_id = %provider_id, "validate provider specialty match");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate provider specialty context",
+        )
+    })
 }
 
 async fn persist_document_file(
     state: &AppState,
     data: &[u8],
     input: &NewStoredDocument<'_>,
-) -> Result<(Uuid, i64, String), axum::response::Response> {
+) -> Result<(Uuid, i64, String, String), axum::response::Response> {
     let document_id = Uuid::new_v4();
     let original_filename = if input.original_filename.trim().is_empty() {
         "document.bin".to_string()
@@ -4850,6 +5567,18 @@ async fn persist_document_file(
     if let Err(e) = tokio::fs::write(&path, data).await {
         tracing::error!(error = %e, "write document file");
         return Err(err(StatusCode::INTERNAL_SERVER_ERROR, "Storage error"));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        if let Err(e) =
+            tokio::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).await
+        {
+            tracing::error!(error = %e, path = %path.display(), "restrict document file permissions");
+            let _ = tokio::fs::remove_file(&path).await;
+            return Err(err(StatusCode::INTERNAL_SERVER_ERROR, "Storage error"));
+        }
     }
 
     let inserted = match sqlx::query(
@@ -4902,7 +5631,7 @@ async fn persist_document_file(
     };
 
     let document_id: Uuid = inserted.try_get("id").unwrap_or_else(|_| Uuid::nil());
-    Ok((document_id, file_size, original_filename))
+    Ok((document_id, file_size, original_filename, storage_key))
 }
 
 async fn list_document_templates(Extension(auth): Extension<AuthUser>) -> axum::response::Response {
@@ -5722,7 +6451,7 @@ async fn generate_document(
         uploaded_by: auth.user_id,
     };
 
-    let (document_id, file_size, original_filename) =
+    let (document_id, file_size, original_filename, _storage_key) =
         match persist_document_file(&state, &pdf_bytes, &persist_input).await {
             Ok(value) => value,
             Err(resp) => return resp,
@@ -5903,7 +6632,9 @@ async fn list_document_intake_queue(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
-    if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+    if let Err(resp) =
+        auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::TeamleadInterpreter])
+    {
         return resp;
     }
 
@@ -5923,6 +6654,7 @@ async fn list_document_intake_queue(
                   o.order_number,
                   a.title AS appointment_title,
                   u.name AS uploaded_by_name,
+                  u.role AS uploaded_by_role,
                   COALESCE((SELECT count(*)::bigint FROM document_shares ds WHERE ds.document_id = d.id AND ds.revoked_at IS NULL), 0) AS share_count,
                   COALESCE((SELECT count(*)::bigint FROM documents dv WHERE dv.version_root_document_id = d.version_root_document_id), 1) AS version_count,
                   (SELECT dv.id FROM documents dv WHERE dv.replaces_document_id = d.id ORDER BY dv.created_at DESC LIMIT 1) AS superseded_by_document_id,
@@ -5944,6 +6676,7 @@ async fn list_document_intake_queue(
              AND (
                 COALESCE(d.category, '') = ''
                 OR d.category = 'portal_upload'
+                OR (d.ursprung = 'interpreter_upload' AND d.status = 'draft')
                 OR d.art IN (
                     'document',
                     'uploaded_document',
@@ -5972,13 +6705,9 @@ async fn list_document_intake_queue(
 
     let items: Vec<_> = rows
         .iter()
-        .filter(|row| can_view_document_row(&auth, row, &assignment_set))
+        .filter(|row| can_review_document_intake_row(&auth, row, &assignment_set))
+        .filter(|row| is_document_intake_queue_candidate(row))
         .map(document_json)
-        .filter(|item| {
-            item.get("needs_categorization")
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-        })
         .collect();
 
     Json(items).into_response()
@@ -6016,6 +6745,121 @@ async fn get_document(
     }
 
     Json(document_json(&row)).into_response()
+}
+
+async fn get_document_text_extraction(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(id): Path<Uuid>,
+) -> axum::response::Response {
+    if let Err(resp) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::CeoAssistant,
+        Role::PatientManager,
+        Role::TeamleadInterpreter,
+        Role::Interpreter,
+        Role::Concierge,
+        Role::Billing,
+    ]) {
+        return resp;
+    }
+
+    let assignment_set = match load_assignment_set(&state, &auth).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let row = match fetch_document_row(&state, id, auth.user_id).await {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Document not found"),
+        Err(resp) => return resp,
+    };
+
+    if !can_view_document_row(&auth, &row, &assignment_set) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+
+    Json(document_text_extraction_json(&row)).into_response()
+}
+
+async fn run_document_text_extraction(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(id): Path<Uuid>,
+) -> axum::response::Response {
+    if let Err(resp) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::PatientManager,
+        Role::TeamleadInterpreter,
+        Role::Interpreter,
+        Role::Concierge,
+    ]) {
+        return resp;
+    }
+
+    let assignment_set = match load_assignment_set(&state, &auth).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let row = match fetch_document_row(&state, id, auth.user_id).await {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Document not found"),
+        Err(resp) => return resp,
+    };
+
+    if !can_view_document_row(&auth, &row, &assignment_set) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+
+    let Some(storage_key) = row
+        .try_get::<Option<String>, _>("storage_key")
+        .unwrap_or_default()
+    else {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Document file is not available for text extraction",
+        );
+    };
+
+    let result = match extract_document_text_and_store(
+        &state,
+        id,
+        row.try_get::<Option<String>, _>("original_filename")
+            .unwrap_or_default()
+            .as_deref(),
+        row.try_get::<Option<String>, _>("mime_type")
+            .unwrap_or_default()
+            .as_deref(),
+        storage_key.as_str(),
+        auth.user_id,
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(resp) => return resp,
+    };
+
+    let _ = sqlx::query(
+        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'run_document_text_extraction', 'document', $2, $3)",
+    )
+    .bind(auth.user_id)
+    .bind(id)
+    .bind(json!({
+        "result": match result {
+            DocumentTextExtractionResult::Completed { method, .. } => json!({ "status": "completed", "method": method }),
+            DocumentTextExtractionResult::Unsupported { method, message } => json!({ "status": "unsupported", "method": method, "message": message }),
+            DocumentTextExtractionResult::Failed { method, message } => json!({ "status": "failed", "method": method, "message": message }),
+        }
+    }))
+    .execute(&state.db)
+    .await;
+
+    let fresh_row = match fetch_document_row(&state, id, auth.user_id).await {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Document not found"),
+        Err(resp) => return resp,
+    };
+
+    Json(document_text_extraction_json(&fresh_row)).into_response()
 }
 
 async fn list_document_versions(
@@ -6141,11 +6985,14 @@ async fn list_document_translation_requests(
 
     let rows = match sqlx::query(
         r#"SELECT dtr.id, dtr.document_id, dtr.patient_id, dtr.requested_language,
-                  dtr.status, dtr.note, dtr.requested_by, dtr.requested_at,
-                  dtr.completed_at, dtr.updated_at,
-                  requester.name AS requested_by_name
+                  dtr.status, dtr.note, dtr.source_language, dtr.source_text,
+                  dtr.translated_text, dtr.requested_by, dtr.translated_by,
+                  dtr.requested_at, dtr.completed_at, dtr.translated_at, dtr.updated_at,
+                  requester.name AS requested_by_name,
+                  translator.name AS translated_by_name
            FROM document_translation_requests dtr
            LEFT JOIN users requester ON requester.id = dtr.requested_by
+           LEFT JOIN users translator ON translator.id = dtr.translated_by
            WHERE dtr.document_id = $1
            ORDER BY dtr.requested_at DESC, dtr.created_at DESC"#,
     )
@@ -6223,12 +7070,15 @@ async fn create_document_translation_request(
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty());
+    let prefilled_source_text = row
+        .try_get::<Option<String>, _>("extracted_text")
+        .unwrap_or_default();
 
     let request_id: Uuid = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO document_translation_requests (
-                document_id, patient_id, requested_language, status, requested_by, note
+                document_id, patient_id, requested_language, status, requested_by, note, source_text
            ) VALUES (
-                $1, $2, $3, 'pending', $4, $5
+                $1, $2, $3, 'pending', $4, $5, $6
            )
            RETURNING id"#,
     )
@@ -6237,6 +7087,7 @@ async fn create_document_translation_request(
     .bind(requested_language)
     .bind(auth.user_id)
     .bind(note)
+    .bind(prefilled_source_text.as_deref())
     .fetch_one(&state.db)
     .await
     {
@@ -6273,11 +7124,14 @@ async fn create_document_translation_request(
 
     let response_row = match sqlx::query(
         r#"SELECT dtr.id, dtr.document_id, dtr.patient_id, dtr.requested_language,
-                  dtr.status, dtr.note, dtr.requested_by, dtr.requested_at,
-                  dtr.completed_at, dtr.updated_at,
-                  requester.name AS requested_by_name
+                  dtr.status, dtr.note, dtr.source_language, dtr.source_text,
+                  dtr.translated_text, dtr.requested_by, dtr.translated_by,
+                  dtr.requested_at, dtr.completed_at, dtr.translated_at, dtr.updated_at,
+                  requester.name AS requested_by_name,
+                  translator.name AS translated_by_name
            FROM document_translation_requests dtr
            LEFT JOIN users requester ON requester.id = dtr.requested_by
+           LEFT JOIN users translator ON translator.id = dtr.translated_by
            WHERE dtr.id = $1"#,
     )
     .bind(request_id)
@@ -6320,7 +7174,7 @@ async fn update_document_translation_request(
     };
 
     let request_row = match sqlx::query(
-        r#"SELECT dtr.id, dtr.document_id
+        r#"SELECT dtr.id, dtr.document_id, dtr.source_text, dtr.translated_text
            FROM document_translation_requests dtr
            WHERE dtr.id = $1"#,
     )
@@ -6361,16 +7215,76 @@ async fn update_document_translation_request(
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty());
+    let source_language = match body
+        .source_language
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(value) => match normalize_document_language(Some(value)) {
+            Some(language) => Some(language),
+            None => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Unknown translation source language",
+                );
+            }
+        },
+        None => None,
+    };
+    let source_text = body
+        .source_text
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let translated_text = body
+        .translated_text
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let current_translated_text = request_row
+        .try_get::<Option<String>, _>("translated_text")
+        .unwrap_or_default();
+    if next_status == "completed"
+        && translated_text.is_none()
+        && current_translated_text
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_none()
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Completed translation requests require translated text",
+        );
+    }
     if let Err(e) = sqlx::query(
         r#"UPDATE document_translation_requests
            SET status = $2,
                note = COALESCE($3, note),
+               source_language = COALESCE($4, source_language),
+               source_text = COALESCE($5, source_text),
+               translated_text = COALESCE($6, translated_text),
+               translated_by = CASE
+                   WHEN $4 IS NOT NULL OR $5 IS NOT NULL OR $6 IS NOT NULL OR $2 = 'completed'
+                       THEN $7
+                   ELSE translated_by
+               END,
+               translated_at = CASE
+                   WHEN $4 IS NOT NULL OR $5 IS NOT NULL OR $6 IS NOT NULL OR $2 = 'completed'
+                       THEN now()
+                   ELSE translated_at
+               END,
                completed_at = CASE WHEN $2 = 'completed' THEN now() ELSE NULL END
            WHERE id = $1"#,
     )
     .bind(request_id)
     .bind(next_status)
     .bind(note)
+    .bind(source_language)
+    .bind(source_text)
+    .bind(translated_text)
+    .bind(auth.user_id)
     .execute(&state.db)
     .await
     {
@@ -6395,11 +7309,14 @@ async fn update_document_translation_request(
 
     let response_row = match sqlx::query(
         r#"SELECT dtr.id, dtr.document_id, dtr.patient_id, dtr.requested_language,
-                  dtr.status, dtr.note, dtr.requested_by, dtr.requested_at,
-                  dtr.completed_at, dtr.updated_at,
-                  requester.name AS requested_by_name
+                  dtr.status, dtr.note, dtr.source_language, dtr.source_text,
+                  dtr.translated_text, dtr.requested_by, dtr.translated_by,
+                  dtr.requested_at, dtr.completed_at, dtr.translated_at, dtr.updated_at,
+                  requester.name AS requested_by_name,
+                  translator.name AS translated_by_name
            FROM document_translation_requests dtr
            LEFT JOIN users requester ON requester.id = dtr.requested_by
+           LEFT JOIN users translator ON translator.id = dtr.translated_by
            WHERE dtr.id = $1"#,
     )
     .bind(request_id)
@@ -6700,6 +7617,18 @@ async fn upload_my_document(
         Some(data) if !data.is_empty() => data,
         _ => return err(StatusCode::BAD_REQUEST, "No file uploaded"),
     };
+    match validate_upload_magic_bytes(file_name.as_deref(), Some(mime_type.as_str()), &data) {
+        Ok(Some(validated_mime)) => mime_type = validated_mime,
+        Ok(None) => {}
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    }
+    match scan_upload_bytes(file_name.as_deref(), &data).await {
+        Ok(FileScanOutcome::Clean) => {}
+        Ok(FileScanOutcome::Skipped) => {
+            tracing::warn!(filename = ?file_name, "virus scanner unavailable; patient portal document scan skipped");
+        }
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
+    }
     let preset = match parse_patient_upload_preset(&upload_kind) {
         Ok(value) => value,
         Err(resp) => return resp,
@@ -6744,11 +7673,21 @@ async fn upload_my_document(
         version_number: 1,
         uploaded_by: auth.user_id,
     };
-    let (document_id, file_size, original_filename) =
+    let (document_id, file_size, original_filename, storage_key) =
         match persist_document_file(&state, &data, &persist_input).await {
             Ok(value) => value,
             Err(resp) => return resp,
         };
+
+    best_effort_extract_document_text_and_store(
+        &state,
+        document_id,
+        Some(original_filename.as_str()),
+        Some(mime_type.as_str()),
+        storage_key.as_str(),
+        auth.user_id,
+    )
+    .await;
 
     let _ = sqlx::query(
         "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'patient_portal_upload_document', 'document', $2, $3)",
@@ -6868,7 +7807,12 @@ async fn upload_document(
     Extension(auth): Extension<AuthUser>,
     mut multipart: Multipart,
 ) -> axum::response::Response {
-    if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+    if let Err(resp) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::PatientManager,
+        Role::TeamleadInterpreter,
+        Role::Interpreter,
+    ]) {
         return resp;
     }
 
@@ -6883,7 +7827,7 @@ async fn upload_document(
     let mut category: Option<String> = None;
     let mut status = String::from("active");
     let mut visibility = String::from("internal");
-    let mut is_medical = false;
+    let mut is_medical_override: Option<bool> = None;
     let mut klinik: Option<String> = None;
     let mut ursprung: Option<String> = None;
     let mut notes: Option<String> = None;
@@ -6941,11 +7885,10 @@ async fn upload_document(
                     .unwrap_or_else(|| "internal".to_string())
             }
             "is_medical" => {
-                is_medical = parse_optional_text_field(field)
+                is_medical_override = parse_optional_text_field(field)
                     .await
                     .as_deref()
                     .map(parse_bool_flag)
-                    .unwrap_or(false)
             }
             "klinik" => klinik = parse_optional_text_field(field).await,
             "ursprung" => ursprung = parse_optional_text_field(field).await,
@@ -6958,13 +7901,22 @@ async fn upload_document(
         Some(data) if !data.is_empty() => data,
         _ => return err(StatusCode::BAD_REQUEST, "No file uploaded"),
     };
+    match validate_upload_magic_bytes(file_name.as_deref(), Some(mime_type.as_str()), &data) {
+        Ok(Some(validated_mime)) => mime_type = validated_mime,
+        Ok(None) => {}
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    }
+    match scan_upload_bytes(file_name.as_deref(), &data).await {
+        Ok(FileScanOutcome::Clean) => {}
+        Ok(FileScanOutcome::Skipped) => {
+            tracing::warn!(filename = ?file_name, "virus scanner unavailable; document scan skipped");
+        }
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
+    }
     if auto_name.trim().is_empty() {
         auto_name = file_name
             .clone()
             .unwrap_or_else(|| "Uploaded document".to_string());
-    }
-    if art.trim().is_empty() {
-        return err(StatusCode::UNPROCESSABLE_ENTITY, "Document art is required");
     }
     if !matches!(status.as_str(), "draft" | "active" | "archived") {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid document status");
@@ -6989,18 +7941,85 @@ async fn upload_document(
         );
     }
 
+    if matches!(auth.role, Role::Interpreter | Role::TeamleadInterpreter) {
+        let assignment_set = match load_assignment_set(&state, &auth).await {
+            Ok(value) => value,
+            Err(resp) => return resp,
+        };
+        let Some(document_patient_id) = patient_id else {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Interpreter document upload requires patient-linked context",
+            );
+        };
+        if !assignment_set.contains(&document_patient_id) {
+            return err(
+                StatusCode::FORBIDDEN,
+                "Interpreter document upload is limited to assigned patients",
+            );
+        }
+
+        visibility = "internal".to_string();
+        if auth.role == Role::Interpreter {
+            status = "draft".to_string();
+            ursprung = Some("interpreter_upload".to_string());
+        } else if ursprung.as_deref().unwrap_or_default().trim().is_empty() {
+            ursprung = Some("teamlead_upload".to_string());
+        }
+    }
+
     let original_filename = file_name.unwrap_or_else(|| "document".to_string());
+    let classification_suggestion = suggest_document_classification(
+        Some(original_filename.as_str()),
+        Some(auto_name.trim()),
+        Some(mime_type.as_str()),
+        ursprung.as_deref(),
+        notes.as_deref(),
+    );
+    let resolved_art = if art.trim().is_empty() {
+        classification_suggestion
+            .as_ref()
+            .and_then(classification_suggestion_art)
+            .unwrap_or("uploaded_document")
+            .to_string()
+    } else {
+        art.trim().to_string()
+    };
+    let resolved_category = category
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .or_else(|| {
+            classification_suggestion
+                .as_ref()
+                .and_then(classification_suggestion_category)
+                .map(ToOwned::to_owned)
+        });
+    let resolved_is_medical = is_medical_override.unwrap_or_else(|| {
+        classification_suggestion
+            .as_ref()
+            .and_then(classification_suggestion_is_medical)
+            .unwrap_or_else(|| {
+                document_fields_imply_medical(&resolved_art, resolved_category.as_deref())
+            })
+    });
+    let needs_categorization = document_needs_categorization(
+        Some(resolved_art.as_str()),
+        resolved_category.as_deref(),
+        ursprung.as_deref(),
+    );
     let persist_input = NewStoredDocument {
         patient_id,
         order_id,
         appointment_id,
         auto_name: auto_name.trim(),
         original_filename: &original_filename,
-        art: art.trim(),
-        category: category.as_deref(),
+        art: resolved_art.as_str(),
+        category: resolved_category.as_deref(),
         status: status.as_str(),
         visibility: visibility.as_str(),
-        is_medical,
+        is_medical: resolved_is_medical,
         mime_type: &mime_type,
         klinik: klinik.as_deref(),
         ursprung: ursprung.as_deref(),
@@ -7010,11 +8029,22 @@ async fn upload_document(
         version_number: 1,
         uploaded_by: auth.user_id,
     };
-    let (document_id, file_size, original_filename) =
+    let (document_id, file_size, original_filename, storage_key) =
         match persist_document_file(&state, &data, &persist_input).await {
             Ok(value) => value,
             Err(resp) => return resp,
         };
+
+    best_effort_extract_document_text_and_store(
+        &state,
+        document_id,
+        Some(original_filename.as_str()),
+        Some(mime_type.as_str()),
+        storage_key.as_str(),
+        auth.user_id,
+    )
+    .await;
+
     let _ = sqlx::query(
         "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'upload_document', 'document', $2, $3)",
     )
@@ -7024,12 +8054,63 @@ async fn upload_document(
         "patient_id": patient_id,
         "order_id": order_id,
         "appointment_id": appointment_id,
-        "art": art,
+        "art": persist_input.art,
+        "category": resolved_category.as_deref(),
         "visibility": visibility,
-        "is_medical": is_medical,
+        "status": status,
+        "is_medical": resolved_is_medical,
+        "ursprung": ursprung.as_deref(),
+        "classification_suggestion": classification_suggestion.clone(),
     }))
     .execute(&state.db)
     .await;
+
+    if auth.role == Role::Interpreter
+        && let Some(document_patient_id) = patient_id
+    {
+        let patient_label = sqlx::query(
+            r#"SELECT patient_id, trim(concat_ws(' ', first_name, last_name)) AS patient_name
+               FROM patients
+               WHERE id = $1"#,
+        )
+        .bind(document_patient_id)
+        .fetch_optional(&state.db)
+        .await
+        .ok()
+        .flatten()
+        .map(|row| {
+            let pid = row.try_get::<String, _>("patient_id").unwrap_or_default();
+            let name = row.try_get::<String, _>("patient_name").unwrap_or_default();
+            if pid.is_empty() {
+                name
+            } else if name.is_empty() {
+                pid
+            } else {
+                format!("{pid} · {name}")
+            }
+        })
+        .unwrap_or_else(|| document_patient_id.to_string());
+
+        let _ = sqlx::query(
+            r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
+               SELECT pa.user_id, 'interpreter_upload', $2, $3, 'document', $1
+               FROM patient_assignments pa
+               JOIN users u ON u.id = pa.user_id
+               WHERE pa.patient_id = $4
+                 AND pa.revoked_at IS NULL
+                 AND u.is_active = true
+                 AND u.role IN ('patient_manager', 'teamlead_interpreter', 'ceo')"#,
+        )
+        .bind(document_id)
+        .bind("Interpreter document uploaded")
+        .bind(format!(
+            "{patient_label} has a new interpreter document awaiting review: {}.",
+            auto_name.trim()
+        ))
+        .bind(document_patient_id)
+        .execute(&state.db)
+        .await;
+    }
 
     Json(json!({
         "ok": true,
@@ -7037,6 +8118,11 @@ async fn upload_document(
         "original_filename": original_filename,
         "mime_type": mime_type,
         "file_size": file_size,
+        "art": persist_input.art,
+        "category": resolved_category,
+        "is_medical": resolved_is_medical,
+        "needs_categorization": needs_categorization,
+        "classification_suggestion": classification_suggestion,
     }))
     .into_response()
 }
@@ -7047,7 +8133,9 @@ async fn update_document(
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateDocumentRequest>,
 ) -> axum::response::Response {
-    if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+    if let Err(resp) =
+        auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::TeamleadInterpreter])
+    {
         return resp;
     }
 
@@ -7056,6 +8144,22 @@ async fn update_document(
         Ok(None) => return err(StatusCode::NOT_FOUND, "Document not found"),
         Err(resp) => return resp,
     };
+    let assignment_set = match load_assignment_set(&state, &auth).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+
+    if auth.role == Role::TeamleadInterpreter {
+        if !can_review_document_intake_row(&auth, &current, &assignment_set) {
+            return err(
+                StatusCode::FORBIDDEN,
+                "Teamlead may review only interpreter-origin intake documents for assigned patients",
+            );
+        }
+        if let Err(resp) = validate_teamlead_document_review_update(&body) {
+            return resp;
+        }
+    }
 
     let current_patient_id: Option<Uuid> = current.try_get("patient_id").unwrap_or_default();
     let current_order_id: Option<Uuid> = current.try_get("order_id").unwrap_or_default();
@@ -7115,6 +8219,23 @@ async fn update_document(
             .try_get::<Option<String>, _>("notes")
             .unwrap_or_default()
     });
+
+    if auth.role == Role::TeamleadInterpreter && visibility != "internal" {
+        return err(
+            StatusCode::FORBIDDEN,
+            "Teamlead review cannot change document visibility",
+        );
+    }
+
+    if auth.role == Role::TeamleadInterpreter
+        && status == "active"
+        && document_needs_categorization(Some(art.trim()), category.as_deref(), ursprung.as_deref())
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Teamlead release requires document classification fields",
+        );
+    }
 
     if auto_name.trim().is_empty() || art.trim().is_empty() {
         return err(

@@ -348,6 +348,8 @@ async fn update_status(
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
+    let status = body.status;
+
     match sqlx::query(
         r#"UPDATE tasks
            SET status = $2,
@@ -356,11 +358,62 @@ async fn update_status(
            WHERE id = $1"#,
     )
     .bind(task_id)
-    .bind(body.status)
+    .bind(&status)
     .execute(&state.db)
     .await
     {
-        Ok(r) if r.rows_affected() > 0 => Json(serde_json::json!({"ok": true})).into_response(),
+        Ok(r) if r.rows_affected() > 0 => {
+            if status == "completed" {
+                let checklist_row = sqlx::query(
+                    r#"UPDATE workflow_checklist_items
+                       SET is_completed = true,
+                           completed_by = $2,
+                           completed_at = COALESCE(completed_at, now()),
+                           updated_at = now()
+                       WHERE linked_task_id = $1
+                         AND is_completed = false
+                       RETURNING patient_id, order_id, scope_type, scope_id, item_text"#,
+                )
+                .bind(task_id)
+                .bind(auth.user_id)
+                .fetch_optional(&state.db)
+                .await;
+
+                match checklist_row {
+                    Ok(Some(row)) => {
+                        let patient_id: Option<Uuid> = row.try_get("patient_id").ok();
+                        let order_id: Option<Uuid> = row.try_get("order_id").unwrap_or_default();
+                        let scope_type: String = row.try_get("scope_type").unwrap_or_default();
+                        let scope_id: Option<Uuid> = row.try_get("scope_id").ok();
+                        let item_text: String = row.try_get("item_text").unwrap_or_default();
+                        if let Some(patient_id) = patient_id {
+                            let _ = sqlx::query(
+                                r#"INSERT INTO audit_log (user_id, action, entity_type, entity_id, context)
+                                   VALUES ($1, 'workflow_checklist_item_completed', 'patient', $2, $3)"#,
+                            )
+                            .bind(auth.user_id)
+                            .bind(patient_id)
+                            .bind(serde_json::json!({
+                                "scope_type": scope_type,
+                                "scope_id": scope_id,
+                                "order_id": order_id,
+                                "task_id": task_id,
+                                "item_text": item_text,
+                                "completed_via": "task"
+                            }))
+                            .execute(&state.db)
+                            .await;
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        tracing::error!(error = %e, task_id = %task_id, "sync workflow checklist from task");
+                    }
+                }
+            }
+
+            Json(serde_json::json!({"ok": true})).into_response()
+        }
         Ok(_) => err(StatusCode::NOT_FOUND, "Task not found"),
         Err(e) => {
             tracing::error!(error = %e, task_id = %task_id, "update task status");

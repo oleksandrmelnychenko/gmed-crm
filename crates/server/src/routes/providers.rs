@@ -85,6 +85,8 @@ struct ListProvidersQuery {
 struct UpsertProviderRequest {
     name: String,
     provider_type: String,
+    legal_name: Option<String>,
+    tax_id: Option<String>,
     address_street: Option<String>,
     address_city: Option<String>,
     address_zip: Option<String>,
@@ -102,8 +104,12 @@ struct UpsertDoctorRequest {
     name: String,
     title: Option<String>,
     fachbereich: Option<String>,
+    languages: Option<Vec<String>>,
     phone: Option<String>,
     email: Option<String>,
+    license_number: Option<String>,
+    licensing_country: Option<String>,
+    licensing_valid_until: Option<String>,
     notes: Option<String>,
 }
 
@@ -150,7 +156,8 @@ async fn list_providers(
     }
 
     let rows = match sqlx::query(
-        r#"SELECT p.id, p.name, p.provider_type, p.address_city, p.address_country, p.fachbereich,
+        r#"SELECT p.id, p.name, p.provider_type, p.legal_name, p.tax_id,
+                  p.address_city, p.address_country, p.fachbereich,
                   p.phone, p.email, p.is_active, p.created_at,
                   (p.kooperationsvertrag IS NOT NULL) AS has_contract,
                   (
@@ -174,6 +181,8 @@ async fn list_providers(
              AND (
                 $3::text = '%%'
                 OR p.name ILIKE $3
+                OR COALESCE(p.legal_name, '') ILIKE $3
+                OR COALESCE(p.tax_id, '') ILIKE $3
                 OR COALESCE(p.address_city, '') ILIKE $3
                 OR COALESCE(p.fachbereich, '') ILIKE $3
                 OR EXISTS (
@@ -293,6 +302,8 @@ async fn list_providers(
             "id": id,
             "name": name,
             "provider_type": provider_type,
+            "legal_name": row.try_get::<Option<String>, _>("legal_name").unwrap_or_default(),
+            "tax_id": row.try_get::<Option<String>, _>("tax_id").unwrap_or_default(),
             "address_city": row.try_get::<Option<String>, _>("address_city").unwrap_or_default(),
             "address_country": row.try_get::<Option<String>, _>("address_country").unwrap_or_default(),
             "fachbereich": row.try_get::<Option<String>, _>("fachbereich").unwrap_or_default(),
@@ -326,16 +337,20 @@ async fn create_provider(
 
     let row = match sqlx::query(
         r#"INSERT INTO providers (
-                name, provider_type, address_street, address_city, address_zip, address_country,
+                name, provider_type, legal_name, tax_id,
+                address_street, address_city, address_zip, address_country,
                 phone, email, website, fachbereich, kooperationsvertrag, notes
            ) VALUES (
-                $1, $2, $3, $4, $5, $6,
-                $7, $8, $9, $10, $11, $12
+                $1, $2, $3, $4,
+                $5, $6, $7, $8,
+                $9, $10, $11, $12, $13, $14
            )
            RETURNING id, created_at"#,
     )
     .bind(provider.name)
     .bind(provider.provider_type)
+    .bind(provider.legal_name)
+    .bind(provider.tax_id)
     .bind(provider.address_street)
     .bind(provider.address_city)
     .bind(provider.address_zip)
@@ -408,7 +423,8 @@ async fn get_provider(
     }
 
     let provider = match sqlx::query(
-        r#"SELECT id, name, provider_type, address_street, address_city, address_zip,
+        r#"SELECT id, name, provider_type, legal_name, tax_id,
+                  address_street, address_city, address_zip,
                   address_country, phone, email, website, fachbereich, kooperationsvertrag, notes,
                   is_active, created_at, updated_at
            FROM providers
@@ -447,6 +463,8 @@ async fn get_provider(
         "id": provider.try_get::<Uuid, _>("id").unwrap_or(provider_id),
         "name": provider.try_get::<String, _>("name").unwrap_or_default(),
         "provider_type": provider.try_get::<String, _>("provider_type").unwrap_or_default(),
+        "legal_name": provider.try_get::<Option<String>, _>("legal_name").unwrap_or_default(),
+        "tax_id": provider.try_get::<Option<String>, _>("tax_id").unwrap_or_default(),
         "address_street": provider.try_get::<Option<String>, _>("address_street").unwrap_or_default(),
         "address_city": provider.try_get::<Option<String>, _>("address_city").unwrap_or_default(),
         "address_zip": provider.try_get::<Option<String>, _>("address_zip").unwrap_or_default(),
@@ -487,16 +505,18 @@ async fn update_provider(
         r#"UPDATE providers
            SET name = $2,
                provider_type = $3,
-               address_street = $4,
-               address_city = $5,
-               address_zip = $6,
-               address_country = $7,
-               phone = $8,
-               email = $9,
-               website = $10,
-               fachbereich = $11,
-               kooperationsvertrag = $12,
-               notes = $13,
+               legal_name = $4,
+               tax_id = $5,
+               address_street = $6,
+               address_city = $7,
+               address_zip = $8,
+               address_country = $9,
+               phone = $10,
+               email = $11,
+               website = $12,
+               fachbereich = $13,
+               kooperationsvertrag = $14,
+               notes = $15,
                updated_at = now()
            WHERE id = $1
            RETURNING id"#,
@@ -504,6 +524,8 @@ async fn update_provider(
     .bind(provider_id)
     .bind(provider.name)
     .bind(provider.provider_type)
+    .bind(provider.legal_name)
+    .bind(provider.tax_id)
     .bind(provider.address_street)
     .bind(provider.address_city)
     .bind(provider.address_zip)
@@ -702,7 +724,9 @@ async fn get_doctor(
     }
 
     match sqlx::query(
-        r#"SELECT d.id, d.provider_id, d.name, d.title, d.fachbereich, d.phone, d.email, d.notes, d.created_at,
+        r#"SELECT d.id, d.provider_id, d.name, d.title, d.fachbereich, d.languages,
+                  d.phone, d.email, d.license_number, d.licensing_country,
+                  d.licensing_valid_until, d.notes, d.created_at,
                   (
                     SELECT COUNT(DISTINCT a.patient_id)
                     FROM appointments a
@@ -739,8 +763,12 @@ async fn get_doctor(
                 "name": row.try_get::<String, _>("name").unwrap_or_default(),
                 "title": row.try_get::<Option<String>, _>("title").unwrap_or_default(),
                 "fachbereich": row.try_get::<Option<String>, _>("fachbereich").unwrap_or_default(),
+                "languages": row.try_get::<Vec<String>, _>("languages").unwrap_or_default(),
                 "phone": row.try_get::<Option<String>, _>("phone").unwrap_or_default(),
                 "email": row.try_get::<Option<String>, _>("email").unwrap_or_default(),
+                "license_number": row.try_get::<Option<String>, _>("license_number").unwrap_or_default(),
+                "licensing_country": row.try_get::<Option<String>, _>("licensing_country").unwrap_or_default(),
+                "licensing_valid_until": row.try_get::<Option<chrono::NaiveDate>, _>("licensing_valid_until").unwrap_or_default().map(|v| v.to_string()),
                 "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
                 "patient_count": row.try_get::<i64, _>("patient_count").unwrap_or_default(),
                 "appointment_count": row.try_get::<i64, _>("appointment_count").unwrap_or_default(),
@@ -779,9 +807,11 @@ async fn create_doctor(
 
     let row = match sqlx::query(
         r#"INSERT INTO provider_doctors (
-                provider_id, name, title, fachbereich, phone, email, notes
+                provider_id, name, title, fachbereich, languages,
+                phone, email, license_number, licensing_country, licensing_valid_until, notes
            ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7
+                $1, $2, $3, $4, $5,
+                $6, $7, $8, $9, $10, $11
            )
            RETURNING id, created_at"#,
     )
@@ -789,8 +819,12 @@ async fn create_doctor(
     .bind(doctor.name)
     .bind(doctor.title)
     .bind(doctor.fachbereich)
+    .bind(doctor.languages)
     .bind(doctor.phone)
     .bind(doctor.email)
+    .bind(doctor.license_number)
+    .bind(doctor.licensing_country)
+    .bind(doctor.licensing_valid_until)
     .bind(doctor.notes)
     .fetch_one(&state.db)
     .await
@@ -850,9 +884,13 @@ async fn update_doctor(
            SET name = $3,
                title = $4,
                fachbereich = $5,
-               phone = $6,
-               email = $7,
-               notes = $8
+               languages = $6,
+               phone = $7,
+               email = $8,
+               license_number = $9,
+               licensing_country = $10,
+               licensing_valid_until = $11,
+               notes = $12
            WHERE provider_id = $1 AND id = $2"#,
     )
     .bind(provider_id)
@@ -860,8 +898,12 @@ async fn update_doctor(
     .bind(doctor.name)
     .bind(doctor.title)
     .bind(doctor.fachbereich)
+    .bind(doctor.languages)
     .bind(doctor.phone)
     .bind(doctor.email)
+    .bind(doctor.license_number)
+    .bind(doctor.licensing_country)
+    .bind(doctor.licensing_valid_until)
     .bind(doctor.notes)
     .execute(&state.db)
     .await
@@ -1176,6 +1218,8 @@ async fn delete_service(
 struct ProviderPayload {
     name: String,
     provider_type: String,
+    legal_name: Option<String>,
+    tax_id: Option<String>,
     address_street: Option<String>,
     address_city: Option<String>,
     address_zip: Option<String>,
@@ -1192,8 +1236,12 @@ struct DoctorPayload {
     name: String,
     title: Option<String>,
     fachbereich: Option<String>,
+    languages: Vec<String>,
     phone: Option<String>,
     email: Option<String>,
+    license_number: Option<String>,
+    licensing_country: Option<String>,
+    licensing_valid_until: Option<chrono::NaiveDate>,
     notes: Option<String>,
 }
 
@@ -1222,6 +1270,8 @@ fn normalize_provider_payload(
     Ok(ProviderPayload {
         name,
         provider_type,
+        legal_name: normalize_optional(body.legal_name),
+        tax_id: normalize_optional(body.tax_id),
         address_street: normalize_optional(body.address_street),
         address_city: normalize_optional(body.address_city),
         address_zip: normalize_optional(body.address_zip),
@@ -1241,12 +1291,19 @@ fn normalize_doctor_payload(body: UpsertDoctorRequest) -> Result<DoctorPayload, 
         return Err("Doctor name is required (max 255)");
     }
 
+    let languages = normalize_string_list(body.languages);
+    let licensing_valid_until = parse_date(body.licensing_valid_until, "licensing_valid_until")?;
+
     Ok(DoctorPayload {
         name,
         title: normalize_optional(body.title),
         fachbereich: normalize_optional(body.fachbereich),
+        languages,
         phone: normalize_optional(body.phone),
         email: normalize_optional(body.email),
+        license_number: normalize_optional(body.license_number),
+        licensing_country: normalize_optional(body.licensing_country),
+        licensing_valid_until,
         notes: normalize_optional(body.notes),
     })
 }
@@ -1320,6 +1377,21 @@ fn parse_date(
             }),
         None => Ok(None),
     }
+}
+
+fn normalize_string_list(value: Option<Vec<String>>) -> Vec<String> {
+    value
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|item| {
+            let trimmed = item.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        })
+        .collect()
 }
 
 fn is_valid_provider_type(value: &str) -> bool {
@@ -1420,7 +1492,9 @@ async fn load_doctors_json(
     provider_id: Uuid,
 ) -> Result<Vec<serde_json::Value>, axum::response::Response> {
     let rows = sqlx::query(
-        r#"SELECT d.id, d.provider_id, d.name, d.title, d.fachbereich, d.phone, d.email, d.notes, d.created_at,
+        r#"SELECT d.id, d.provider_id, d.name, d.title, d.fachbereich, d.languages,
+                  d.phone, d.email, d.license_number, d.licensing_country,
+                  d.licensing_valid_until, d.notes, d.created_at,
                   (
                     SELECT COUNT(DISTINCT a.patient_id)
                     FROM appointments a
@@ -1454,8 +1528,12 @@ async fn load_doctors_json(
             "name": row.try_get::<String, _>("name").unwrap_or_default(),
             "title": row.try_get::<Option<String>, _>("title").unwrap_or_default(),
             "fachbereich": row.try_get::<Option<String>, _>("fachbereich").unwrap_or_default(),
+            "languages": row.try_get::<Vec<String>, _>("languages").unwrap_or_default(),
             "phone": row.try_get::<Option<String>, _>("phone").unwrap_or_default(),
             "email": row.try_get::<Option<String>, _>("email").unwrap_or_default(),
+            "license_number": row.try_get::<Option<String>, _>("license_number").unwrap_or_default(),
+            "licensing_country": row.try_get::<Option<String>, _>("licensing_country").unwrap_or_default(),
+            "licensing_valid_until": row.try_get::<Option<chrono::NaiveDate>, _>("licensing_valid_until").unwrap_or_default().map(|v| v.to_string()),
             "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
             "patient_count": row.try_get::<i64, _>("patient_count").unwrap_or_default(),
             "appointment_count": row.try_get::<i64, _>("appointment_count").unwrap_or_default(),
