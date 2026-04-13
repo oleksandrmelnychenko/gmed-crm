@@ -8,6 +8,7 @@ use axum::{
 use serde::Deserialize;
 use uuid::Uuid;
 
+use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::auth::tokens;
 use crate::settings;
@@ -160,15 +161,13 @@ async fn revoke_user_sessions(
 
     tracing::info!(admin = %auth.user_id, target = %user_id, "Admin force-logout user");
 
-    let _ = sqlx::query!(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context)
-         VALUES ($1, 'admin_force_logout_user', 'user', $2, $3)",
-        auth.user_id,
-        user_id,
-        serde_json::json!({ "target_user_id": user_id })
-    )
-    .execute(&state.db)
-    .await;
+    state.audit_sender.try_send(audit::domain_event(
+        "admin_force_logout_user",
+        Some(auth.user_id),
+        "user",
+        Some(user_id),
+        serde_json::json!({ "target_user_id": user_id }),
+    ));
 
     Json(serde_json::json!({ "ok": true, "user_id": user_id })).into_response()
 }
@@ -314,10 +313,13 @@ async fn approve_pending(
         pending_id, auth.user_id
     ).execute(&state.db).await {
         Ok(r) if r.rows_affected() > 0 => {
-            let _ = sqlx::query!(
-                "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'mfa_approve', 'pending_login', $2, $3)",
-                auth.user_id, pending_id, serde_json::json!({"pending_id": pending_id})
-            ).execute(&state.db).await;
+            state.audit_sender.try_send(audit::domain_event(
+                "mfa_approve",
+                Some(auth.user_id),
+                "pending_login",
+                Some(pending_id),
+                serde_json::json!({ "pending_id": pending_id }),
+            ));
             tracing::info!(admin = %auth.user_id, pending = %pending_id, "MFA login approved");
             Json(serde_json::json!({"ok": true})).into_response()
         }
@@ -343,10 +345,13 @@ async fn reject_pending(
         pending_id, auth.user_id
     ).execute(&state.db).await {
         Ok(r) if r.rows_affected() > 0 => {
-            let _ = sqlx::query!(
-                "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'mfa_reject', 'pending_login', $2, $3)",
-                auth.user_id, pending_id, serde_json::json!({"pending_id": pending_id})
-            ).execute(&state.db).await;
+            state.audit_sender.try_send(audit::domain_event(
+                "mfa_reject",
+                Some(auth.user_id),
+                "pending_login",
+                Some(pending_id),
+                serde_json::json!({ "pending_id": pending_id }),
+            ));
             tracing::info!(admin = %auth.user_id, pending = %pending_id, "MFA login rejected");
             Json(serde_json::json!({"ok": true})).into_response()
         }
@@ -382,10 +387,13 @@ async fn toggle_mfa(
     .await
     {
         Ok(r) if r.rows_affected() > 0 => {
-            let _ = sqlx::query!(
-                "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'toggle_mfa', 'user', $2, $3)",
-                auth.user_id, user_id, serde_json::json!({"enabled": body.enabled, "target_user": user_id})
-            ).execute(&state.db).await;
+            state.audit_sender.try_send(audit::domain_event(
+                "toggle_mfa",
+                Some(auth.user_id),
+                "user",
+                Some(user_id),
+                serde_json::json!({ "enabled": body.enabled, "target_user": user_id }),
+            ));
             tracing::info!(admin = %auth.user_id, target = %user_id, mfa = body.enabled, "MFA toggled");
             Json(serde_json::json!({"ok": true, "mfa_required": body.enabled})).into_response()
         }
