@@ -252,6 +252,12 @@ export type PortalFeedbackItem = {
   concierge_score?: number | null;
   treatment_score?: number | null;
   doctor_score?: number | null;
+  organization_score?: number | null;
+  service_score?: number | null;
+  infrastructure_score?: number | null;
+  price_value_score?: number | null;
+  treatment_success?: string | null;
+  complication_reported?: boolean;
   nps_score: number;
   comments?: string | null;
   improvement_notes?: string | null;
@@ -270,6 +276,10 @@ export type PortalFeedbackAverageScores = {
   concierge?: number | null;
   treatment?: number | null;
   doctor?: number | null;
+  organization?: number | null;
+  service?: number | null;
+  infrastructure?: number | null;
+  price_value?: number | null;
 };
 
 export type PortalFeedbackPromoter = {
@@ -299,6 +309,9 @@ export type PortalFeedbackSummary = {
   passives: number;
   detractors: number;
   average_scores: PortalFeedbackAverageScores;
+  treatment_success_yes_rate?: number | null;
+  treatment_success_partial_rate?: number | null;
+  complication_rate?: number | null;
   top_promoters: PortalFeedbackPromoter[];
   interpreter_ranking: PortalFeedbackRanking[];
   clinic_ranking: PortalFeedbackRanking[];

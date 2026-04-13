@@ -175,7 +175,43 @@ async fn list_providers(
                     SELECT COUNT(*)
                     FROM appointments a
                     WHERE a.provider_id = p.id
-                  ) AS appointment_count
+                  ) AS appointment_count,
+                  (
+                    SELECT COUNT(*)
+                    FROM service_catalog s
+                    WHERE s.provider_id = p.id
+                  ) AS service_count,
+                  (
+                    SELECT COUNT(*)
+                    FROM concierge_services cs
+                    WHERE cs.provider_id = p.id
+                  ) AS concierge_service_count,
+                  (
+                    SELECT COUNT(*)
+                    FROM concierge_services cs
+                    WHERE cs.provider_id = p.id
+                      AND cs.status IN ('planned', 'booked', 'confirmed', 'in_service')
+                  ) AS open_concierge_service_count,
+                  NULLIF(
+                    GREATEST(
+                        COALESCE((
+                            SELECT MAX((a.date::timestamp + COALESCE(a.time_start, TIME '00:00')) AT TIME ZONE 'UTC')
+                            FROM appointments a
+                            WHERE a.provider_id = p.id
+                        ), to_timestamp(0)),
+                        COALESCE((
+                            SELECT MAX(COALESCE(ol.approved_at, ol.delivered_at, ol.created_at))
+                            FROM order_leistungen ol
+                            WHERE ol.provider_id = p.id
+                        ), to_timestamp(0)),
+                        COALESCE((
+                            SELECT MAX(COALESCE(cs.starts_at, cs.completed_at, cs.updated_at, cs.created_at))
+                            FROM concierge_services cs
+                            WHERE cs.provider_id = p.id
+                        ), to_timestamp(0))
+                    ),
+                    to_timestamp(0)
+                  ) AS last_interaction_at
            FROM providers p
            WHERE ($1::bool = false OR p.is_active = true)
              AND ($2::text IS NULL OR p.provider_type = $2)
@@ -186,15 +222,26 @@ async fn list_providers(
                 OR COALESCE(p.tax_id, '') ILIKE $3
                 OR COALESCE(p.address_city, '') ILIKE $3
                 OR COALESCE(p.fachbereich, '') ILIKE $3
-                OR EXISTS (
-                    SELECT 1
-                    FROM provider_doctors d
-                    WHERE d.provider_id = p.id
-                      AND (
-                        d.name ILIKE $3
-                        OR COALESCE(d.fachbereich, '') ILIKE $3
-                      )
-                )
+                 OR EXISTS (
+                     SELECT 1
+                     FROM provider_doctors d
+                     WHERE d.provider_id = p.id
+                       AND (
+                         d.name ILIKE $3
+                         OR COALESCE(d.fachbereich, '') ILIKE $3
+                       )
+                 )
+                 OR EXISTS (
+                     SELECT 1
+                     FROM concierge_services cs
+                     WHERE cs.provider_id = p.id
+                       AND (
+                         cs.title ILIKE $3
+                         OR cs.service_kind ILIKE $3
+                         OR COALESCE(cs.vendor_name, '') ILIKE $3
+                         OR COALESCE(cs.vendor_contact, '') ILIKE $3
+                       )
+                 )
              )
              AND ($4::text = '%%' OR COALESCE(p.address_city, '') ILIKE $4)
              AND ($5::text = '%%' OR COALESCE(p.address_country, '') ILIKE $5)
@@ -219,16 +266,26 @@ async fn list_providers(
              )
              AND (
                 $9::text = '%%'
-                OR EXISTS (
-                    SELECT 1
-                    FROM service_catalog s
-                    WHERE s.provider_id = p.id
-                      AND (
-                        s.service_name ILIKE $9
-                        OR COALESCE(s.description, '') ILIKE $9
-                      )
-                )
-             )
+                 OR EXISTS (
+                     SELECT 1
+                     FROM service_catalog s
+                     WHERE s.provider_id = p.id
+                       AND (
+                         s.service_name ILIKE $9
+                         OR COALESCE(s.description, '') ILIKE $9
+                       )
+                 )
+                 OR EXISTS (
+                     SELECT 1
+                     FROM concierge_services cs
+                     WHERE cs.provider_id = p.id
+                       AND (
+                         cs.title ILIKE $9
+                         OR cs.service_kind ILIKE $9
+                         OR COALESCE(cs.vendor_name, '') ILIKE $9
+                       )
+                 )
+              )
              AND (
                 $10::bool IS NULL
                 OR ($10 = true AND p.kooperationsvertrag IS NOT NULL)
@@ -316,6 +373,10 @@ async fn list_providers(
             "doctor_count": doctor_count,
             "patient_count": row.try_get::<i64, _>("patient_count").unwrap_or_default(),
             "appointment_count": row.try_get::<i64, _>("appointment_count").unwrap_or_default(),
+            "service_count": row.try_get::<i64, _>("service_count").unwrap_or_default(),
+            "concierge_service_count": row.try_get::<i64, _>("concierge_service_count").unwrap_or_default(),
+            "open_concierge_service_count": row.try_get::<i64, _>("open_concierge_service_count").unwrap_or_default(),
+            "last_interaction_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("last_interaction_at").unwrap_or_default().map(|v| v.to_rfc3339()),
         }));
     }
 
@@ -1591,38 +1652,53 @@ async fn load_provider_patients_json(
     doctor_id: Option<Uuid>,
 ) -> Result<Vec<serde_json::Value>, axum::response::Response> {
     let rows = sqlx::query(
-        r#"WITH appointment_links AS (
+        r#"WITH links AS (
                 SELECT a.patient_id,
                        COUNT(*)::bigint AS appointment_count,
-                       MAX((a.date::timestamp + COALESCE(a.time_start, TIME '00:00')) AT TIME ZONE 'UTC') AS last_appointment_at
+                       0::bigint AS leistung_count,
+                       0::bigint AS concierge_count,
+                       MAX((a.date::timestamp + COALESCE(a.time_start, TIME '00:00')) AT TIME ZONE 'UTC') AS last_interaction_at
                 FROM appointments a
                 WHERE a.provider_id = $1
                   AND ($2::uuid IS NULL OR a.doctor_id = $2)
                 GROUP BY a.patient_id
-            ),
-            order_links AS (
+
+                UNION ALL
+
                 SELECT o.patient_id,
+                       0::bigint AS appointment_count,
                        COUNT(*)::bigint AS leistung_count,
-                       MAX(ol.created_at) AS last_order_activity_at
+                       0::bigint AS concierge_count,
+                       MAX(COALESCE(ol.approved_at, ol.delivered_at, ol.created_at)) AS last_interaction_at
                 FROM order_leistungen ol
                 JOIN orders o ON o.id = ol.order_id
                 WHERE ol.provider_id = $1
                   AND ($2::uuid IS NULL OR ol.doctor_id = $2)
                 GROUP BY o.patient_id
+
+                UNION ALL
+
+                SELECT cs.patient_id,
+                       0::bigint AS appointment_count,
+                       0::bigint AS leistung_count,
+                       COUNT(*)::bigint AS concierge_count,
+                       MAX(COALESCE(cs.starts_at, cs.completed_at, cs.updated_at, cs.created_at)) AS last_interaction_at
+                FROM concierge_services cs
+                WHERE cs.provider_id = $1
+                  AND $2::uuid IS NULL
+                GROUP BY cs.patient_id
             ),
             linked AS (
-                SELECT COALESCE(a.patient_id, o.patient_id) AS patient_id,
-                       COALESCE(a.appointment_count, 0) AS appointment_count,
-                       COALESCE(o.leistung_count, 0) AS leistung_count,
-                       GREATEST(
-                           COALESCE(a.last_appointment_at, to_timestamp(0)),
-                           COALESCE(o.last_order_activity_at, to_timestamp(0))
-                       ) AS last_interaction_at
-                FROM appointment_links a
-                FULL OUTER JOIN order_links o ON o.patient_id = a.patient_id
+                SELECT patient_id,
+                       SUM(appointment_count)::bigint AS appointment_count,
+                       SUM(leistung_count)::bigint AS leistung_count,
+                       SUM(concierge_count)::bigint AS concierge_count,
+                       MAX(last_interaction_at) AS last_interaction_at
+                FROM links
+                GROUP BY patient_id
             )
             SELECT p.id, p.patient_id, p.first_name, p.last_name,
-                   l.appointment_count, l.leistung_count, l.last_interaction_at
+                   l.appointment_count, l.leistung_count, l.concierge_count, l.last_interaction_at
             FROM linked l
             JOIN patients p ON p.id = l.patient_id
             ORDER BY l.last_interaction_at DESC, p.last_name, p.first_name
@@ -1649,6 +1725,7 @@ async fn load_provider_patients_json(
             "last_name": row.try_get::<String, _>("last_name").unwrap_or_default(),
             "appointment_count": row.try_get::<i64, _>("appointment_count").unwrap_or_default(),
             "leistung_count": row.try_get::<i64, _>("leistung_count").unwrap_or_default(),
+            "concierge_count": row.try_get::<i64, _>("concierge_count").unwrap_or_default(),
             "last_interaction_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("last_interaction_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
         }));
     }
@@ -1715,7 +1792,33 @@ async fn load_provider_interactions_json(
                 LEFT JOIN provider_doctors d ON d.id = ol.doctor_id
                 WHERE ol.provider_id = $1
                   AND ($2::uuid IS NULL OR ol.doctor_id = $2)
-           ) interactions
+
+                UNION ALL
+
+                SELECT 'concierge_service'::text AS kind,
+                       cs.id AS interaction_id,
+                       p.patient_id AS patient_id,
+                       CONCAT_WS(' ', p.first_name, p.last_name) AS patient_name,
+                       NULL::uuid AS doctor_id,
+                       NULL::text AS doctor_name,
+                       a.order_id AS order_id,
+                       o.order_number AS order_number,
+                       cs.status AS status,
+                       cs.title AS title,
+                       cs.service_kind AS appointment_type,
+                       COALESCE(cs.vendor_name, cs.booking_reference) AS location,
+                       COALESCE(cs.service_notes, cs.vendor_contact, cs.billing_notes) AS notes,
+                       COALESCE(cs.starts_at, cs.completed_at, cs.updated_at, cs.created_at) AS occurred_at,
+                       NULL::numeric AS quantity,
+                       COALESCE(cs.actual_cost, cs.cost_estimate) AS unit_price,
+                       cs.currency AS currency
+                FROM concierge_services cs
+                JOIN patients p ON p.id = cs.patient_id
+                LEFT JOIN appointments a ON a.id = cs.appointment_id
+                LEFT JOIN orders o ON o.id = a.order_id
+                WHERE cs.provider_id = $1
+                  AND $2::uuid IS NULL
+            ) interactions
            ORDER BY occurred_at DESC, patient_name, title
            LIMIT 200"#,
     )

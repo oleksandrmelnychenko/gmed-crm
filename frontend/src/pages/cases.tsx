@@ -157,6 +157,81 @@ type CardiologyAssessment = {
   notes: string;
 };
 
+type GastroenterologyAssessment = {
+  is_relevant: boolean;
+  abdominal_pain: boolean;
+  reflux: boolean;
+  nausea: boolean;
+  diarrhea: boolean;
+  constipation: boolean;
+  gi_bleeding: boolean;
+  prior_endoscopy: string;
+  bowel_habits: string;
+  liver_history: string;
+  food_intolerance: string;
+  red_flags: string;
+  notes: string;
+};
+
+type OrthopedicsAssessment = {
+  is_relevant: boolean;
+  joint_pain: boolean;
+  back_pain: boolean;
+  mobility_limitation: boolean;
+  trauma_history: boolean;
+  prior_imaging: string;
+  assistive_devices: string;
+  physiotherapy_history: string;
+  pain_triggers: string;
+  red_flags: string;
+  notes: string;
+};
+
+type NeurologyAssessment = {
+  is_relevant: boolean;
+  headache: boolean;
+  dizziness: boolean;
+  sensory_changes: boolean;
+  weakness: boolean;
+  seizure_history: boolean;
+  gait_balance_issues: boolean;
+  prior_neuro_imaging: string;
+  prior_neurology_workup: string;
+  cognitive_changes: string;
+  red_flags: string;
+  notes: string;
+};
+
+type PulmonologyAssessment = {
+  is_relevant: boolean;
+  chronic_cough: boolean;
+  dyspnea: boolean;
+  wheezing: boolean;
+  chest_tightness: boolean;
+  hemoptysis: boolean;
+  smoking_history: string;
+  prior_chest_imaging: string;
+  inhaler_therapy: string;
+  sleep_apnea_history: string;
+  red_flags: string;
+  notes: string;
+};
+
+type UrologyAssessment = {
+  is_relevant: boolean;
+  dysuria: boolean;
+  hematuria: boolean;
+  flank_pain: boolean;
+  urinary_frequency: boolean;
+  urinary_retention: boolean;
+  incontinence: boolean;
+  prior_urology_workup: string;
+  catheter_history: string;
+  stone_history: string;
+  red_flags: string;
+  notes: string;
+};
+
 type CaseDetail = {
   id: string;
   case_uuid?: string;
@@ -184,6 +259,16 @@ type CaseDetail = {
   symptome: SymptomItem[];
   cardiology_recommended?: boolean;
   cardiology?: Partial<CardiologyAssessment> | null;
+  gastroenterology_recommended?: boolean;
+  gastroenterology?: Partial<GastroenterologyAssessment> | null;
+  orthopedics_recommended?: boolean;
+  orthopedics?: Partial<OrthopedicsAssessment> | null;
+  neurology_recommended?: boolean;
+  neurology?: Partial<NeurologyAssessment> | null;
+  pulmonology_recommended?: boolean;
+  pulmonology?: Partial<PulmonologyAssessment> | null;
+  urology_recommended?: boolean;
+  urology?: Partial<UrologyAssessment> | null;
   vegetative_anamnese?: {
     appetit_durst?: string | null;
     koerpergroesse?: number | null;
@@ -247,6 +332,11 @@ type SectionStatusKey =
   | "pain"
   | "symptome"
   | "cardiology"
+  | "gastroenterology"
+  | "orthopedics"
+  | "neurology"
+  | "pulmonology"
+  | "urology"
   | "vegetative"
   | "impfstatus";
 
@@ -440,6 +530,91 @@ function blankCardiology(): CardiologyAssessment {
   };
 }
 
+function blankGastroenterology(): GastroenterologyAssessment {
+  return {
+    is_relevant: false,
+    abdominal_pain: false,
+    reflux: false,
+    nausea: false,
+    diarrhea: false,
+    constipation: false,
+    gi_bleeding: false,
+    prior_endoscopy: "",
+    bowel_habits: "",
+    liver_history: "",
+    food_intolerance: "",
+    red_flags: "",
+    notes: "",
+  };
+}
+
+function blankOrthopedics(): OrthopedicsAssessment {
+  return {
+    is_relevant: false,
+    joint_pain: false,
+    back_pain: false,
+    mobility_limitation: false,
+    trauma_history: false,
+    prior_imaging: "",
+    assistive_devices: "",
+    physiotherapy_history: "",
+    pain_triggers: "",
+    red_flags: "",
+    notes: "",
+  };
+}
+
+function blankNeurology(): NeurologyAssessment {
+  return {
+    is_relevant: false,
+    headache: false,
+    dizziness: false,
+    sensory_changes: false,
+    weakness: false,
+    seizure_history: false,
+    gait_balance_issues: false,
+    prior_neuro_imaging: "",
+    prior_neurology_workup: "",
+    cognitive_changes: "",
+    red_flags: "",
+    notes: "",
+  };
+}
+
+function blankPulmonology(): PulmonologyAssessment {
+  return {
+    is_relevant: false,
+    chronic_cough: false,
+    dyspnea: false,
+    wheezing: false,
+    chest_tightness: false,
+    hemoptysis: false,
+    smoking_history: "",
+    prior_chest_imaging: "",
+    inhaler_therapy: "",
+    sleep_apnea_history: "",
+    red_flags: "",
+    notes: "",
+  };
+}
+
+function blankUrology(): UrologyAssessment {
+  return {
+    is_relevant: false,
+    dysuria: false,
+    hematuria: false,
+    flank_pain: false,
+    urinary_frequency: false,
+    urinary_retention: false,
+    incontinence: false,
+    prior_urology_workup: "",
+    catheter_history: "",
+    stone_history: "",
+    red_flags: "",
+    notes: "",
+  };
+}
+
 function buildCasesPath(filters: CaseFilters) {
   const params = new URLSearchParams();
   if (filters.search.trim()) params.set("search", filters.search.trim());
@@ -503,6 +678,16 @@ function historySectionLabel(section: string) {
       return "Symptoms";
     case "cardiology":
       return "Cardiology";
+    case "gastroenterology":
+      return "Gastroenterology";
+    case "orthopedics":
+      return "Orthopedics";
+    case "neurology":
+      return "Neurology";
+    case "pulmonology":
+      return "Pulmonology";
+    case "urology":
+      return "Urology";
     case "vegetative":
       return "Vegetative";
     case "impfstatus":
@@ -661,6 +846,91 @@ function cardiologyToPayload(cardiology: CardiologyAssessment) {
   };
 }
 
+function gastroenterologyToPayload(gastroenterology: GastroenterologyAssessment) {
+  return {
+    is_relevant: gastroenterology.is_relevant,
+    abdominal_pain: gastroenterology.abdominal_pain,
+    reflux: gastroenterology.reflux,
+    nausea: gastroenterology.nausea,
+    diarrhea: gastroenterology.diarrhea,
+    constipation: gastroenterology.constipation,
+    gi_bleeding: gastroenterology.gi_bleeding,
+    prior_endoscopy: toOptionalText(gastroenterology.prior_endoscopy),
+    bowel_habits: toOptionalText(gastroenterology.bowel_habits),
+    liver_history: toOptionalText(gastroenterology.liver_history),
+    food_intolerance: toOptionalText(gastroenterology.food_intolerance),
+    red_flags: toOptionalText(gastroenterology.red_flags),
+    notes: toOptionalText(gastroenterology.notes),
+  };
+}
+
+function orthopedicsToPayload(orthopedics: OrthopedicsAssessment) {
+  return {
+    is_relevant: orthopedics.is_relevant,
+    joint_pain: orthopedics.joint_pain,
+    back_pain: orthopedics.back_pain,
+    mobility_limitation: orthopedics.mobility_limitation,
+    trauma_history: orthopedics.trauma_history,
+    prior_imaging: toOptionalText(orthopedics.prior_imaging),
+    assistive_devices: toOptionalText(orthopedics.assistive_devices),
+    physiotherapy_history: toOptionalText(orthopedics.physiotherapy_history),
+    pain_triggers: toOptionalText(orthopedics.pain_triggers),
+    red_flags: toOptionalText(orthopedics.red_flags),
+    notes: toOptionalText(orthopedics.notes),
+  };
+}
+
+function neurologyToPayload(neurology: NeurologyAssessment) {
+  return {
+    is_relevant: neurology.is_relevant,
+    headache: neurology.headache,
+    dizziness: neurology.dizziness,
+    sensory_changes: neurology.sensory_changes,
+    weakness: neurology.weakness,
+    seizure_history: neurology.seizure_history,
+    gait_balance_issues: neurology.gait_balance_issues,
+    prior_neuro_imaging: toOptionalText(neurology.prior_neuro_imaging),
+    prior_neurology_workup: toOptionalText(neurology.prior_neurology_workup),
+    cognitive_changes: toOptionalText(neurology.cognitive_changes),
+    red_flags: toOptionalText(neurology.red_flags),
+    notes: toOptionalText(neurology.notes),
+  };
+}
+
+function pulmonologyToPayload(pulmonology: PulmonologyAssessment) {
+  return {
+    is_relevant: pulmonology.is_relevant,
+    chronic_cough: pulmonology.chronic_cough,
+    dyspnea: pulmonology.dyspnea,
+    wheezing: pulmonology.wheezing,
+    chest_tightness: pulmonology.chest_tightness,
+    hemoptysis: pulmonology.hemoptysis,
+    smoking_history: toOptionalText(pulmonology.smoking_history),
+    prior_chest_imaging: toOptionalText(pulmonology.prior_chest_imaging),
+    inhaler_therapy: toOptionalText(pulmonology.inhaler_therapy),
+    sleep_apnea_history: toOptionalText(pulmonology.sleep_apnea_history),
+    red_flags: toOptionalText(pulmonology.red_flags),
+    notes: toOptionalText(pulmonology.notes),
+  };
+}
+
+function urologyToPayload(urology: UrologyAssessment) {
+  return {
+    is_relevant: urology.is_relevant,
+    dysuria: urology.dysuria,
+    hematuria: urology.hematuria,
+    flank_pain: urology.flank_pain,
+    urinary_frequency: urology.urinary_frequency,
+    urinary_retention: urology.urinary_retention,
+    incontinence: urology.incontinence,
+    prior_urology_workup: toOptionalText(urology.prior_urology_workup),
+    catheter_history: toOptionalText(urology.catheter_history),
+    stone_history: toOptionalText(urology.stone_history),
+    red_flags: toOptionalText(urology.red_flags),
+    notes: toOptionalText(urology.notes),
+  };
+}
+
 export function CasesPage() {
   const { t } = useLang();
   const { user } = useAuth();
@@ -698,6 +968,17 @@ export function CasesPage() {
   const [painRecords, setPainRecords] = useState<PainItem[]>([]);
   const [symptome, setSymptome] = useState<SymptomItem[]>([]);
   const [cardiology, setCardiology] = useState<CardiologyAssessment>(blankCardiology());
+  const [gastroenterology, setGastroenterology] = useState<GastroenterologyAssessment>(
+    blankGastroenterology(),
+  );
+  const [orthopedics, setOrthopedics] = useState<OrthopedicsAssessment>(
+    blankOrthopedics(),
+  );
+  const [neurology, setNeurology] = useState<NeurologyAssessment>(blankNeurology());
+  const [pulmonology, setPulmonology] = useState<PulmonologyAssessment>(
+    blankPulmonology(),
+  );
+  const [urology, setUrology] = useState<UrologyAssessment>(blankUrology());
   const [vegetative, setVegetative] = useState<VegetativeState>(blankVegetative());
   const [impfstatus, setImpfstatus] = useState("");
   const [sectionBusy, setSectionBusy] = useState<SectionStatusKey | "">("");
@@ -737,6 +1018,77 @@ export function CasesPage() {
         return fachrichtung.includes("cardio") || fachrichtung.includes("kardio");
       }),
     [cardiology.is_relevant, detail?.cardiology_recommended, symptome],
+  );
+  const gastroenterologyTriggered = useMemo(
+    () =>
+      gastroenterology.is_relevant ||
+      Boolean(detail?.gastroenterology_recommended) ||
+      symptome.some((item) => {
+        const fachrichtung = (item.fachrichtung ?? "").trim().toLowerCase();
+        return (
+          fachrichtung.includes("gastro") ||
+          fachrichtung.includes("kolo") ||
+          fachrichtung.includes("colo")
+        );
+      }),
+    [gastroenterology.is_relevant, detail?.gastroenterology_recommended, symptome],
+  );
+  const orthopedicsTriggered = useMemo(
+    () =>
+      orthopedics.is_relevant ||
+      Boolean(detail?.orthopedics_recommended) ||
+      symptome.some((item) => {
+        const fachrichtung = (item.fachrichtung ?? "").trim().toLowerCase();
+        return (
+          fachrichtung.includes("ortho") ||
+          fachrichtung.includes("orthop") ||
+          fachrichtung.includes("trauma") ||
+          fachrichtung.includes("bewegung")
+        );
+      }),
+    [detail?.orthopedics_recommended, orthopedics.is_relevant, symptome],
+  );
+  const neurologyTriggered = useMemo(
+    () =>
+      neurology.is_relevant ||
+      Boolean(detail?.neurology_recommended) ||
+      symptome.some((item) => {
+        const fachrichtung = (item.fachrichtung ?? "").trim().toLowerCase();
+        return fachrichtung.includes("neuro") || fachrichtung.includes("neurol");
+      }),
+    [detail?.neurology_recommended, neurology.is_relevant, symptome],
+  );
+  const pulmonologyTriggered = useMemo(
+    () =>
+      pulmonology.is_relevant ||
+      Boolean(detail?.pulmonology_recommended) ||
+      symptome.some((item) => {
+        const fachrichtung = (item.fachrichtung ?? "").trim().toLowerCase();
+        return (
+          fachrichtung.includes("pulmo") ||
+          fachrichtung.includes("pneumo") ||
+          fachrichtung.includes("respir") ||
+          fachrichtung.includes("asthma") ||
+          fachrichtung.includes("lung")
+        );
+      }),
+    [detail?.pulmonology_recommended, pulmonology.is_relevant, symptome],
+  );
+  const urologyTriggered = useMemo(
+    () =>
+      urology.is_relevant ||
+      Boolean(detail?.urology_recommended) ||
+      symptome.some((item) => {
+        const fachrichtung = (item.fachrichtung ?? "").trim().toLowerCase();
+        return (
+          fachrichtung.includes("uro") ||
+          fachrichtung.includes("renal") ||
+          fachrichtung.includes("kidney") ||
+          fachrichtung.includes("bladder") ||
+          fachrichtung.includes("prostat")
+        );
+      }),
+    [detail?.urology_recommended, symptome, urology.is_relevant],
   );
 
   useEffect(() => {
@@ -860,6 +1212,84 @@ export function CasesPage() {
             family_history: item.cardiology?.family_history ?? "",
             red_flags: item.cardiology?.red_flags ?? "",
             notes: item.cardiology?.notes ?? "",
+          });
+          setGastroenterology({
+            ...blankGastroenterology(),
+            is_relevant:
+              item.gastroenterology?.is_relevant ??
+              item.gastroenterology_recommended ??
+              false,
+            abdominal_pain: item.gastroenterology?.abdominal_pain ?? false,
+            reflux: item.gastroenterology?.reflux ?? false,
+            nausea: item.gastroenterology?.nausea ?? false,
+            diarrhea: item.gastroenterology?.diarrhea ?? false,
+            constipation: item.gastroenterology?.constipation ?? false,
+            gi_bleeding: item.gastroenterology?.gi_bleeding ?? false,
+            prior_endoscopy: item.gastroenterology?.prior_endoscopy ?? "",
+            bowel_habits: item.gastroenterology?.bowel_habits ?? "",
+            liver_history: item.gastroenterology?.liver_history ?? "",
+            food_intolerance: item.gastroenterology?.food_intolerance ?? "",
+            red_flags: item.gastroenterology?.red_flags ?? "",
+            notes: item.gastroenterology?.notes ?? "",
+          });
+          setOrthopedics({
+            ...blankOrthopedics(),
+            is_relevant: item.orthopedics?.is_relevant ?? item.orthopedics_recommended ?? false,
+            joint_pain: item.orthopedics?.joint_pain ?? false,
+            back_pain: item.orthopedics?.back_pain ?? false,
+            mobility_limitation: item.orthopedics?.mobility_limitation ?? false,
+            trauma_history: item.orthopedics?.trauma_history ?? false,
+            prior_imaging: item.orthopedics?.prior_imaging ?? "",
+            assistive_devices: item.orthopedics?.assistive_devices ?? "",
+            physiotherapy_history: item.orthopedics?.physiotherapy_history ?? "",
+            pain_triggers: item.orthopedics?.pain_triggers ?? "",
+            red_flags: item.orthopedics?.red_flags ?? "",
+            notes: item.orthopedics?.notes ?? "",
+          });
+          setNeurology({
+            ...blankNeurology(),
+            is_relevant: item.neurology?.is_relevant ?? item.neurology_recommended ?? false,
+            headache: item.neurology?.headache ?? false,
+            dizziness: item.neurology?.dizziness ?? false,
+            sensory_changes: item.neurology?.sensory_changes ?? false,
+            weakness: item.neurology?.weakness ?? false,
+            seizure_history: item.neurology?.seizure_history ?? false,
+            gait_balance_issues: item.neurology?.gait_balance_issues ?? false,
+            prior_neuro_imaging: item.neurology?.prior_neuro_imaging ?? "",
+            prior_neurology_workup: item.neurology?.prior_neurology_workup ?? "",
+            cognitive_changes: item.neurology?.cognitive_changes ?? "",
+            red_flags: item.neurology?.red_flags ?? "",
+            notes: item.neurology?.notes ?? "",
+          });
+          setPulmonology({
+            ...blankPulmonology(),
+            is_relevant: item.pulmonology?.is_relevant ?? item.pulmonology_recommended ?? false,
+            chronic_cough: item.pulmonology?.chronic_cough ?? false,
+            dyspnea: item.pulmonology?.dyspnea ?? false,
+            wheezing: item.pulmonology?.wheezing ?? false,
+            chest_tightness: item.pulmonology?.chest_tightness ?? false,
+            hemoptysis: item.pulmonology?.hemoptysis ?? false,
+            smoking_history: item.pulmonology?.smoking_history ?? "",
+            prior_chest_imaging: item.pulmonology?.prior_chest_imaging ?? "",
+            inhaler_therapy: item.pulmonology?.inhaler_therapy ?? "",
+            sleep_apnea_history: item.pulmonology?.sleep_apnea_history ?? "",
+            red_flags: item.pulmonology?.red_flags ?? "",
+            notes: item.pulmonology?.notes ?? "",
+          });
+          setUrology({
+            ...blankUrology(),
+            is_relevant: item.urology?.is_relevant ?? item.urology_recommended ?? false,
+            dysuria: item.urology?.dysuria ?? false,
+            hematuria: item.urology?.hematuria ?? false,
+            flank_pain: item.urology?.flank_pain ?? false,
+            urinary_frequency: item.urology?.urinary_frequency ?? false,
+            urinary_retention: item.urology?.urinary_retention ?? false,
+            incontinence: item.urology?.incontinence ?? false,
+            prior_urology_workup: item.urology?.prior_urology_workup ?? "",
+            catheter_history: item.urology?.catheter_history ?? "",
+            stone_history: item.urology?.stone_history ?? "",
+            red_flags: item.urology?.red_flags ?? "",
+            notes: item.urology?.notes ?? "",
           });
           setVegetative({
             appetit_durst: item.vegetative_anamnese?.appetit_durst ?? "",
@@ -1096,6 +1526,76 @@ export function CasesPage() {
         apiFetch(`/cases/${detail.id}/cardiology`, {
           method: "POST",
           body: JSON.stringify(cardiologyToPayload(cardiology)),
+        }),
+      t.common_failed_update,
+    );
+  }
+
+  async function handleSaveGastroenterology(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!detail) return;
+    await runSectionSave(
+      "gastroenterology",
+      () =>
+        apiFetch(`/cases/${detail.id}/gastroenterology`, {
+          method: "POST",
+          body: JSON.stringify(gastroenterologyToPayload(gastroenterology)),
+        }),
+      t.common_failed_update,
+    );
+  }
+
+  async function handleSaveOrthopedics(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!detail) return;
+    await runSectionSave(
+      "orthopedics",
+      () =>
+        apiFetch(`/cases/${detail.id}/orthopedics`, {
+          method: "POST",
+          body: JSON.stringify(orthopedicsToPayload(orthopedics)),
+        }),
+      t.common_failed_update,
+    );
+  }
+
+  async function handleSaveNeurology(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!detail) return;
+    await runSectionSave(
+      "neurology",
+      () =>
+        apiFetch(`/cases/${detail.id}/neurology`, {
+          method: "POST",
+          body: JSON.stringify(neurologyToPayload(neurology)),
+        }),
+      t.common_failed_update,
+    );
+  }
+
+  async function handleSavePulmonology(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!detail) return;
+    await runSectionSave(
+      "pulmonology",
+      () =>
+        apiFetch(`/cases/${detail.id}/pulmonology`, {
+          method: "POST",
+          body: JSON.stringify(pulmonologyToPayload(pulmonology)),
+        }),
+      t.common_failed_update,
+    );
+  }
+
+  async function handleSaveUrology(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!detail) return;
+    await runSectionSave(
+      "urology",
+      () =>
+        apiFetch(`/cases/${detail.id}/urology`, {
+          method: "POST",
+          body: JSON.stringify(urologyToPayload(urology)),
         }),
       t.common_failed_update,
     );
@@ -1504,6 +2004,11 @@ export function CasesPage() {
             setSelectedId("");
             setDetail(null);
             setCardiology(blankCardiology());
+            setGastroenterology(blankGastroenterology());
+            setOrthopedics(blankOrthopedics());
+            setNeurology(blankNeurology());
+            setPulmonology(blankPulmonology());
+            setUrology(blankUrology());
             setDetailError("");
             updateQuery({ case: null });
           }
@@ -1916,6 +2421,693 @@ export function CasesPage() {
                       <Button type="submit" className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800" disabled={sectionBusy === "cardiology" || !permissions.canEdit}>
                         {sectionBusy === "cardiology" ? <LoaderCircle className="size-4 animate-spin" /> : null}
                         Save cardiology
+                      </Button>
+                    </div>
+                  </form>
+                </Panel>
+
+                <Panel
+                  title="Gastroenterology sub-flow"
+                  description={
+                    gastroenterologyTriggered
+                      ? "Specialty branch for gastroenterology-related symptoms, bowel changes and prior endoscopy context."
+                      : "Enable when symptoms or referral indicate gastroenterology."
+                  }
+                >
+                  <form onSubmit={handleSaveGastroenterology} className="space-y-4">
+                    {sectionErrors.gastroenterology ? (
+                      <Banner tone="error">{sectionErrors.gastroenterology}</Banner>
+                    ) : null}
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                      <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={gastroenterology.is_relevant}
+                          onChange={(event) =>
+                            setGastroenterology((current) => ({
+                              ...current,
+                              is_relevant: event.target.checked,
+                            }))
+                          }
+                        />
+                        Gastroenterology relevant
+                      </label>
+                      {[
+                        ["abdominal_pain", "Abdominal pain"],
+                        ["reflux", "Reflux"],
+                        ["nausea", "Nausea"],
+                        ["diarrhea", "Diarrhea"],
+                        ["constipation", "Constipation"],
+                        ["gi_bleeding", "GI bleeding"],
+                      ].map(([key, label]) => (
+                        <label
+                          key={key}
+                          className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={Boolean(
+                              gastroenterology[key as keyof GastroenterologyAssessment],
+                            )}
+                            onChange={(event) =>
+                              setGastroenterology((current) => ({
+                                ...current,
+                                [key]: event.target.checked,
+                              }))
+                            }
+                          />
+                          {label}
+                        </label>
+                      ))}
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                      <Field label="Prior endoscopy / colonoscopy">
+                        <Input
+                          value={gastroenterology.prior_endoscopy}
+                          onChange={(event) =>
+                            setGastroenterology((current) => ({
+                              ...current,
+                              prior_endoscopy: event.target.value,
+                            }))
+                          }
+                          className="h-10 rounded-xl bg-slate-50"
+                        />
+                      </Field>
+                      <Field label="Bowel habit changes">
+                        <Input
+                          value={gastroenterology.bowel_habits}
+                          onChange={(event) =>
+                            setGastroenterology((current) => ({
+                              ...current,
+                              bowel_habits: event.target.value,
+                            }))
+                          }
+                          className="h-10 rounded-xl bg-slate-50"
+                        />
+                      </Field>
+                      <Field label="Liver / hepatobiliary history">
+                        <Input
+                          value={gastroenterology.liver_history}
+                          onChange={(event) =>
+                            setGastroenterology((current) => ({
+                              ...current,
+                              liver_history: event.target.value,
+                            }))
+                          }
+                          className="h-10 rounded-xl bg-slate-50"
+                        />
+                      </Field>
+                      <Field label="Food intolerance / triggers">
+                        <Input
+                          value={gastroenterology.food_intolerance}
+                          onChange={(event) =>
+                            setGastroenterology((current) => ({
+                              ...current,
+                              food_intolerance: event.target.value,
+                            }))
+                          }
+                          className="h-10 rounded-xl bg-slate-50"
+                        />
+                      </Field>
+                      <Field label="Red flags">
+                        <Input
+                          value={gastroenterology.red_flags}
+                          onChange={(event) =>
+                            setGastroenterology((current) => ({
+                              ...current,
+                              red_flags: event.target.value,
+                            }))
+                          }
+                          className="h-10 rounded-xl bg-slate-50"
+                        />
+                      </Field>
+                    </div>
+                    <Field label="Gastroenterology notes">
+                      <textarea
+                        value={gastroenterology.notes}
+                        onChange={(event) =>
+                          setGastroenterology((current) => ({
+                            ...current,
+                            notes: event.target.value,
+                          }))
+                        }
+                        className={textareaClassName}
+                        rows={4}
+                      />
+                    </Field>
+                    <div className="flex justify-end border-t border-border/70 pt-4">
+                      <Button
+                        type="submit"
+                        className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+                        disabled={
+                          sectionBusy === "gastroenterology" || !permissions.canEdit
+                        }
+                      >
+                        {sectionBusy === "gastroenterology" ? (
+                          <LoaderCircle className="size-4 animate-spin" />
+                        ) : null}
+                        Save gastroenterology
+                      </Button>
+                    </div>
+                  </form>
+                </Panel>
+
+                <Panel
+                  title="Orthopedics sub-flow"
+                  description={
+                    orthopedicsTriggered
+                      ? "Specialty branch for musculoskeletal pain, mobility issues and trauma-related context."
+                      : "Enable when symptoms or referral indicate orthopedics."
+                  }
+                >
+                  <form onSubmit={handleSaveOrthopedics} className="space-y-4">
+                    {sectionErrors.orthopedics ? (
+                      <Banner tone="error">{sectionErrors.orthopedics}</Banner>
+                    ) : null}
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                      <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={orthopedics.is_relevant}
+                          onChange={(event) =>
+                            setOrthopedics((current) => ({
+                              ...current,
+                              is_relevant: event.target.checked,
+                            }))
+                          }
+                        />
+                        Orthopedics relevant
+                      </label>
+                      {[
+                        ["joint_pain", "Joint pain"],
+                        ["back_pain", "Back / spine pain"],
+                        ["mobility_limitation", "Mobility limitation"],
+                        ["trauma_history", "Trauma history"],
+                      ].map(([key, label]) => (
+                        <label
+                          key={key}
+                          className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={Boolean(orthopedics[key as keyof OrthopedicsAssessment])}
+                            onChange={(event) =>
+                              setOrthopedics((current) => ({
+                                ...current,
+                                [key]: event.target.checked,
+                              }))
+                            }
+                          />
+                          {label}
+                        </label>
+                      ))}
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                      <Field label="Prior imaging">
+                        <Input
+                          value={orthopedics.prior_imaging}
+                          onChange={(event) =>
+                            setOrthopedics((current) => ({
+                              ...current,
+                              prior_imaging: event.target.value,
+                            }))
+                          }
+                          className="h-10 rounded-xl bg-slate-50"
+                        />
+                      </Field>
+                      <Field label="Assistive devices / implants">
+                        <Input
+                          value={orthopedics.assistive_devices}
+                          onChange={(event) =>
+                            setOrthopedics((current) => ({
+                              ...current,
+                              assistive_devices: event.target.value,
+                            }))
+                          }
+                          className="h-10 rounded-xl bg-slate-50"
+                        />
+                      </Field>
+                      <Field label="Physiotherapy / rehab history">
+                        <Input
+                          value={orthopedics.physiotherapy_history}
+                          onChange={(event) =>
+                            setOrthopedics((current) => ({
+                              ...current,
+                              physiotherapy_history: event.target.value,
+                            }))
+                          }
+                          className="h-10 rounded-xl bg-slate-50"
+                        />
+                      </Field>
+                      <Field label="Pain triggers / load pattern">
+                        <Input
+                          value={orthopedics.pain_triggers}
+                          onChange={(event) =>
+                            setOrthopedics((current) => ({
+                              ...current,
+                              pain_triggers: event.target.value,
+                            }))
+                          }
+                          className="h-10 rounded-xl bg-slate-50"
+                        />
+                      </Field>
+                      <Field label="Red flags">
+                        <Input
+                          value={orthopedics.red_flags}
+                          onChange={(event) =>
+                            setOrthopedics((current) => ({
+                              ...current,
+                              red_flags: event.target.value,
+                            }))
+                          }
+                          className="h-10 rounded-xl bg-slate-50"
+                        />
+                      </Field>
+                    </div>
+                    <Field label="Orthopedics notes">
+                      <textarea
+                        value={orthopedics.notes}
+                        onChange={(event) =>
+                          setOrthopedics((current) => ({
+                            ...current,
+                            notes: event.target.value,
+                          }))
+                        }
+                        className={textareaClassName}
+                        rows={4}
+                      />
+                    </Field>
+                    <div className="flex justify-end border-t border-border/70 pt-4">
+                      <Button
+                        type="submit"
+                        className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+                        disabled={sectionBusy === "orthopedics" || !permissions.canEdit}
+                      >
+                        {sectionBusy === "orthopedics" ? (
+                          <LoaderCircle className="size-4 animate-spin" />
+                        ) : null}
+                        Save orthopedics
+                      </Button>
+                    </div>
+                  </form>
+                </Panel>
+
+                <Panel
+                  title="Neurology sub-flow"
+                  description={
+                    neurologyTriggered
+                      ? "Specialty branch for headache, dizziness, neurologic deficits and prior neuro workup."
+                      : "Enable when symptoms or referral indicate neurology."
+                  }
+                >
+                  <form onSubmit={handleSaveNeurology} className="space-y-4">
+                    {sectionErrors.neurology ? (
+                      <Banner tone="error">{sectionErrors.neurology}</Banner>
+                    ) : null}
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                      <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={neurology.is_relevant}
+                          onChange={(event) =>
+                            setNeurology((current) => ({
+                              ...current,
+                              is_relevant: event.target.checked,
+                            }))
+                          }
+                        />
+                        Neurology relevant
+                      </label>
+                      {[
+                        ["headache", "Headache"],
+                        ["dizziness", "Dizziness / vertigo"],
+                        ["sensory_changes", "Sensory changes"],
+                        ["weakness", "Weakness"],
+                        ["seizure_history", "Seizure history"],
+                        ["gait_balance_issues", "Gait / balance issues"],
+                      ].map(([key, label]) => (
+                        <label
+                          key={key}
+                          className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={Boolean(neurology[key as keyof NeurologyAssessment])}
+                            onChange={(event) =>
+                              setNeurology((current) => ({
+                                ...current,
+                                [key]: event.target.checked,
+                              }))
+                            }
+                          />
+                          {label}
+                        </label>
+                      ))}
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                      <Field label="Prior neuro imaging">
+                        <Input
+                          value={neurology.prior_neuro_imaging}
+                          onChange={(event) =>
+                            setNeurology((current) => ({
+                              ...current,
+                              prior_neuro_imaging: event.target.value,
+                            }))
+                          }
+                          className="h-10 rounded-xl bg-slate-50"
+                        />
+                      </Field>
+                      <Field label="Prior neurology workup">
+                        <Input
+                          value={neurology.prior_neurology_workup}
+                          onChange={(event) =>
+                            setNeurology((current) => ({
+                              ...current,
+                              prior_neurology_workup: event.target.value,
+                            }))
+                          }
+                          className="h-10 rounded-xl bg-slate-50"
+                        />
+                      </Field>
+                      <Field label="Cognitive / speech changes">
+                        <Input
+                          value={neurology.cognitive_changes}
+                          onChange={(event) =>
+                            setNeurology((current) => ({
+                              ...current,
+                              cognitive_changes: event.target.value,
+                            }))
+                          }
+                          className="h-10 rounded-xl bg-slate-50"
+                        />
+                      </Field>
+                      <Field label="Red flags">
+                        <Input
+                          value={neurology.red_flags}
+                          onChange={(event) =>
+                            setNeurology((current) => ({
+                              ...current,
+                              red_flags: event.target.value,
+                            }))
+                          }
+                          className="h-10 rounded-xl bg-slate-50"
+                        />
+                      </Field>
+                    </div>
+                    <Field label="Neurology notes">
+                      <textarea
+                        value={neurology.notes}
+                        onChange={(event) =>
+                          setNeurology((current) => ({
+                            ...current,
+                            notes: event.target.value,
+                          }))
+                        }
+                        className={textareaClassName}
+                        rows={4}
+                      />
+                    </Field>
+                    <div className="flex justify-end border-t border-border/70 pt-4">
+                      <Button
+                        type="submit"
+                        className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+                        disabled={sectionBusy === "neurology" || !permissions.canEdit}
+                      >
+                        {sectionBusy === "neurology" ? (
+                          <LoaderCircle className="size-4 animate-spin" />
+                        ) : null}
+                        Save neurology
+                      </Button>
+                    </div>
+                  </form>
+                </Panel>
+
+                <Panel
+                  title="Pulmonology sub-flow"
+                  description={
+                    pulmonologyTriggered
+                      ? "Specialty branch for respiratory symptoms, chronic cough and prior chest workup."
+                      : "Enable when symptoms or referral indicate pulmonology."
+                  }
+                >
+                  <form onSubmit={handleSavePulmonology} className="space-y-4">
+                    {sectionErrors.pulmonology ? (
+                      <Banner tone="error">{sectionErrors.pulmonology}</Banner>
+                    ) : null}
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                      <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={pulmonology.is_relevant}
+                          onChange={(event) =>
+                            setPulmonology((current) => ({
+                              ...current,
+                              is_relevant: event.target.checked,
+                            }))
+                          }
+                        />
+                        Pulmonology relevant
+                      </label>
+                      {[
+                        ["chronic_cough", "Chronic cough"],
+                        ["dyspnea", "Dyspnea / shortness of breath"],
+                        ["wheezing", "Wheezing"],
+                        ["chest_tightness", "Chest tightness"],
+                        ["hemoptysis", "Hemoptysis"],
+                      ].map(([key, label]) => (
+                        <label
+                          key={key}
+                          className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={Boolean(pulmonology[key as keyof PulmonologyAssessment])}
+                            onChange={(event) =>
+                              setPulmonology((current) => ({
+                                ...current,
+                                [key]: event.target.checked,
+                              }))
+                            }
+                          />
+                          {label}
+                        </label>
+                      ))}
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                      <Field label="Smoking history / pack years">
+                        <Input
+                          value={pulmonology.smoking_history}
+                          onChange={(event) =>
+                            setPulmonology((current) => ({
+                              ...current,
+                              smoking_history: event.target.value,
+                            }))
+                          }
+                          className="h-10 rounded-xl bg-slate-50"
+                        />
+                      </Field>
+                      <Field label="Prior chest imaging">
+                        <Input
+                          value={pulmonology.prior_chest_imaging}
+                          onChange={(event) =>
+                            setPulmonology((current) => ({
+                              ...current,
+                              prior_chest_imaging: event.target.value,
+                            }))
+                          }
+                          className="h-10 rounded-xl bg-slate-50"
+                        />
+                      </Field>
+                      <Field label="Inhaler / respiratory therapy">
+                        <Input
+                          value={pulmonology.inhaler_therapy}
+                          onChange={(event) =>
+                            setPulmonology((current) => ({
+                              ...current,
+                              inhaler_therapy: event.target.value,
+                            }))
+                          }
+                          className="h-10 rounded-xl bg-slate-50"
+                        />
+                      </Field>
+                      <Field label="Sleep apnea / CPAP history">
+                        <Input
+                          value={pulmonology.sleep_apnea_history}
+                          onChange={(event) =>
+                            setPulmonology((current) => ({
+                              ...current,
+                              sleep_apnea_history: event.target.value,
+                            }))
+                          }
+                          className="h-10 rounded-xl bg-slate-50"
+                        />
+                      </Field>
+                      <Field label="Red flags">
+                        <Input
+                          value={pulmonology.red_flags}
+                          onChange={(event) =>
+                            setPulmonology((current) => ({
+                              ...current,
+                              red_flags: event.target.value,
+                            }))
+                          }
+                          className="h-10 rounded-xl bg-slate-50"
+                        />
+                      </Field>
+                    </div>
+                    <Field label="Pulmonology notes">
+                      <textarea
+                        value={pulmonology.notes}
+                        onChange={(event) =>
+                          setPulmonology((current) => ({
+                            ...current,
+                            notes: event.target.value,
+                          }))
+                        }
+                        className={textareaClassName}
+                        rows={4}
+                      />
+                    </Field>
+                    <div className="flex justify-end border-t border-border/70 pt-4">
+                      <Button
+                        type="submit"
+                        className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+                        disabled={sectionBusy === "pulmonology" || !permissions.canEdit}
+                      >
+                        {sectionBusy === "pulmonology" ? (
+                          <LoaderCircle className="size-4 animate-spin" />
+                        ) : null}
+                        Save pulmonology
+                      </Button>
+                    </div>
+                  </form>
+                </Panel>
+
+                <Panel
+                  title="Urology sub-flow"
+                  description={
+                    urologyTriggered
+                      ? "Specialty branch for urinary symptoms, retention and prior urology workup."
+                      : "Enable when symptoms or referral indicate urology."
+                  }
+                >
+                  <form onSubmit={handleSaveUrology} className="space-y-4">
+                    {sectionErrors.urology ? (
+                      <Banner tone="error">{sectionErrors.urology}</Banner>
+                    ) : null}
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                      <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={urology.is_relevant}
+                          onChange={(event) =>
+                            setUrology((current) => ({
+                              ...current,
+                              is_relevant: event.target.checked,
+                            }))
+                          }
+                        />
+                        Urology relevant
+                      </label>
+                      {[
+                        ["dysuria", "Dysuria / burning"],
+                        ["hematuria", "Hematuria"],
+                        ["flank_pain", "Flank pain"],
+                        ["urinary_frequency", "Urinary frequency"],
+                        ["urinary_retention", "Urinary retention"],
+                        ["incontinence", "Incontinence"],
+                      ].map(([key, label]) => (
+                        <label
+                          key={key}
+                          className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={Boolean(urology[key as keyof UrologyAssessment])}
+                            onChange={(event) =>
+                              setUrology((current) => ({
+                                ...current,
+                                [key]: event.target.checked,
+                              }))
+                            }
+                          />
+                          {label}
+                        </label>
+                      ))}
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                      <Field label="Prior urology workup">
+                        <Input
+                          value={urology.prior_urology_workup}
+                          onChange={(event) =>
+                            setUrology((current) => ({
+                              ...current,
+                              prior_urology_workup: event.target.value,
+                            }))
+                          }
+                          className="h-10 rounded-xl bg-slate-50"
+                        />
+                      </Field>
+                      <Field label="Catheter / instrumentation history">
+                        <Input
+                          value={urology.catheter_history}
+                          onChange={(event) =>
+                            setUrology((current) => ({
+                              ...current,
+                              catheter_history: event.target.value,
+                            }))
+                          }
+                          className="h-10 rounded-xl bg-slate-50"
+                        />
+                      </Field>
+                      <Field label="Stone / renal colic history">
+                        <Input
+                          value={urology.stone_history}
+                          onChange={(event) =>
+                            setUrology((current) => ({
+                              ...current,
+                              stone_history: event.target.value,
+                            }))
+                          }
+                          className="h-10 rounded-xl bg-slate-50"
+                        />
+                      </Field>
+                      <Field label="Red flags">
+                        <Input
+                          value={urology.red_flags}
+                          onChange={(event) =>
+                            setUrology((current) => ({
+                              ...current,
+                              red_flags: event.target.value,
+                            }))
+                          }
+                          className="h-10 rounded-xl bg-slate-50"
+                        />
+                      </Field>
+                    </div>
+                    <Field label="Urology notes">
+                      <textarea
+                        value={urology.notes}
+                        onChange={(event) =>
+                          setUrology((current) => ({
+                            ...current,
+                            notes: event.target.value,
+                          }))
+                        }
+                        className={textareaClassName}
+                        rows={4}
+                      />
+                    </Field>
+                    <div className="flex justify-end border-t border-border/70 pt-4">
+                      <Button
+                        type="submit"
+                        className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+                        disabled={sectionBusy === "urology" || !permissions.canEdit}
+                      >
+                        {sectionBusy === "urology" ? (
+                          <LoaderCircle className="size-4 animate-spin" />
+                        ) : null}
+                        Save urology
                       </Button>
                     </div>
                   </form>

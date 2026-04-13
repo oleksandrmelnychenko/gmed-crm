@@ -140,6 +140,14 @@ fn optional_decimal_to_f64(value: Option<Decimal>) -> Option<f64> {
     value.and_then(|current| current.round_dp(2).to_f64())
 }
 
+fn percentage(value: i64, total: i64) -> Option<f64> {
+    if total <= 0 {
+        None
+    } else {
+        Some(((value as f64 / total as f64) * 100.0 * 10.0).round() / 10.0)
+    }
+}
+
 async fn overview(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -315,6 +323,10 @@ async fn reports_workspace(
         role,
         Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing
     );
+    let include_non_medical_providers = matches!(
+        role,
+        Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing | Role::Sales
+    );
     let can_see_financial = role.can_see_financial_data();
 
     let summary = match load_reports_summary(&state, can_see_financial).await {
@@ -384,6 +396,20 @@ async fn reports_workspace(
     } else {
         Vec::new()
     };
+    let non_medical_providers = if include_non_medical_providers {
+        match load_report_non_medical_providers(&state, can_see_financial).await {
+            Ok(value) => value,
+            Err(e) => {
+                tracing::error!(error = %e, "load report non medical providers");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to load reports workspace",
+                );
+            }
+        }
+    } else {
+        Vec::new()
+    };
 
     let mut allowed_sections = Vec::new();
     if include_clinics {
@@ -398,6 +424,9 @@ async fn reports_workspace(
     if include_doctors {
         allowed_sections.push("doctors");
     }
+    if include_non_medical_providers {
+        allowed_sections.push("non_medical_providers");
+    }
 
     Json(json!({
         "summary": summary,
@@ -406,6 +435,7 @@ async fn reports_workspace(
         "countries": countries,
         "service_types": service_types,
         "doctors": doctors,
+        "non_medical_providers": non_medical_providers,
         "financial_metrics_visible": can_see_financial,
     }))
     .into_response()
@@ -488,7 +518,20 @@ async fn reports_export(
                     .map(export_doctors_csv),
             )
         }
-        "clinics" | "countries" | "service_types" | "doctors" => {
+        "non_medical_providers"
+            if matches!(
+                role,
+                Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing | Role::Sales
+            ) =>
+        {
+            (
+                "non-medical-provider-report.csv",
+                load_report_non_medical_providers(&state, can_see_financial)
+                    .await
+                    .map(export_non_medical_providers_csv),
+            )
+        }
+        "clinics" | "countries" | "service_types" | "doctors" | "non_medical_providers" => {
             return err(StatusCode::FORBIDDEN, "Insufficient permissions");
         }
         _ => {
@@ -654,9 +697,12 @@ async fn risk_analysis(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
-    if let Err(resp) =
-        auth.require_any_role(&[Role::CeoAssistant, Role::PatientManager, Role::Billing])
-    {
+    if let Err(resp) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::CeoAssistant,
+        Role::PatientManager,
+        Role::Billing,
+    ]) {
         return resp;
     }
 
@@ -1422,13 +1468,54 @@ async fn load_provider_kpis(state: &AppState) -> Result<Vec<Value>, sqlx::Error>
                       AND ol.status IN ('delivered', 'approved', 'invoiced')
                 ) AS gross_service_volume,
                 (
+                    SELECT COUNT(*)::bigint
+                    FROM patient_feedback_forms f
+                    WHERE f.provider_id = p.id
+                ) AS feedback_count,
+                (
                     SELECT ROUND(
                         AVG(COALESCE(f.treatment_score, f.overall_score))::numeric,
                         2
                     )
                     FROM patient_feedback_forms f
                     WHERE f.provider_id = p.id
-                ) AS avg_feedback_score
+                ) AS avg_feedback_score,
+                (
+                    SELECT ROUND(
+                        AVG(COALESCE(f.treatment_score, f.overall_score))::numeric,
+                        2
+                    )
+                    FROM patient_feedback_forms f
+                    WHERE f.provider_id = p.id
+                ) AS avg_treatment_score,
+                (
+                    SELECT ROUND(
+                        AVG(COALESCE(f.doctor_score, f.treatment_score, f.overall_score))::numeric,
+                        2
+                    )
+                    FROM patient_feedback_forms f
+                    WHERE f.provider_id = p.id
+                ) AS avg_doctor_score,
+                (
+                    SELECT COUNT(DISTINCT ol.order_id)::bigint
+                    FROM order_leistungen ol
+                    JOIN order_followup_flows off ON off.order_id = ol.order_id
+                    WHERE ol.provider_id = p.id
+                      AND ol.status IN ('delivered', 'approved', 'invoiced')
+                ) AS followup_orders_total,
+                (
+                    SELECT COUNT(DISTINCT ol.order_id)::bigint
+                    FROM order_leistungen ol
+                    JOIN order_followup_flows off ON off.order_id = ol.order_id
+                    WHERE ol.provider_id = p.id
+                      AND ol.status IN ('delivered', 'approved', 'invoiced')
+                      AND off.doctor_followup_status IN ('completed', 'not_required')
+                      AND off.followup_1w_status IN ('completed', 'not_required')
+                      AND off.followup_1m_status IN ('completed', 'not_required')
+                      AND off.followup_6m_status IN ('completed', 'not_required')
+                      AND off.package_end_status IN ('completed', 'not_required')
+                      AND off.results_handoff_status = 'completed'
+                ) AS followup_completed_orders
            FROM providers p
            WHERE p.is_active = true
              AND p.provider_type = 'medical'
@@ -1561,13 +1648,182 @@ async fn load_report_clinics(
                       AND ol.status IN ('delivered', 'approved', 'invoiced')
                 ) AS gross_service_volume,
                 (
+                    SELECT COUNT(*)::bigint
+                    FROM patient_feedback_forms f
+                    WHERE f.provider_id = p.id
+                ) AS feedback_count,
+                (
                     SELECT ROUND(
                         AVG(COALESCE(f.treatment_score, f.overall_score))::numeric,
                         2
                     )
                     FROM patient_feedback_forms f
                     WHERE f.provider_id = p.id
-                ) AS avg_feedback_score
+                ) AS avg_feedback_score,
+                (
+                    SELECT ROUND(
+                        AVG(COALESCE(f.treatment_score, f.overall_score))::numeric,
+                        2
+                    )
+                    FROM patient_feedback_forms f
+                    WHERE f.provider_id = p.id
+                ) AS avg_treatment_score,
+                (
+                    SELECT ROUND(
+                        AVG(COALESCE(f.doctor_score, f.treatment_score, f.overall_score))::numeric,
+                        2
+                    )
+                    FROM patient_feedback_forms f
+                    WHERE f.provider_id = p.id
+                ) AS avg_doctor_score,
+                (
+                    SELECT COUNT(DISTINCT ol.order_id)::bigint
+                    FROM order_leistungen ol
+                    JOIN order_followup_flows off ON off.order_id = ol.order_id
+                    WHERE ol.provider_id = p.id
+                      AND ol.status IN ('delivered', 'approved', 'invoiced')
+                ) AS followup_orders_total,
+                (
+                    SELECT COUNT(DISTINCT ol.order_id)::bigint
+                    FROM order_leistungen ol
+                    JOIN order_followup_flows off ON off.order_id = ol.order_id
+                    WHERE ol.provider_id = p.id
+                      AND ol.status IN ('delivered', 'approved', 'invoiced')
+                      AND off.doctor_followup_status IN ('completed', 'not_required')
+                      AND off.followup_1w_status IN ('completed', 'not_required')
+                      AND off.followup_1m_status IN ('completed', 'not_required')
+                      AND off.followup_6m_status IN ('completed', 'not_required')
+                      AND off.package_end_status IN ('completed', 'not_required')
+                      AND off.results_handoff_status = 'completed'
+                ) AS followup_completed_orders,
+                (
+                    SELECT ROUND(
+                        AVG(
+                            EXTRACT(
+                                EPOCH FROM (COALESCE(ac.responded_at, ac.closed_at) - ac.created_at)
+                            ) / 3600.0
+                        )::numeric,
+                        2
+                    )
+                    FROM appointment_communications ac
+                    WHERE ac.provider_id = p.id
+                      AND ac.target_type = 'clinic'
+                      AND ac.direction = 'outbound'
+                      AND ac.status IN ('answered', 'closed')
+                      AND COALESCE(ac.responded_at, ac.closed_at) IS NOT NULL
+                ) AS avg_response_hours,
+                (
+                    SELECT COUNT(*)::bigint
+                    FROM appointment_communications ac
+                    WHERE ac.provider_id = p.id
+                      AND ac.target_type = 'clinic'
+                      AND ac.direction = 'outbound'
+                      AND ac.status IN ('answered', 'closed')
+                      AND COALESCE(ac.responded_at, ac.closed_at) IS NOT NULL
+                ) AS response_sample_count,
+                (
+                    SELECT COUNT(*)::bigint
+                    FROM appointment_communications ac
+                    WHERE ac.provider_id = p.id
+                      AND ac.target_type = 'clinic'
+                      AND ac.direction = 'outbound'
+                      AND ac.status IN ('planned', 'sent')
+                ) AS open_communication_count,
+                (
+                    SELECT ROUND(
+                        AVG(COALESCE(f.organization_score, f.overall_score))::numeric,
+                        2
+                    )
+                    FROM patient_feedback_forms f
+                    WHERE f.provider_id = p.id
+                ) AS avg_organization_score,
+                (
+                    SELECT ROUND(
+                        AVG(COALESCE(f.service_score, f.overall_score))::numeric,
+                        2
+                    )
+                    FROM patient_feedback_forms f
+                    WHERE f.provider_id = p.id
+                ) AS avg_service_score,
+                (
+                    SELECT ROUND(
+                        AVG(COALESCE(f.infrastructure_score, f.overall_score))::numeric,
+                        2
+                    )
+                    FROM patient_feedback_forms f
+                    WHERE f.provider_id = p.id
+                ) AS avg_infrastructure_score,
+                (
+                    SELECT ROUND(
+                        AVG(COALESCE(f.price_value_score, f.overall_score))::numeric,
+                        2
+                    )
+                    FROM patient_feedback_forms f
+                    WHERE f.provider_id = p.id
+                ) AS avg_price_value_score,
+                (
+                    SELECT COUNT(*)::bigint
+                    FROM patient_feedback_forms f
+                    WHERE f.provider_id = p.id
+                      AND f.treatment_success = 'yes'
+                ) AS treatment_success_yes_count,
+                (
+                    SELECT COUNT(*)::bigint
+                    FROM patient_feedback_forms f
+                    WHERE f.provider_id = p.id
+                      AND f.treatment_success = 'partial'
+                ) AS treatment_success_partial_count,
+                (
+                    SELECT COUNT(*)::bigint
+                    FROM patient_feedback_forms f
+                    WHERE f.provider_id = p.id
+                      AND f.treatment_success IS NOT NULL
+                ) AS treatment_success_sample_count,
+                (
+                    SELECT COUNT(*)::bigint
+                    FROM patient_feedback_forms f
+                    WHERE f.provider_id = p.id
+                      AND f.complication_reported = true
+                ) AS complication_count,
+                (
+                    SELECT ROUND(AVG(item.turnaround_hours)::numeric, 2)
+                    FROM (
+                        SELECT EXTRACT(
+                                   EPOCH FROM (
+                                       MIN(d.created_at) - (
+                                           (a.date::timestamp + COALESCE(a.time_end, a.time_start, TIME '00:00'))
+                                           AT TIME ZONE 'UTC'
+                                       )
+                                   )
+                               ) / 3600.0 AS turnaround_hours
+                        FROM documents d
+                        JOIN appointments a ON a.id = d.appointment_id
+                        WHERE a.provider_id = p.id
+                          AND d.art = 'arztbrief'
+                          AND d.status IN ('active', 'archived')
+                          AND d.created_at >= (
+                                (a.date::timestamp + COALESCE(a.time_end, a.time_start, TIME '00:00'))
+                                AT TIME ZONE 'UTC'
+                          )
+                        GROUP BY a.id, a.date, a.time_start, a.time_end
+                    ) item
+                ) AS avg_findings_turnaround_hours,
+                (
+                    SELECT COUNT(*)::bigint
+                    FROM (
+                        SELECT a.id
+                        FROM documents d
+                        JOIN appointments a ON a.id = d.appointment_id
+                        WHERE a.provider_id = p.id
+                          AND d.art = 'arztbrief'
+                          AND d.status IN ('active', 'archived')
+                          AND d.created_at >= (
+                                (a.date::timestamp + COALESCE(a.time_end, a.time_start, TIME '00:00'))
+                                AT TIME ZONE 'UTC'
+                          )
+                        GROUP BY a.id
+                    ) item
+                ) AS findings_sample_count
            FROM providers p
            WHERE p.is_active = true
              AND p.provider_type = 'medical'
@@ -1588,6 +1844,25 @@ async fn load_report_clinics(
             } else {
                 None
             };
+            let followup_orders_total = row
+                .try_get::<i64, _>("followup_orders_total")
+                .unwrap_or_default();
+            let followup_completed_orders = row
+                .try_get::<i64, _>("followup_completed_orders")
+                .unwrap_or_default();
+            let treatment_success_yes_count = row
+                .try_get::<i64, _>("treatment_success_yes_count")
+                .unwrap_or_default();
+            let treatment_success_partial_count = row
+                .try_get::<i64, _>("treatment_success_partial_count")
+                .unwrap_or_default();
+            let treatment_success_sample_count = row
+                .try_get::<i64, _>("treatment_success_sample_count")
+                .unwrap_or_default();
+            let complication_count = row
+                .try_get::<i64, _>("complication_count")
+                .unwrap_or_default();
+            let feedback_count = row.try_get::<i64, _>("feedback_count").unwrap_or(0);
 
             json!({
                 "provider_id": row.try_get::<uuid::Uuid, _>("id").unwrap_or_else(|_| uuid::Uuid::nil()),
@@ -1599,9 +1874,52 @@ async fn load_report_clinics(
                 "appointments_90d": row.try_get::<i64, _>("appointments_90d").unwrap_or(0),
                 "delivered_items": row.try_get::<i64, _>("delivered_items").unwrap_or(0),
                 "doctor_count": row.try_get::<i64, _>("doctor_count").unwrap_or(0),
+                "feedback_count": feedback_count,
                 "gross_service_volume": gross_service_volume,
                 "avg_feedback_score": optional_decimal_to_f64(
                     row.try_get::<Option<Decimal>, _>("avg_feedback_score").unwrap_or_default()
+                ),
+                "avg_treatment_score": optional_decimal_to_f64(
+                    row.try_get::<Option<Decimal>, _>("avg_treatment_score").unwrap_or_default()
+                ),
+                "avg_doctor_score": optional_decimal_to_f64(
+                    row.try_get::<Option<Decimal>, _>("avg_doctor_score").unwrap_or_default()
+                ),
+                "avg_organization_score": optional_decimal_to_f64(
+                    row.try_get::<Option<Decimal>, _>("avg_organization_score").unwrap_or_default()
+                ),
+                "avg_service_score": optional_decimal_to_f64(
+                    row.try_get::<Option<Decimal>, _>("avg_service_score").unwrap_or_default()
+                ),
+                "avg_infrastructure_score": optional_decimal_to_f64(
+                    row.try_get::<Option<Decimal>, _>("avg_infrastructure_score").unwrap_or_default()
+                ),
+                "avg_price_value_score": optional_decimal_to_f64(
+                    row.try_get::<Option<Decimal>, _>("avg_price_value_score").unwrap_or_default()
+                ),
+                "avg_response_hours": optional_decimal_to_f64(
+                    row.try_get::<Option<Decimal>, _>("avg_response_hours").unwrap_or_default()
+                ),
+                "avg_findings_turnaround_hours": optional_decimal_to_f64(
+                    row.try_get::<Option<Decimal>, _>("avg_findings_turnaround_hours").unwrap_or_default()
+                ),
+                "response_sample_count": row.try_get::<i64, _>("response_sample_count").unwrap_or(0),
+                "open_communication_count": row.try_get::<i64, _>("open_communication_count").unwrap_or(0),
+                "findings_sample_count": row.try_get::<i64, _>("findings_sample_count").unwrap_or(0),
+                "treatment_success_yes_rate": percentage(
+                    treatment_success_yes_count,
+                    treatment_success_sample_count,
+                ),
+                "treatment_success_partial_rate": percentage(
+                    treatment_success_partial_count,
+                    treatment_success_sample_count,
+                ),
+                "complication_rate": percentage(complication_count, feedback_count),
+                "followup_orders_total": followup_orders_total,
+                "followup_completed_orders": followup_completed_orders,
+                "followup_completion_rate": percentage(
+                    followup_completed_orders,
+                    followup_orders_total,
                 ),
             })
         })
@@ -1765,6 +2083,175 @@ async fn load_report_doctors(
                       AND ol.status IN ('delivered', 'approved', 'invoiced')
                 ) AS active_orders,
                 (
+                    SELECT COUNT(*)::bigint
+                    FROM patient_feedback_forms f
+                    WHERE f.doctor_id = pd.id
+                ) AS feedback_count,
+                (
+                    SELECT ROUND(
+                        AVG(COALESCE(f.treatment_score, f.overall_score))::numeric,
+                        2
+                    )
+                    FROM patient_feedback_forms f
+                    WHERE f.doctor_id = pd.id
+                ) AS avg_treatment_score,
+                (
+                    SELECT ROUND(
+                        AVG(COALESCE(f.doctor_score, f.treatment_score, f.overall_score))::numeric,
+                        2
+                    )
+                    FROM patient_feedback_forms f
+                    WHERE f.doctor_id = pd.id
+                ) AS avg_doctor_score,
+                (
+                    SELECT COUNT(DISTINCT ol.order_id)::bigint
+                    FROM order_leistungen ol
+                    JOIN order_followup_flows off ON off.order_id = ol.order_id
+                    WHERE ol.doctor_id = pd.id
+                      AND ol.status IN ('delivered', 'approved', 'invoiced')
+                ) AS followup_orders_total,
+                (
+                    SELECT COUNT(DISTINCT ol.order_id)::bigint
+                    FROM order_leistungen ol
+                    JOIN order_followup_flows off ON off.order_id = ol.order_id
+                    WHERE ol.doctor_id = pd.id
+                      AND ol.status IN ('delivered', 'approved', 'invoiced')
+                      AND off.doctor_followup_status IN ('completed', 'not_required')
+                      AND off.followup_1w_status IN ('completed', 'not_required')
+                      AND off.followup_1m_status IN ('completed', 'not_required')
+                      AND off.followup_6m_status IN ('completed', 'not_required')
+                      AND off.package_end_status IN ('completed', 'not_required')
+                      AND off.results_handoff_status = 'completed'
+                ) AS followup_completed_orders,
+                (
+                    SELECT ROUND(
+                        AVG(
+                            EXTRACT(
+                                EPOCH FROM (COALESCE(ac.responded_at, ac.closed_at) - ac.created_at)
+                            ) / 3600.0
+                        )::numeric,
+                        2
+                    )
+                    FROM appointment_communications ac
+                    WHERE ac.doctor_id = pd.id
+                      AND ac.target_type = 'doctor'
+                      AND ac.direction = 'outbound'
+                      AND ac.status IN ('answered', 'closed')
+                      AND COALESCE(ac.responded_at, ac.closed_at) IS NOT NULL
+                ) AS avg_response_hours,
+                (
+                    SELECT COUNT(*)::bigint
+                    FROM appointment_communications ac
+                    WHERE ac.doctor_id = pd.id
+                      AND ac.target_type = 'doctor'
+                      AND ac.direction = 'outbound'
+                      AND ac.status IN ('answered', 'closed')
+                      AND COALESCE(ac.responded_at, ac.closed_at) IS NOT NULL
+                ) AS response_sample_count,
+                (
+                    SELECT COUNT(*)::bigint
+                    FROM appointment_communications ac
+                    WHERE ac.doctor_id = pd.id
+                      AND ac.target_type = 'doctor'
+                      AND ac.direction = 'outbound'
+                      AND ac.status IN ('planned', 'sent')
+                ) AS open_communication_count,
+                (
+                    SELECT ROUND(
+                        AVG(COALESCE(f.organization_score, f.overall_score))::numeric,
+                        2
+                    )
+                    FROM patient_feedback_forms f
+                    WHERE f.doctor_id = pd.id
+                ) AS avg_organization_score,
+                (
+                    SELECT ROUND(
+                        AVG(COALESCE(f.service_score, f.overall_score))::numeric,
+                        2
+                    )
+                    FROM patient_feedback_forms f
+                    WHERE f.doctor_id = pd.id
+                ) AS avg_service_score,
+                (
+                    SELECT ROUND(
+                        AVG(COALESCE(f.infrastructure_score, f.overall_score))::numeric,
+                        2
+                    )
+                    FROM patient_feedback_forms f
+                    WHERE f.doctor_id = pd.id
+                ) AS avg_infrastructure_score,
+                (
+                    SELECT ROUND(
+                        AVG(COALESCE(f.price_value_score, f.overall_score))::numeric,
+                        2
+                    )
+                    FROM patient_feedback_forms f
+                    WHERE f.doctor_id = pd.id
+                ) AS avg_price_value_score,
+                (
+                    SELECT COUNT(*)::bigint
+                    FROM patient_feedback_forms f
+                    WHERE f.doctor_id = pd.id
+                      AND f.treatment_success = 'yes'
+                ) AS treatment_success_yes_count,
+                (
+                    SELECT COUNT(*)::bigint
+                    FROM patient_feedback_forms f
+                    WHERE f.doctor_id = pd.id
+                      AND f.treatment_success = 'partial'
+                ) AS treatment_success_partial_count,
+                (
+                    SELECT COUNT(*)::bigint
+                    FROM patient_feedback_forms f
+                    WHERE f.doctor_id = pd.id
+                      AND f.treatment_success IS NOT NULL
+                ) AS treatment_success_sample_count,
+                (
+                    SELECT COUNT(*)::bigint
+                    FROM patient_feedback_forms f
+                    WHERE f.doctor_id = pd.id
+                      AND f.complication_reported = true
+                ) AS complication_count,
+                (
+                    SELECT ROUND(AVG(item.turnaround_hours)::numeric, 2)
+                    FROM (
+                        SELECT EXTRACT(
+                                   EPOCH FROM (
+                                       MIN(d.created_at) - (
+                                           (a.date::timestamp + COALESCE(a.time_end, a.time_start, TIME '00:00'))
+                                           AT TIME ZONE 'UTC'
+                                       )
+                                   )
+                               ) / 3600.0 AS turnaround_hours
+                        FROM documents d
+                        JOIN appointments a ON a.id = d.appointment_id
+                        WHERE a.doctor_id = pd.id
+                          AND d.art = 'arztbrief'
+                          AND d.status IN ('active', 'archived')
+                          AND d.created_at >= (
+                                (a.date::timestamp + COALESCE(a.time_end, a.time_start, TIME '00:00'))
+                                AT TIME ZONE 'UTC'
+                          )
+                        GROUP BY a.id, a.date, a.time_start, a.time_end
+                    ) item
+                ) AS avg_findings_turnaround_hours,
+                (
+                    SELECT COUNT(*)::bigint
+                    FROM (
+                        SELECT a.id
+                        FROM documents d
+                        JOIN appointments a ON a.id = d.appointment_id
+                        WHERE a.doctor_id = pd.id
+                          AND d.art = 'arztbrief'
+                          AND d.status IN ('active', 'archived')
+                          AND d.created_at >= (
+                                (a.date::timestamp + COALESCE(a.time_end, a.time_start, TIME '00:00'))
+                                AT TIME ZONE 'UTC'
+                          )
+                        GROUP BY a.id
+                    ) item
+                ) AS findings_sample_count,
+                (
                     SELECT COALESCE(
                         SUM(ol.quantity * ol.unit_price * (1 + (ol.vat_rate / 100))),
                         0
@@ -1796,6 +2283,25 @@ async fn load_report_doctors(
             } else {
                 None
             };
+            let followup_orders_total = row
+                .try_get::<i64, _>("followup_orders_total")
+                .unwrap_or_default();
+            let followup_completed_orders = row
+                .try_get::<i64, _>("followup_completed_orders")
+                .unwrap_or_default();
+            let treatment_success_yes_count = row
+                .try_get::<i64, _>("treatment_success_yes_count")
+                .unwrap_or_default();
+            let treatment_success_partial_count = row
+                .try_get::<i64, _>("treatment_success_partial_count")
+                .unwrap_or_default();
+            let treatment_success_sample_count = row
+                .try_get::<i64, _>("treatment_success_sample_count")
+                .unwrap_or_default();
+            let complication_count = row
+                .try_get::<i64, _>("complication_count")
+                .unwrap_or_default();
+            let feedback_count = row.try_get::<i64, _>("feedback_count").unwrap_or(0);
 
             json!({
                 "doctor_id": row.try_get::<uuid::Uuid, _>("id").unwrap_or_else(|_| uuid::Uuid::nil()),
@@ -1810,6 +2316,209 @@ async fn load_report_doctors(
                 "appointments_90d": row.try_get::<i64, _>("appointments_90d").unwrap_or(0),
                 "delivered_items": row.try_get::<i64, _>("delivered_items").unwrap_or(0),
                 "active_orders": row.try_get::<i64, _>("active_orders").unwrap_or(0),
+                "feedback_count": feedback_count,
+                "avg_treatment_score": optional_decimal_to_f64(
+                    row.try_get::<Option<Decimal>, _>("avg_treatment_score").unwrap_or_default()
+                ),
+                "avg_doctor_score": optional_decimal_to_f64(
+                    row.try_get::<Option<Decimal>, _>("avg_doctor_score").unwrap_or_default()
+                ),
+                "avg_organization_score": optional_decimal_to_f64(
+                    row.try_get::<Option<Decimal>, _>("avg_organization_score").unwrap_or_default()
+                ),
+                "avg_service_score": optional_decimal_to_f64(
+                    row.try_get::<Option<Decimal>, _>("avg_service_score").unwrap_or_default()
+                ),
+                "avg_infrastructure_score": optional_decimal_to_f64(
+                    row.try_get::<Option<Decimal>, _>("avg_infrastructure_score").unwrap_or_default()
+                ),
+                "avg_price_value_score": optional_decimal_to_f64(
+                    row.try_get::<Option<Decimal>, _>("avg_price_value_score").unwrap_or_default()
+                ),
+                "avg_response_hours": optional_decimal_to_f64(
+                    row.try_get::<Option<Decimal>, _>("avg_response_hours").unwrap_or_default()
+                ),
+                "avg_findings_turnaround_hours": optional_decimal_to_f64(
+                    row.try_get::<Option<Decimal>, _>("avg_findings_turnaround_hours").unwrap_or_default()
+                ),
+                "response_sample_count": row.try_get::<i64, _>("response_sample_count").unwrap_or(0),
+                "open_communication_count": row.try_get::<i64, _>("open_communication_count").unwrap_or(0),
+                "findings_sample_count": row.try_get::<i64, _>("findings_sample_count").unwrap_or(0),
+                "treatment_success_yes_rate": percentage(
+                    treatment_success_yes_count,
+                    treatment_success_sample_count,
+                ),
+                "treatment_success_partial_rate": percentage(
+                    treatment_success_partial_count,
+                    treatment_success_sample_count,
+                ),
+                "complication_rate": percentage(complication_count, feedback_count),
+                "followup_orders_total": followup_orders_total,
+                "followup_completed_orders": followup_completed_orders,
+                "followup_completion_rate": percentage(
+                    followup_completed_orders,
+                    followup_orders_total,
+                ),
+                "gross_service_volume": gross_service_volume,
+            })
+        })
+        .collect())
+}
+
+async fn load_report_non_medical_providers(
+    state: &AppState,
+    can_see_financial: bool,
+) -> Result<Vec<Value>, sqlx::Error> {
+    let rows = sqlx::query(
+        r#"SELECT
+                p.id,
+                p.name,
+                p.address_city,
+                p.address_country,
+                (
+                    SELECT COUNT(*)::bigint
+                    FROM service_catalog s
+                    WHERE s.provider_id = p.id
+                ) AS service_count,
+                (
+                    SELECT COUNT(DISTINCT patient_id)::bigint
+                    FROM (
+                        SELECT a.patient_id
+                        FROM appointments a
+                        WHERE a.provider_id = p.id
+                          AND a.status <> 'cancelled'
+                          AND a.date >= CURRENT_DATE - 90
+                        UNION
+                        SELECT cs.patient_id
+                        FROM concierge_services cs
+                        WHERE cs.provider_id = p.id
+                          AND cs.created_at >= now() - INTERVAL '90 days'
+                        UNION
+                        SELECT o.patient_id
+                        FROM order_leistungen ol
+                        JOIN orders o ON o.id = ol.order_id
+                        WHERE ol.provider_id = p.id
+                          AND ol.status IN ('delivered', 'approved', 'invoiced')
+                          AND ol.created_at >= now() - INTERVAL '90 days'
+                    ) linked_patients
+                ) AS active_patients_90d,
+                (
+                    SELECT COUNT(*)::bigint
+                    FROM appointments a
+                    WHERE a.provider_id = p.id
+                      AND a.appointment_type = 'non_medical'
+                      AND a.status <> 'cancelled'
+                      AND a.date >= CURRENT_DATE - 90
+                ) AS appointments_90d,
+                (
+                    SELECT COUNT(*)::bigint
+                    FROM concierge_services cs
+                    WHERE cs.provider_id = p.id
+                      AND cs.created_at >= now() - INTERVAL '90 days'
+                ) AS concierge_requests_90d,
+                (
+                    SELECT COUNT(*)::bigint
+                    FROM concierge_services cs
+                    WHERE cs.provider_id = p.id
+                      AND cs.status IN ('planned', 'booked', 'confirmed', 'in_service')
+                ) AS open_concierge_requests,
+                (
+                    SELECT COUNT(*)::bigint
+                    FROM concierge_services cs
+                    WHERE cs.provider_id = p.id
+                      AND cs.status = 'completed'
+                      AND COALESCE(cs.completed_at, cs.updated_at, cs.created_at) >= now() - INTERVAL '90 days'
+                ) AS completed_concierge_requests_90d,
+                (
+                    SELECT COUNT(*)::bigint
+                    FROM order_leistungen ol
+                    WHERE ol.provider_id = p.id
+                      AND ol.status IN ('delivered', 'approved', 'invoiced')
+                ) AS delivered_items,
+                (
+                    SELECT COUNT(DISTINCT COALESCE(NULLIF(TRIM(cs.vendor_name), ''), cs.title))::bigint
+                    FROM concierge_services cs
+                    WHERE cs.provider_id = p.id
+                ) AS vendor_count,
+                (
+                    SELECT COALESCE(json_agg(item.label ORDER BY item.label), '[]'::json)
+                    FROM (
+                        SELECT DISTINCT label
+                        FROM (
+                            SELECT s.service_name AS label
+                            FROM service_catalog s
+                            WHERE s.provider_id = p.id
+                            UNION
+                            SELECT INITCAP(REPLACE(cs.service_kind, '_', ' ')) AS label
+                            FROM concierge_services cs
+                            WHERE cs.provider_id = p.id
+                        ) labels
+                        WHERE label IS NOT NULL AND TRIM(label) <> ''
+                        ORDER BY label
+                        LIMIT 5
+                    ) item
+                ) AS service_focus,
+                (
+                    SELECT ROUND(
+                        AVG(COALESCE(f.concierge_score, f.overall_score))::numeric,
+                        2
+                    )
+                    FROM patient_feedback_forms f
+                    WHERE f.provider_id = p.id
+                ) AS avg_concierge_score,
+                (
+                    SELECT COUNT(*)::bigint
+                    FROM patient_feedback_forms f
+                    WHERE f.provider_id = p.id
+                ) AS feedback_count,
+                (
+                    SELECT COALESCE(
+                        SUM(ol.quantity * ol.unit_price * (1 + (ol.vat_rate / 100))),
+                        0
+                    )
+                    FROM order_leistungen ol
+                    WHERE ol.provider_id = p.id
+                      AND ol.status IN ('delivered', 'approved', 'invoiced')
+                ) AS gross_service_volume
+           FROM providers p
+           WHERE p.is_active = true
+             AND p.provider_type = 'non_medical'
+           ORDER BY concierge_requests_90d DESC, appointments_90d DESC, p.name
+           LIMIT 25"#,
+    )
+    .fetch_all(&state.db)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            let gross_service_volume = if can_see_financial {
+                Some(decimal_to_string(
+                    row.try_get::<Decimal, _>("gross_service_volume")
+                        .unwrap_or(Decimal::ZERO),
+                ))
+            } else {
+                None
+            };
+
+            json!({
+                "provider_id": row.try_get::<uuid::Uuid, _>("id").unwrap_or_else(|_| uuid::Uuid::nil()),
+                "name": row.try_get::<String, _>("name").unwrap_or_default(),
+                "address_city": row.try_get::<Option<String>, _>("address_city").unwrap_or_default(),
+                "address_country": row.try_get::<Option<String>, _>("address_country").unwrap_or_default(),
+                "service_count": row.try_get::<i64, _>("service_count").unwrap_or(0),
+                "active_patients_90d": row.try_get::<i64, _>("active_patients_90d").unwrap_or(0),
+                "appointments_90d": row.try_get::<i64, _>("appointments_90d").unwrap_or(0),
+                "concierge_requests_90d": row.try_get::<i64, _>("concierge_requests_90d").unwrap_or(0),
+                "open_concierge_requests": row.try_get::<i64, _>("open_concierge_requests").unwrap_or(0),
+                "completed_concierge_requests_90d": row.try_get::<i64, _>("completed_concierge_requests_90d").unwrap_or(0),
+                "delivered_items": row.try_get::<i64, _>("delivered_items").unwrap_or(0),
+                "vendor_count": row.try_get::<i64, _>("vendor_count").unwrap_or(0),
+                "service_focus": row.try_get::<Value, _>("service_focus").unwrap_or_else(|_| json!([])),
+                "avg_concierge_score": optional_decimal_to_f64(
+                    row.try_get::<Option<Decimal>, _>("avg_concierge_score").unwrap_or_default()
+                ),
+                "feedback_count": row.try_get::<i64, _>("feedback_count").unwrap_or(0),
                 "gross_service_volume": gross_service_volume,
             })
         })
@@ -2176,6 +2885,23 @@ fn export_clinics_csv(rows: Vec<Value>) -> String {
         "appointments_90d".to_string(),
         "delivered_items".to_string(),
         "feedback".to_string(),
+        "treatment_score".to_string(),
+        "doctor_score".to_string(),
+        "organization_score".to_string(),
+        "service_score".to_string(),
+        "infrastructure_score".to_string(),
+        "price_value_score".to_string(),
+        "treatment_success_yes_rate".to_string(),
+        "treatment_success_partial_rate".to_string(),
+        "complication_rate".to_string(),
+        "avg_response_hours".to_string(),
+        "avg_findings_turnaround_hours".to_string(),
+        "findings_sample_count".to_string(),
+        "response_sample_count".to_string(),
+        "open_communication_count".to_string(),
+        "followup_completed_orders".to_string(),
+        "followup_orders_total".to_string(),
+        "followup_completion_rate".to_string(),
         "gross_service_volume".to_string(),
     ])];
 
@@ -2201,6 +2927,74 @@ fn export_clinics_csv(rows: Vec<Value>) -> String {
                 .unwrap_or_default()
                 .to_string(),
             row["avg_feedback_score"]
+                .as_f64()
+                .map(|value| format!("{value:.1}"))
+                .unwrap_or_default(),
+            row["avg_treatment_score"]
+                .as_f64()
+                .map(|value| format!("{value:.1}"))
+                .unwrap_or_default(),
+            row["avg_doctor_score"]
+                .as_f64()
+                .map(|value| format!("{value:.1}"))
+                .unwrap_or_default(),
+            row["avg_organization_score"]
+                .as_f64()
+                .map(|value| format!("{value:.1}"))
+                .unwrap_or_default(),
+            row["avg_service_score"]
+                .as_f64()
+                .map(|value| format!("{value:.1}"))
+                .unwrap_or_default(),
+            row["avg_infrastructure_score"]
+                .as_f64()
+                .map(|value| format!("{value:.1}"))
+                .unwrap_or_default(),
+            row["avg_price_value_score"]
+                .as_f64()
+                .map(|value| format!("{value:.1}"))
+                .unwrap_or_default(),
+            row["treatment_success_yes_rate"]
+                .as_f64()
+                .map(|value| format!("{value:.1}"))
+                .unwrap_or_default(),
+            row["treatment_success_partial_rate"]
+                .as_f64()
+                .map(|value| format!("{value:.1}"))
+                .unwrap_or_default(),
+            row["complication_rate"]
+                .as_f64()
+                .map(|value| format!("{value:.1}"))
+                .unwrap_or_default(),
+            row["avg_response_hours"]
+                .as_f64()
+                .map(|value| format!("{value:.1}"))
+                .unwrap_or_default(),
+            row["avg_findings_turnaround_hours"]
+                .as_f64()
+                .map(|value| format!("{value:.1}"))
+                .unwrap_or_default(),
+            row["findings_sample_count"]
+                .as_i64()
+                .unwrap_or_default()
+                .to_string(),
+            row["response_sample_count"]
+                .as_i64()
+                .unwrap_or_default()
+                .to_string(),
+            row["open_communication_count"]
+                .as_i64()
+                .unwrap_or_default()
+                .to_string(),
+            row["followup_completed_orders"]
+                .as_i64()
+                .unwrap_or_default()
+                .to_string(),
+            row["followup_orders_total"]
+                .as_i64()
+                .unwrap_or_default()
+                .to_string(),
+            row["followup_completion_rate"]
                 .as_f64()
                 .map(|value| format!("{value:.1}"))
                 .unwrap_or_default(),
@@ -2280,6 +3074,24 @@ fn export_doctors_csv(rows: Vec<Value>) -> String {
         "appointments_90d".to_string(),
         "active_orders".to_string(),
         "delivered_items".to_string(),
+        "feedback_count".to_string(),
+        "treatment_score".to_string(),
+        "doctor_score".to_string(),
+        "organization_score".to_string(),
+        "service_score".to_string(),
+        "infrastructure_score".to_string(),
+        "price_value_score".to_string(),
+        "treatment_success_yes_rate".to_string(),
+        "treatment_success_partial_rate".to_string(),
+        "complication_rate".to_string(),
+        "avg_response_hours".to_string(),
+        "avg_findings_turnaround_hours".to_string(),
+        "findings_sample_count".to_string(),
+        "response_sample_count".to_string(),
+        "open_communication_count".to_string(),
+        "followup_completed_orders".to_string(),
+        "followup_orders_total".to_string(),
+        "followup_completion_rate".to_string(),
         "gross_service_volume".to_string(),
     ])];
 
@@ -2313,6 +3125,164 @@ fn export_doctors_csv(rows: Vec<Value>) -> String {
                 .as_i64()
                 .unwrap_or_default()
                 .to_string(),
+            row["feedback_count"]
+                .as_i64()
+                .unwrap_or_default()
+                .to_string(),
+            row["avg_treatment_score"]
+                .as_f64()
+                .map(|value| format!("{value:.1}"))
+                .unwrap_or_default(),
+            row["avg_doctor_score"]
+                .as_f64()
+                .map(|value| format!("{value:.1}"))
+                .unwrap_or_default(),
+            row["avg_organization_score"]
+                .as_f64()
+                .map(|value| format!("{value:.1}"))
+                .unwrap_or_default(),
+            row["avg_service_score"]
+                .as_f64()
+                .map(|value| format!("{value:.1}"))
+                .unwrap_or_default(),
+            row["avg_infrastructure_score"]
+                .as_f64()
+                .map(|value| format!("{value:.1}"))
+                .unwrap_or_default(),
+            row["avg_price_value_score"]
+                .as_f64()
+                .map(|value| format!("{value:.1}"))
+                .unwrap_or_default(),
+            row["treatment_success_yes_rate"]
+                .as_f64()
+                .map(|value| format!("{value:.1}"))
+                .unwrap_or_default(),
+            row["treatment_success_partial_rate"]
+                .as_f64()
+                .map(|value| format!("{value:.1}"))
+                .unwrap_or_default(),
+            row["complication_rate"]
+                .as_f64()
+                .map(|value| format!("{value:.1}"))
+                .unwrap_or_default(),
+            row["avg_response_hours"]
+                .as_f64()
+                .map(|value| format!("{value:.1}"))
+                .unwrap_or_default(),
+            row["avg_findings_turnaround_hours"]
+                .as_f64()
+                .map(|value| format!("{value:.1}"))
+                .unwrap_or_default(),
+            row["findings_sample_count"]
+                .as_i64()
+                .unwrap_or_default()
+                .to_string(),
+            row["response_sample_count"]
+                .as_i64()
+                .unwrap_or_default()
+                .to_string(),
+            row["open_communication_count"]
+                .as_i64()
+                .unwrap_or_default()
+                .to_string(),
+            row["followup_completed_orders"]
+                .as_i64()
+                .unwrap_or_default()
+                .to_string(),
+            row["followup_orders_total"]
+                .as_i64()
+                .unwrap_or_default()
+                .to_string(),
+            row["followup_completion_rate"]
+                .as_f64()
+                .map(|value| format!("{value:.1}"))
+                .unwrap_or_default(),
+            row["gross_service_volume"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+        ]));
+    }
+
+    lines.join("\n")
+}
+
+fn export_non_medical_providers_csv(rows: Vec<Value>) -> String {
+    let mut lines = vec![csv_row(&[
+        "provider".to_string(),
+        "city".to_string(),
+        "country".to_string(),
+        "service_count".to_string(),
+        "service_focus".to_string(),
+        "patients_90d".to_string(),
+        "appointments_90d".to_string(),
+        "concierge_requests_90d".to_string(),
+        "open_concierge_requests".to_string(),
+        "completed_concierge_requests_90d".to_string(),
+        "delivered_items".to_string(),
+        "vendor_count".to_string(),
+        "feedback_count".to_string(),
+        "concierge_score".to_string(),
+        "gross_service_volume".to_string(),
+    ])];
+
+    for row in rows {
+        let service_focus = row["service_focus"]
+            .as_array()
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            })
+            .unwrap_or_default();
+
+        lines.push(csv_row(&[
+            row["name"].as_str().unwrap_or_default().to_string(),
+            row["address_city"].as_str().unwrap_or_default().to_string(),
+            row["address_country"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            row["service_count"]
+                .as_i64()
+                .unwrap_or_default()
+                .to_string(),
+            service_focus,
+            row["active_patients_90d"]
+                .as_i64()
+                .unwrap_or_default()
+                .to_string(),
+            row["appointments_90d"]
+                .as_i64()
+                .unwrap_or_default()
+                .to_string(),
+            row["concierge_requests_90d"]
+                .as_i64()
+                .unwrap_or_default()
+                .to_string(),
+            row["open_concierge_requests"]
+                .as_i64()
+                .unwrap_or_default()
+                .to_string(),
+            row["completed_concierge_requests_90d"]
+                .as_i64()
+                .unwrap_or_default()
+                .to_string(),
+            row["delivered_items"]
+                .as_i64()
+                .unwrap_or_default()
+                .to_string(),
+            row["vendor_count"].as_i64().unwrap_or_default().to_string(),
+            row["feedback_count"]
+                .as_i64()
+                .unwrap_or_default()
+                .to_string(),
+            row["avg_concierge_score"]
+                .as_f64()
+                .map(|value| format!("{value:.1}"))
+                .unwrap_or_default(),
             row["gross_service_volume"]
                 .as_str()
                 .unwrap_or_default()

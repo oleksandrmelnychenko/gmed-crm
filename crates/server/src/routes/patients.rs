@@ -444,6 +444,7 @@ async fn list_patients(
 ) -> impl IntoResponse {
     auth.require_any_role(&[
         Role::Ceo,
+        Role::CeoAssistant,
         Role::PatientManager,
         Role::Billing,
         Role::TeamleadInterpreter,
@@ -579,6 +580,7 @@ async fn get_patient(
 ) -> impl IntoResponse {
     auth.require_any_role(&[
         Role::Ceo,
+        Role::CeoAssistant,
         Role::PatientManager,
         Role::Billing,
         Role::TeamleadInterpreter,

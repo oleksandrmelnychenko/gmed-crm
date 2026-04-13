@@ -422,6 +422,61 @@ async fn advance_invoice_does_not_consume_order_services() {
 }
 
 #[tokio::test]
+async fn second_advance_invoice_for_same_quote_is_rejected() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("invoice-advance-duplicate");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    seed_order_leistung(
+        &pool,
+        order_id,
+        "Advance duplicate guard",
+        350.0,
+        "approved",
+    )
+    .await;
+
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let billing_bearer = auth_header_for(billing_id, "billing");
+    let quote = create_quote(&app, &pm_bearer, order_id).await;
+    let quote_id = quote["id"].as_str().unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{quote_id}/invoices"),
+        &billing_bearer,
+        Some(json!({ "invoice_type": "advance" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(body["invoice_type"], "advance");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{quote_id}/invoices"),
+        &billing_bearer,
+        Some(json!({ "invoice_type": "advance" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap()
+            .contains("active invoice already exists")
+    );
+}
+
+#[tokio::test]
 async fn invoice_creation_requires_billing_release_gate() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;

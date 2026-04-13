@@ -70,6 +70,12 @@ type FeedbackFormState = {
   conciergeScore: string;
   treatmentScore: string;
   doctorScore: string;
+  organizationScore: string;
+  serviceScore: string;
+  infrastructureScore: string;
+  priceValueScore: string;
+  treatmentSuccess: string;
+  complicationReported: boolean;
   npsScore: string;
   comments: string;
   improvementNotes: string;
@@ -88,6 +94,12 @@ function blankFeedbackForm(): FeedbackFormState {
     conciergeScore: "5",
     treatmentScore: "5",
     doctorScore: "5",
+    organizationScore: "5",
+    serviceScore: "5",
+    infrastructureScore: "5",
+    priceValueScore: "5",
+    treatmentSuccess: "yes",
+    complicationReported: false,
     npsScore: "10",
     comments: "",
     improvementNotes: "",
@@ -159,6 +171,13 @@ function detailField(label: string, value?: string | null) {
   );
 }
 
+function treatmentSuccessLabel(value?: string | null) {
+  if (value === "yes") return "Yes";
+  if (value === "partial") return "Partial";
+  if (value === "no") return "No";
+  return "Not set";
+}
+
 function feedbackCard(item: PortalFeedbackItem, withInternal = false, footer?: ReactNode) {
   return (
     <article key={item.id} className={shellCard("p-5")}>
@@ -190,6 +209,14 @@ function feedbackCard(item: PortalFeedbackItem, withInternal = false, footer?: R
         {detailField("Concierge", item.concierge_score ? String(item.concierge_score) : "Not rated")}
         {detailField("Treatment", item.treatment_score ? String(item.treatment_score) : "Not rated")}
         {detailField("Doctor", item.doctor_score ? String(item.doctor_score) : "Not rated")}
+      </div>
+      <div className="mt-3 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+        {detailField("Organization", item.organization_score ? String(item.organization_score) : "Not rated")}
+        {detailField("Service", item.service_score ? String(item.service_score) : "Not rated")}
+        {detailField("Ambience", item.infrastructure_score ? String(item.infrastructure_score) : "Not rated")}
+        {detailField("Price / value", item.price_value_score ? String(item.price_value_score) : "Not rated")}
+        {detailField("Treatment success", treatmentSuccessLabel(item.treatment_success))}
+        {detailField("Complication", item.complication_reported ? "Reported" : "No")}
       </div>
 
       {item.comments ? (
@@ -312,6 +339,12 @@ function PatientFeedbackWorkspace() {
           concierge_score: Number(form.conciergeScore),
           treatment_score: Number(form.treatmentScore),
           doctor_score: Number(form.doctorScore),
+          organization_score: Number(form.organizationScore),
+          service_score: Number(form.serviceScore),
+          infrastructure_score: Number(form.infrastructureScore),
+          price_value_score: Number(form.priceValueScore),
+          treatment_success: form.treatmentSuccess || null,
+          complication_reported: form.complicationReported,
           nps_score: Number(form.npsScore),
           comments: form.comments.trim() || null,
           improvement_notes: form.improvementNotes.trim() || null,
@@ -408,9 +441,32 @@ function PatientFeedbackWorkspace() {
               {scoreField("Interpreter", form.interpreterScore, (value) => setForm((current) => ({ ...current, interpreterScore: value })), scoreOptions)}
               {scoreField("Concierge", form.conciergeScore, (value) => setForm((current) => ({ ...current, conciergeScore: value })), scoreOptions)}
               {scoreField("Treatment quality", form.treatmentScore, (value) => setForm((current) => ({ ...current, treatmentScore: value })), scoreOptions)}
-              <div className="md:col-span-2">
-                {scoreField("Doctors", form.doctorScore, (value) => setForm((current) => ({ ...current, doctorScore: value })), scoreOptions)}
+              {scoreField("Doctors", form.doctorScore, (value) => setForm((current) => ({ ...current, doctorScore: value })), scoreOptions)}
+              {scoreField("Inpatient organization", form.organizationScore, (value) => setForm((current) => ({ ...current, organizationScore: value })), scoreOptions)}
+              {scoreField("Service quality", form.serviceScore, (value) => setForm((current) => ({ ...current, serviceScore: value })), scoreOptions)}
+              {scoreField("Infrastructure / ambience", form.infrastructureScore, (value) => setForm((current) => ({ ...current, infrastructureScore: value })), scoreOptions)}
+              {scoreField("Price / value", form.priceValueScore, (value) => setForm((current) => ({ ...current, priceValueScore: value })), scoreOptions)}
+              <div className="space-y-2">
+                <Label>Treatment success</Label>
+                <select
+                  value={form.treatmentSuccess}
+                  onChange={(event) => setForm((current) => ({ ...current, treatmentSuccess: event.target.value }))}
+                  className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                >
+                  <option value="yes">Yes</option>
+                  <option value="partial">Partial</option>
+                  <option value="no">No</option>
+                </select>
               </div>
+              <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={form.complicationReported}
+                  onChange={(event) => setForm((current) => ({ ...current, complicationReported: event.target.checked }))}
+                  className="size-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                />
+                Complication reported after visit
+              </label>
             </div>
 
             <div className="space-y-2">
@@ -590,6 +646,12 @@ function StaffFeedbackWorkspace() {
           concierge_score: Number(form.conciergeScore),
           treatment_score: Number(form.treatmentScore),
           doctor_score: Number(form.doctorScore),
+          organization_score: Number(form.organizationScore),
+          service_score: Number(form.serviceScore),
+          infrastructure_score: Number(form.infrastructureScore),
+          price_value_score: Number(form.priceValueScore),
+          treatment_success: form.treatmentSuccess || null,
+          complication_reported: form.complicationReported,
           nps_score: Number(form.npsScore),
           comments: form.comments.trim() || null,
           improvement_notes: form.improvementNotes.trim() || null,
@@ -774,6 +836,21 @@ function StaffFeedbackWorkspace() {
                 {detailField("Interpreter avg", formatPortalAverage(summary.average_scores.interpreter))}
                 {detailField("Concierge avg", formatPortalAverage(summary.average_scores.concierge))}
                 {detailField("Treatment avg", formatPortalAverage(summary.average_scores.treatment))}
+                {detailField("Service avg", formatPortalAverage(summary.average_scores.service))}
+                {detailField("Ambience avg", formatPortalAverage(summary.average_scores.infrastructure))}
+                {detailField("Value avg", formatPortalAverage(summary.average_scores.price_value))}
+                {detailField(
+                  "Treatment success",
+                  summary.treatment_success_yes_rate === null || summary.treatment_success_yes_rate === undefined
+                    ? "Not set"
+                    : `${summary.treatment_success_yes_rate.toFixed(1)}% yes`,
+                )}
+                {detailField(
+                  "Complication rate",
+                  summary.complication_rate === null || summary.complication_rate === undefined
+                    ? "Not set"
+                    : `${summary.complication_rate.toFixed(1)}%`,
+                )}
               </div>
 
               <div className="mt-5 grid gap-4">
@@ -897,9 +974,32 @@ function StaffFeedbackWorkspace() {
                   {scoreField("Interpreter", form.interpreterScore, (value) => setForm((current) => ({ ...current, interpreterScore: value })), scoreOptions)}
                   {scoreField("Concierge", form.conciergeScore, (value) => setForm((current) => ({ ...current, conciergeScore: value })), scoreOptions)}
                   {scoreField("Treatment quality", form.treatmentScore, (value) => setForm((current) => ({ ...current, treatmentScore: value })), scoreOptions)}
-                  <div className="md:col-span-2">
-                    {scoreField("Doctors", form.doctorScore, (value) => setForm((current) => ({ ...current, doctorScore: value })), scoreOptions)}
+                  {scoreField("Doctors", form.doctorScore, (value) => setForm((current) => ({ ...current, doctorScore: value })), scoreOptions)}
+                  {scoreField("Inpatient organization", form.organizationScore, (value) => setForm((current) => ({ ...current, organizationScore: value })), scoreOptions)}
+                  {scoreField("Service quality", form.serviceScore, (value) => setForm((current) => ({ ...current, serviceScore: value })), scoreOptions)}
+                  {scoreField("Infrastructure / ambience", form.infrastructureScore, (value) => setForm((current) => ({ ...current, infrastructureScore: value })), scoreOptions)}
+                  {scoreField("Price / value", form.priceValueScore, (value) => setForm((current) => ({ ...current, priceValueScore: value })), scoreOptions)}
+                  <div className="space-y-2">
+                    <Label>Treatment success</Label>
+                    <select
+                      value={form.treatmentSuccess}
+                      onChange={(event) => setForm((current) => ({ ...current, treatmentSuccess: event.target.value }))}
+                      className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                    >
+                      <option value="yes">Yes</option>
+                      <option value="partial">Partial</option>
+                      <option value="no">No</option>
+                    </select>
                   </div>
+                  <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={form.complicationReported}
+                      onChange={(event) => setForm((current) => ({ ...current, complicationReported: event.target.checked }))}
+                      className="size-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                    />
+                    Complication reported after visit
+                  </label>
                 </div>
 
                 <div className="space-y-2">

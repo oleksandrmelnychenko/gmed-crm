@@ -203,6 +203,37 @@ async fn seed_service(pool: &PgPool, provider_id: Uuid, name: &str, description:
     .unwrap()
 }
 
+async fn seed_provider_concierge_service(
+    pool: &PgPool,
+    patient_id: Uuid,
+    provider_id: Uuid,
+    created_by: Uuid,
+    service_kind: &str,
+    title: &str,
+    vendor_name: &str,
+    status: &str,
+) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO concierge_services (
+                patient_id, provider_id, service_kind, title, status,
+                vendor_name, created_by
+           ) VALUES (
+                $1, $2, $3, $4, $5,
+                $6, $7
+           ) RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(provider_id)
+    .bind(service_kind)
+    .bind(title)
+    .bind(status)
+    .bind(vendor_name)
+    .bind(created_by)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
 async fn seed_order(
     pool: &PgPool,
     patient_id: Uuid,
@@ -1159,6 +1190,426 @@ async fn case_cardiology_subflow_round_trip_works() {
 }
 
 #[tokio::test]
+async fn case_gastroenterology_subflow_round_trip_works() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("case-gastroenterology");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    let (status, created_body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/cases",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "hauptanfragegrund": "Gastroenterology case"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let case_id = Uuid::parse_str(created_body["id"].as_str().expect("created case id")).unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/cases/{case_id}/symptome"),
+        &pm_bearer,
+        Some(json!({
+            "items": [{
+                "beschreibung": "Abdominal pain after meals",
+                "fachrichtung": "gastroenterology"
+            }]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["count"], 1);
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/cases/{case_id}/gastroenterology"),
+        &pm_bearer,
+        Some(json!({
+            "is_relevant": true,
+            "abdominal_pain": true,
+            "reflux": true,
+            "nausea": false,
+            "diarrhea": true,
+            "constipation": false,
+            "gi_bleeding": false,
+            "prior_endoscopy": "Gastroscopy 2024",
+            "bowel_habits": "Alternating diarrhea after meals",
+            "liver_history": "Mild fatty liver",
+            "food_intolerance": "Lactose intolerance suspected",
+            "red_flags": "Weight loss and persistent pain",
+            "notes": "Needs gastroenterology workup"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/cases/{case_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["gastroenterology_recommended"], true);
+    assert_eq!(body["gastroenterology"]["is_relevant"], true);
+    assert_eq!(body["gastroenterology"]["abdominal_pain"], true);
+    assert_eq!(body["gastroenterology"]["reflux"], true);
+    assert_eq!(
+        body["gastroenterology"]["prior_endoscopy"],
+        "Gastroscopy 2024"
+    );
+    assert_eq!(
+        body["gastroenterology"]["food_intolerance"],
+        "Lactose intolerance suspected"
+    );
+    assert_eq!(
+        body["gastroenterology"]["notes"],
+        "Needs gastroenterology workup"
+    );
+}
+
+#[tokio::test]
+async fn case_orthopedics_subflow_round_trip_works() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("case-orthopedics");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    let (status, created_body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/cases",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "hauptanfragegrund": "Orthopedics case"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let case_id = Uuid::parse_str(created_body["id"].as_str().expect("created case id")).unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/cases/{case_id}/symptome"),
+        &pm_bearer,
+        Some(json!({
+            "items": [{
+                "beschreibung": "Knee pain and reduced mobility",
+                "fachrichtung": "orthopedics"
+            }]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["count"], 1);
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/cases/{case_id}/orthopedics"),
+        &pm_bearer,
+        Some(json!({
+            "is_relevant": true,
+            "joint_pain": true,
+            "back_pain": false,
+            "mobility_limitation": true,
+            "trauma_history": true,
+            "prior_imaging": "MRI knee 2025",
+            "assistive_devices": "Brace during long walks",
+            "physiotherapy_history": "6 sessions in 2025",
+            "pain_triggers": "Stairs and prolonged standing",
+            "red_flags": "Night pain after trauma",
+            "notes": "Needs orthopedic workup"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/cases/{case_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["orthopedics_recommended"], true);
+    assert_eq!(body["orthopedics"]["is_relevant"], true);
+    assert_eq!(body["orthopedics"]["joint_pain"], true);
+    assert_eq!(body["orthopedics"]["mobility_limitation"], true);
+    assert_eq!(body["orthopedics"]["prior_imaging"], "MRI knee 2025");
+    assert_eq!(body["orthopedics"]["notes"], "Needs orthopedic workup");
+}
+
+#[tokio::test]
+async fn case_neurology_subflow_round_trip_works() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("case-neurology");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    let (status, created_body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/cases",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "hauptanfragegrund": "Neurology case"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let case_id = Uuid::parse_str(created_body["id"].as_str().expect("created case id")).unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/cases/{case_id}/symptome"),
+        &pm_bearer,
+        Some(json!({
+            "items": [{
+                "beschreibung": "Intermittent dizziness and sensory changes",
+                "fachrichtung": "neurology"
+            }]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["count"], 1);
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/cases/{case_id}/neurology"),
+        &pm_bearer,
+        Some(json!({
+            "is_relevant": true,
+            "headache": true,
+            "dizziness": true,
+            "sensory_changes": true,
+            "weakness": false,
+            "seizure_history": false,
+            "gait_balance_issues": true,
+            "prior_neuro_imaging": "Brain MRI 2024",
+            "prior_neurology_workup": "Outpatient neurology consult",
+            "cognitive_changes": "Short episodes of word-finding issues",
+            "red_flags": "Progressive imbalance",
+            "notes": "Needs neurology workup"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/cases/{case_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["neurology_recommended"], true);
+    assert_eq!(body["neurology"]["is_relevant"], true);
+    assert_eq!(body["neurology"]["dizziness"], true);
+    assert_eq!(body["neurology"]["gait_balance_issues"], true);
+    assert_eq!(body["neurology"]["prior_neuro_imaging"], "Brain MRI 2024");
+    assert_eq!(body["neurology"]["notes"], "Needs neurology workup");
+}
+
+#[tokio::test]
+async fn case_pulmonology_subflow_round_trip_works() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("case-pulmonology");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    let (status, created_body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/cases",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "hauptanfragegrund": "Pulmonology case"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let case_id = Uuid::parse_str(created_body["id"].as_str().expect("created case id")).unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/cases/{case_id}/symptome"),
+        &pm_bearer,
+        Some(json!({
+            "items": [{
+                "beschreibung": "Chronic cough with wheezing",
+                "fachrichtung": "pulmonology"
+            }]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["count"], 1);
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/cases/{case_id}/pulmonology"),
+        &pm_bearer,
+        Some(json!({
+            "is_relevant": true,
+            "chronic_cough": true,
+            "dyspnea": true,
+            "wheezing": true,
+            "chest_tightness": false,
+            "hemoptysis": false,
+            "smoking_history": "15 pack years, stopped 2022",
+            "prior_chest_imaging": "Chest CT 2025",
+            "inhaler_therapy": "Budesonide/formoterol",
+            "sleep_apnea_history": "CPAP since 2024",
+            "red_flags": "Night symptoms and exertional dyspnea",
+            "notes": "Needs pulmonology workup"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/cases/{case_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["pulmonology_recommended"], true);
+    assert_eq!(body["pulmonology"]["is_relevant"], true);
+    assert_eq!(body["pulmonology"]["chronic_cough"], true);
+    assert_eq!(body["pulmonology"]["dyspnea"], true);
+    assert_eq!(body["pulmonology"]["prior_chest_imaging"], "Chest CT 2025");
+    assert_eq!(body["pulmonology"]["notes"], "Needs pulmonology workup");
+}
+
+#[tokio::test]
+async fn case_urology_subflow_round_trip_works() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("case-urology");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    let (status, created_body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/cases",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "hauptanfragegrund": "Urology case"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let case_id = Uuid::parse_str(created_body["id"].as_str().expect("created case id")).unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/cases/{case_id}/symptome"),
+        &pm_bearer,
+        Some(json!({
+            "items": [{
+                "beschreibung": "Urinary frequency with flank pain",
+                "fachrichtung": "urology"
+            }]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["count"], 1);
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/cases/{case_id}/urology"),
+        &pm_bearer,
+        Some(json!({
+            "is_relevant": true,
+            "dysuria": true,
+            "hematuria": false,
+            "flank_pain": true,
+            "urinary_frequency": true,
+            "urinary_retention": false,
+            "incontinence": false,
+            "prior_urology_workup": "Ultrasound 2024",
+            "catheter_history": "None",
+            "stone_history": "Kidney stone in 2023",
+            "red_flags": "Fever with flank pain",
+            "notes": "Needs urology workup"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/cases/{case_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["urology_recommended"], true);
+    assert_eq!(body["urology"]["is_relevant"], true);
+    assert_eq!(body["urology"]["dysuria"], true);
+    assert_eq!(body["urology"]["flank_pain"], true);
+    assert_eq!(body["urology"]["stone_history"], "Kidney stone in 2023");
+    assert_eq!(body["urology"]["notes"], "Needs urology workup");
+}
+
+#[tokio::test]
 async fn case_history_exposes_system_uuid_retention_and_append_only_versions() {
     let Some((app, pool, admin_id, _)) = test_context().await else {
         return;
@@ -1558,6 +2009,75 @@ async fn interpreter_and_concierge_only_see_assigned_patients() {
 }
 
 #[tokio::test]
+async fn teamlead_only_sees_assigned_patients_and_appointments() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("teamlead-visibility");
+    let visible_patient_id = seed_patient(&pool, admin_id, &format!("{tag}-visible")).await;
+    let hidden_patient_id = seed_patient(&pool, admin_id, &format!("{tag}-hidden")).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let visible_appointment_id = seed_appointment(
+        &pool,
+        visible_patient_id,
+        provider_id,
+        doctor_id,
+        admin_id,
+        "Assigned interpreter slot",
+        "planned",
+        "2026-04-20",
+    )
+    .await;
+    let hidden_appointment_id = seed_appointment(
+        &pool,
+        hidden_patient_id,
+        provider_id,
+        doctor_id,
+        admin_id,
+        "Hidden interpreter slot",
+        "planned",
+        "2026-04-21",
+    )
+    .await;
+    let teamlead_id = seed_user(&pool, &tag, "teamlead_interpreter").await;
+    seed_patient_assignment(&pool, visible_patient_id, teamlead_id, admin_id).await;
+
+    let teamlead_bearer = auth_header_for(teamlead_id, "teamlead_interpreter");
+
+    let (status, body) =
+        json_request(&app, "GET", "/api/v1/patients", &teamlead_bearer, None).await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body.as_array().unwrap();
+    assert!(
+        items
+            .iter()
+            .any(|item| item["id"] == visible_patient_id.to_string())
+    );
+    assert!(
+        !items
+            .iter()
+            .any(|item| item["id"] == hidden_patient_id.to_string())
+    );
+
+    let (status, body) =
+        json_request(&app, "GET", "/api/v1/appointments", &teamlead_bearer, None).await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body.as_array().unwrap();
+    assert!(
+        items
+            .iter()
+            .any(|item| item["id"] == visible_appointment_id.to_string())
+    );
+    assert!(
+        !items
+            .iter()
+            .any(|item| item["id"] == hidden_appointment_id.to_string())
+    );
+}
+
+#[tokio::test]
 async fn patient_detail_view_audit_logs_visible_fields_for_role_filtered_payload() {
     let Some((app, pool, admin_id, _)) = test_context().await else {
         return;
@@ -1628,6 +2148,239 @@ async fn patient_detail_view_audit_logs_visible_fields_for_role_filtered_payload
             .iter()
             .any(|field| field == "functional_labels")
     );
+}
+
+#[tokio::test]
+async fn ceo_assistant_can_read_patient_registry_with_role_filtered_fields() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("ceo-assistant-patient-registry");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    sqlx::query(
+        r#"UPDATE patients
+           SET phone_primary = $2,
+               email = $3,
+               nationality = $4,
+               residence_country = $5,
+               languages = $6,
+               functional_labels = $7,
+               insurance_provider = $8,
+               insurance_number = $9,
+               insurance_type = $10,
+               legal_status = $11,
+               notes = $12
+           WHERE id = $1"#,
+    )
+    .bind(patient_id)
+    .bind("+49 123 4567")
+    .bind("assistant-visible@example.com")
+    .bind("DE")
+    .bind("Germany")
+    .bind(vec!["de".to_string(), "en".to_string()])
+    .bind(vec!["vip".to_string(), "high_risk".to_string()])
+    .bind("AOK")
+    .bind("POL-123")
+    .bind("private")
+    .bind(json!({ "restriction_hold": true }))
+    .bind("Internal notes must stay hidden")
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let assistant_id = seed_user(&pool, &tag, "ceo_assistant").await;
+    let assistant_bearer = auth_header_for(assistant_id, "ceo_assistant");
+
+    let (status, body) =
+        json_request(&app, "GET", "/api/v1/patients", &assistant_bearer, None).await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body.as_array().unwrap();
+    let summary = items
+        .iter()
+        .find(|item| item["id"] == patient_id.to_string())
+        .cloned()
+        .expect("patient visible in ceo assistant registry");
+    assert_eq!(summary["first_name"], format!("First {tag}"));
+    assert_eq!(summary["email"], "assistant-visible@example.com");
+    assert_eq!(summary["phone_primary"], "+49 123 4567");
+    assert_eq!(summary["insurance_provider"], Value::Null);
+    assert_eq!(summary["insurance_type"], Value::Null);
+    assert!(summary.get("functional_labels").is_none());
+
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}"),
+        &assistant_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail["first_name"], format!("First {tag}"));
+    assert_eq!(detail["last_name"], format!("Last {tag}"));
+    assert_eq!(detail["email"], "assistant-visible@example.com");
+    assert_eq!(detail["phone_primary"], "+49 123 4567");
+    assert_eq!(detail["nationality"], "DE");
+    assert_eq!(detail["residence_country"], "Germany");
+    assert_eq!(detail["languages"][0], "de");
+    assert_eq!(detail["languages"][1], "en");
+    assert_eq!(detail["insurance_provider"], Value::Null);
+    assert_eq!(detail["insurance_number"], Value::Null);
+    assert_eq!(detail["insurance_type"], Value::Null);
+    assert!(detail.get("functional_labels").is_none());
+    assert!(detail.get("legal_status").is_none());
+    assert!(detail.get("notes").is_none());
+    assert!(detail.get("address_street").is_none());
+    assert!(detail.get("emergency_contact_name").is_none());
+
+    let context: Value = sqlx::query_scalar(
+        r#"SELECT context
+           FROM audit_log
+           WHERE action = 'view_patient'
+             AND entity_type = 'patient'
+             AND entity_id = $1
+           ORDER BY created_at DESC
+           LIMIT 1"#,
+    )
+    .bind(patient_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(context["role"], "ceo_assistant");
+    let visible_fields = context["visible_fields"]
+        .as_array()
+        .expect("visible_fields array");
+    assert!(visible_fields.iter().any(|field| field == "email"));
+    assert!(visible_fields.iter().any(|field| field == "phone_primary"));
+    assert!(
+        visible_fields
+            .iter()
+            .all(|field| field != "insurance_provider")
+    );
+    assert!(
+        visible_fields
+            .iter()
+            .all(|field| field != "insurance_number")
+    );
+    assert!(
+        visible_fields
+            .iter()
+            .all(|field| field != "functional_labels")
+    );
+    assert!(visible_fields.iter().all(|field| field != "legal_status"));
+    assert!(visible_fields.iter().all(|field| field != "notes"));
+}
+
+#[tokio::test]
+async fn sales_cannot_open_patient_registry() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("sales-patient-registry-block");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let sales_id = seed_user(&pool, &tag, "sales").await;
+    let sales_bearer = auth_header_for(sales_id, "sales");
+
+    let (status, _) = json_request(&app, "GET", "/api/v1/patients", &sales_bearer, None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}"),
+        &sales_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn it_admin_cannot_open_patient_registry_case_or_reports_workspace() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("it-admin-rbac-block");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let case_id = seed_case(
+        &pool,
+        patient_id,
+        admin_id,
+        &format!("C-{tag}"),
+        "open",
+        "Restricted clinical context",
+    )
+    .await;
+    let it_admin_id = seed_user(&pool, &tag, "it_admin").await;
+    let it_admin_bearer = auth_header_for(it_admin_id, "it_admin");
+
+    let (status, _) = json_request(&app, "GET", "/api/v1/patients", &it_admin_bearer, None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}"),
+        &it_admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/cases/{case_id}"),
+        &it_admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        "/api/v1/stats/reports/workspace",
+        &it_admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn billing_cannot_open_medical_case_detail() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("billing-case-block");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let case_id = seed_case(
+        &pool,
+        patient_id,
+        admin_id,
+        &format!("C-{tag}"),
+        "open",
+        "Billing must not see medical details",
+    )
+    .await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let billing_bearer = auth_header_for(billing_id, "billing");
+
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/cases/{case_id}"),
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]
@@ -2113,6 +2866,1172 @@ async fn patient_manager_can_create_weekly_recurring_appointment_series() {
     let items = list_body.as_array().unwrap();
     assert_eq!(items.len(), 4);
     assert!(items.iter().all(|item| item["recurrence_series_size"] == 4));
+}
+
+#[tokio::test]
+async fn patient_manager_can_reschedule_whole_recurring_appointment_series() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("recurring-appointment-update");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let title = format!("Recurring therapy {tag}");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/appointments",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "provider_id": provider_id,
+            "doctor_id": doctor_id,
+            "owner_user_id": pm_id,
+            "appointment_type": "medical",
+            "title": title,
+            "date": "2026-05-04",
+            "time_start": "09:00",
+            "time_end": "10:00",
+            "recurrence_frequency": "weekly",
+            "recurrence_interval": 1,
+            "recurrence_count": 3
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let root_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+
+    let updated_title = format!("Shifted recurring therapy {tag}");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{root_id}/update"),
+        &pm_bearer,
+        Some(json!({
+            "provider_id": provider_id,
+            "doctor_id": doctor_id,
+            "owner_user_id": pm_id,
+            "interpreter_id": Value::Null,
+            "title": updated_title,
+            "date": "2026-05-06",
+            "time_start": "11:00",
+            "time_end": "12:30",
+            "location": "Telemedicine room 2",
+            "recurrence_scope": "series"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["recurrence_scope"], "series");
+    assert_eq!(body["affected_count"], 3);
+
+    let rows = sqlx::query(
+        r#"SELECT title, date, time_start, time_end, location, recurrence_index
+           FROM appointments
+           WHERE recurrence_series_id = $1
+           ORDER BY recurrence_index"#,
+    )
+    .bind(root_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(rows.len(), 3);
+    let expected_dates = ["2026-05-06", "2026-05-13", "2026-05-20"];
+    for (index, row) in rows.iter().enumerate() {
+        let appointment_date = row
+            .try_get::<chrono::NaiveDate, _>("date")
+            .unwrap()
+            .to_string();
+        let time_start = row
+            .try_get::<Option<chrono::NaiveTime>, _>("time_start")
+            .unwrap()
+            .unwrap()
+            .to_string();
+        let time_end = row
+            .try_get::<Option<chrono::NaiveTime>, _>("time_end")
+            .unwrap()
+            .unwrap()
+            .to_string();
+        let recurrence_index: i32 = row.try_get("recurrence_index").unwrap();
+
+        assert_eq!(recurrence_index, index as i32);
+        assert_eq!(row.try_get::<String, _>("title").unwrap(), updated_title);
+        assert_eq!(appointment_date, expected_dates[index]);
+        assert_eq!(time_start, "11:00:00");
+        assert_eq!(time_end, "12:30:00");
+        assert_eq!(
+            row.try_get::<Option<String>, _>("location")
+                .unwrap()
+                .as_deref(),
+            Some("Telemedicine room 2")
+        );
+    }
+}
+
+#[tokio::test]
+async fn patient_manager_can_cancel_whole_recurring_appointment_series() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("recurring-appointment-cancel");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let title = format!("Recurring therapy {tag}");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/appointments",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "provider_id": provider_id,
+            "doctor_id": doctor_id,
+            "owner_user_id": pm_id,
+            "appointment_type": "medical",
+            "title": title,
+            "date": "2026-05-04",
+            "time_start": "09:00",
+            "time_end": "10:00",
+            "recurrence_frequency": "weekly",
+            "recurrence_interval": 1,
+            "recurrence_count": 4
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let root_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+
+    let rows = sqlx::query(
+        r#"SELECT id, recurrence_index
+           FROM appointments
+           WHERE recurrence_series_id = $1
+           ORDER BY recurrence_index"#,
+    )
+    .bind(root_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(rows.len(), 4);
+    let last_occurrence_id: Uuid = rows[3].try_get("id").unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{last_occurrence_id}/status"),
+        &pm_bearer,
+        Some(json!({ "status": "completed" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["recurrence_scope"], "single");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{root_id}/status"),
+        &pm_bearer,
+        Some(json!({
+            "status": "cancelled",
+            "recurrence_scope": "series"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["recurrence_scope"], "series");
+    assert_eq!(body["affected_count"], 3);
+
+    let status_rows = sqlx::query(
+        r#"SELECT recurrence_index, status
+           FROM appointments
+           WHERE recurrence_series_id = $1
+           ORDER BY recurrence_index"#,
+    )
+    .bind(root_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(status_rows.len(), 4);
+    for row in status_rows.iter().take(3) {
+        assert_eq!(row.try_get::<String, _>("status").unwrap(), "cancelled");
+    }
+    assert_eq!(
+        status_rows[3].try_get::<String, _>("status").unwrap(),
+        "completed"
+    );
+}
+
+#[tokio::test]
+async fn patient_manager_can_confirm_whole_recurring_appointment_series() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("recurring-appointment-confirm");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let title = format!("Recurring therapy {tag}");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/appointments",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "provider_id": provider_id,
+            "doctor_id": doctor_id,
+            "owner_user_id": pm_id,
+            "appointment_type": "medical",
+            "title": title,
+            "date": "2026-05-04",
+            "time_start": "09:00",
+            "time_end": "10:00",
+            "recurrence_frequency": "weekly",
+            "recurrence_interval": 1,
+            "recurrence_count": 3
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let root_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{root_id}/status"),
+        &pm_bearer,
+        Some(json!({
+            "status": "confirmed",
+            "recurrence_scope": "series"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["recurrence_scope"], "series");
+    assert_eq!(body["status"], "confirmed");
+    assert_eq!(body["affected_count"], 3);
+
+    let status_rows = sqlx::query(
+        r#"SELECT status
+           FROM appointments
+           WHERE recurrence_series_id = $1
+           ORDER BY recurrence_index"#,
+    )
+    .bind(root_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(status_rows.len(), 3);
+    assert!(
+        status_rows
+            .iter()
+            .all(|row| row.try_get::<String, _>("status").unwrap() == "confirmed")
+    );
+}
+
+#[tokio::test]
+async fn patient_manager_can_reschedule_this_and_following_occurrences() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("recurring-appointment-following-update");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let title = format!("Recurring therapy {tag}");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/appointments",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "provider_id": provider_id,
+            "doctor_id": doctor_id,
+            "owner_user_id": pm_id,
+            "appointment_type": "medical",
+            "title": title,
+            "date": "2026-05-04",
+            "time_start": "09:00",
+            "time_end": "10:00",
+            "recurrence_frequency": "weekly",
+            "recurrence_interval": 1,
+            "recurrence_count": 4
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let root_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+
+    let rows = sqlx::query(
+        r#"SELECT id, recurrence_index
+           FROM appointments
+           WHERE recurrence_series_id = $1
+           ORDER BY recurrence_index"#,
+    )
+    .bind(root_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(rows.len(), 4);
+    let second_occurrence_id: Uuid = rows[1].try_get("id").unwrap();
+
+    let updated_title = format!("Adjusted from midpoint {tag}");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{second_occurrence_id}/update"),
+        &pm_bearer,
+        Some(json!({
+            "provider_id": provider_id,
+            "doctor_id": doctor_id,
+            "owner_user_id": pm_id,
+            "interpreter_id": Value::Null,
+            "title": updated_title,
+            "date": "2026-05-13",
+            "time_start": "14:00",
+            "time_end": "15:00",
+            "location": "Recovery room 5",
+            "recurrence_scope": "following"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["recurrence_scope"], "following");
+    assert_eq!(body["affected_count"], 3);
+    assert_eq!(body["split_performed"], true);
+
+    let original_rows = sqlx::query(
+        r#"SELECT recurrence_index, recurrence_count, recurrence_until, title, date
+           FROM appointments
+           WHERE recurrence_series_id = $1
+           ORDER BY recurrence_index"#,
+    )
+    .bind(root_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(original_rows.len(), 1);
+    assert_eq!(
+        original_rows[0]
+            .try_get::<i32, _>("recurrence_index")
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        original_rows[0]
+            .try_get::<Option<i32>, _>("recurrence_count")
+            .unwrap(),
+        Some(1)
+    );
+    assert_eq!(
+        original_rows[0]
+            .try_get::<Option<chrono::NaiveDate>, _>("recurrence_until")
+            .unwrap()
+            .unwrap()
+            .to_string(),
+        "2026-05-04"
+    );
+
+    let updated_rows = sqlx::query(
+        r#"SELECT recurrence_index, recurrence_count, recurrence_until, title, date, time_start, time_end, location
+           FROM appointments
+           WHERE recurrence_series_id = $1
+           ORDER BY recurrence_index"#,
+    )
+    .bind(second_occurrence_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(updated_rows.len(), 3);
+    let expected_dates = ["2026-05-13", "2026-05-20", "2026-05-27"];
+    for (offset, row) in updated_rows.iter().enumerate() {
+        assert_eq!(row.try_get::<String, _>("title").unwrap(), updated_title);
+        assert_eq!(
+            row.try_get::<i32, _>("recurrence_index").unwrap(),
+            offset as i32
+        );
+        assert_eq!(
+            row.try_get::<Option<i32>, _>("recurrence_count").unwrap(),
+            Some(3)
+        );
+        assert_eq!(
+            row.try_get::<Option<chrono::NaiveDate>, _>("recurrence_until")
+                .unwrap()
+                .unwrap()
+                .to_string(),
+            "2026-05-27"
+        );
+        assert_eq!(
+            row.try_get::<chrono::NaiveDate, _>("date")
+                .unwrap()
+                .to_string(),
+            expected_dates[offset]
+        );
+        assert_eq!(
+            row.try_get::<Option<chrono::NaiveTime>, _>("time_start")
+                .unwrap()
+                .unwrap()
+                .to_string(),
+            "14:00:00"
+        );
+        assert_eq!(
+            row.try_get::<Option<chrono::NaiveTime>, _>("time_end")
+                .unwrap()
+                .unwrap()
+                .to_string(),
+            "15:00:00"
+        );
+        assert_eq!(
+            row.try_get::<Option<String>, _>("location")
+                .unwrap()
+                .as_deref(),
+            Some("Recovery room 5")
+        );
+    }
+
+    let (status, detail_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/appointments/{second_occurrence_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        detail_body["recurrence_parent_series_id"].as_str(),
+        Some(root_id.to_string().as_str())
+    );
+    assert_eq!(
+        detail_body["recurrence_split_from_appointment_id"].as_str(),
+        Some(second_occurrence_id.to_string().as_str())
+    );
+    assert_eq!(detail_body["recurrence_split_from_index"], 1);
+    assert_eq!(
+        detail_body["recurring_scope_preview"]
+            .as_array()
+            .map(|items| items.len()),
+        Some(3)
+    );
+}
+
+#[tokio::test]
+async fn patient_manager_can_edit_whole_series_recurrence_rule() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("recurring-appointment-series-rule");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let title = format!("Recurring therapy {tag}");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/appointments",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "provider_id": provider_id,
+            "doctor_id": doctor_id,
+            "owner_user_id": pm_id,
+            "appointment_type": "medical",
+            "title": title,
+            "date": "2026-05-04",
+            "time_start": "09:00",
+            "time_end": "10:00",
+            "recurrence_frequency": "weekly",
+            "recurrence_interval": 1,
+            "recurrence_count": 4
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let root_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{root_id}/update"),
+        &pm_bearer,
+        Some(json!({
+            "provider_id": provider_id,
+            "doctor_id": doctor_id,
+            "owner_user_id": pm_id,
+            "interpreter_id": Value::Null,
+            "title": format!("Reshaped recurring therapy {tag}"),
+            "date": "2026-05-06",
+            "time_start": "11:00",
+            "time_end": "12:00",
+            "location": "Series room",
+            "recurrence_frequency": "weekly",
+            "recurrence_interval": 2,
+            "recurrence_count": 5,
+            "recurrence_until": Value::Null,
+            "recurrence_scope": "series"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["recurrence_scope"], "series");
+    assert_eq!(body["created_occurrence_count"], 1);
+
+    let rows = sqlx::query(
+        r#"SELECT date, time_start, time_end, recurrence_index, recurrence_count, recurrence_until, recurrence_interval
+           FROM appointments
+           WHERE recurrence_series_id = $1
+             AND status = 'planned'
+           ORDER BY recurrence_index"#,
+    )
+    .bind(root_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+
+    let expected_dates = [
+        "2026-05-06",
+        "2026-05-20",
+        "2026-06-03",
+        "2026-06-17",
+        "2026-07-01",
+    ];
+    assert_eq!(rows.len(), expected_dates.len());
+    for (index, row) in rows.iter().enumerate() {
+        assert_eq!(
+            row.try_get::<chrono::NaiveDate, _>("date")
+                .unwrap()
+                .to_string(),
+            expected_dates[index]
+        );
+        assert_eq!(
+            row.try_get::<i32, _>("recurrence_index").unwrap(),
+            index as i32
+        );
+        assert_eq!(
+            row.try_get::<Option<i32>, _>("recurrence_count").unwrap(),
+            Some(5)
+        );
+        assert_eq!(
+            row.try_get::<Option<i32>, _>("recurrence_interval")
+                .unwrap(),
+            Some(2)
+        );
+        assert_eq!(
+            row.try_get::<Option<chrono::NaiveDate>, _>("recurrence_until")
+                .unwrap()
+                .unwrap()
+                .to_string(),
+            "2026-07-01"
+        );
+        assert_eq!(
+            row.try_get::<Option<chrono::NaiveTime>, _>("time_start")
+                .unwrap()
+                .unwrap()
+                .to_string(),
+            "11:00:00"
+        );
+        assert_eq!(
+            row.try_get::<Option<chrono::NaiveTime>, _>("time_end")
+                .unwrap()
+                .unwrap()
+                .to_string(),
+            "12:00:00"
+        );
+    }
+}
+
+#[tokio::test]
+async fn patient_manager_can_cancel_this_and_following_occurrences() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("recurring-appointment-following-cancel");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let title = format!("Recurring therapy {tag}");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/appointments",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "provider_id": provider_id,
+            "doctor_id": doctor_id,
+            "owner_user_id": pm_id,
+            "appointment_type": "medical",
+            "title": title,
+            "date": "2026-05-04",
+            "time_start": "09:00",
+            "time_end": "10:00",
+            "recurrence_frequency": "weekly",
+            "recurrence_interval": 1,
+            "recurrence_count": 4
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let root_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+
+    let rows = sqlx::query(
+        r#"SELECT id, recurrence_index
+           FROM appointments
+           WHERE recurrence_series_id = $1
+           ORDER BY recurrence_index"#,
+    )
+    .bind(root_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(rows.len(), 4);
+    let third_occurrence_id: Uuid = rows[2].try_get("id").unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{third_occurrence_id}/status"),
+        &pm_bearer,
+        Some(json!({
+            "status": "cancelled",
+            "recurrence_scope": "following"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["recurrence_scope"], "following");
+    assert_eq!(body["affected_count"], 2);
+    assert_eq!(body["split_performed"], true);
+
+    let original_rows = sqlx::query(
+        r#"SELECT recurrence_index, recurrence_count, recurrence_until, status
+           FROM appointments
+           WHERE recurrence_series_id = $1
+           ORDER BY recurrence_index"#,
+    )
+    .bind(root_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(original_rows.len(), 2);
+    assert_eq!(
+        original_rows[0].try_get::<String, _>("status").unwrap(),
+        "planned"
+    );
+    assert_eq!(
+        original_rows[1].try_get::<String, _>("status").unwrap(),
+        "planned"
+    );
+    assert_eq!(
+        original_rows[1]
+            .try_get::<Option<i32>, _>("recurrence_count")
+            .unwrap(),
+        Some(2)
+    );
+    assert_eq!(
+        original_rows[1]
+            .try_get::<Option<chrono::NaiveDate>, _>("recurrence_until")
+            .unwrap()
+            .unwrap()
+            .to_string(),
+        "2026-05-11"
+    );
+
+    let split_rows = sqlx::query(
+        r#"SELECT recurrence_index, recurrence_count, recurrence_until, status
+           FROM appointments
+           WHERE recurrence_series_id = $1
+           ORDER BY recurrence_index"#,
+    )
+    .bind(third_occurrence_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(split_rows.len(), 2);
+    assert_eq!(
+        split_rows[0].try_get::<String, _>("status").unwrap(),
+        "cancelled"
+    );
+    assert_eq!(
+        split_rows[1].try_get::<String, _>("status").unwrap(),
+        "cancelled"
+    );
+    assert_eq!(
+        split_rows[1]
+            .try_get::<Option<i32>, _>("recurrence_count")
+            .unwrap(),
+        Some(2)
+    );
+    assert_eq!(
+        split_rows[1]
+            .try_get::<Option<chrono::NaiveDate>, _>("recurrence_until")
+            .unwrap()
+            .unwrap()
+            .to_string(),
+        "2026-05-25"
+    );
+}
+
+#[tokio::test]
+async fn patient_manager_can_trim_following_series_via_recurrence_rule() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("recurring-appointment-following-rule");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let title = format!("Recurring therapy {tag}");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/appointments",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "provider_id": provider_id,
+            "doctor_id": doctor_id,
+            "owner_user_id": pm_id,
+            "appointment_type": "medical",
+            "title": title,
+            "date": "2026-05-04",
+            "time_start": "09:00",
+            "time_end": "10:00",
+            "recurrence_frequency": "weekly",
+            "recurrence_interval": 1,
+            "recurrence_count": 4
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let root_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+
+    let rows = sqlx::query(
+        r#"SELECT id
+           FROM appointments
+           WHERE recurrence_series_id = $1
+           ORDER BY recurrence_index"#,
+    )
+    .bind(root_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let second_occurrence_id: Uuid = rows[1].try_get("id").unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{second_occurrence_id}/update"),
+        &pm_bearer,
+        Some(json!({
+            "provider_id": provider_id,
+            "doctor_id": doctor_id,
+            "owner_user_id": pm_id,
+            "interpreter_id": Value::Null,
+            "title": format!("Trimmed tail {tag}"),
+            "date": "2026-05-11",
+            "time_start": "13:00",
+            "time_end": "14:00",
+            "location": "Tail room",
+            "recurrence_frequency": "weekly",
+            "recurrence_interval": 1,
+            "recurrence_count": 2,
+            "recurrence_until": Value::Null,
+            "recurrence_scope": "following"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["recurrence_scope"], "following");
+    assert_eq!(body["split_performed"], true);
+    assert_eq!(body["created_occurrence_count"], 0);
+    let archived_series_id =
+        Uuid::parse_str(body["archived_tail_series_id"].as_str().unwrap()).unwrap();
+
+    let active_tail_rows = sqlx::query(
+        r#"SELECT status, recurrence_index, recurrence_count, recurrence_until
+           FROM appointments
+           WHERE recurrence_series_id = $1
+             AND status = 'planned'
+           ORDER BY recurrence_index"#,
+    )
+    .bind(second_occurrence_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(active_tail_rows.len(), 2);
+    assert_eq!(
+        active_tail_rows[1]
+            .try_get::<Option<i32>, _>("recurrence_count")
+            .unwrap(),
+        Some(2)
+    );
+    assert_eq!(
+        active_tail_rows[1]
+            .try_get::<Option<chrono::NaiveDate>, _>("recurrence_until")
+            .unwrap()
+            .unwrap()
+            .to_string(),
+        "2026-05-18"
+    );
+
+    let archived_rows = sqlx::query(
+        r#"SELECT status, recurrence_index, recurrence_count, recurrence_until, recurrence_parent_series_id
+           FROM appointments
+           WHERE recurrence_series_id = $1
+           ORDER BY recurrence_index"#,
+    )
+    .bind(archived_series_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(archived_rows.len(), 1);
+    assert_eq!(
+        archived_rows[0].try_get::<String, _>("status").unwrap(),
+        "cancelled"
+    );
+    assert_eq!(
+        archived_rows[0]
+            .try_get::<Option<Uuid>, _>("recurrence_parent_series_id")
+            .unwrap(),
+        Some(second_occurrence_id)
+    );
+}
+
+#[tokio::test]
+async fn recurring_appointment_detail_exposes_scope_checklist_blockers() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("recurring-appointment-scope-preview");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/appointments",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "provider_id": provider_id,
+            "doctor_id": doctor_id,
+            "owner_user_id": pm_id,
+            "appointment_type": "medical",
+            "title": format!("Recurring checklist preview {tag}"),
+            "date": "2026-06-01",
+            "time_start": "10:00",
+            "time_end": "11:00",
+            "recurrence_frequency": "weekly",
+            "recurrence_interval": 1,
+            "recurrence_count": 3
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let root_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+
+    let rows = sqlx::query(
+        r#"SELECT id
+           FROM appointments
+           WHERE recurrence_series_id = $1
+           ORDER BY recurrence_index"#,
+    )
+    .bind(root_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(rows.len(), 3);
+    let blocking_occurrence_id: Uuid = rows[2].try_get("id").unwrap();
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{blocking_occurrence_id}/checklist"),
+        &pm_bearer,
+        Some(json!({
+            "phase": "followup",
+            "item_text": "Collect final findings"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    let (status, detail_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/appointments/{root_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let preview = detail_body["recurring_scope_preview"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(preview.len(), 3);
+    assert!(preview.iter().any(|item| {
+        item["id"] == blocking_occurrence_id.to_string()
+            && item["recurrence_index"] == 2
+            && item["open_checklist_count"] == 1
+    }));
+}
+
+#[tokio::test]
+async fn recurring_appointment_detail_exposes_lineage_history_metrics() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("recurring-appointment-lineage-history");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/appointments",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "provider_id": provider_id,
+            "doctor_id": doctor_id,
+            "owner_user_id": pm_id,
+            "appointment_type": "medical",
+            "title": format!("Recurring lineage {tag}"),
+            "date": "2026-06-01",
+            "time_start": "10:00",
+            "time_end": "11:00",
+            "recurrence_frequency": "weekly",
+            "recurrence_interval": 1,
+            "recurrence_count": 4
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let root_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+
+    let rows = sqlx::query(
+        r#"SELECT id
+           FROM appointments
+           WHERE recurrence_series_id = $1
+           ORDER BY recurrence_index"#,
+    )
+    .bind(root_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let second_occurrence_id: Uuid = rows[1].try_get("id").unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{second_occurrence_id}/update"),
+        &pm_bearer,
+        Some(json!({
+            "provider_id": provider_id,
+            "doctor_id": doctor_id,
+            "owner_user_id": pm_id,
+            "interpreter_id": Value::Null,
+            "title": format!("Recurring lineage split {tag}"),
+            "date": "2026-06-10",
+            "time_start": "13:00",
+            "time_end": "14:00",
+            "location": "Lineage room",
+            "recurrence_scope": "following"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["split_performed"], true);
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{second_occurrence_id}/update"),
+        &pm_bearer,
+        Some(json!({
+            "provider_id": provider_id,
+            "doctor_id": doctor_id,
+            "owner_user_id": pm_id,
+            "interpreter_id": Value::Null,
+            "title": format!("Recurring lineage trimmed {tag}"),
+            "date": "2026-06-10",
+            "time_start": "13:00",
+            "time_end": "14:00",
+            "location": "Lineage room",
+            "recurrence_frequency": "weekly",
+            "recurrence_interval": 1,
+            "recurrence_count": 2,
+            "recurrence_until": Value::Null,
+            "recurrence_scope": "series"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let archived_tail_series_id =
+        Uuid::parse_str(body["archived_tail_series_id"].as_str().unwrap()).unwrap();
+
+    let (status, detail_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/appointments/{second_occurrence_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let lineage = detail_body["recurring_lineage_history"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(lineage.len(), 3);
+    assert!(lineage.iter().any(|item| {
+        item["series_id"] == root_id.to_string()
+            && item["relation"] == "ancestor"
+            && item["total_occurrences"] == 1
+    }));
+    assert!(lineage.iter().any(|item| {
+        item["series_id"] == second_occurrence_id.to_string()
+            && item["relation"] == "current"
+            && item["total_occurrences"] == 2
+            && item["active_occurrences"] == 2
+    }));
+    assert!(lineage.iter().any(|item| {
+        item["series_id"] == archived_tail_series_id.to_string()
+            && item["relation"] == "descendant"
+            && item["cancelled_occurrences"] == 1
+    }));
+}
+
+#[tokio::test]
+async fn appointment_schedule_exclusion_constraints_block_overlapping_patient_slots() {
+    let Some((_app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("appointment-exclusion");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+
+    seed_appointment_slot(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        admin_id,
+        "Anchor slot",
+        "planned",
+        "2026-08-04",
+        "medical",
+        Some("09:00"),
+        Some("10:00"),
+        None,
+    )
+    .await;
+
+    let result = sqlx::query(
+        r#"INSERT INTO appointments (
+                patient_id, provider_id, doctor_id, appointment_type, title, date,
+                time_start, time_end, status, created_by
+           ) VALUES (
+                $1, $2, $3, 'medical', $4, $5,
+                $6, $7, 'planned', $8
+           )"#,
+    )
+    .bind(patient_id)
+    .bind(provider_id)
+    .bind(doctor_id)
+    .bind("Overlapping slot")
+    .bind("2026-08-04")
+    .bind(chrono::NaiveTime::parse_from_str("09:30", "%H:%M").expect("valid overlap start"))
+    .bind(chrono::NaiveTime::parse_from_str("10:30", "%H:%M").expect("valid overlap end"))
+    .bind(admin_id)
+    .execute(&pool)
+    .await;
+
+    match result {
+        Err(sqlx::Error::Database(db_error)) => {
+            assert_eq!(db_error.code().as_deref(), Some("23P01"));
+            assert_eq!(
+                db_error.constraint(),
+                Some("appointments_patient_timed_schedule_excl")
+            );
+        }
+        other => panic!("expected exclusion violation, got {other:?}"),
+    }
 }
 
 #[tokio::test]
@@ -3826,11 +5745,12 @@ async fn create_appointment_returns_conflict_payload_with_interpreter_context() 
 
 #[tokio::test]
 async fn providers_list_supports_country_and_doctor_filters() {
-    let Some((app, pool, admin_id, _)) = test_context().await else {
+    let Some((app, pool, _admin_id, _)) = test_context().await else {
         return;
     };
 
     let tag = unique_tag("provider-filters");
+    let sales_id = seed_user(&pool, &format!("{tag}-sales"), "sales").await;
     let non_medical_provider_id =
         seed_provider_with_type(&pool, &format!("{tag}-travel"), "non_medical", "Poland").await;
     let medical_provider_id =
@@ -3882,7 +5802,7 @@ async fn providers_list_supports_country_and_doctor_filters() {
     .await
     .unwrap();
 
-    let sales_bearer = auth_header_for(admin_id, "ceo");
+    let sales_bearer = auth_header_for(sales_id, "sales");
     let (status, body) = json_request(
         &app,
         "GET",
@@ -3896,6 +5816,108 @@ async fn providers_list_supports_country_and_doctor_filters() {
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["id"], non_medical_provider_id.to_string());
     assert_eq!(items[0]["provider_type"], "non_medical");
+}
+
+#[tokio::test]
+async fn providers_list_and_detail_include_non_medical_concierge_activity() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("provider-concierge-activity");
+    let sales_id = seed_user(&pool, &tag, "sales").await;
+    let sales_bearer = auth_header_for(sales_id, "sales");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider_with_type(&pool, &tag, "non_medical", "Austria").await;
+
+    let concierge_service_id = seed_provider_concierge_service(
+        &pool,
+        patient_id,
+        provider_id,
+        admin_id,
+        "vip_terminal",
+        "VIP terminal escort",
+        "Elite Drives",
+        "planned",
+    )
+    .await;
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/providers?provider_type=non_medical&service_name=Elite&search=escort",
+        &sales_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body.as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["id"], provider_id.to_string());
+    assert_eq!(items[0]["concierge_service_count"], 1);
+    assert_eq!(items[0]["open_concierge_service_count"], 1);
+    assert_eq!(items[0]["service_count"], 0);
+    assert_ne!(items[0]["last_interaction_at"], Value::Null);
+
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers/{provider_id}"),
+        &sales_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail["linked_patients"][0]["concierge_count"], 1);
+    assert!(
+        detail["interactions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| {
+                item["id"] == concierge_service_id.to_string()
+                    && item["kind"] == "concierge_service"
+                    && item["appointment_type"] == "vip_terminal"
+                    && item["location"] == "Elite Drives"
+            })
+    );
+}
+
+#[tokio::test]
+async fn sales_can_read_provider_registry_but_cannot_update_provider() {
+    let Some((app, pool, _admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("sales-provider-readonly");
+    let sales_id = seed_user(&pool, &tag, "sales").await;
+    let sales_bearer = auth_header_for(sales_id, "sales");
+    let provider_id = seed_provider_with_type(&pool, &tag, "non_medical", "Italy").await;
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers/{provider_id}"),
+        &sales_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["id"], provider_id.to_string());
+    assert_eq!(body["provider_type"], "non_medical");
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/providers/{provider_id}/update"),
+        &sales_bearer,
+        Some(json!({
+            "name": "Sales must stay read only",
+            "provider_type": "non_medical"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]

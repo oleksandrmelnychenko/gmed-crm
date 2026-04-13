@@ -37,8 +37,26 @@ type ClinicReportRow = {
   appointments_90d: number;
   delivered_items: number;
   doctor_count: number;
+  feedback_count: number;
   gross_service_volume?: string | null;
   avg_feedback_score?: number | null;
+  avg_treatment_score?: number | null;
+  avg_doctor_score?: number | null;
+  avg_organization_score?: number | null;
+  avg_service_score?: number | null;
+  avg_infrastructure_score?: number | null;
+  avg_price_value_score?: number | null;
+  avg_response_hours?: number | null;
+  avg_findings_turnaround_hours?: number | null;
+  findings_sample_count: number;
+  response_sample_count: number;
+  open_communication_count: number;
+  treatment_success_yes_rate?: number | null;
+  treatment_success_partial_rate?: number | null;
+  complication_rate?: number | null;
+  followup_orders_total: number;
+  followup_completed_orders: number;
+  followup_completion_rate?: number | null;
 };
 
 type CountryReportRow = {
@@ -69,6 +87,43 @@ type DoctorReportRow = {
   appointments_90d: number;
   active_orders: number;
   delivered_items: number;
+  feedback_count: number;
+  avg_treatment_score?: number | null;
+  avg_doctor_score?: number | null;
+  avg_organization_score?: number | null;
+  avg_service_score?: number | null;
+  avg_infrastructure_score?: number | null;
+  avg_price_value_score?: number | null;
+  avg_response_hours?: number | null;
+  avg_findings_turnaround_hours?: number | null;
+  findings_sample_count: number;
+  response_sample_count: number;
+  open_communication_count: number;
+  treatment_success_yes_rate?: number | null;
+  treatment_success_partial_rate?: number | null;
+  complication_rate?: number | null;
+  followup_orders_total: number;
+  followup_completed_orders: number;
+  followup_completion_rate?: number | null;
+  gross_service_volume?: string | null;
+};
+
+type NonMedicalProviderReportRow = {
+  provider_id: string;
+  name: string;
+  address_city?: string | null;
+  address_country?: string | null;
+  service_count: number;
+  active_patients_90d: number;
+  appointments_90d: number;
+  concierge_requests_90d: number;
+  open_concierge_requests: number;
+  completed_concierge_requests_90d: number;
+  delivered_items: number;
+  vendor_count: number;
+  service_focus: string[];
+  avg_concierge_score?: number | null;
+  feedback_count: number;
   gross_service_volume?: string | null;
 };
 
@@ -79,6 +134,7 @@ type ReportsWorkspacePayload = {
   countries: CountryReportRow[];
   service_types: ServiceTypeReportRow[];
   doctors: DoctorReportRow[];
+  non_medical_providers: NonMedicalProviderReportRow[];
   financial_metrics_visible: boolean;
 };
 
@@ -189,6 +245,16 @@ function formatRating(value?: number | null) {
   return `${value.toFixed(1)}/5`;
 }
 
+function formatPercent(value?: number | null) {
+  if (typeof value !== "number" || Number.isNaN(value)) return "No baseline";
+  return `${value.toFixed(1)}%`;
+}
+
+function formatHours(value?: number | null) {
+  if (typeof value !== "number" || Number.isNaN(value)) return "No responses";
+  return `${value.toFixed(1)} h`;
+}
+
 function serviceTypeLabel(value: string) {
   if (value === "medical") return "Medical";
   if (value === "non_medical") return "Non-medical";
@@ -276,7 +342,14 @@ export function ReportsPage() {
     [data?.clinics, selectedClinicId],
   );
 
-  async function exportSection(section: "clinics" | "countries" | "service_types" | "doctors") {
+  async function exportSection(
+    section:
+      | "clinics"
+      | "countries"
+      | "service_types"
+      | "doctors"
+      | "non_medical_providers",
+  ) {
     setExportingSection(section);
     setError("");
 
@@ -587,7 +660,7 @@ export function ReportsPage() {
                     <div>
                       <h2 className="text-base font-semibold text-slate-950">Clinic report</h2>
                       <p className="mt-1 text-sm text-slate-500">
-                        Medical partner clinics ranked by recent activity, delivered items and satisfaction trend.
+                        Medical partner clinics ranked by recent activity, delivered items, communication response speed and provider-quality signals from feedback and follow-up completion.
                       </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
@@ -631,7 +704,7 @@ export function ReportsPage() {
                               </Badge>
                             )}
                           </div>
-                          <div className="mt-4 grid gap-3 md:grid-cols-5">
+                          <div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-4">
                             <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
                               <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Patients / 90d</p>
                               <p className="mt-2 text-sm font-semibold text-slate-950">{item.active_patients_90d}</p>
@@ -651,6 +724,59 @@ export function ReportsPage() {
                             <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
                               <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Feedback</p>
                               <p className="mt-2 text-sm font-semibold text-slate-950">{formatRating(item.avg_feedback_score)}</p>
+                            </div>
+                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
+                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Feedback count</p>
+                              <p className="mt-2 text-sm font-semibold text-slate-950">{item.feedback_count}</p>
+                            </div>
+                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
+                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Treatment score</p>
+                              <p className="mt-2 text-sm font-semibold text-slate-950">{formatRating(item.avg_treatment_score)}</p>
+                            </div>
+                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
+                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Doctor communication</p>
+                              <p className="mt-2 text-sm font-semibold text-slate-950">{formatRating(item.avg_doctor_score)}</p>
+                            </div>
+                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
+                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Clinic response time</p>
+                              <p className="mt-2 text-sm font-semibold text-slate-950">{formatHours(item.avg_response_hours)}</p>
+                              <p className="mt-1 text-[11px] text-slate-500">
+                                {item.response_sample_count} answered · {item.open_communication_count} open
+                              </p>
+                            </div>
+                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
+                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Written findings</p>
+                              <p className="mt-2 text-sm font-semibold text-slate-950">{formatHours(item.avg_findings_turnaround_hours)}</p>
+                              <p className="mt-1 text-[11px] text-slate-500">
+                                {item.findings_sample_count} linked Arztbrief
+                              </p>
+                            </div>
+                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
+                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Follow-up completion</p>
+                              <p className="mt-2 text-sm font-semibold text-slate-950">
+                                {formatPercent(item.followup_completion_rate)}
+                              </p>
+                              <p className="mt-1 text-[11px] text-slate-500">
+                                {item.followup_completed_orders}/{item.followup_orders_total} orders
+                              </p>
+                            </div>
+                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
+                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Clinical outcome</p>
+                              <p className="mt-2 text-sm font-semibold text-slate-950">
+                                {formatPercent(item.treatment_success_yes_rate)} yes
+                              </p>
+                              <p className="mt-1 text-[11px] text-slate-500">
+                                {formatPercent(item.treatment_success_partial_rate)} partial · {formatPercent(item.complication_rate)} complications
+                              </p>
+                            </div>
+                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3 md:col-span-2 xl:col-span-2">
+                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Experience bundle</p>
+                              <p className="mt-2 text-sm font-semibold text-slate-950">
+                                Org {formatRating(item.avg_organization_score)} · Service {formatRating(item.avg_service_score)}
+                              </p>
+                              <p className="mt-1 text-[11px] text-slate-500">
+                                Ambience {formatRating(item.avg_infrastructure_score)} · Value {formatRating(item.avg_price_value_score)}
+                              </p>
                             </div>
                           </div>
                           <div className="mt-4 flex flex-wrap gap-2">
@@ -735,6 +861,111 @@ export function ReportsPage() {
                   </div>
                 </section>
               ) : null}
+
+              {allowedSections.has("non_medical_providers") ? (
+                <section className={card("p-6")}>
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <h2 className="text-base font-semibold text-slate-950">Non-medical provider report</h2>
+                      <p className="mt-1 text-sm text-slate-500">
+                        Concierge-facing partner volume across service portfolio, live request load, patient reach and feedback.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge className="bg-slate-100 text-slate-700 hover:bg-slate-100">
+                        {data.non_medical_providers.length}
+                      </Badge>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={exportingSection === "non_medical_providers"}
+                        onClick={() => void exportSection("non_medical_providers")}
+                      >
+                        {exportingSection === "non_medical_providers" ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}
+                        Export CSV
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="mt-5 space-y-3">
+                    {data.non_medical_providers.length > 0 ? (
+                      data.non_medical_providers.map((item) => (
+                        <article key={item.provider_id} className="rounded-[1.5rem] border border-slate-200 bg-white px-4 py-4 shadow-sm">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-semibold text-slate-950">{item.name}</p>
+                              <p className="mt-2 text-sm text-slate-500">
+                                {[item.address_city, item.address_country].filter(Boolean).join(", ") || "Location not set"}
+                              </p>
+                            </div>
+                            {item.gross_service_volume ? (
+                              <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100">
+                                {formatMoney(item.gross_service_volume)}
+                              </Badge>
+                            ) : (
+                              <Badge className="bg-slate-100 text-slate-600 hover:bg-slate-100">
+                                Counts only
+                              </Badge>
+                            )}
+                          </div>
+                          <div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-4">
+                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
+                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Services</p>
+                              <p className="mt-2 text-sm font-semibold text-slate-950">{item.service_count}</p>
+                            </div>
+                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
+                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Patients / 90d</p>
+                              <p className="mt-2 text-sm font-semibold text-slate-950">{item.active_patients_90d}</p>
+                            </div>
+                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
+                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Appointments / 90d</p>
+                              <p className="mt-2 text-sm font-semibold text-slate-950">{item.appointments_90d}</p>
+                            </div>
+                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
+                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Concierge requests / 90d</p>
+                              <p className="mt-2 text-sm font-semibold text-slate-950">{item.concierge_requests_90d}</p>
+                            </div>
+                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
+                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Open requests</p>
+                              <p className="mt-2 text-sm font-semibold text-slate-950">{item.open_concierge_requests}</p>
+                            </div>
+                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
+                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Completed / 90d</p>
+                              <p className="mt-2 text-sm font-semibold text-slate-950">{item.completed_concierge_requests_90d}</p>
+                            </div>
+                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
+                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Delivered items</p>
+                              <p className="mt-2 text-sm font-semibold text-slate-950">{item.delivered_items}</p>
+                            </div>
+                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
+                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Concierge score</p>
+                              <p className="mt-2 text-sm font-semibold text-slate-950">{formatRating(item.avg_concierge_score)}</p>
+                              <p className="mt-1 text-[11px] text-slate-500">{item.feedback_count} feedback / {item.vendor_count} vendors</p>
+                            </div>
+                          </div>
+                          {item.service_focus.length > 0 ? (
+                            <div className="mt-4 flex flex-wrap gap-2">
+                              {item.service_focus.map((service) => (
+                                <Badge key={`${item.provider_id}-${service}`} className="bg-slate-100 text-slate-700 hover:bg-slate-100">
+                                  {service}
+                                </Badge>
+                              ))}
+                            </div>
+                          ) : null}
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            <Link to={`/providers?provider=${item.provider_id}`}>
+                              <Button variant="outline" size="sm">Open provider</Button>
+                            </Link>
+                          </div>
+                        </article>
+                      ))
+                    ) : (
+                      <div className="rounded-[1.5rem] border border-dashed border-slate-200 bg-slate-50/70 px-5 py-8 text-center text-sm text-slate-500">
+                        No non-medical provider report data available yet.
+                      </div>
+                    )}
+                  </div>
+                </section>
+              ) : null}
             </div>
 
             <div className="space-y-6">
@@ -800,7 +1031,7 @@ export function ReportsPage() {
                     <div>
                       <h2 className="text-base font-semibold text-slate-950">Doctor drill-down</h2>
                       <p className="mt-1 text-sm text-slate-500">
-                        Doctor-level activity, patient reach and delivered scope. Use clinic drill-down to narrow to one provider.
+                        Doctor-level activity, patient reach, response speed and quality signals based on direct feedback and follow-up execution. Use clinic drill-down to narrow to one provider.
                       </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
@@ -854,7 +1085,7 @@ export function ReportsPage() {
                               </Badge>
                             )}
                           </div>
-                          <div className="mt-4 grid gap-3 md:grid-cols-4">
+                          <div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-4">
                             <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
                               <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Patients / 90d</p>
                               <p className="mt-2 text-sm font-semibold text-slate-950">{item.active_patients_90d}</p>
@@ -870,6 +1101,59 @@ export function ReportsPage() {
                             <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
                               <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Delivered items</p>
                               <p className="mt-2 text-sm font-semibold text-slate-950">{item.delivered_items}</p>
+                            </div>
+                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
+                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Feedback count</p>
+                              <p className="mt-2 text-sm font-semibold text-slate-950">{item.feedback_count}</p>
+                            </div>
+                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
+                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Treatment score</p>
+                              <p className="mt-2 text-sm font-semibold text-slate-950">{formatRating(item.avg_treatment_score)}</p>
+                            </div>
+                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
+                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Doctor communication</p>
+                              <p className="mt-2 text-sm font-semibold text-slate-950">{formatRating(item.avg_doctor_score)}</p>
+                            </div>
+                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
+                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Doctor response time</p>
+                              <p className="mt-2 text-sm font-semibold text-slate-950">{formatHours(item.avg_response_hours)}</p>
+                              <p className="mt-1 text-[11px] text-slate-500">
+                                {item.response_sample_count} answered · {item.open_communication_count} open
+                              </p>
+                            </div>
+                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
+                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Written findings</p>
+                              <p className="mt-2 text-sm font-semibold text-slate-950">{formatHours(item.avg_findings_turnaround_hours)}</p>
+                              <p className="mt-1 text-[11px] text-slate-500">
+                                {item.findings_sample_count} linked Arztbrief
+                              </p>
+                            </div>
+                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
+                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Follow-up completion</p>
+                              <p className="mt-2 text-sm font-semibold text-slate-950">
+                                {formatPercent(item.followup_completion_rate)}
+                              </p>
+                              <p className="mt-1 text-[11px] text-slate-500">
+                                {item.followup_completed_orders}/{item.followup_orders_total} orders
+                              </p>
+                            </div>
+                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
+                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Clinical outcome</p>
+                              <p className="mt-2 text-sm font-semibold text-slate-950">
+                                {formatPercent(item.treatment_success_yes_rate)} yes
+                              </p>
+                              <p className="mt-1 text-[11px] text-slate-500">
+                                {formatPercent(item.treatment_success_partial_rate)} partial · {formatPercent(item.complication_rate)} complications
+                              </p>
+                            </div>
+                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3 md:col-span-2 xl:col-span-2">
+                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Experience bundle</p>
+                              <p className="mt-2 text-sm font-semibold text-slate-950">
+                                Org {formatRating(item.avg_organization_score)} · Service {formatRating(item.avg_service_score)}
+                              </p>
+                              <p className="mt-1 text-[11px] text-slate-500">
+                                Ambience {formatRating(item.avg_infrastructure_score)} · Value {formatRating(item.avg_price_value_score)}
+                              </p>
                             </div>
                           </div>
                         </article>

@@ -38,6 +38,8 @@ pub fn router() -> Router<AppState> {
         )
         .route("/cases/{case_id}/orthopedics", post(save_orthopedics))
         .route("/cases/{case_id}/neurology", post(save_neurology))
+        .route("/cases/{case_id}/pulmonology", post(save_pulmonology))
+        .route("/cases/{case_id}/urology", post(save_urology))
         .route("/cases/{case_id}/vegetative", post(save_vegetative))
         .route("/cases/{case_id}/impfstatus", post(save_impfstatus))
 }
@@ -195,6 +197,38 @@ struct NeurologyAssessmentRequest {
     prior_neuro_imaging: Option<String>,
     prior_neurology_workup: Option<String>,
     cognitive_changes: Option<String>,
+    red_flags: Option<String>,
+    notes: Option<String>,
+}
+
+#[derive(Deserialize, Serialize, Clone)]
+struct PulmonologyAssessmentRequest {
+    is_relevant: Option<bool>,
+    chronic_cough: Option<bool>,
+    dyspnea: Option<bool>,
+    wheezing: Option<bool>,
+    chest_tightness: Option<bool>,
+    hemoptysis: Option<bool>,
+    smoking_history: Option<String>,
+    prior_chest_imaging: Option<String>,
+    inhaler_therapy: Option<String>,
+    sleep_apnea_history: Option<String>,
+    red_flags: Option<String>,
+    notes: Option<String>,
+}
+
+#[derive(Deserialize, Serialize, Clone)]
+struct UrologyAssessmentRequest {
+    is_relevant: Option<bool>,
+    dysuria: Option<bool>,
+    hematuria: Option<bool>,
+    flank_pain: Option<bool>,
+    urinary_frequency: Option<bool>,
+    urinary_retention: Option<bool>,
+    incontinence: Option<bool>,
+    prior_urology_workup: Option<String>,
+    catheter_history: Option<String>,
+    stone_history: Option<String>,
     red_flags: Option<String>,
     notes: Option<String>,
 }
@@ -565,6 +599,30 @@ async fn get_case_full(
     .await
     .ok()
     .flatten();
+    let pulmonology = sqlx::query(
+        r#"SELECT is_relevant, chronic_cough, dyspnea, wheezing, chest_tightness,
+                  hemoptysis, smoking_history, prior_chest_imaging, inhaler_therapy,
+                  sleep_apnea_history, red_flags, notes
+           FROM case_pulmonology_assessments
+           WHERE case_id = $1"#,
+    )
+    .bind(case_uuid)
+    .fetch_optional(&state.db)
+    .await
+    .ok()
+    .flatten();
+    let urology = sqlx::query(
+        r#"SELECT is_relevant, dysuria, hematuria, flank_pain, urinary_frequency,
+                  urinary_retention, incontinence, prior_urology_workup,
+                  catheter_history, stone_history, red_flags, notes
+           FROM case_urology_assessments
+           WHERE case_id = $1"#,
+    )
+    .bind(case_uuid)
+    .fetch_optional(&state.db)
+    .await
+    .ok()
+    .flatten();
     let veg = sqlx::query!("SELECT appetit_durst, koerpergroesse, gewicht, gewichtsveraenderung, grund FROM vegetative_anamnese WHERE case_id = $1", case_uuid)
         .fetch_optional(&state.db).await.ok().flatten();
     let impf = sqlx::query!(
@@ -638,6 +696,15 @@ async fn get_case_full(
     let neurology_recommended = symptoms_json
         .iter()
         .any(|item| symptom_matches_specialty(item, &["neuro", "neurol"]));
+    let pulmonology_recommended = symptoms_json.iter().any(|item| {
+        symptom_matches_specialty(item, &["pulmo", "pneumo", "respir", "asthma", "lung"])
+    });
+    let urology_recommended = symptoms_json.iter().any(|item| {
+        symptom_matches_specialty(
+            item,
+            &["uro", "urolog", "renal", "kidney", "bladder", "prostat"],
+        )
+    });
     let recent_history = match load_case_history(&state.db, case_uuid, 12).await {
         Ok(items) => items,
         Err(e) => {
@@ -729,6 +796,36 @@ async fn get_case_full(
             "prior_neuro_imaging": item.try_get::<Option<String>, _>("prior_neuro_imaging").unwrap_or_default(),
             "prior_neurology_workup": item.try_get::<Option<String>, _>("prior_neurology_workup").unwrap_or_default(),
             "cognitive_changes": item.try_get::<Option<String>, _>("cognitive_changes").unwrap_or_default(),
+            "red_flags": item.try_get::<Option<String>, _>("red_flags").unwrap_or_default(),
+            "notes": item.try_get::<Option<String>, _>("notes").unwrap_or_default(),
+        })),
+        "pulmonology_recommended": pulmonology_recommended,
+        "pulmonology": pulmonology.map(|item| serde_json::json!({
+            "is_relevant": item.try_get::<bool, _>("is_relevant").unwrap_or(false),
+            "chronic_cough": item.try_get::<bool, _>("chronic_cough").unwrap_or(false),
+            "dyspnea": item.try_get::<bool, _>("dyspnea").unwrap_or(false),
+            "wheezing": item.try_get::<bool, _>("wheezing").unwrap_or(false),
+            "chest_tightness": item.try_get::<bool, _>("chest_tightness").unwrap_or(false),
+            "hemoptysis": item.try_get::<bool, _>("hemoptysis").unwrap_or(false),
+            "smoking_history": item.try_get::<Option<String>, _>("smoking_history").unwrap_or_default(),
+            "prior_chest_imaging": item.try_get::<Option<String>, _>("prior_chest_imaging").unwrap_or_default(),
+            "inhaler_therapy": item.try_get::<Option<String>, _>("inhaler_therapy").unwrap_or_default(),
+            "sleep_apnea_history": item.try_get::<Option<String>, _>("sleep_apnea_history").unwrap_or_default(),
+            "red_flags": item.try_get::<Option<String>, _>("red_flags").unwrap_or_default(),
+            "notes": item.try_get::<Option<String>, _>("notes").unwrap_or_default(),
+        })),
+        "urology_recommended": urology_recommended,
+        "urology": urology.map(|item| serde_json::json!({
+            "is_relevant": item.try_get::<bool, _>("is_relevant").unwrap_or(false),
+            "dysuria": item.try_get::<bool, _>("dysuria").unwrap_or(false),
+            "hematuria": item.try_get::<bool, _>("hematuria").unwrap_or(false),
+            "flank_pain": item.try_get::<bool, _>("flank_pain").unwrap_or(false),
+            "urinary_frequency": item.try_get::<bool, _>("urinary_frequency").unwrap_or(false),
+            "urinary_retention": item.try_get::<bool, _>("urinary_retention").unwrap_or(false),
+            "incontinence": item.try_get::<bool, _>("incontinence").unwrap_or(false),
+            "prior_urology_workup": item.try_get::<Option<String>, _>("prior_urology_workup").unwrap_or_default(),
+            "catheter_history": item.try_get::<Option<String>, _>("catheter_history").unwrap_or_default(),
+            "stone_history": item.try_get::<Option<String>, _>("stone_history").unwrap_or_default(),
             "red_flags": item.try_get::<Option<String>, _>("red_flags").unwrap_or_default(),
             "notes": item.try_get::<Option<String>, _>("notes").unwrap_or_default(),
         })),
@@ -1702,6 +1799,178 @@ async fn save_neurology(
     Json(serde_json::json!({"ok": true})).into_response()
 }
 
+async fn save_pulmonology(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(case_uuid): Path<Uuid>,
+    Json(body): Json<PulmonologyAssessmentRequest>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
+        return e;
+    }
+    match can_access_case(&state, &auth, case_uuid, None).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(resp) => return resp,
+    }
+
+    let old_value = match load_case_section_snapshot(&state.db, case_uuid, "pulmonology").await {
+        Ok(value) => value.unwrap_or(serde_json::Value::Null),
+        Err(e) => {
+            tracing::error!(error = %e, case_id = %case_uuid, "load pulmonology snapshot");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+
+    if let Err(e) = sqlx::query(
+        r#"INSERT INTO case_pulmonology_assessments (
+                case_id, is_relevant, chronic_cough, dyspnea, wheezing,
+                chest_tightness, hemoptysis, smoking_history, prior_chest_imaging,
+                inhaler_therapy, sleep_apnea_history, red_flags, notes
+           ) VALUES (
+                $1, $2, $3, $4, $5,
+                $6, $7, $8, $9, $10, $11, $12, $13
+           )
+           ON CONFLICT (case_id) DO UPDATE SET
+                is_relevant = EXCLUDED.is_relevant,
+                chronic_cough = EXCLUDED.chronic_cough,
+                dyspnea = EXCLUDED.dyspnea,
+                wheezing = EXCLUDED.wheezing,
+                chest_tightness = EXCLUDED.chest_tightness,
+                hemoptysis = EXCLUDED.hemoptysis,
+                smoking_history = EXCLUDED.smoking_history,
+                prior_chest_imaging = EXCLUDED.prior_chest_imaging,
+                inhaler_therapy = EXCLUDED.inhaler_therapy,
+                sleep_apnea_history = EXCLUDED.sleep_apnea_history,
+                red_flags = EXCLUDED.red_flags,
+                notes = EXCLUDED.notes"#,
+    )
+    .bind(case_uuid)
+    .bind(body.is_relevant.unwrap_or(false))
+    .bind(body.chronic_cough.unwrap_or(false))
+    .bind(body.dyspnea.unwrap_or(false))
+    .bind(body.wheezing.unwrap_or(false))
+    .bind(body.chest_tightness.unwrap_or(false))
+    .bind(body.hemoptysis.unwrap_or(false))
+    .bind(body.smoking_history.clone())
+    .bind(body.prior_chest_imaging.clone())
+    .bind(body.inhaler_therapy.clone())
+    .bind(body.sleep_apnea_history.clone())
+    .bind(body.red_flags.clone())
+    .bind(body.notes.clone())
+    .execute(&state.db)
+    .await
+    {
+        tracing::error!(error = %e, case_id = %case_uuid, "save pulmonology assessment");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+
+    let new_value = match load_case_section_snapshot(&state.db, case_uuid, "pulmonology").await {
+        Ok(value) => value.unwrap_or(serde_json::Value::Null),
+        Err(e) => {
+            tracing::error!(error = %e, case_id = %case_uuid, "reload pulmonology snapshot");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+
+    version_log(
+        &state,
+        case_uuid,
+        auth.user_id,
+        "pulmonology",
+        old_value,
+        new_value,
+    )
+    .await;
+    Json(serde_json::json!({"ok": true})).into_response()
+}
+
+async fn save_urology(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(case_uuid): Path<Uuid>,
+    Json(body): Json<UrologyAssessmentRequest>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
+        return e;
+    }
+    match can_access_case(&state, &auth, case_uuid, None).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(resp) => return resp,
+    }
+
+    let old_value = match load_case_section_snapshot(&state.db, case_uuid, "urology").await {
+        Ok(value) => value.unwrap_or(serde_json::Value::Null),
+        Err(e) => {
+            tracing::error!(error = %e, case_id = %case_uuid, "load urology snapshot");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+
+    if let Err(e) = sqlx::query(
+        r#"INSERT INTO case_urology_assessments (
+                case_id, is_relevant, dysuria, hematuria, flank_pain,
+                urinary_frequency, urinary_retention, incontinence,
+                prior_urology_workup, catheter_history, stone_history, red_flags, notes
+           ) VALUES (
+                $1, $2, $3, $4, $5,
+                $6, $7, $8, $9, $10, $11, $12, $13
+           )
+           ON CONFLICT (case_id) DO UPDATE SET
+                is_relevant = EXCLUDED.is_relevant,
+                dysuria = EXCLUDED.dysuria,
+                hematuria = EXCLUDED.hematuria,
+                flank_pain = EXCLUDED.flank_pain,
+                urinary_frequency = EXCLUDED.urinary_frequency,
+                urinary_retention = EXCLUDED.urinary_retention,
+                incontinence = EXCLUDED.incontinence,
+                prior_urology_workup = EXCLUDED.prior_urology_workup,
+                catheter_history = EXCLUDED.catheter_history,
+                stone_history = EXCLUDED.stone_history,
+                red_flags = EXCLUDED.red_flags,
+                notes = EXCLUDED.notes"#,
+    )
+    .bind(case_uuid)
+    .bind(body.is_relevant.unwrap_or(false))
+    .bind(body.dysuria.unwrap_or(false))
+    .bind(body.hematuria.unwrap_or(false))
+    .bind(body.flank_pain.unwrap_or(false))
+    .bind(body.urinary_frequency.unwrap_or(false))
+    .bind(body.urinary_retention.unwrap_or(false))
+    .bind(body.incontinence.unwrap_or(false))
+    .bind(body.prior_urology_workup.clone())
+    .bind(body.catheter_history.clone())
+    .bind(body.stone_history.clone())
+    .bind(body.red_flags.clone())
+    .bind(body.notes.clone())
+    .execute(&state.db)
+    .await
+    {
+        tracing::error!(error = %e, case_id = %case_uuid, "save urology assessment");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+
+    let new_value = match load_case_section_snapshot(&state.db, case_uuid, "urology").await {
+        Ok(value) => value.unwrap_or(serde_json::Value::Null),
+        Err(e) => {
+            tracing::error!(error = %e, case_id = %case_uuid, "reload urology snapshot");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+
+    version_log(
+        &state,
+        case_uuid,
+        auth.user_id,
+        "urology",
+        old_value,
+        new_value,
+    )
+    .await;
+    Json(serde_json::json!({"ok": true})).into_response()
+}
+
 async fn save_vegetative(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -2192,6 +2461,52 @@ async fn load_case_section_snapshot(
                         'notes', notes
                     ) AS value
                    FROM case_neurology_assessments
+                   WHERE case_id = $1"#,
+            )
+            .bind(case_id)
+            .fetch_optional(db)
+            .await?,
+        ),
+        "pulmonology" => Some(
+            sqlx::query(
+                r#"SELECT jsonb_build_object(
+                        'is_relevant', is_relevant,
+                        'chronic_cough', chronic_cough,
+                        'dyspnea', dyspnea,
+                        'wheezing', wheezing,
+                        'chest_tightness', chest_tightness,
+                        'hemoptysis', hemoptysis,
+                        'smoking_history', smoking_history,
+                        'prior_chest_imaging', prior_chest_imaging,
+                        'inhaler_therapy', inhaler_therapy,
+                        'sleep_apnea_history', sleep_apnea_history,
+                        'red_flags', red_flags,
+                        'notes', notes
+                    ) AS value
+                   FROM case_pulmonology_assessments
+                   WHERE case_id = $1"#,
+            )
+            .bind(case_id)
+            .fetch_optional(db)
+            .await?,
+        ),
+        "urology" => Some(
+            sqlx::query(
+                r#"SELECT jsonb_build_object(
+                        'is_relevant', is_relevant,
+                        'dysuria', dysuria,
+                        'hematuria', hematuria,
+                        'flank_pain', flank_pain,
+                        'urinary_frequency', urinary_frequency,
+                        'urinary_retention', urinary_retention,
+                        'incontinence', incontinence,
+                        'prior_urology_workup', prior_urology_workup,
+                        'catheter_history', catheter_history,
+                        'stone_history', stone_history,
+                        'red_flags', red_flags,
+                        'notes', notes
+                    ) AS value
+                   FROM case_urology_assessments
                    WHERE case_id = $1"#,
             )
             .bind(case_id)

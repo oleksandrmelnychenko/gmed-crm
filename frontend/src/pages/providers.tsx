@@ -64,6 +64,10 @@ type ProviderSummary = {
   doctor_count: number;
   patient_count: number;
   appointment_count: number;
+  service_count: number;
+  concierge_service_count: number;
+  open_concierge_service_count: number;
+  last_interaction_at: string | null;
   created_at: string;
 };
 
@@ -74,6 +78,7 @@ type LinkedPatient = {
   last_name: string;
   appointment_count: number;
   leistung_count: number;
+  concierge_count: number;
   last_interaction_at: string;
 };
 
@@ -315,6 +320,10 @@ function providerTypeBadge(value: string) {
   return value === "non_medical"
     ? "border-teal-200 bg-teal-50 text-teal-700"
     : "border-sky-200 bg-sky-50 text-sky-700";
+}
+
+function providerContactsLabel(providerType: ProviderType) {
+  return providerType === "non_medical" ? "Contacts" : "Doctors";
 }
 
 function statusBadge(active: boolean) {
@@ -671,9 +680,21 @@ function ProvidersPage() {
         acc.doctors += item.doctor_count;
         acc.patients += item.patient_count;
         acc.appointments += item.appointment_count;
+        acc.services += item.service_count;
+        acc.conciergeRequests += item.concierge_service_count;
+        acc.openConciergeRequests += item.open_concierge_service_count;
         return acc;
       },
-      { total: 0, active: 0, doctors: 0, patients: 0, appointments: 0 }
+      {
+        total: 0,
+        active: 0,
+        doctors: 0,
+        patients: 0,
+        appointments: 0,
+        services: 0,
+        conciergeRequests: 0,
+        openConciergeRequests: 0,
+      }
     );
   }, [providers]);
 
@@ -1057,9 +1078,19 @@ function ProvidersPage() {
 
           <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <MetricCard icon={Building2} label={t.providers_title} value={metrics.total.toString()} tone="sky" />
-            <MetricCard icon={UsersRound} label={t.providers_doctors} value={metrics.doctors.toString()} tone="emerald" />
+            <MetricCard
+              icon={UsersRound}
+              label={permissions.forceNonMedical ? "Services" : t.providers_doctors}
+              value={(permissions.forceNonMedical ? metrics.services : metrics.doctors).toString()}
+              tone="emerald"
+            />
             <MetricCard icon={Stethoscope} label={t.providers_linked_patients} value={metrics.patients.toString()} tone="amber" />
-            <MetricCard icon={CalendarClock} label={t.providers_appointments} value={metrics.appointments.toString()} tone="slate" />
+            <MetricCard
+              icon={CalendarClock}
+              label={permissions.forceNonMedical ? "Open requests" : t.providers_appointments}
+              value={(permissions.forceNonMedical ? metrics.openConciergeRequests : metrics.appointments).toString()}
+              tone="slate"
+            />
           </div>
         </section>
 
@@ -1319,10 +1350,10 @@ function ProvidersPage() {
                       <InlineInfo icon={Mail}>{provider.email || t.common_not_set}</InlineInfo>
                     </div>
 
-                    <div className="mt-5 grid grid-cols-3 gap-3">
+                    <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-4">
                       <div className="rounded-2xl bg-slate-50 px-3 py-3">
                         <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">
-                          Doctors
+                          {providerContactsLabel(provider.provider_type)}
                         </p>
                         <p className="mt-2 text-xl font-semibold text-slate-950">
                           {provider.doctor_count}
@@ -1338,13 +1369,33 @@ function ProvidersPage() {
                       </div>
                       <div className="rounded-2xl bg-slate-50 px-3 py-3">
                         <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">
-                          Slots
+                          Services
                         </p>
                         <p className="mt-2 text-xl font-semibold text-slate-950">
-                          {provider.appointment_count}
+                          {provider.service_count}
+                        </p>
+                      </div>
+                      <div className="rounded-2xl bg-slate-50 px-3 py-3">
+                        <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">
+                          {provider.provider_type === "non_medical" ? "Open requests" : "Slots"}
+                        </p>
+                        <p className="mt-2 text-xl font-semibold text-slate-950">
+                          {provider.provider_type === "non_medical"
+                            ? provider.open_concierge_service_count
+                            : provider.appointment_count}
                         </p>
                       </div>
                     </div>
+                    {provider.provider_type === "non_medical" ? (
+                      <p className="mt-4 text-sm text-slate-500">
+                        {provider.concierge_service_count} concierge requests tracked
+                        {provider.last_interaction_at ? ` · Last activity ${compactDateTime(provider.last_interaction_at)}` : ""}
+                      </p>
+                    ) : provider.last_interaction_at ? (
+                      <p className="mt-4 text-sm text-slate-500">
+                        Last activity {compactDateTime(provider.last_interaction_at)}
+                      </p>
+                    ) : null}
                   </button>
                 ))}
                 </div>
@@ -1618,10 +1669,16 @@ function ProviderOverviewSection({
           </div>
         </div>
 
-        <div className="mt-5 grid gap-3 md:grid-cols-3">
+        <div className="mt-5 grid gap-3 md:grid-cols-4">
           <div className="rounded-2xl bg-slate-50 px-4 py-4">
-            <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Doctors</p>
+            <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">
+              {providerContactsLabel(detail.provider_type)}
+            </p>
             <p className="mt-2 text-2xl font-semibold text-slate-950">{detail.doctors.length}</p>
+          </div>
+          <div className="rounded-2xl bg-slate-50 px-4 py-4">
+            <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Services</p>
+            <p className="mt-2 text-2xl font-semibold text-slate-950">{detail.services.length}</p>
           </div>
           <div className="rounded-2xl bg-slate-50 px-4 py-4">
             <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">
@@ -1769,15 +1826,19 @@ function DoctorSection({
     <section className={cardClass("p-5")}>
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h3 className="text-sm font-semibold text-slate-950">Doctors</h3>
-          <p className="mt-1 text-sm text-slate-600">
-            Registry of clinicians attached to this provider.
-          </p>
+            <h3 className="text-sm font-semibold text-slate-950">
+              {providerContactsLabel(detail.provider_type)}
+            </h3>
+            <p className="mt-1 text-sm text-slate-600">
+              {detail.provider_type === "non_medical"
+                ? "Registry of operational contacts attached to this partner."
+                : "Registry of clinicians attached to this provider."}
+            </p>
+          </div>
+          <div className="text-xs uppercase tracking-[0.12em] text-slate-500">
+            {detail.doctors.length} {detail.provider_type === "non_medical" ? "contacts" : "clinicians"}
+          </div>
         </div>
-        <div className="text-xs uppercase tracking-[0.12em] text-slate-500">
-          {detail.doctors.length} clinicians
-        </div>
-      </div>
 
       {detail.doctors.length === 0 ? (
         <div className="mt-4">
@@ -2134,7 +2195,7 @@ function LinkedPatientsSection({
                 Last interaction {compactDateTime(patient.last_interaction_at)}
               </p>
 
-              <div className="mt-4 grid grid-cols-2 gap-3">
+              <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <div className="rounded-2xl bg-white px-3 py-3">
                   <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">
                     Appointments
@@ -2149,6 +2210,14 @@ function LinkedPatientsSection({
                   </p>
                   <p className="mt-2 text-xl font-semibold text-slate-950">
                     {patient.leistung_count}
+                  </p>
+                </div>
+                <div className="rounded-2xl bg-white px-3 py-3">
+                  <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">
+                    Concierge
+                  </p>
+                  <p className="mt-2 text-xl font-semibold text-slate-950">
+                    {patient.concierge_count}
                   </p>
                 </div>
               </div>

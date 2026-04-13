@@ -175,7 +175,9 @@ async fn settings_update_validates_bounds() {
 
 #[tokio::test]
 async fn settings_update_valid_value() {
-    let Some((app, admin_id)) = test_context().await else { return };
+    let Some((app, admin_id)) = test_context().await else {
+        return;
+    };
     let admin = auth_header_for("it_admin", admin_id);
 
     let (status, body) = json_request(
@@ -203,7 +205,9 @@ async fn settings_update_valid_value() {
 
 #[tokio::test]
 async fn settings_update_accepts_agency_profile_values() {
-    let Some((app, admin_id)) = test_context().await else { return };
+    let Some((app, admin_id)) = test_context().await else {
+        return;
+    };
     let admin = auth_header_for("it_admin", admin_id);
 
     let (status, body) = json_request(

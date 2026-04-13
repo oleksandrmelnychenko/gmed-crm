@@ -155,12 +155,17 @@ async fn seed_patient_assignment(
 }
 
 async fn seed_provider(pool: &PgPool, tag: &str) -> Uuid {
+    seed_provider_with_type(pool, tag, "medical").await
+}
+
+async fn seed_provider_with_type(pool: &PgPool, tag: &str, provider_type: &str) -> Uuid {
     sqlx::query_scalar(
         r#"INSERT INTO providers (name, provider_type, address_city, address_country)
-           VALUES ($1, 'medical', 'Cologne', 'DE')
+           VALUES ($1, $2, 'Cologne', 'DE')
            RETURNING id"#,
     )
     .bind(format!("Clinic {tag}"))
+    .bind(provider_type)
     .fetch_one(pool)
     .await
     .unwrap()
@@ -246,6 +251,22 @@ async fn seed_order_service(
     .bind(unit_price)
     .bind(provider_id)
     .bind(doctor_id)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+async fn seed_provider_service(pool: &PgPool, provider_id: Uuid, service_name: &str) {
+    sqlx::query(
+        r#"INSERT INTO service_catalog (
+                provider_id, service_name, description, price, currency, valid_from
+           ) VALUES (
+                $1, $2, $3, 120.0, 'EUR', CURRENT_DATE - 30
+           )"#,
+    )
+    .bind(provider_id)
+    .bind(service_name)
+    .bind(format!("{service_name} package"))
     .execute(pool)
     .await
     .unwrap();
@@ -450,6 +471,36 @@ async fn seed_appointment(
     .unwrap()
 }
 
+#[allow(clippy::too_many_arguments)]
+async fn seed_non_medical_appointment(
+    pool: &PgPool,
+    patient_id: Uuid,
+    provider_id: Uuid,
+    order_id: Uuid,
+    owner_user_id: Uuid,
+    created_by: Uuid,
+    tag: &str,
+) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO appointments (
+                patient_id, provider_id, order_id, owner_user_id,
+                appointment_type, title, date, time_start, time_end, status, created_by
+           ) VALUES (
+                $1, $2, $3, $4,
+                'non_medical', $5, CURRENT_DATE - 3, '12:00', '13:00', 'completed', $6
+           ) RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(provider_id)
+    .bind(order_id)
+    .bind(owner_user_id)
+    .bind(format!("Concierge visit {tag}"))
+    .bind(created_by)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
 async fn seed_interpreter_report(pool: &PgPool, appointment_id: Uuid, interpreter_id: Uuid) {
     sqlx::query(
         r#"INSERT INTO interpreter_reports (
@@ -503,6 +554,44 @@ async fn seed_concierge_service(
     .unwrap();
 }
 
+#[allow(clippy::too_many_arguments)]
+async fn seed_provider_concierge_service(
+    pool: &PgPool,
+    patient_id: Uuid,
+    provider_id: Uuid,
+    concierge_id: Uuid,
+    created_by: Uuid,
+    tag: &str,
+    status: &str,
+    billing_status: &str,
+    vendor_name: &str,
+    service_kind: &str,
+) {
+    sqlx::query(
+        r#"INSERT INTO concierge_services (
+                patient_id, provider_id, assigned_concierge_id, service_kind, title, status,
+                vendor_name, billing_status, completed_at, created_by
+           ) VALUES (
+                $1, $2, $3, $4, $5, $6,
+                $7, $8,
+                CASE WHEN $6 = 'completed' THEN now() ELSE NULL END,
+                $9
+           )"#,
+    )
+    .bind(patient_id)
+    .bind(provider_id)
+    .bind(concierge_id)
+    .bind(service_kind)
+    .bind(format!("{tag} {service_kind}"))
+    .bind(status)
+    .bind(vendor_name)
+    .bind(billing_status)
+    .bind(created_by)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
 async fn seed_feedback(
     pool: &PgPool,
     patient_id: Uuid,
@@ -516,11 +605,15 @@ async fn seed_feedback(
         r#"INSERT INTO patient_feedback_forms (
                 patient_id, provider_id, patient_manager_id, interpreter_id, concierge_id,
                 submitted_by, source, status, overall_score, patient_manager_score,
-                interpreter_score, concierge_score, treatment_score, nps_score
+                interpreter_score, concierge_score, treatment_score, doctor_score,
+                organization_score, service_score, infrastructure_score, price_value_score,
+                treatment_success, complication_reported, nps_score
            ) VALUES (
                 $1, $2, $3, $4, $5,
                 $6, 'staff_capture', 'reviewed', 5, 5,
-                4, 5, 5, 10
+                4, 5, 5, 5,
+                4, 5, 4, 4,
+                'yes', false, 10
            )"#,
     )
     .bind(patient_id)
@@ -529,6 +622,97 @@ async fn seed_feedback(
     .bind(interpreter_id)
     .bind(concierge_id)
     .bind(submitted_by)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+async fn seed_appointment_arztbrief(
+    pool: &PgPool,
+    patient_id: Uuid,
+    order_id: Uuid,
+    appointment_id: Uuid,
+    uploaded_by: Uuid,
+    tag: &str,
+    turnaround_hours: i32,
+) {
+    sqlx::query(
+        r#"INSERT INTO documents (
+                patient_id, order_id, appointment_id, auto_name, original_filename,
+                art, category, status, visibility, is_medical, mime_type, file_size,
+                storage_key, uploaded_by, created_at
+           )
+           SELECT
+                $1, $2, $3, $4, $5,
+                'arztbrief', 'medical', 'active', 'released_external', true, 'application/pdf', 1024,
+                $6, $7,
+                ((a.date::timestamp + COALESCE(a.time_end, a.time_start, TIME '00:00')) AT TIME ZONE 'UTC')
+                    + ($8::int * interval '1 hour')
+           FROM appointments a
+           WHERE a.id = $3"#,
+    )
+    .bind(patient_id)
+    .bind(order_id)
+    .bind(appointment_id)
+    .bind(format!("{tag}-arztbrief"))
+    .bind(format!("{tag}-arztbrief.pdf"))
+    .bind(format!("documents/{tag}-arztbrief.pdf"))
+    .bind(uploaded_by)
+    .bind(turnaround_hours)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn seed_appointment_communication(
+    pool: &PgPool,
+    appointment_id: Uuid,
+    patient_id: Uuid,
+    provider_id: Option<Uuid>,
+    doctor_id: Option<Uuid>,
+    created_by: Uuid,
+    target_type: &str,
+    status: &str,
+    created_hours_ago: i32,
+    responded_hours_ago: Option<i32>,
+) {
+    sqlx::query(
+        r#"INSERT INTO appointment_communications (
+                appointment_id, patient_id, provider_id, doctor_id,
+                target_type, direction, channel, status, subject,
+                created_by, created_at, responded_at, closed_at
+           ) VALUES (
+                $1, $2, $3, $4,
+                $5, 'outbound', 'email', $6, $7,
+                $8,
+                now() - ($9::int * interval '1 hour'),
+                CASE
+                    WHEN $10::int IS NULL THEN NULL
+                    ELSE now() - ($10::int * interval '1 hour')
+                END,
+                CASE
+                    WHEN $6 = 'closed' THEN COALESCE(
+                        CASE
+                            WHEN $10::int IS NULL THEN NULL
+                            ELSE now() - ($10::int * interval '1 hour')
+                        END,
+                        now()
+                    )
+                    ELSE NULL
+                END
+           )"#,
+    )
+    .bind(appointment_id)
+    .bind(patient_id)
+    .bind(provider_id)
+    .bind(doctor_id)
+    .bind(target_type)
+    .bind(status)
+    .bind(format!("{target_type} communication"))
+    .bind(created_by)
+    .bind(created_hours_ago)
+    .bind(responded_hours_ago)
     .execute(pool)
     .await
     .unwrap();
@@ -823,6 +1007,87 @@ async fn ceo_dashboard_is_forbidden_for_patient_manager() {
 }
 
 #[tokio::test]
+async fn sales_cannot_access_executive_risk_or_restricted_exports() {
+    let Some((app, pool, _admin_id)) = test_context().await else {
+        return;
+    };
+
+    let sales_id = seed_user(&pool, &unique_tag("sales-rbac"), "sales").await;
+    let sales_auth = auth_header_for(sales_id, "sales");
+
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        "/api/v1/stats/ceo/dashboard",
+        &sales_auth,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        "/api/v1/stats/risk-analysis",
+        &sales_auth,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, _, _, _) = text_request(
+        &app,
+        "GET",
+        "/api/v1/stats/reports/export?section=clinics",
+        &sales_auth,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, _, _, _) = text_request(
+        &app,
+        "GET",
+        "/api/v1/stats/reports/export?section=doctors",
+        &sales_auth,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn ceo_can_open_risk_analysis_workspace() {
+    let Some((app, pool, _admin_id)) = test_context().await else {
+        return;
+    };
+
+    let ceo_id = seed_user(&pool, &unique_tag("ceo-risk"), "ceo").await;
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/stats/risk-analysis",
+        &auth_header_for(ceo_id, "ceo"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        body["allowed_sections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == "patient_manager")
+    );
+    assert!(
+        body["allowed_sections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == "billing")
+    );
+}
+
+#[tokio::test]
 async fn reports_workspace_returns_role_scoped_sections() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;
@@ -831,13 +1096,14 @@ async fn reports_workspace_returns_role_scoped_sections() {
     let tag = unique_tag("reports-workspace");
     let sales_id = seed_user(&pool, &format!("{tag}-sales"), "sales").await;
     let billing_id = seed_user(&pool, &format!("{tag}-billing"), "billing").await;
+    let concierge_id = seed_user(&pool, &format!("{tag}-concierge"), "concierge").await;
 
     let patient_id = seed_patient(&pool, admin_id, &tag, "UA").await;
     let provider_id = seed_provider(&pool, &tag).await;
     let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
     let order_id = seed_order(&pool, patient_id, admin_id, &tag, "active").await;
     seed_order_service(&pool, order_id, provider_id, Some(doctor_id), &tag, 1400).await;
-    seed_appointment(
+    let appointment_id = seed_appointment(
         &pool,
         patient_id,
         provider_id,
@@ -860,6 +1126,155 @@ async fn reports_workspace_returns_role_scoped_sections() {
         0,
         "CURRENT_DATE + 14",
         "NULL",
+    )
+    .await;
+    sqlx::query(
+        r#"INSERT INTO order_followup_flows (
+                order_id, doctor_followup_status, followup_1w_status, followup_1m_status,
+                followup_6m_status, package_end_status, results_handoff_status
+           ) VALUES (
+                $1, 'completed', 'completed', 'completed',
+                'completed', 'not_required', 'completed'
+           )
+           ON CONFLICT (order_id) DO UPDATE
+           SET doctor_followup_status = EXCLUDED.doctor_followup_status,
+               followup_1w_status = EXCLUDED.followup_1w_status,
+               followup_1m_status = EXCLUDED.followup_1m_status,
+               followup_6m_status = EXCLUDED.followup_6m_status,
+               package_end_status = EXCLUDED.package_end_status,
+               results_handoff_status = EXCLUDED.results_handoff_status"#,
+    )
+    .bind(order_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO patient_feedback_forms (
+                patient_id, appointment_id, provider_id, doctor_id, patient_manager_id,
+                submitted_by, source, status, overall_score, treatment_score, doctor_score,
+                organization_score, service_score, infrastructure_score, price_value_score,
+                treatment_success, complication_reported, nps_score, comments
+           ) VALUES (
+                $1, $2, $3, $4, $5,
+                $5, 'staff_capture', 'reviewed', 5, 4, 5,
+                4, 5, 3, 4,
+                'yes', false, 9, 'High quality provider experience'
+           )"#,
+    )
+    .bind(patient_id)
+    .bind(appointment_id)
+    .bind(provider_id)
+    .bind(doctor_id)
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    seed_appointment_arztbrief(
+        &pool,
+        patient_id,
+        order_id,
+        appointment_id,
+        admin_id,
+        &tag,
+        36,
+    )
+    .await;
+    seed_appointment_communication(
+        &pool,
+        appointment_id,
+        patient_id,
+        Some(provider_id),
+        Some(doctor_id),
+        admin_id,
+        "clinic",
+        "answered",
+        30,
+        Some(6),
+    )
+    .await;
+    seed_appointment_communication(
+        &pool,
+        appointment_id,
+        patient_id,
+        Some(provider_id),
+        Some(doctor_id),
+        admin_id,
+        "doctor",
+        "answered",
+        34,
+        Some(4),
+    )
+    .await;
+    seed_appointment_communication(
+        &pool,
+        appointment_id,
+        patient_id,
+        Some(provider_id),
+        Some(doctor_id),
+        admin_id,
+        "doctor",
+        "sent",
+        5,
+        None,
+    )
+    .await;
+
+    let non_medical_provider_id =
+        seed_provider_with_type(&pool, &format!("{tag}-travel"), "non_medical").await;
+    seed_provider_service(&pool, non_medical_provider_id, "Airport transfer").await;
+    seed_order_service(
+        &pool,
+        order_id,
+        non_medical_provider_id,
+        None,
+        &format!("{tag}-travel"),
+        300,
+    )
+    .await;
+    let _ = seed_non_medical_appointment(
+        &pool,
+        patient_id,
+        non_medical_provider_id,
+        order_id,
+        concierge_id,
+        admin_id,
+        &format!("{tag}-travel"),
+    )
+    .await;
+    seed_provider_concierge_service(
+        &pool,
+        patient_id,
+        non_medical_provider_id,
+        concierge_id,
+        admin_id,
+        &format!("{tag}-travel-open"),
+        "planned",
+        "draft",
+        "Elite Drives",
+        "transfer",
+    )
+    .await;
+    seed_provider_concierge_service(
+        &pool,
+        patient_id,
+        non_medical_provider_id,
+        concierge_id,
+        admin_id,
+        &format!("{tag}-travel-done"),
+        "completed",
+        "ready",
+        "Sky Lounge",
+        "vip_terminal",
+    )
+    .await;
+    seed_feedback(
+        &pool,
+        patient_id,
+        non_medical_provider_id,
+        admin_id,
+        admin_id,
+        concierge_id,
+        admin_id,
     )
     .await;
 
@@ -906,6 +1321,13 @@ async fn reports_workspace_returns_role_scoped_sections() {
             .all(|value| value != "doctors")
     );
     assert!(
+        sales_body["allowed_sections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == "non_medical_providers")
+    );
+    assert!(
         sales_body["countries"]
             .as_array()
             .unwrap()
@@ -913,6 +1335,14 @@ async fn reports_workspace_returns_role_scoped_sections() {
             .any(|row| row["country"] == "UA")
     );
     assert_eq!(sales_body["service_types"][0]["gross_total"], Value::Null);
+    let non_medical_sales_row = sales_body["non_medical_providers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["provider_id"] == non_medical_provider_id.to_string())
+        .expect("expected non medical provider report row for sales");
+    assert_eq!(non_medical_sales_row["gross_service_volume"], Value::Null);
+    assert_eq!(non_medical_sales_row["service_count"], 1);
 
     let (billing_status, billing_body) = json_request(
         &app,
@@ -950,6 +1380,13 @@ async fn reports_workspace_returns_role_scoped_sections() {
             .any(|value| value == "doctors")
     );
     assert!(
+        billing_body["allowed_sections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == "non_medical_providers")
+    );
+    assert!(
         billing_body["clinics"]
             .as_array()
             .unwrap()
@@ -963,6 +1400,29 @@ async fn reports_workspace_returns_role_scoped_sections() {
             .iter()
             .any(|row| row["doctor_count"].as_i64().unwrap_or_default() >= 1)
     );
+    let clinic_row = billing_body["clinics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["name"] == format!("Clinic {tag}"))
+        .expect("expected clinic report row");
+    assert_eq!(clinic_row["feedback_count"], 1);
+    assert_eq!(clinic_row["avg_treatment_score"], 4.0);
+    assert_eq!(clinic_row["avg_doctor_score"], 5.0);
+    assert_eq!(clinic_row["avg_organization_score"], 4.0);
+    assert_eq!(clinic_row["avg_service_score"], 5.0);
+    assert_eq!(clinic_row["avg_infrastructure_score"], 3.0);
+    assert_eq!(clinic_row["avg_price_value_score"], 4.0);
+    assert_eq!(clinic_row["treatment_success_yes_rate"], 100.0);
+    assert_eq!(clinic_row["complication_rate"], 0.0);
+    assert_eq!(clinic_row["avg_response_hours"], 24.0);
+    assert_eq!(clinic_row["avg_findings_turnaround_hours"], 36.0);
+    assert_eq!(clinic_row["findings_sample_count"], 1);
+    assert_eq!(clinic_row["response_sample_count"], 1);
+    assert_eq!(clinic_row["open_communication_count"], 0);
+    assert_eq!(clinic_row["followup_completed_orders"], 1);
+    assert_eq!(clinic_row["followup_orders_total"], 1);
+    assert_eq!(clinic_row["followup_completion_rate"], 100.0);
     let doctor_rows = billing_body["doctors"].as_array().unwrap();
     assert!(
         doctor_rows
@@ -986,6 +1446,49 @@ async fn reports_workspace_returns_role_scoped_sections() {
             .unwrap_or_default(),
         "1666"
     );
+    assert_eq!(doctor_row["feedback_count"], 1);
+    assert_eq!(doctor_row["avg_treatment_score"], 4.0);
+    assert_eq!(doctor_row["avg_doctor_score"], 5.0);
+    assert_eq!(doctor_row["avg_organization_score"], 4.0);
+    assert_eq!(doctor_row["avg_service_score"], 5.0);
+    assert_eq!(doctor_row["avg_infrastructure_score"], 3.0);
+    assert_eq!(doctor_row["avg_price_value_score"], 4.0);
+    assert_eq!(doctor_row["treatment_success_yes_rate"], 100.0);
+    assert_eq!(doctor_row["complication_rate"], 0.0);
+    assert_eq!(doctor_row["avg_response_hours"], 30.0);
+    assert_eq!(doctor_row["avg_findings_turnaround_hours"], 36.0);
+    assert_eq!(doctor_row["findings_sample_count"], 1);
+    assert_eq!(doctor_row["response_sample_count"], 1);
+    assert_eq!(doctor_row["open_communication_count"], 1);
+    assert_eq!(doctor_row["followup_completed_orders"], 1);
+    assert_eq!(doctor_row["followup_orders_total"], 1);
+    assert_eq!(doctor_row["followup_completion_rate"], 100.0);
+    let non_medical_row = billing_body["non_medical_providers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["provider_id"] == non_medical_provider_id.to_string())
+        .expect("expected non medical provider report row");
+    assert_eq!(non_medical_row["service_count"], 1);
+    assert_eq!(non_medical_row["appointments_90d"], 1);
+    assert_eq!(non_medical_row["concierge_requests_90d"], 2);
+    assert_eq!(non_medical_row["open_concierge_requests"], 1);
+    assert_eq!(non_medical_row["completed_concierge_requests_90d"], 1);
+    assert_eq!(non_medical_row["feedback_count"], 1);
+    assert_eq!(non_medical_row["avg_concierge_score"], 5.0);
+    assert_eq!(
+        non_medical_row["gross_service_volume"]
+            .as_str()
+            .unwrap_or_default(),
+        "357"
+    );
+    assert!(
+        non_medical_row["service_focus"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == "Airport transfer")
+    );
 
     let (export_status, export_body, content_type, content_disposition) = text_request(
         &app,
@@ -1003,6 +1506,30 @@ async fn reports_workspace_returns_role_scoped_sections() {
     );
     assert!(export_body.contains(&format!("Clinic {tag}")));
     assert!(export_body.contains(&format!("Doctor {tag}")));
+    assert!(export_body.contains("avg_response_hours"));
+    assert!(export_body.contains("avg_findings_turnaround_hours"));
+    assert!(export_body.contains("treatment_success_yes_rate"));
+    assert!(export_body.contains("followup_completion_rate"));
+    assert!(export_body.contains("100.0"));
+
+    let (non_medical_export_status, non_medical_export_body, content_type, content_disposition) =
+        text_request(
+            &app,
+            "GET",
+            "/api/v1/stats/reports/export?section=non_medical_providers",
+            &auth_header_for(billing_id, "billing"),
+        )
+        .await;
+    assert_eq!(non_medical_export_status, StatusCode::OK);
+    assert!(content_type.unwrap_or_default().contains("text/csv"));
+    assert!(
+        content_disposition
+            .unwrap_or_default()
+            .contains("non-medical-provider-report.csv")
+    );
+    assert!(non_medical_export_body.contains("Airport transfer"));
+    assert!(non_medical_export_body.contains("Elite Drives"));
+    assert!(non_medical_export_body.contains("concierge_score"));
 }
 
 #[tokio::test]
@@ -1226,6 +1753,96 @@ async fn forecasting_workspace_returns_pipeline_collection_followup_and_capacity
             .all(|value| value != "collections")
     );
     assert_eq!(sales_body["quote_pipeline"]["gross_total"], Value::Null);
+}
+
+#[tokio::test]
+async fn forecasting_workspace_counts_package_end_followup_due_next_30_days() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("forecasting-package-end");
+    let ceo_id = seed_user(&pool, &format!("{tag}-ceo"), "ceo").await;
+    let patient_id = seed_patient(&pool, admin_id, &tag, "DE").await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag, "active").await;
+
+    sqlx::query(
+        r#"INSERT INTO order_followup_flows (
+                order_id, doctor_followup_status, followup_1w_status, followup_1m_status,
+                followup_6m_status, package_end_date, package_end_status, results_handoff_status
+           ) VALUES (
+                $1, 'completed', 'completed', 'completed',
+                'completed', CURRENT_DATE + 12, 'scheduled', 'completed'
+           )
+           ON CONFLICT (order_id) DO UPDATE
+           SET doctor_followup_status = EXCLUDED.doctor_followup_status,
+               followup_1w_status = EXCLUDED.followup_1w_status,
+               followup_1m_status = EXCLUDED.followup_1m_status,
+               followup_6m_status = EXCLUDED.followup_6m_status,
+               package_end_date = EXCLUDED.package_end_date,
+               package_end_status = EXCLUDED.package_end_status,
+               results_handoff_status = EXCLUDED.results_handoff_status"#,
+    )
+    .bind(order_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        r#"INSERT INTO appointments (
+                patient_id, provider_id, appointment_type, title, date, status, created_by
+           ) VALUES (
+                $1, $2, 'medical', $3, CURRENT_DATE + 45, 'planned', $4
+           )"#,
+    )
+    .bind(patient_id)
+    .bind(provider_id)
+    .bind(format!("Out-of-window follow-up {tag}"))
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/stats/forecasting",
+        &auth_header_for(ceo_id, "ceo"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        body["followup"]["package_end_due_next_30d"]
+            .as_i64()
+            .unwrap_or_default(),
+        1
+    );
+    assert_eq!(
+        body["followup"]["followup_1w_due_next_30d"]
+            .as_i64()
+            .unwrap_or_default(),
+        0
+    );
+    assert_eq!(
+        body["followup"]["followup_1m_due_next_30d"]
+            .as_i64()
+            .unwrap_or_default(),
+        0
+    );
+    assert_eq!(
+        body["followup"]["followup_6m_due_next_30d"]
+            .as_i64()
+            .unwrap_or_default(),
+        0
+    );
+    assert_eq!(
+        body["followup"]["milestones_due_next_30d"]
+            .as_i64()
+            .unwrap_or_default(),
+        1
+    );
 }
 
 #[tokio::test]

@@ -167,6 +167,7 @@ function patientPermissions(role?: string): PatientPermissions {
   return {
     canViewPage: [
       "ceo",
+      "ceo_assistant",
       "patient_manager",
       "billing",
       "teamlead_interpreter",
@@ -808,7 +809,7 @@ export function PatientsPage() {
             Patient registry
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600">
-            This workspace is available only to care and operations roles with patient access.
+            This workspace is available only to staff roles with patient access.
           </p>
         </section>
       </div>

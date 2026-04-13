@@ -221,6 +221,12 @@ async fn patient_can_submit_feedback_and_pm_gets_summary() {
             "concierge_score": 4,
             "treatment_score": 5,
             "doctor_score": 5,
+            "organization_score": 4,
+            "service_score": 5,
+            "infrastructure_score": 4,
+            "price_value_score": 4,
+            "treatment_success": "yes",
+            "complication_reported": false,
             "nps_score": 10,
             "comments": "Everything was coordinated well",
             "improvement_notes": "Keep this quality"
@@ -249,6 +255,10 @@ async fn patient_can_submit_feedback_and_pm_gets_summary() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(summary["total_feedback"], 1);
     assert_eq!(summary["nps_score"], 100);
+    assert_eq!(summary["average_scores"]["service"], 5.0);
+    assert_eq!(summary["average_scores"]["organization"], 4.0);
+    assert_eq!(summary["treatment_success_yes_rate"], 100.0);
+    assert_eq!(summary["complication_rate"], 0.0);
 
     let notification_count: i64 = sqlx::query_scalar(
         r#"SELECT count(*)
@@ -312,6 +322,12 @@ async fn teamlead_and_concierge_only_see_relevant_feedback_rows() {
             "interpreter_score": 5,
             "treatment_score": 4,
             "doctor_score": 4,
+            "organization_score": 4,
+            "service_score": 5,
+            "infrastructure_score": 4,
+            "price_value_score": 4,
+            "treatment_success": "yes",
+            "complication_reported": false,
             "nps_score": 9,
             "comments": "Interpreter was excellent"
         })),
@@ -331,6 +347,12 @@ async fn teamlead_and_concierge_only_see_relevant_feedback_rows() {
             "concierge_score": 5,
             "treatment_score": 4,
             "doctor_score": 4,
+            "organization_score": 5,
+            "service_score": 5,
+            "infrastructure_score": 4,
+            "price_value_score": 4,
+            "treatment_success": "partial",
+            "complication_reported": true,
             "nps_score": 8,
             "comments": "Concierge support was excellent"
         })),
@@ -392,6 +414,12 @@ async fn review_writes_timeline_feedback_events() {
             "interpreter_score": 4,
             "treatment_score": 4,
             "doctor_score": 4,
+            "organization_score": 4,
+            "service_score": 4,
+            "infrastructure_score": 3,
+            "price_value_score": 4,
+            "treatment_success": "partial",
+            "complication_reported": false,
             "nps_score": 8,
             "comments": "Follow-up call summary"
         })),

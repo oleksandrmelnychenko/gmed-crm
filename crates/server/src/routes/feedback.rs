@@ -43,6 +43,12 @@ struct CreateFeedbackRequest {
     concierge_score: Option<i32>,
     treatment_score: Option<i32>,
     doctor_score: Option<i32>,
+    organization_score: Option<i32>,
+    service_score: Option<i32>,
+    infrastructure_score: Option<i32>,
+    price_value_score: Option<i32>,
+    treatment_success: Option<String>,
+    complication_reported: Option<bool>,
     nps_score: i32,
     comments: Option<String>,
     improvement_notes: Option<String>,
@@ -96,6 +102,14 @@ impl SummaryAccumulator {
     }
 }
 
+fn percentage(value: i64, total: i64) -> Option<f64> {
+    if total <= 0 {
+        None
+    } else {
+        Some((value as f64 / total as f64) * 100.0)
+    }
+}
+
 #[derive(Clone)]
 struct PromoterSummary {
     patient_id: Uuid,
@@ -138,7 +152,9 @@ async fn list_my_feedback(
     let rows = match sqlx::query(
         r#"SELECT f.id, f.patient_id, f.appointment_id, f.provider_id, f.doctor_id, f.source,
                   f.status, f.overall_score, f.patient_manager_score, f.interpreter_score,
-                  f.concierge_score, f.treatment_score, f.doctor_score, f.nps_score,
+                  f.concierge_score, f.treatment_score, f.doctor_score, f.organization_score,
+                  f.service_score, f.infrastructure_score, f.price_value_score,
+                  f.treatment_success, f.complication_reported, f.nps_score,
                   f.comments, f.improvement_notes, f.submitted_at, f.reviewed_at,
                   a.title AS appointment_title, a.date AS appointment_date,
                   p.name AS provider_name, d.name AS doctor_name,
@@ -298,6 +314,10 @@ async fn get_feedback_summary(
     let mut concierge = SummaryAccumulator { sum: 0, count: 0 };
     let mut treatment = SummaryAccumulator { sum: 0, count: 0 };
     let mut doctor = SummaryAccumulator { sum: 0, count: 0 };
+    let mut organization = SummaryAccumulator { sum: 0, count: 0 };
+    let mut service = SummaryAccumulator { sum: 0, count: 0 };
+    let mut infrastructure = SummaryAccumulator { sum: 0, count: 0 };
+    let mut price_value = SummaryAccumulator { sum: 0, count: 0 };
 
     let mut total_feedback = 0_i64;
     let mut reviewed_feedback = 0_i64;
@@ -306,6 +326,10 @@ async fn get_feedback_summary(
     let mut promoters = 0_i64;
     let mut passives = 0_i64;
     let mut detractors = 0_i64;
+    let mut treatment_success_yes = 0_i64;
+    let mut treatment_success_partial = 0_i64;
+    let mut treatment_success_samples = 0_i64;
+    let mut complication_count = 0_i64;
 
     let mut promoter_map: HashMap<Uuid, PromoterSummary> = HashMap::new();
     let mut interpreter_map: HashMap<Uuid, StaffRankingSummary> = HashMap::new();
@@ -341,6 +365,24 @@ async fn get_feedback_summary(
         let doctor_score = row
             .try_get::<Option<i32>, _>("doctor_score")
             .unwrap_or_default();
+        let organization_score = row
+            .try_get::<Option<i32>, _>("organization_score")
+            .unwrap_or_default();
+        let service_score = row
+            .try_get::<Option<i32>, _>("service_score")
+            .unwrap_or_default();
+        let infrastructure_score = row
+            .try_get::<Option<i32>, _>("infrastructure_score")
+            .unwrap_or_default();
+        let price_value_score = row
+            .try_get::<Option<i32>, _>("price_value_score")
+            .unwrap_or_default();
+        let treatment_success = row
+            .try_get::<Option<String>, _>("treatment_success")
+            .unwrap_or_default();
+        let complication_reported = row
+            .try_get::<bool, _>("complication_reported")
+            .unwrap_or(false);
         let nps_score = row.try_get::<i32, _>("nps_score").unwrap_or(0);
 
         overall.push(overall_score);
@@ -349,6 +391,22 @@ async fn get_feedback_summary(
         concierge.push(concierge_score);
         treatment.push(treatment_score);
         doctor.push(doctor_score);
+        organization.push(organization_score);
+        service.push(service_score);
+        infrastructure.push(infrastructure_score);
+        price_value.push(price_value_score);
+
+        if let Some(value) = treatment_success {
+            treatment_success_samples += 1;
+            match value.as_str() {
+                "yes" => treatment_success_yes += 1,
+                "partial" => treatment_success_partial += 1,
+                _ => {}
+            }
+        }
+        if complication_reported {
+            complication_count += 1;
+        }
 
         if nps_score >= 9 {
             promoters += 1;
@@ -484,7 +542,20 @@ async fn get_feedback_summary(
             "concierge": concierge.average(),
             "treatment": treatment.average(),
             "doctor": doctor.average(),
+            "organization": organization.average(),
+            "service": service.average(),
+            "infrastructure": infrastructure.average(),
+            "price_value": price_value.average(),
         },
+        "treatment_success_yes_rate": percentage(
+            treatment_success_yes,
+            treatment_success_samples,
+        ),
+        "treatment_success_partial_rate": percentage(
+            treatment_success_partial,
+            treatment_success_samples,
+        ),
+        "complication_rate": percentage(complication_count, total_feedback),
         "top_promoters": top_promoters.into_iter().take(10).map(|item| {
             json!({
                 "patient_id": item.patient_id,
@@ -684,7 +755,9 @@ async fn create_feedback_record(
                 patient_manager_id, interpreter_id, concierge_id,
                 submitted_by, source, status,
                 overall_score, patient_manager_score, interpreter_score,
-                concierge_score, treatment_score, doctor_score, nps_score,
+                concierge_score, treatment_score, doctor_score, organization_score,
+                service_score, infrastructure_score, price_value_score,
+                treatment_success, complication_reported, nps_score,
                 comments, improvement_notes, internal_note, submitted_at
            ) VALUES (
                 $1, $2, $3, $4,
@@ -692,7 +765,8 @@ async fn create_feedback_record(
                 $8, $9, 'submitted',
                 $10, $11, $12,
                 $13, $14, $15, $16,
-                $17, $18, $19, $20
+                $17, $18, $19, $20, $21,
+                $22, $23, $24, $25
            )
            RETURNING id"#,
     )
@@ -711,6 +785,14 @@ async fn create_feedback_record(
     .bind(body.concierge_score)
     .bind(body.treatment_score)
     .bind(body.doctor_score)
+    .bind(body.organization_score)
+    .bind(body.service_score)
+    .bind(body.infrastructure_score)
+    .bind(body.price_value_score)
+    .bind(normalize_feedback_treatment_success(
+        body.treatment_success.as_deref(),
+    ))
+    .bind(body.complication_reported.unwrap_or(false))
     .bind(body.nps_score)
     .bind(comments.clone())
     .bind(improvement_notes.clone())
@@ -973,7 +1055,10 @@ async fn load_feedback_rows(
                   f.patient_manager_id, f.interpreter_id, f.concierge_id,
                   f.submitted_by, f.reviewed_by, f.source, f.status,
                   f.overall_score, f.patient_manager_score, f.interpreter_score,
-                  f.concierge_score, f.treatment_score, f.doctor_score, f.nps_score,
+                  f.concierge_score, f.treatment_score, f.doctor_score,
+                  f.organization_score, f.service_score, f.infrastructure_score,
+                  f.price_value_score, f.treatment_success, f.complication_reported,
+                  f.nps_score,
                   f.comments, f.improvement_notes, f.internal_note, f.review_note,
                   f.submitted_at, f.reviewed_at, f.created_at, f.updated_at,
                   p.patient_id AS patient_pid,
@@ -1264,6 +1349,48 @@ fn feedback_row_json(row: sqlx::postgres::PgRow, include_internal: bool) -> Valu
             ),
         ),
         (
+            "organization_score".to_string(),
+            json!(
+                row.try_get::<Option<i32>, _>("organization_score")
+                    .unwrap_or_default()
+            ),
+        ),
+        (
+            "service_score".to_string(),
+            json!(
+                row.try_get::<Option<i32>, _>("service_score")
+                    .unwrap_or_default()
+            ),
+        ),
+        (
+            "infrastructure_score".to_string(),
+            json!(
+                row.try_get::<Option<i32>, _>("infrastructure_score")
+                    .unwrap_or_default()
+            ),
+        ),
+        (
+            "price_value_score".to_string(),
+            json!(
+                row.try_get::<Option<i32>, _>("price_value_score")
+                    .unwrap_or_default()
+            ),
+        ),
+        (
+            "treatment_success".to_string(),
+            json!(
+                row.try_get::<Option<String>, _>("treatment_success")
+                    .unwrap_or_default()
+            ),
+        ),
+        (
+            "complication_reported".to_string(),
+            json!(
+                row.try_get::<bool, _>("complication_reported")
+                    .unwrap_or(false)
+            ),
+        ),
+        (
             "nps_score".to_string(),
             json!(row.try_get::<i32, _>("nps_score").unwrap_or(0)),
         ),
@@ -1341,6 +1468,11 @@ fn validate_feedback_scores(body: &CreateFeedbackRequest) -> Result<(), axum::re
     validate_optional_score_1_5(body.concierge_score, "Concierge score")?;
     validate_optional_score_1_5(body.treatment_score, "Treatment score")?;
     validate_optional_score_1_5(body.doctor_score, "Doctor score")?;
+    validate_optional_score_1_5(body.organization_score, "Organization score")?;
+    validate_optional_score_1_5(body.service_score, "Service score")?;
+    validate_optional_score_1_5(body.infrastructure_score, "Infrastructure score")?;
+    validate_optional_score_1_5(body.price_value_score, "Price/value score")?;
+    validate_treatment_success(body.treatment_success.as_deref())?;
 
     if !(0..=10).contains(&body.nps_score) {
         return Err(err(
@@ -1380,6 +1512,25 @@ fn normalize_optional(value: Option<&str>) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
+}
+
+#[allow(clippy::result_large_err)]
+fn validate_treatment_success(value: Option<&str>) -> Result<(), axum::response::Response> {
+    match normalize_feedback_treatment_success(value) {
+        Some(normalized) if matches!(normalized.as_str(), "no" | "partial" | "yes") => Ok(()),
+        Some(_) => Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Treatment success must be one of: no, partial, yes",
+        )),
+        None => Ok(()),
+    }
+}
+
+fn normalize_feedback_treatment_success(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_ascii_lowercase())
 }
 
 async fn load_patient_label(state: &AppState, patient_id: Uuid) -> Option<String> {
