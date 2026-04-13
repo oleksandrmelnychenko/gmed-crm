@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, patient_id, title, first_name, last_name,\n                  birth_date, gender, nationality, residence_country,\n                  languages, phone_primary, phone_secondary, email,\n                  address_street, address_city, address_zip, address_country,\n                  insurance_provider, insurance_number, insurance_type,\n                  emergency_contact_name, emergency_contact_phone, emergency_contact_relation,\n                  legal_status, notes, is_active, created_at, updated_at\n           FROM patients WHERE id = $1",
+  "query": "SELECT id, patient_id, title, first_name, last_name,\n                  birth_date, gender, nationality, residence_country,\n                  languages, functional_labels, phone_primary, phone_secondary, email,\n                  address_street, address_city, address_zip, address_country,\n                  insurance_provider, insurance_number, insurance_type,\n                  emergency_contact_name, emergency_contact_phone, emergency_contact_relation,\n                  legal_status, notes, is_active, created_at, updated_at\n           FROM patients WHERE id = $1",
   "describe": {
     "columns": [
       {
@@ -55,91 +55,96 @@
       },
       {
         "ordinal": 10,
+        "name": "functional_labels",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 11,
         "name": "phone_primary",
         "type_info": "Text"
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "phone_secondary",
         "type_info": "Text"
       },
       {
-        "ordinal": 12,
+        "ordinal": 13,
         "name": "email",
         "type_info": "Text"
       },
       {
-        "ordinal": 13,
+        "ordinal": 14,
         "name": "address_street",
         "type_info": "Text"
       },
       {
-        "ordinal": 14,
+        "ordinal": 15,
         "name": "address_city",
         "type_info": "Text"
       },
       {
-        "ordinal": 15,
+        "ordinal": 16,
         "name": "address_zip",
         "type_info": "Text"
       },
       {
-        "ordinal": 16,
+        "ordinal": 17,
         "name": "address_country",
         "type_info": "Text"
       },
       {
-        "ordinal": 17,
+        "ordinal": 18,
         "name": "insurance_provider",
         "type_info": "Text"
       },
       {
-        "ordinal": 18,
+        "ordinal": 19,
         "name": "insurance_number",
         "type_info": "Text"
       },
       {
-        "ordinal": 19,
+        "ordinal": 20,
         "name": "insurance_type",
         "type_info": "Text"
       },
       {
-        "ordinal": 20,
+        "ordinal": 21,
         "name": "emergency_contact_name",
         "type_info": "Text"
       },
       {
-        "ordinal": 21,
+        "ordinal": 22,
         "name": "emergency_contact_phone",
         "type_info": "Text"
       },
       {
-        "ordinal": 22,
+        "ordinal": 23,
         "name": "emergency_contact_relation",
         "type_info": "Text"
       },
       {
-        "ordinal": 23,
+        "ordinal": 24,
         "name": "legal_status",
         "type_info": "Jsonb"
       },
       {
-        "ordinal": 24,
+        "ordinal": 25,
         "name": "notes",
         "type_info": "Text"
       },
       {
-        "ordinal": 25,
+        "ordinal": 26,
         "name": "is_active",
         "type_info": "Bool"
       },
       {
-        "ordinal": 26,
+        "ordinal": 27,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 27,
+        "ordinal": 28,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -159,6 +164,7 @@
       false,
       true,
       true,
+      false,
       false,
       true,
       true,
@@ -180,5 +186,5 @@
       false
     ]
   },
-  "hash": "ef201d0eaf39dfaba3d2e6e733b2b4fb9da3dcdf208bacee3f068fdafd931077"
+  "hash": "c60c0c370db97a58caa6aa68eb8ac2f9603544bd2ef66292562c90eb360ed5e1"
 }

@@ -95,16 +95,56 @@
       },
       {
         "ordinal": 18,
-        "name": "first_name",
+        "name": "billing_release_status",
         "type_info": "Text"
       },
       {
         "ordinal": 19,
-        "name": "last_name",
+        "name": "billing_release_note",
         "type_info": "Text"
       },
       {
         "ordinal": 20,
+        "name": "billing_released_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 21,
+        "name": "billing_released_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 22,
+        "name": "package_coverage_status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 23,
+        "name": "package_coverage_note",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 24,
+        "name": "package_coverage_decided_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 25,
+        "name": "package_coverage_decided_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 26,
+        "name": "first_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 27,
+        "name": "last_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 28,
         "name": "p_pid",
         "type_info": "Text"
       }
@@ -133,6 +173,14 @@
       false,
       false,
       false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
       false,
       false,
       false

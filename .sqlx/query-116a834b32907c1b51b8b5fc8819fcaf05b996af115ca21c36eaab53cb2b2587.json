@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, patient_id, first_name, last_name, birth_date, gender, email,\n                  phone_primary, phone_secondary, nationality, languages,\n                  insurance_type, insurance_provider, insurance_number,\n                  notes, is_active, created_at, updated_at\n           FROM patients WHERE id = $1",
+  "query": "SELECT id, patient_id, first_name, last_name, birth_date, gender, email,\n                  phone_primary, phone_secondary, nationality, languages, functional_labels,\n                  insurance_type, insurance_provider, insurance_number,\n                  notes, is_active, created_at, updated_at\n           FROM patients WHERE id = $1",
   "describe": {
     "columns": [
       {
@@ -60,36 +60,41 @@
       },
       {
         "ordinal": 11,
+        "name": "functional_labels",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 12,
         "name": "insurance_type",
         "type_info": "Text"
       },
       {
-        "ordinal": 12,
+        "ordinal": 13,
         "name": "insurance_provider",
         "type_info": "Text"
       },
       {
-        "ordinal": 13,
+        "ordinal": 14,
         "name": "insurance_number",
         "type_info": "Text"
       },
       {
-        "ordinal": 14,
+        "ordinal": 15,
         "name": "notes",
         "type_info": "Text"
       },
       {
-        "ordinal": 15,
+        "ordinal": 16,
         "name": "is_active",
         "type_info": "Bool"
       },
       {
-        "ordinal": 16,
+        "ordinal": 17,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 17,
+        "ordinal": 18,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -111,6 +116,7 @@
       true,
       true,
       false,
+      false,
       true,
       true,
       true,
@@ -120,5 +126,5 @@
       false
     ]
   },
-  "hash": "cc0ed0796aacbb1fc75a6f82e9f693234627960c46928d9825d9b669f619d45b"
+  "hash": "116a834b32907c1b51b8b5fc8819fcaf05b996af115ca21c36eaab53cb2b2587"
 }

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'create_order_blocked_recheck', 'patient', $2, $3)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "070457ca15ae1d3c2f2e6a6ded055179b8c5237ab8802af91100b28fd230919f"
+}

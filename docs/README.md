@@ -18,6 +18,7 @@
 1. `requirements/` - канонічні узгоджені вимоги до продукту.
 2. `backlog/` - delivery-документи для планування реалізації.
 3. `architecture/` - цільова архітектура рішення.
+4. `testing/` - regression matrices, аудити трасованості Excel і current-state gap-аудити.
 
 ## Канонічні документи
 
@@ -39,6 +40,15 @@
 ### Architecture
 
 - `architecture/01_target-architecture_ua.md`
+
+### Testing
+
+- `testing/user-stories-excel-backlog-audit_ua.md` - аудит 1:1 між Excel `User Stories` і `requirements/03_product-backlog_ua.md`
+- `testing/source-workspace-regression-matrix.md` - regression coverage по workspace slices
+- `testing/source-billing-regression-matrix.md` - regression coverage по billing slice
+- `testing/source-documents-regression-matrix.md` - regression coverage по documents slice
+- `testing/current-state-gap-audit_ua.md` - робочий зріз того, що вже є в коді, а що ще лишається gap відносно source scope
+- `testing/worktree-stabilization-inventory_ua.md` - інвентаризація незведеного worktree перед фінальним stabilization pass
 
 ## Як читати документацію
 

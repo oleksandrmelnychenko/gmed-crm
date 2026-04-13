@@ -6,7 +6,7 @@
 - `1 (Update 2) User Story Salesforce.xlsx`
 - нормалізованих markdown-артефактів у `docs/requirements/*` і `docs/backlog/*`
 
-Важлива межа: це покриває **реалізований current-state billing layer**, тобто `order_leistungen`, billing handoff, `concierge_services`, financial document access. Окремі `invoices / quotes / DATEV / Mahnwesen` ще не реалізовані як повний backend module і тому винесені в `Not automated yet`.
+Важлива межа: це покриває **реалізований current-state billing layer**, тобто `order_leistungen`, billing handoff, `quotes`, `invoices`, `Mahnwesen`, `concierge_services`, patient-portal invoice visibility і financial document access. Поза цим current-state все ще лишаються окремі фінансові сценарії на кшталт `DATEV`, `E-Rechnung`, real payment-provider checkout, tax/accounting export і частина advanced settlement logic.
 
 > **Трасованість:** `03_product-backlog_ua.md` синхронізується з Excel скриптом `generate_product_backlog_from_excel.py`; посилання `:рядок` на цей файл у матриці нижче можуть застаріти — шукайте відповідний **Excel ряд.** у беклозі (EPIC 9) або аудит `user-stories-excel-backlog-audit_ua.md`.
 
@@ -50,6 +50,13 @@
   Covers:
   billing can move quote status and record payment amount, while non-financial operational roles cannot access quote detail.
 
+- `quote_versions_capture_initial_and_status_update_snapshots`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:117`
+  `docs/backlog/04_implementation-tasks_ua.md:61`
+  Covers:
+  quote creation writes an initial immutable snapshot, later status/payment updates append a new quote version instead of overwriting the only historical state, and the quote detail workspace can read back that version chain.
+
 - `invoice_creation_from_quote_marks_order_services_invoiced`
   Source:
   `docs/requirements/03_product-backlog_ua.md:117`
@@ -57,6 +64,14 @@
   `docs/requirements/03_product-backlog_ua.md:245`
   Covers:
   invoice is materialized from quote snapshot, remains patient/order bound, and approved order services are moved to `invoiced`.
+
+- `invoice_creation_requires_billing_release_gate`
+  Source:
+  `docs/requirements/01_process-mapping_ua.md:81`
+  `docs/requirements/03_product-backlog_ua.md:486`
+  `docs/diagrams/system-diagrams.md:414`
+  Covers:
+  quote-to-invoice conversion is blocked until billing explicitly grants `Freigabe Abrechnung`; PM service approval alone is not enough.
 
 - `second_active_non_advance_invoice_for_same_quote_is_rejected`
   Source:
@@ -87,6 +102,20 @@
   Covers:
   patient portal sees own invoice snapshots only, can open invoice detail, and payment-proof uploads feed back into billing-facing invoice metadata.
 
+- `staff_can_download_invoice_pdf_document`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:117`
+  `docs/requirements/03_product-backlog_ua.md:131`
+  Covers:
+  billing workspace can render a patient/order-bound invoice snapshot as PDF and return a real `application/pdf` document.
+
+- `patient_can_download_own_invoice_pdf`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:131`
+  `docs/backlog/04_implementation-tasks_ua.md:284`
+  Covers:
+  patient portal can open and download the same invoice PDF for the linked patient record without exposing invoices from other patients.
+
 - `billing_can_run_first_and_second_dunning_then_collections`
   Source:
   `docs/requirements/03_product-backlog_ua.md:117`
@@ -107,6 +136,13 @@
   `docs/requirements/03_product-backlog_ua.md:117`
   Covers:
   paid invoices cannot re-enter Mahnwesen escalation.
+
+- `auto_dunning_scheduler_marks_overdue_and_advances_reminder_levels`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:244`
+  `docs/backlog/04_implementation-tasks_ua.md:164`
+  Covers:
+  background auto-dunning marks overdue invoices, creates the first reminder once the due date is missed, and advances `1st reminder -> 2nd -> collections` after the configured scheduler delays without duplicating existing levels.
 
 - `billing_sees_order_leistung_vat_and_cost_passthrough_fields`
   Source:

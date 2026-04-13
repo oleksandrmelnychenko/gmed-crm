@@ -24,6 +24,36 @@
   Covers:
   upload, list, open detail, download of visit-linked file.
 
+- `document_upload_without_explicit_art_is_auto_classified_from_filename`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:139`
+  Covers:
+  upload without manual document type, filename-based auto-classification, inferred category and medical flag, and no unnecessary intake-queue residue for high-confidence matches.
+
+- `uncategorized_uploads_land_in_document_intake_queue`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:137`
+  `docs/requirements/03_product-backlog_ua.md:139`
+  `docs/requirements/03_product-backlog_ua.md:203`
+  Covers:
+  generic scan/import uploads stay storable without manual art, remain flagged for categorization and appear in the staff intake queue for follow-up review.
+
+- `interpreter_uploads_land_in_teamlead_review_queue_and_teamlead_can_release_them`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:297`
+  `docs/requirements/03_product-backlog_ua.md:301`
+  `docs/backlog/04_implementation-tasks_ua.md:215`
+  `docs/backlog/04_implementation-tasks_ua.md:219`
+  Covers:
+  interpreter can upload an internal draft document for an assigned patient, the upload surfaces in the teamlead review queue, and teamlead can classify and release it without getting full document-management powers.
+
+- `teamlead_cannot_release_interpreter_upload_without_classification`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:301`
+  `docs/backlog/04_implementation-tasks_ua.md:219`
+  Covers:
+  teamlead cannot release an interpreter-origin draft into active status while the document still remains uncategorized or generic.
+
 - `interpreter_sees_only_released_medical_documents_for_assigned_patient`
   Source:
   `docs/requirements/03_product-backlog_ua.md:100`
@@ -57,6 +87,18 @@
   `docs/backlog/04_implementation-tasks_ua.md:203`
   Covers:
   provider-facing external sharing is rejected when the selected communication channel is not part of the allowed official channel policy.
+
+- `medical_document_share_requires_matching_provider_specialty`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:242`
+  Covers:
+  appointment-linked medical documents cannot be forwarded to a different medical provider from the same order context when the provider specialty does not match the doctor specialty of the originating appointment.
+
+- `appointment_linked_document_share_prefers_appointment_provider_over_order_context`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:242`
+  Covers:
+  when a medical document is linked to a concrete appointment, provider involvement is resolved against that appointment first; another provider from the same order must not pass sharing validation just because it appears elsewhere in the order scope.
 
 - `patient_email_share_requires_active_channel_consent`
   Source:
@@ -116,6 +158,26 @@
   `docs/requirements/03_product-backlog_ua.md:149`
   Covers:
   document detail can register a translation request, keep it document-bound and move the request through operational statuses.
+
+- `document_text_extraction_can_prefill_translation_request_workspace`
+  Source:
+  `docs/requirements/04_non-functional-requirements_ua.md:131`
+  `docs/requirements/03_product-backlog_ua.md:149`
+  Covers:
+  best-effort text extraction for uploaded source documents, persisted extraction metadata, manual rerun endpoint and automatic prefill of translation workspace source text.
+
+- `image_document_text_extraction_uses_ocr_or_reports_runtime_unavailable`
+  Source:
+  `docs/requirements/04_non-functional-requirements_ua.md:131`
+  Covers:
+  image-only uploads route through OCR-capable extraction, persist the active OCR/runtime method (`windows_ocr` or `tesseract_cli`) and keep rerun behavior stable when the environment does not provide OCR.
+
+- `translation_workspace_can_store_source_and_translated_text`
+  Source:
+  `docs/requirements/04_non-functional-requirements_ua.md:131`
+  `docs/requirements/03_product-backlog_ua.md:149`
+  Covers:
+  translation workspace stores source language, source text, translated text and blocks completion without final translated content.
 
 - `document_templates_can_generate_medication_summary_pdf_document`
   Source:
