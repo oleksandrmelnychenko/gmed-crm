@@ -37,8 +37,33 @@ interface NavItem {
 
 const mainNav: NavItem[] = [
   { to: "/", labelKey: "nav_dashboard", icon: Home },
-  { to: "/chat", labelKey: "nav_chat", icon: MessageSquare },
-  { to: "/feedback", labelKey: "nav_feedback", icon: Star },
+  {
+    to: "/chat",
+    labelKey: "nav_chat",
+    icon: MessageSquare,
+    roles: [
+      "ceo",
+      "ceo_assistant",
+      "patient_manager",
+      "teamlead_interpreter",
+      "interpreter",
+      "concierge",
+      "billing",
+      "it_admin",
+    ],
+  },
+  {
+    to: "/feedback",
+    labelKey: "nav_feedback",
+    icon: Star,
+    roles: [
+      "ceo",
+      "ceo_assistant",
+      "patient_manager",
+      "teamlead_interpreter",
+      "concierge",
+    ],
+  },
   {
     to: "/reports",
     labelKey: "nav_reports",
@@ -64,14 +89,48 @@ const crmNav: NavItem[] = [
   { to: "/patients", labelKey: "patients_title", icon: Users },
   { to: "/providers", labelKey: "nav_providers", icon: Building2 },
   { to: "/orders", labelKey: "orders_title", icon: FileText },
-  { to: "/contracts", labelKey: "Contracts", icon: Wallet },
-  { to: "/invoices", labelKey: "Invoices", icon: Wallet },
-  { to: "/documents", labelKey: "Documents", icon: Files },
+  {
+    to: "/contracts",
+    labelKey: "Contracts",
+    icon: Wallet,
+    roles: ["ceo", "ceo_assistant", "patient_manager", "billing"],
+  },
+  {
+    to: "/invoices",
+    labelKey: "Invoices",
+    icon: Wallet,
+    roles: ["ceo", "ceo_assistant", "patient_manager", "billing"],
+  },
+  {
+    to: "/documents",
+    labelKey: "Documents",
+    icon: Files,
+    roles: [
+      "ceo",
+      "ceo_assistant",
+      "patient_manager",
+      "teamlead_interpreter",
+      "interpreter",
+      "concierge",
+      "billing",
+    ],
+  },
 ];
 
 const medicineNav: NavItem[] = [
   { to: "/cases", labelKey: "cases_title", icon: Activity },
-  { to: "/appointments", labelKey: "appointments_title", icon: Calendar },
+  {
+    to: "/appointments",
+    labelKey: "appointments_title",
+    icon: Calendar,
+    roles: [
+      "ceo",
+      "patient_manager",
+      "teamlead_interpreter",
+      "interpreter",
+      "concierge",
+    ],
+  },
 ];
 
 const adminNav: NavItem[] = [

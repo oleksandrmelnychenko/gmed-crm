@@ -94,7 +94,11 @@ const textareaClassName = "min-h-[104px] w-full rounded-xl border border-input b
 
 function permissions(role?: string) {
   return {
-    canView: role === "ceo" || role === "patient_manager" || role === "billing",
+    canView:
+      role === "ceo" ||
+      role === "ceo_assistant" ||
+      role === "patient_manager" ||
+      role === "billing",
     canCreate: role === "ceo" || role === "patient_manager" || role === "billing",
     canManage: role === "ceo" || role === "billing",
   };
@@ -226,6 +230,12 @@ function StaffInvoicesPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
   const access = permissions(user?.role);
+  const canLoadOrderOptions = user?.role === "patient_manager" || user?.role === "billing";
+  const canLoadQuoteOptions =
+    user?.role === "ceo" ||
+    user?.role === "ceo_assistant" ||
+    user?.role === "patient_manager" ||
+    user?.role === "billing";
 
   const initialPatientId = searchParams.get("patient") ?? "";
   const initialOrderId = searchParams.get("order") ?? "";
@@ -293,8 +303,8 @@ function StaffInvoicesPage() {
       try {
         const [patientsResult, ordersResult, quotesResult] = await Promise.all([
           apiFetch<PatientOption[]>("/patients?active_only=false"),
-          apiFetch<OrderOption[]>("/orders"),
-          apiFetch<QuoteOption[]>("/quotes"),
+          canLoadOrderOptions ? apiFetch<OrderOption[]>("/orders") : Promise.resolve([]),
+          canLoadQuoteOptions ? apiFetch<QuoteOption[]>("/quotes") : Promise.resolve([]),
         ]);
         if (ignore) return;
         setPatients(patientsResult);
@@ -309,7 +319,7 @@ function StaffInvoicesPage() {
     return () => {
       ignore = true;
     };
-  }, [t.common_error]);
+  }, [canLoadOrderOptions, canLoadQuoteOptions, t.common_error]);
 
   useEffect(() => {
     let ignore = false;
@@ -449,7 +459,7 @@ function StaffInvoicesPage() {
   if (!access.canView) {
     return (
       <div className="rounded-3xl border border-amber-200 bg-amber-50 px-6 py-5 text-sm text-amber-800 shadow-sm">
-        Invoices are restricted to CEO, patient managers and billing.
+        Invoices are restricted to CEO, CEO assistant, patient managers and billing.
       </div>
     );
   }

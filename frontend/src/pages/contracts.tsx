@@ -223,9 +223,14 @@ const textareaClassName =
   "min-h-[104px] w-full rounded-xl border border-input bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100";
 
 function contractsPermissions(role?: string): ContractsPermissions {
+  const canView =
+    role === "ceo" ||
+    role === "ceo_assistant" ||
+    role === "patient_manager" ||
+    role === "billing";
   const canManage = role === "ceo" || role === "patient_manager" || role === "billing";
   return {
-    canViewPage: canManage,
+    canViewPage: canView,
     canCreateContract: canManage,
     canManageContract: canManage,
     canCreateQuote: canManage,
@@ -785,7 +790,7 @@ export function ContractsPage() {
   if (!permissions.canViewPage) {
     return (
       <div className="rounded-3xl border border-amber-200 bg-amber-50 px-6 py-5 text-sm text-amber-800 shadow-sm">
-        Contracts and quotes are restricted to CEO, patient managers and billing.
+        Contracts and quotes are restricted to CEO, CEO assistant, patient managers and billing.
       </div>
     );
   }

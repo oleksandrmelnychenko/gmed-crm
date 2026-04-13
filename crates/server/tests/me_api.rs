@@ -961,3 +961,245 @@ async fn patient_can_cancel_own_pending_additional_service_request() {
             .unwrap();
     assert_eq!(status_in_db, "cancelled");
 }
+
+#[tokio::test]
+async fn patient_sees_staff_processing_updates_for_portal_service_and_loses_cancel_right() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("me-concierge-crossflow");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let patient_user_id = seed_user(&pool, &tag, "patient").await;
+    let concierge_id = seed_user(&pool, &tag, "concierge").await;
+    let patient_manager_id = seed_user(&pool, &tag, "patient_manager").await;
+
+    seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, concierge_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, patient_manager_id, admin_id).await;
+
+    let patient_bearer = auth_header_for(patient_user_id, "patient");
+    let concierge_bearer = auth_header_for(concierge_id, "concierge");
+
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/me/concierge-services",
+        &patient_bearer,
+        Some(json!({
+            "service_kind": "hotel",
+            "title": "Clinic hotel coordination",
+            "vendor_name": "Airport Hilton",
+            "starts_at": "2026-04-24T12:00:00Z",
+            "ends_at": "2026-04-26T10:00:00Z",
+            "service_notes": "Please confirm a quiet room close to the clinic."
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let service_id = created["id"].as_str().expect("service id");
+    assert_eq!(created["status"], "planned");
+    assert_eq!(created["request_source"], "patient_portal");
+    assert_eq!(created["can_cancel"], true);
+
+    let (status, staff_queue) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/concierge-services?patient_id={patient_id}"),
+        &concierge_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let staff_items = staff_queue.as_array().expect("staff queue");
+    assert_eq!(staff_items.len(), 1);
+    assert_eq!(staff_items[0]["id"], service_id);
+    assert_eq!(staff_items[0]["request_source"], "patient_portal");
+    assert_eq!(staff_items[0]["status"], "planned");
+
+    let (status, updated) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/concierge-services/{service_id}/update"),
+        &concierge_bearer,
+        Some(json!({
+            "status": "booked",
+            "booking_reference": "HTL-7788",
+            "vendor_contact": "booking@hilton.example",
+            "service_notes": "Booked by concierge and confirmed with the patient."
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(updated["status"], "booked");
+    assert_eq!(updated["booking_reference"], "HTL-7788");
+
+    let (status, portal_history) = json_request(
+        &app,
+        "GET",
+        "/api/v1/me/concierge-services",
+        &patient_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let portal_items = portal_history.as_array().expect("portal history");
+    assert_eq!(portal_items.len(), 1);
+    assert_eq!(portal_items[0]["id"], service_id);
+    assert_eq!(portal_items[0]["status"], "booked");
+    assert_eq!(portal_items[0]["booking_reference"], "HTL-7788");
+    assert_eq!(
+        portal_items[0]["service_notes"],
+        "Booked by concierge and confirmed with the patient."
+    );
+    assert_eq!(portal_items[0]["can_cancel"], false);
+    assert_eq!(
+        portal_items[0]["assigned_concierge_name"],
+        format!("concierge {tag}")
+    );
+
+    let (status, cancel_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/me/concierge-services/{service_id}/cancel"),
+        &patient_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(
+        cancel_body["message"],
+        "Service request is already being processed and can no longer be cancelled"
+    );
+}
+
+#[tokio::test]
+async fn portal_service_notifications_and_staff_queue_stay_assignment_scoped() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("me-concierge-scope");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let patient_user_id = seed_user(&pool, &tag, "patient").await;
+    let assigned_pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    let assigned_concierge_id = seed_user(&pool, &format!("{tag}-concierge"), "concierge").await;
+    let unrelated_pm_id = seed_user(&pool, &format!("{tag}-other-pm"), "patient_manager").await;
+    let unrelated_concierge_id =
+        seed_user(&pool, &format!("{tag}-other-concierge"), "concierge").await;
+
+    seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, assigned_pm_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, assigned_concierge_id, admin_id).await;
+
+    let patient_bearer = auth_header_for(patient_user_id, "patient");
+    let assigned_concierge_bearer = auth_header_for(assigned_concierge_id, "concierge");
+    let unrelated_concierge_bearer = auth_header_for(unrelated_concierge_id, "concierge");
+    let unrelated_pm_bearer = auth_header_for(unrelated_pm_id, "patient_manager");
+
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/me/concierge-services",
+        &patient_bearer,
+        Some(json!({
+            "service_kind": "transfer",
+            "title": "Airport pickup coordination",
+            "starts_at": "2026-04-28T08:30:00Z",
+            "service_notes": "One passenger with two bags."
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let service_id = created["id"].as_str().expect("service id");
+
+    for (user_id, expected_count) in [(assigned_pm_id, 1_i64), (assigned_concierge_id, 1_i64)] {
+        let count: i64 = sqlx::query_scalar(
+            r#"SELECT count(*)
+               FROM user_notifications
+               WHERE user_id = $1
+                 AND kind = 'concierge_service_request'
+                 AND entity_type = 'concierge_service'
+                 AND entity_id = $2"#,
+        )
+        .bind(user_id)
+        .bind(Uuid::parse_str(service_id).unwrap())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            count, expected_count,
+            "assigned staff should get service request notification"
+        );
+    }
+
+    for user_id in [unrelated_pm_id, unrelated_concierge_id] {
+        let count: i64 = sqlx::query_scalar(
+            r#"SELECT count(*)
+               FROM user_notifications
+               WHERE user_id = $1
+                 AND kind = 'concierge_service_request'
+                 AND entity_type = 'concierge_service'
+                 AND entity_id = $2"#,
+        )
+        .bind(user_id)
+        .bind(Uuid::parse_str(service_id).unwrap())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            count, 0,
+            "unrelated staff must not get portal service notifications"
+        );
+    }
+
+    let (status, assigned_queue) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/concierge-services?patient_id={patient_id}"),
+        &assigned_concierge_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let assigned_items = assigned_queue.as_array().expect("assigned concierge queue");
+    assert_eq!(assigned_items.len(), 1);
+    assert_eq!(assigned_items[0]["id"], service_id);
+    assert_eq!(assigned_items[0]["request_source"], "patient_portal");
+
+    let (status, unrelated_queue) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/concierge-services?patient_id={patient_id}"),
+        &unrelated_concierge_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        unrelated_queue
+            .as_array()
+            .expect("unrelated concierge queue")
+            .len(),
+        0,
+        "unrelated concierge must not see portal service row"
+    );
+
+    let (status, unrelated_pm_queue) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/concierge-services?patient_id={patient_id}"),
+        &unrelated_pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        unrelated_pm_queue
+            .as_array()
+            .expect("unrelated pm queue")
+            .len(),
+        0,
+        "unrelated PM must not see portal service row"
+    );
+}

@@ -606,3 +606,328 @@ async fn quote_versions_capture_initial_and_status_update_snapshots() {
             .unwrap();
     assert_eq!(stored_version_count, 2);
 }
+
+#[tokio::test]
+async fn ceo_can_manage_contracts_and_quotes_without_patient_assignment() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("ceo-contracts");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+
+    let ceo_bearer = auth_header_for(admin_id, "ceo");
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/orders",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "needs_description": "CEO quote workspace"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let order_id = body["id"].as_str().unwrap().to_string();
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/leistungen"),
+        &pm_bearer,
+        Some(json!({
+            "description": "CEO-managed service",
+            "quantity": 1.0,
+            "unit_price": 210.0,
+            "provider_id": provider_id,
+            "doctor_id": doctor_id
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/framework-contracts",
+        &ceo_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "status": "sent",
+            "valid_from": "2026-05-01",
+            "valid_to": "2026-12-31"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let contract_id = body["id"].as_str().unwrap().to_string();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/framework-contracts/{contract_id}/status"),
+        &ceo_bearer,
+        Some(json!({
+            "status": "signed"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["status"], "signed");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/quotes"),
+        &ceo_bearer,
+        Some(json!({
+            "valid_until": "2026-05-31",
+            "notes": "CEO-created quote"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let quote_id = body["id"].as_str().unwrap().to_string();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{quote_id}/status"),
+        &ceo_bearer,
+        Some(json!({
+            "status": "sent",
+            "notes": "CEO approved for sending"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["status"], "sent");
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/quotes/{quote_id}/versions"),
+        &ceo_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body.as_array().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn ceo_assistant_can_read_but_cannot_mutate_contracts_and_quotes() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("assistant-contracts");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let assistant_id = seed_user(&pool, &tag, "ceo_assistant").await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let billing_bearer = auth_header_for(billing_id, "billing");
+    let assistant_bearer = auth_header_for(assistant_id, "ceo_assistant");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/framework-contracts",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "status": "sent",
+            "valid_from": "2026-05-01"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let contract_id = body["id"].as_str().unwrap().to_string();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/orders",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "needs_description": "Assistant read-only visibility"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let order_id = body["id"].as_str().unwrap().to_string();
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/leistungen"),
+        &pm_bearer,
+        Some(json!({
+            "description": "Assistant quote line",
+            "quantity": 1.0,
+            "unit_price": 180.0,
+            "provider_id": provider_id,
+            "doctor_id": doctor_id
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/quotes"),
+        &billing_bearer,
+        Some(json!({
+            "valid_until": "2026-06-15",
+            "notes": "Read-only quote"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let quote_id = body["id"].as_str().unwrap().to_string();
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/framework-contracts?patient_id={patient_id}"),
+        &assistant_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body.as_array().unwrap().len(), 1);
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/framework-contracts/{contract_id}"),
+        &assistant_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["patient_id"], patient_id.to_string());
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/framework-contracts"),
+        &assistant_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body.as_array().unwrap().len(), 1);
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/quotes?patient_id={patient_id}"),
+        &assistant_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body.as_array().unwrap().len(), 1);
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/quotes/{quote_id}"),
+        &assistant_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["patient_id"], patient_id.to_string());
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/quotes/{quote_id}/versions"),
+        &assistant_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body.as_array().unwrap().len(), 1);
+
+    for (method, path, payload) in [
+        (
+            "POST",
+            "/api/v1/framework-contracts".to_string(),
+            Some(json!({
+                "patient_id": patient_id,
+                "status": "draft"
+            })),
+        ),
+        (
+            "POST",
+            format!("/api/v1/framework-contracts/{contract_id}/status"),
+            Some(json!({ "status": "signed" })),
+        ),
+        (
+            "POST",
+            format!("/api/v1/orders/{order_id}/quotes"),
+            Some(json!({})),
+        ),
+        (
+            "POST",
+            format!("/api/v1/quotes/{quote_id}/status"),
+            Some(json!({ "status": "accepted" })),
+        ),
+    ] {
+        let (status, _) = json_request(&app, method, &path, &assistant_bearer, payload).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+}
+
+#[tokio::test]
+async fn sales_and_concierge_cannot_access_contracts_or_quotes_workspaces() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("deny-contracts");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let sales_id = seed_user(&pool, &tag, "sales").await;
+    let concierge_id = seed_user(&pool, &tag, "concierge").await;
+
+    let sales_bearer = auth_header_for(sales_id, "sales");
+    let concierge_bearer = auth_header_for(concierge_id, "concierge");
+
+    for bearer in [&sales_bearer, &concierge_bearer] {
+        let (status, _) =
+            json_request(&app, "GET", "/api/v1/framework-contracts", bearer, None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+
+        let (status, _) = json_request(&app, "GET", "/api/v1/quotes", bearer, None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/framework-contracts"),
+        &concierge_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}

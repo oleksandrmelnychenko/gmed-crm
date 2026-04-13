@@ -50,6 +50,20 @@ export type PatientLabelPayload = {
 
 export type PatientTimelineRangeFilter = "all" | "30d" | "90d" | "180d" | "365d";
 
+type PatientTimelineNavigationAccess = {
+  canOpenDocumentsWorkspace: boolean;
+  canViewContracts: boolean;
+  canViewInvoices: boolean;
+  canOpenComplianceWorkspace: boolean;
+};
+
+type PatientTabAccess = {
+  canViewOperationalSurface: boolean;
+  canViewDocuments: boolean;
+  canViewContracts: boolean;
+  canViewInvoices: boolean;
+};
+
 type PatientTimelineFilters = {
   entityFilter: string;
   categoryFilter: string;
@@ -77,6 +91,42 @@ const TIMELINE_RANGE_DAYS: Record<Exclude<PatientTimelineRangeFilter, "all">, nu
   "365d": 365,
 };
 
+const PATIENT_OPERATIONAL_SURFACE_ROLES = new Set([
+  "ceo",
+  "patient_manager",
+  "billing",
+  "teamlead_interpreter",
+  "interpreter",
+  "concierge",
+]);
+
+const PATIENT_DOCUMENT_WORKSPACE_ROLES = new Set([
+  "ceo",
+  "ceo_assistant",
+  "patient_manager",
+  "billing",
+  "teamlead_interpreter",
+  "interpreter",
+  "concierge",
+]);
+
+const PATIENT_CONTRACT_SURFACE_ROLES = new Set([
+  "ceo",
+  "ceo_assistant",
+  "patient_manager",
+  "billing",
+]);
+
+const PATIENT_INVOICE_SURFACE_ROLES = PATIENT_CONTRACT_SURFACE_ROLES;
+const PATIENT_OPERATIONAL_TAB_KEYS = new Set([
+  "relations",
+  "cases",
+  "orders",
+  "appointments",
+  "workflow",
+  "timeline",
+]);
+
 export const DEFAULT_PATIENT_LABEL_FORMAT_ID: PatientLabelFormatId = "compact-90x48";
 
 export const PATIENT_LABEL_FORMAT_OPTIONS: PatientLabelFormat[] = [
@@ -99,6 +149,67 @@ export const PATIENT_LABEL_FORMAT_OPTIONS: PatientLabelFormat[] = [
     height_mm: 37,
   },
 ];
+
+export function canViewPatientOperationalSurface(role?: string) {
+  return PATIENT_OPERATIONAL_SURFACE_ROLES.has(role ?? "");
+}
+
+export function canViewPatientDocumentsSurface(role?: string) {
+  return canViewPatientOperationalSurface(role);
+}
+
+export function canOpenPatientDocumentsWorkspace(role?: string) {
+  return PATIENT_DOCUMENT_WORKSPACE_ROLES.has(role ?? "");
+}
+
+export function canViewPatientContractsSurface(role?: string) {
+  return PATIENT_CONTRACT_SURFACE_ROLES.has(role ?? "");
+}
+
+export function canViewPatientInvoicesSurface(role?: string) {
+  return PATIENT_INVOICE_SURFACE_ROLES.has(role ?? "");
+}
+
+export function normalizePatientDetailTab(tab: string | null | undefined, access: PatientTabAccess) {
+  const requestedTab = (tab ?? "profile").trim() || "profile";
+  if (PATIENT_OPERATIONAL_TAB_KEYS.has(requestedTab) && !access.canViewOperationalSurface) {
+    return "profile";
+  }
+  if (requestedTab === "documents" && !access.canViewDocuments) {
+    return "profile";
+  }
+  if (requestedTab === "contracts" && !access.canViewContracts) {
+    return "profile";
+  }
+  if (requestedTab === "invoices" && !access.canViewInvoices) {
+    return "profile";
+  }
+  return requestedTab;
+}
+
+export function resolvePatientTimelineRoute(
+  item: Pick<PatientTimelineItem, "entity_type" | "entity_id">,
+  access: PatientTimelineNavigationAccess
+) {
+  switch (item.entity_type) {
+    case "case":
+      return `/cases?case=${item.entity_id}`;
+    case "order":
+      return `/orders?order=${item.entity_id}`;
+    case "appointment":
+      return `/appointments?appointment=${item.entity_id}`;
+    case "document":
+      return access.canOpenDocumentsWorkspace ? `/documents?document=${item.entity_id}` : null;
+    case "contract":
+      return access.canViewContracts ? `/contracts?contract=${item.entity_id}` : null;
+    case "invoice":
+      return access.canViewInvoices ? `/invoices?invoice=${item.entity_id}` : null;
+    case "compliance":
+      return access.canOpenComplianceWorkspace ? "/admin/compliance" : null;
+    default:
+      return null;
+  }
+}
 
 export function filterPatientTimelineItems(
   items: PatientTimelineItem[],

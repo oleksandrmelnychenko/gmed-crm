@@ -233,6 +233,21 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
         .into_response()
 }
 
+fn can_read_invoices(role: Role) -> bool {
+    matches!(
+        role,
+        Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing
+    )
+}
+
+fn can_create_invoices(role: Role) -> bool {
+    matches!(role, Role::Ceo | Role::PatientManager | Role::Billing)
+}
+
+fn can_manage_invoice_finance(role: Role) -> bool {
+    matches!(role, Role::Ceo | Role::Billing)
+}
+
 fn is_valid_invoice_type(value: &str) -> bool {
     matches!(value, "advance" | "interim" | "final")
 }
@@ -1080,7 +1095,7 @@ async fn can_access_patient(
     auth: &AuthUser,
     patient_id: Uuid,
 ) -> Result<bool, axum::response::Response> {
-    if matches!(auth.role, Role::Ceo | Role::Billing) {
+    if matches!(auth.role, Role::Ceo | Role::CeoAssistant | Role::Billing) {
         return Ok(true);
     }
 
@@ -2143,8 +2158,8 @@ async fn list_invoices(
     Extension(auth): Extension<AuthUser>,
     Query(query): Query<ListInvoicesQuery>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Billing, Role::Ceo]) {
-        return e;
+    if !can_read_invoices(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     if let Some(ref status) = query.status
@@ -2249,8 +2264,8 @@ async fn create_invoice_from_quote(
     Path(quote_id): Path<Uuid>,
     Json(body): Json<CreateInvoiceRequest>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Billing, Role::Ceo]) {
-        return e;
+    if !can_create_invoices(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let Some(ctx) = (match load_quote_invoice_context(&state, quote_id).await {
@@ -2370,8 +2385,8 @@ async fn get_invoice(
     Extension(auth): Extension<AuthUser>,
     Path(invoice_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Billing, Role::Ceo]) {
-        return e;
+    if !can_read_invoices(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     match load_invoice_detail(&state, invoice_id, &auth).await {
@@ -2386,8 +2401,8 @@ async fn download_invoice_pdf(
     Extension(auth): Extension<AuthUser>,
     Path(invoice_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(resp) = auth.require_any_role(&[Role::PatientManager, Role::Billing, Role::Ceo]) {
-        return resp;
+    if !can_read_invoices(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let Some(context) = (match load_invoice_pdf_context(&state, invoice_id).await {
@@ -2490,8 +2505,8 @@ async fn list_dunning_events(
     Extension(auth): Extension<AuthUser>,
     Path(invoice_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Billing, Role::Ceo]) {
-        return e;
+    if !can_read_invoices(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let Some(ctx) = (match load_invoice_dunning_context(&state, invoice_id).await {
@@ -2553,8 +2568,8 @@ async fn create_dunning_event(
     Path(invoice_id): Path<Uuid>,
     Json(body): Json<CreateDunningEventRequest>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::Billing, Role::Ceo]) {
-        return e;
+    if !can_manage_invoice_finance(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
     if !is_valid_dunning_level(&body.level) {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid dunning level");
@@ -2688,8 +2703,8 @@ async fn update_invoice_status(
     Path(invoice_id): Path<Uuid>,
     Json(body): Json<UpdateInvoiceStatusRequest>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::Billing, Role::Ceo]) {
-        return e;
+    if !can_manage_invoice_finance(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
     if !is_valid_invoice_status(&body.status) {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid invoice status");

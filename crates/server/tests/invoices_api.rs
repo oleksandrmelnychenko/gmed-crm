@@ -1091,3 +1091,146 @@ async fn patient_can_download_own_invoice_pdf() {
     assert!(bytes.starts_with(b"%PDF-"));
     assert!(bytes.len() > 1_000);
 }
+
+#[tokio::test]
+async fn ceo_assistant_can_read_but_cannot_mutate_invoice_workspace() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("invoice-assistant");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let assistant_id = seed_user(&pool, &tag, "ceo_assistant").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+
+    let billing_bearer = auth_header_for(billing_id, "billing");
+    let assistant_bearer = auth_header_for(assistant_id, "ceo_assistant");
+
+    let order_id = seed_order(&pool, patient_id, pm_id, &tag).await;
+    seed_order_leistung(
+        &pool,
+        order_id,
+        "Assistant-visible invoice line",
+        210.0,
+        "planned",
+    )
+    .await;
+    let quote = create_quote(&app, &billing_bearer, order_id).await;
+    let quote_id = quote["id"].as_str().unwrap();
+    let invoice = create_invoice(&app, &billing_bearer, quote_id, "final", "2026-05-30").await;
+    let invoice_id = invoice["id"].as_str().unwrap().to_string();
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/invoices?patient_id={patient_id}"),
+        &assistant_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body.as_array().unwrap().len(), 1);
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/invoices/{invoice_id}"),
+        &assistant_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["patient_id"], patient_id.to_string());
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/invoices"),
+        &assistant_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body.as_array().unwrap().len(), 1);
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/invoices/{invoice_id}/dunning"),
+        &assistant_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.as_array().unwrap().is_empty());
+
+    let (status, headers, bytes) = binary_request(
+        &app,
+        "GET",
+        &format!("/api/v1/invoices/{invoice_id}/pdf"),
+        &assistant_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        headers
+            .get("content-type")
+            .and_then(|value| value.to_str().ok()),
+        Some("application/pdf")
+    );
+    assert!(bytes.starts_with(b"%PDF-"));
+    assert!(bytes.len() > 1_000);
+
+    for (method, path, payload) in [
+        (
+            "POST",
+            format!("/api/v1/quotes/{quote_id}/invoices"),
+            Some(json!({ "invoice_type": "interim" })),
+        ),
+        (
+            "POST",
+            format!("/api/v1/invoices/{invoice_id}/status"),
+            Some(json!({ "status": "paid", "paid_amount": 249.90 })),
+        ),
+        (
+            "POST",
+            format!("/api/v1/invoices/{invoice_id}/dunning"),
+            Some(json!({ "level": "first" })),
+        ),
+    ] {
+        let (status, _) = json_request(&app, method, &path, &assistant_bearer, payload).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+}
+
+#[tokio::test]
+async fn sales_and_concierge_cannot_access_invoice_workspace() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("invoice-deny");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let sales_id = seed_user(&pool, &tag, "sales").await;
+    let concierge_id = seed_user(&pool, &tag, "concierge").await;
+
+    let sales_bearer = auth_header_for(sales_id, "sales");
+    let concierge_bearer = auth_header_for(concierge_id, "concierge");
+
+    for bearer in [&sales_bearer, &concierge_bearer] {
+        let (status, _) = json_request(&app, "GET", "/api/v1/invoices", bearer, None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/invoices"),
+        &concierge_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}

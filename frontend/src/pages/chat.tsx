@@ -135,6 +135,20 @@ function formatSize(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function canAccessChat(role?: string) {
+  return (
+    role === "patient" ||
+    role === "ceo" ||
+    role === "ceo_assistant" ||
+    role === "patient_manager" ||
+    role === "teamlead_interpreter" ||
+    role === "interpreter" ||
+    role === "concierge" ||
+    role === "billing" ||
+    role === "it_admin"
+  );
+}
+
 const FILE_BASE = "/api/v1/messages/file/";
 
 // ── Component ──
@@ -144,6 +158,7 @@ export function ChatPage() {
   const { t } = useLang();
   const [searchParams, setSearchParams] = useSearchParams();
   const myId = user?.id ?? "";
+  const canViewChat = canAccessChat(user?.role);
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -186,6 +201,11 @@ export function ChatPage() {
 
   // Load conversations
   const loadConversations = useCallback(async () => {
+    if (!canViewChat) {
+      setConversations([]);
+      setLoading(false);
+      return;
+    }
     try {
       const data = await apiFetch<Conversation[]>("/messages/conversations");
       setConversations(data);
@@ -194,7 +214,7 @@ export function ChatPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [canViewChat]);
 
   const loadPeerMessageKey = useCallback(
     async (peerId: string, fingerprint?: string | null) => {
@@ -262,6 +282,10 @@ export function ChatPage() {
 
   const loadMessagesForPeer = useCallback(
     async (peerId: string, markRead = false) => {
+      if (!canViewChat) {
+        setMessages([]);
+        return;
+      }
       const msgs = await apiFetch<Message[]>(`/messages/${peerId}?limit=100`);
       const hydrated = await hydrateMessages(peerId, msgs);
       setMessages(hydrated);
@@ -269,7 +293,7 @@ export function ChatPage() {
         await apiFetch(`/messages/${peerId}/read`, { method: "POST" });
       }
     },
-    [hydrateMessages],
+    [canViewChat, hydrateMessages],
   );
 
   useEffect(() => {
@@ -278,6 +302,13 @@ export function ChatPage() {
 
   useEffect(() => {
     let cancelled = false;
+    if (!canViewChat) {
+      setMyMessageKey(null);
+      setSecureStatus(null);
+      return () => {
+        cancelled = true;
+      };
+    }
 
     void (async () => {
       try {
@@ -295,13 +326,17 @@ export function ChatPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [canViewChat]);
 
   useEffect(() => {
     activePeerRef.current = activePeer;
   }, [activePeer]);
 
   useEffect(() => {
+    if (!canViewChat) {
+      setActivePeerMessageKey(null);
+      return;
+    }
     if (!activePeer) {
       setActivePeerMessageKey(null);
       setSecureStatus(null);
@@ -331,7 +366,7 @@ export function ChatPage() {
     return () => {
       cancelled = true;
     };
-  }, [activePeer, loadPeerMessageKey]);
+  }, [activePeer, canViewChat, loadPeerMessageKey]);
 
   useEffect(() => {
     const peer = searchParams.get("peer");
@@ -383,6 +418,7 @@ export function ChatPage() {
 
   // Keep chat live via WebSocket push.
   useEffect(() => {
+    if (!canViewChat) return;
     const token = getAccessToken();
     if (!token) return;
 
@@ -427,7 +463,7 @@ export function ChatPage() {
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
       socket?.close();
     };
-  }, [loadConversations, loadMessagesForPeer, myId]);
+  }, [canViewChat, loadConversations, loadMessagesForPeer, myId]);
 
   // Load messages when peer changes
   useEffect(() => {
@@ -465,6 +501,10 @@ export function ChatPage() {
   };
 
   const loadUsers = useCallback(async () => {
+    if (!canViewChat) {
+      setAllUsers([]);
+      return;
+    }
     try {
       const query = userSearch.trim()
         ? `/messages/allowed-peers?search=${encodeURIComponent(userSearch.trim())}`
@@ -474,7 +514,7 @@ export function ChatPage() {
     } catch {
       /* ignore */
     }
-  }, [userSearch]);
+  }, [canViewChat, userSearch]);
 
   useEffect(() => {
     if (!showNewChat) return;
@@ -743,6 +783,14 @@ export function ChatPage() {
 
   const displayMsgs = [...messages].reverse();
 
+  if (!canViewChat) {
+    return (
+      <div className="rounded-2xl border bg-card p-8 text-sm text-muted-foreground shadow-sm">
+        Your current role does not have access to chat.
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-[calc(100vh-8rem)] rounded-2xl border bg-card shadow-sm overflow-hidden">
       {/* ── Left: Conversations ── */}
@@ -754,6 +802,8 @@ export function ChatPage() {
             onClick={() => {
               setShowNewChat(!showNewChat);
             }}
+            aria-label={t.chat_new}
+            title={t.chat_new}
             className="flex items-center justify-center size-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
           >
             <MessageSquarePlus className="size-[18px]" />
@@ -775,7 +825,10 @@ export function ChatPage() {
 
         {/* New chat picker */}
         {showNewChat && (
-          <div className="border-b px-4 py-2 space-y-2 bg-muted/30 animate-in fade-in slide-in-from-top-1 duration-200">
+          <div
+            data-testid="chat-new-picker"
+            className="border-b px-4 py-2 space-y-2 bg-muted/30 animate-in fade-in slide-in-from-top-1 duration-200"
+          >
             <Input
               placeholder={t.chat_search_users}
               value={userSearch}
@@ -966,6 +1019,7 @@ export function ChatPage() {
                     {/* Text bubble */}
                     {hasText && (
                       <div
+                        data-testid={`chat-message-text-${m.id}`}
                         className={cn(
                           "max-w-[70%] rounded-2xl px-4 py-2 text-sm",
                           mine

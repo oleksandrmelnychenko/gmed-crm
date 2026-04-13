@@ -3,9 +3,16 @@ import { describe, expect, it } from "vitest";
 import {
   buildPatientLabelPrintHtml,
   buildPatientTimelineSummary,
+  canOpenPatientDocumentsWorkspace,
+  canViewPatientContractsSurface,
+  canViewPatientDocumentsSurface,
+  canViewPatientInvoicesSurface,
+  canViewPatientOperationalSurface,
+  normalizePatientDetailTab,
   filterPatientTimelineItems,
   formatRelatedPatientName,
   formatRelatedPatientOption,
+  resolvePatientTimelineRoute,
 } from "./patient-detail.helpers";
 
 describe("filterPatientTimelineItems", () => {
@@ -192,5 +199,126 @@ describe("buildPatientLabelPrintHtml", () => {
     expect(html).toContain("P-20260410-0001");
     expect(html).toContain("Insurance AXA");
     expect(html).toContain("c/o GMED");
+  });
+});
+
+describe("patient surface access helpers", () => {
+  it("keeps ceo assistant in read-only commercial and document workspace scope", () => {
+    expect(canViewPatientOperationalSurface("ceo_assistant")).toBe(false);
+    expect(canViewPatientDocumentsSurface("ceo_assistant")).toBe(false);
+    expect(canOpenPatientDocumentsWorkspace("ceo_assistant")).toBe(true);
+    expect(canViewPatientContractsSurface("ceo_assistant")).toBe(true);
+    expect(canViewPatientInvoicesSurface("ceo_assistant")).toBe(true);
+  });
+
+  it("keeps sales outside patient-bound commercial and document surfaces", () => {
+    expect(canViewPatientOperationalSurface("sales")).toBe(false);
+    expect(canViewPatientDocumentsSurface("sales")).toBe(false);
+    expect(canOpenPatientDocumentsWorkspace("sales")).toBe(false);
+    expect(canViewPatientContractsSurface("sales")).toBe(false);
+    expect(canViewPatientInvoicesSurface("sales")).toBe(false);
+  });
+});
+
+describe("resolvePatientTimelineRoute", () => {
+  it("blocks finance and document links when the viewer lacks those surfaces", () => {
+    expect(
+      resolvePatientTimelineRoute(
+        { entity_type: "document", entity_id: "doc-1" },
+        {
+          canOpenDocumentsWorkspace: false,
+          canViewContracts: false,
+          canViewInvoices: false,
+          canOpenComplianceWorkspace: false,
+        }
+      )
+    ).toBeNull();
+    expect(
+      resolvePatientTimelineRoute(
+        { entity_type: "contract", entity_id: "ctr-1" },
+        {
+          canOpenDocumentsWorkspace: true,
+          canViewContracts: false,
+          canViewInvoices: false,
+          canOpenComplianceWorkspace: false,
+        }
+      )
+    ).toBeNull();
+    expect(
+      resolvePatientTimelineRoute(
+        { entity_type: "invoice", entity_id: "inv-1" },
+        {
+          canOpenDocumentsWorkspace: true,
+          canViewContracts: true,
+          canViewInvoices: false,
+          canOpenComplianceWorkspace: false,
+        }
+      )
+    ).toBeNull();
+  });
+
+  it("returns the matching route when the viewer has the required scope", () => {
+    expect(
+      resolvePatientTimelineRoute(
+        { entity_type: "document", entity_id: "doc-1" },
+        {
+          canOpenDocumentsWorkspace: true,
+          canViewContracts: true,
+          canViewInvoices: true,
+          canOpenComplianceWorkspace: true,
+        }
+      )
+    ).toBe("/documents?document=doc-1");
+    expect(
+      resolvePatientTimelineRoute(
+        { entity_type: "compliance", entity_id: "cmp-1" },
+        {
+          canOpenDocumentsWorkspace: true,
+          canViewContracts: true,
+          canViewInvoices: true,
+          canOpenComplianceWorkspace: true,
+        }
+      )
+    ).toBe("/admin/compliance");
+  });
+});
+
+describe("normalizePatientDetailTab", () => {
+  it("redirects forbidden patient-detail tabs back to profile", () => {
+    expect(
+      normalizePatientDetailTab("documents", {
+        canViewOperationalSurface: false,
+        canViewDocuments: false,
+        canViewContracts: true,
+        canViewInvoices: true,
+      })
+    ).toBe("profile");
+    expect(
+      normalizePatientDetailTab("timeline", {
+        canViewOperationalSurface: false,
+        canViewDocuments: false,
+        canViewContracts: true,
+        canViewInvoices: true,
+      })
+    ).toBe("profile");
+  });
+
+  it("keeps allowed commercial tabs intact for read-only executives", () => {
+    expect(
+      normalizePatientDetailTab("contracts", {
+        canViewOperationalSurface: false,
+        canViewDocuments: false,
+        canViewContracts: true,
+        canViewInvoices: true,
+      })
+    ).toBe("contracts");
+    expect(
+      normalizePatientDetailTab("invoices", {
+        canViewOperationalSurface: false,
+        canViewDocuments: false,
+        canViewContracts: true,
+        canViewInvoices: true,
+      })
+    ).toBe("invoices");
   });
 });

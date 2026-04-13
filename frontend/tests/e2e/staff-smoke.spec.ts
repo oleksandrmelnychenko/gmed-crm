@@ -8,12 +8,75 @@ function json(route: Route, body: unknown, status = 200) {
   });
 }
 
-async function installStaffApiMocks(page: Page) {
+type StaffMockOptions = {
+  role?: string;
+  email?: string;
+  name?: string;
+  userId?: string;
+};
+
+async function loginAsStaff(page: Page, email: string) {
+  await page.goto("/login");
+  await page.locator("#email").fill(email);
+  await page.locator("#password").fill("admin123");
+  await page.getByRole("button", { name: /Anmelden|Войти/i }).click();
+  await page.waitForURL(/\/$/, { timeout: 15_000 });
+}
+
+async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) {
+  const role = options.role ?? "ceo";
+  const email = options.email ?? "admin@gmed.de";
+  const name = options.name ?? "Admin GMED";
+  const userId = options.userId ?? "00000000-0000-0000-0000-000000000001";
   let portalShareActive = false;
   const documentId = "00000000-0000-0000-0000-000000000501";
+  const patientId = "00000000-0000-0000-0000-000000000301";
   let nextGeneratedDocumentIndex = 1;
   let nextProviderShareIndex = 1;
   let nextTranslationRequestIndex = 1;
+  let feedbackRows = [
+    {
+      id: "00000000-0000-0000-0000-000000001301",
+      patient_id: "00000000-0000-0000-0000-000000000301",
+      patient_name: "Anna Muster",
+      patient_pid: "PT-001",
+      appointment_id: "00000000-0000-0000-0000-000000000401",
+      appointment_title: "Follow-up slot",
+      provider_id: "00000000-0000-0000-0000-000000000201",
+      provider_name: "Clinic Cologne",
+      doctor_id: "00000000-0000-0000-0000-000000000202",
+      doctor_name: "Doctor Cologne",
+      patient_manager_id: "00000000-0000-0000-0000-000000000001",
+      patient_manager_name: "Admin GMED",
+      interpreter_id: null,
+      interpreter_name: null,
+      concierge_id: null,
+      concierge_name: null,
+      source: "patient_portal",
+      status: "submitted",
+      overall_score: 5,
+      patient_manager_score: 5,
+      interpreter_score: null,
+      concierge_score: null,
+      treatment_score: 5,
+      doctor_score: 5,
+      organization_score: 4,
+      service_score: 5,
+      infrastructure_score: 4,
+      price_value_score: 4,
+      treatment_success: "yes",
+      complication_reported: false,
+      nps_score: 9,
+      comments: "Portal feedback from Anna.",
+      improvement_notes: "Please shorten the waiting time at check-in.",
+      internal_note: null,
+      review_note: null,
+      submitted_by_name: "Anna Portal",
+      reviewed_by_name: null,
+      submitted_at: "2026-04-10T09:30:00Z",
+      reviewed_at: null,
+    },
+  ];
 
   const templateCatalog = {
     templates: [
@@ -45,9 +108,83 @@ async function installStaffApiMocks(page: Page) {
     ],
   };
 
+  const patientDetail = {
+    id: patientId,
+    patient_id: "PT-001",
+    title: null,
+    first_name: "Anna",
+    last_name: "Muster",
+    birth_date: "1990-01-01",
+    gender: "diverse",
+    nationality: "DE",
+    residence_country: "DE",
+    languages: ["de", "uk"],
+    functional_labels: [],
+    phone_primary: "+49 30 000000",
+    phone_secondary: null,
+    email: "anna@example.com",
+    insurance_provider: "AOK",
+    insurance_type: "public",
+    insurance_number: "4711",
+    is_active: true,
+    created_at: "2026-01-01T09:00:00Z",
+    updated_at: "2026-04-01T09:00:00Z",
+    address_street: "Musterstrasse 1",
+    address_city: "Berlin",
+    address_zip: "10115",
+    address_country: "DE",
+    emergency_contact_name: "Max Muster",
+    emergency_contact_phone: "+49 30 111111",
+    emergency_contact_relation: "Spouse",
+    legal_status: {
+      dsgvo_signed: true,
+      identity_verified: true,
+      compliance_completed: true,
+      contract_status: "signed",
+      notes: null,
+    },
+    notes: "Portal-ready patient profile.",
+  };
+  const patientAssignments = [
+    {
+      user_id: userId,
+      user_name: name,
+      user_role: role,
+      user_active: true,
+      assigned_by_name: "System",
+      assigned_at: "2026-01-01T09:00:00Z",
+      revoked_at: null,
+    },
+  ];
+  const patientContracts = [
+    {
+      id: "00000000-0000-0000-0000-000000000801",
+      contract_number: "CTR-001",
+      status: "signed",
+      signed_at: "2026-03-01T09:00:00Z",
+      valid_from: "2026-03-01",
+      valid_to: "2026-12-31",
+      created_at: "2026-03-01T09:00:00Z",
+    },
+  ];
+  const patientInvoices = [
+    {
+      id: "00000000-0000-0000-0000-000000000601",
+      invoice_number: "INV-001",
+      invoice_type: "advance",
+      status: "sent",
+      issued_at: "2026-04-01",
+      due_date: "2026-04-15",
+      total_gross: "1000.00",
+      paid_amount: "0.00",
+      order_number: "ORD-001",
+      quote_number: null,
+    },
+  ];
+
   const buildDocument = (overrides: Record<string, unknown> = {}) => ({
     id: documentId,
-    patient_id: "00000000-0000-0000-0000-000000000301",
+    patient_id: patientId,
     order_id: null,
     appointment_id: "00000000-0000-0000-0000-000000000401",
     patient_pid: "PT-001",
@@ -151,6 +288,47 @@ async function installStaffApiMocks(page: Page) {
     ];
   }
 
+  function buildFeedbackSummary() {
+    const total = feedbackRows.length;
+    const reviewed = feedbackRows.filter((item) => item.status === "reviewed").length;
+    const patientPortal = feedbackRows.filter((item) => item.source === "patient_portal").length;
+    const staffCapture = feedbackRows.filter((item) => item.source === "staff_capture").length;
+    const overallAverage =
+      total === 0
+        ? null
+        : Number(
+            (
+              feedbackRows.reduce((sum, item) => sum + Number(item.overall_score || 0), 0) / total
+            ).toFixed(1),
+          );
+    const promoters = feedbackRows.filter((item) => Number(item.nps_score) >= 9).length;
+    const detractors = feedbackRows.filter((item) => Number(item.nps_score) <= 6).length;
+    const passives = total - promoters - detractors;
+
+    return {
+      total_feedback: total,
+      reviewed_feedback: reviewed,
+      patient_portal_count: patientPortal,
+      staff_capture_count: staffCapture,
+      nps_score: total === 0 ? null : Math.round(((promoters - detractors) / total) * 100),
+      promoters,
+      passives,
+      detractors,
+      average_scores: {
+        overall: overallAverage,
+        interpreter: null,
+        concierge: null,
+        treatment: null,
+        service: null,
+        infrastructure: null,
+        price_value: null,
+      },
+      top_promoters: [],
+      interpreter_ranking: [],
+      clinic_ranking: [],
+    };
+  }
+
   await page.route("**/auth/**", async (route) => {
     const url = new URL(route.request().url());
     const { pathname } = url;
@@ -178,9 +356,9 @@ async function installStaffApiMocks(page: Page) {
     if (path === "/me") {
       return json(route, {
         id: "00000000-0000-0000-0000-000000000001",
-        email: "admin@gmed.de",
-        name: "Admin GMED",
-        role: "ceo",
+        email,
+        name,
+        role,
         created_at: "2026-01-01T00:00:00Z",
       });
     }
@@ -312,28 +490,36 @@ async function installStaffApiMocks(page: Page) {
     }
 
     if (path === "/feedback/summary") {
-      return json(route, {
-        total_feedback: 0,
-        reviewed_feedback: 0,
-        patient_portal_count: 0,
-        staff_capture_count: 0,
-        nps_score: null,
-        promoters: 0,
-        passives: 0,
-        detractors: 0,
-        average_scores: {
-          overall: null,
-          interpreter: null,
-          concierge: null,
-          treatment: null,
-          service: null,
-          infrastructure: null,
-          price_value: null,
-        },
-        top_promoters: [],
-        interpreter_ranking: [],
-        clinic_ranking: [],
+      return json(route, buildFeedbackSummary());
+    }
+
+    if (path === "/feedback") {
+      return json(route, feedbackRows);
+    }
+
+    if (
+      path.startsWith("/feedback/") &&
+      path.endsWith("/review") &&
+      route.request().method() === "POST"
+    ) {
+      const feedbackId = path.replace("/feedback/", "").replace("/review", "");
+      const payload = JSON.parse(route.request().postData() ?? "{}") as {
+        status?: string;
+        review_note?: string | null;
+      };
+      let updatedRow: (typeof feedbackRows)[number] | null = null;
+      feedbackRows = feedbackRows.map((item) => {
+        if (item.id !== feedbackId) return item;
+        updatedRow = {
+          ...item,
+          status: payload.status ?? "reviewed",
+          review_note: payload.review_note ?? null,
+          reviewed_by_name: "Admin GMED",
+          reviewed_at: "2026-04-13T11:45:00Z",
+        };
+        return updatedRow;
       });
+      return json(route, updatedRow ?? { message: "Not found" }, updatedRow ? 200 : 404);
     }
 
     if (path === "/providers" || path.startsWith("/providers?")) {
@@ -361,7 +547,7 @@ async function installStaffApiMocks(page: Page) {
     if (path === "/patients" || path.startsWith("/patients?")) {
       return json(route, [
         {
-          id: "00000000-0000-0000-0000-000000000301",
+          id: patientId,
           patient_id: "PT-001",
           first_name: "Anna",
           last_name: "Muster",
@@ -372,6 +558,22 @@ async function installStaffApiMocks(page: Page) {
           is_active: true,
         },
       ]);
+    }
+
+    if (path === `/patients/${patientId}`) {
+      return json(route, patientDetail);
+    }
+
+    if (path === `/patients/${patientId}/assignments`) {
+      return json(route, patientAssignments);
+    }
+
+    if (path === `/patients/${patientId}/framework-contracts`) {
+      return json(route, patientContracts);
+    }
+
+    if (path === `/patients/${patientId}/invoices`) {
+      return json(route, patientInvoices);
     }
 
     if (path === "/appointments/meta/staff") {
@@ -780,11 +982,7 @@ test.describe("staff smoke flows", () => {
       window.localStorage.setItem("gmed_lang", "de");
     });
     await installStaffApiMocks(page);
-    await page.goto("/login");
-    await page.locator("#email").fill("admin@gmed.de");
-    await page.locator("#password").fill("admin123");
-    await page.getByRole("button", { name: /Anmelden|Войти/i }).click();
-    await page.waitForURL(/\/$/, { timeout: 15_000 });
+    await loginAsStaff(page, "admin@gmed.de");
     await expect(page.getByRole("button", { name: /Open calendar/i })).toBeVisible();
   });
 
@@ -1020,5 +1218,82 @@ test.describe("staff smoke flows", () => {
       page.locator('[role="status"]').filter({ hasText: /Abgeschlossen/i }),
     ).toBeVisible();
     await expect(sheet.getByText("Ready for patient delivery.")).toBeVisible();
+  });
+
+  test("staff can review portal feedback from the feedback workspace", async ({
+    page,
+  }) => {
+    await page.goto("/feedback");
+    await expect(page).toHaveURL(/\/feedback$/);
+    await expect(
+      page.getByRole("heading", { name: /Feedback and NPS/i }),
+    ).toBeVisible();
+
+    const feedbackCard = page
+      .locator("article")
+      .filter({ hasText: "Portal feedback from Anna." })
+      .first();
+    await expect(feedbackCard).toBeVisible();
+    await expect(feedbackCard.getByText("submitted")).toBeVisible();
+
+    await feedbackCard.getByRole("button", { name: /^Review$/i }).click();
+
+    const reviewSheet = page.getByRole("dialog");
+    await expect(
+      reviewSheet.getByRole("heading", { name: /Review feedback/i }),
+    ).toBeVisible();
+    await reviewSheet.getByPlaceholder("Operational follow-up or review note").fill(
+      "Reviewed with the clinic manager and added to the quality follow-up list.",
+    );
+    await reviewSheet.getByRole("button", { name: /Save review/i }).click();
+
+    await expect(reviewSheet).toHaveCount(0);
+    await expect(
+      feedbackCard.getByText("reviewed", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      feedbackCard.getByText(
+        "Reviewed with the clinic manager and added to the quality follow-up list.",
+      ),
+    ).toBeVisible();
+  });
+});
+
+test.describe("patient-profile RBAC shell", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      window.localStorage.setItem("gmed_lang", "de");
+    });
+    await installStaffApiMocks(page, {
+      role: "ceo_assistant",
+      email: "assistant@gmed.de",
+      name: "CEO Assistant",
+      userId: "00000000-0000-0000-0000-000000000002",
+    });
+    await loginAsStaff(page, "assistant@gmed.de");
+    await expect(page.getByRole("heading", { level: 1 })).toContainText(/CEO Assistant|GMED/i);
+  });
+
+  test("ceo assistant sees only read-only commercial tabs on patient profile", async ({
+    page,
+  }) => {
+    await page.goto("/patients/00000000-0000-0000-0000-000000000301?tab=documents");
+    await page.waitForURL(/\/patients\/00000000-0000-0000-0000-000000000301$/);
+
+    await expect(page.getByRole("heading", { name: "Anna Muster" })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "Documents" })).toHaveCount(0);
+    await expect(page.getByRole("tab", { name: "Relations" })).toHaveCount(0);
+    await expect(page.getByRole("tab", { name: "Workflow" })).toHaveCount(0);
+    await expect(page.getByRole("tab", { name: "Timeline" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Open documents" })).toHaveCount(0);
+
+    await expect(page.getByRole("tab", { name: "Contracts" })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "Invoices" })).toBeVisible();
+
+    await page.getByRole("tab", { name: "Contracts" }).click();
+    await expect(page.getByText("CTR-001")).toBeVisible();
+
+    await page.getByRole("tab", { name: "Invoices" }).click();
+    await expect(page.getByText("INV-001")).toBeVisible();
   });
 });

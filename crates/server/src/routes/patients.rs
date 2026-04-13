@@ -1966,11 +1966,9 @@ async fn list_patient_framework_contracts(
 ) -> Result<Json<Vec<Value>>, axum::response::Response> {
     auth.require_any_role(&[
         Role::Ceo,
+        Role::CeoAssistant,
         Role::PatientManager,
         Role::Billing,
-        Role::TeamleadInterpreter,
-        Role::Interpreter,
-        Role::Concierge,
     ])?;
     ensure_patient_visible(&state, &auth, patient_uuid).await?;
 
@@ -2141,11 +2139,9 @@ async fn list_patient_invoices(
 ) -> Result<Json<Vec<Value>>, axum::response::Response> {
     auth.require_any_role(&[
         Role::Ceo,
+        Role::CeoAssistant,
         Role::PatientManager,
         Role::Billing,
-        Role::TeamleadInterpreter,
-        Role::Interpreter,
-        Role::Concierge,
     ])?;
     ensure_patient_visible(&state, &auth, patient_uuid).await?;
 

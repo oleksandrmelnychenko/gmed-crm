@@ -875,7 +875,14 @@ async fn deleting_portal_document_file_does_not_break_patient_manager_chat() {
     seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
     seed_patient_assignment(&pool, patient_id, patient_manager_id, admin_id).await;
 
-    let document_id = seed_document(&pool, patient_id, patient_manager_id, &tag, "patient_visible").await;
+    let document_id = seed_document(
+        &pool,
+        patient_id,
+        patient_manager_id,
+        &tag,
+        "patient_visible",
+    )
+    .await;
     sqlx::query(
         r#"INSERT INTO document_shares (
                 document_id, shared_with_user_id, shared_by, channel, requires_confirmation,
@@ -897,7 +904,9 @@ async fn deleting_portal_document_file_does_not_break_patient_manager_chat() {
     let (status, before_delete_docs) =
         json_request(&app, "GET", "/api/v1/me/documents", &patient_auth, None).await;
     assert_eq!(status, StatusCode::OK);
-    let items = before_delete_docs.as_array().expect("portal document list before delete");
+    let items = before_delete_docs
+        .as_array()
+        .expect("portal document list before delete");
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["id"], document_id.to_string());
 
@@ -940,9 +949,13 @@ async fn deleting_portal_document_file_does_not_break_patient_manager_chat() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let conversation = conversation_body.as_array().expect("conversation after document delete");
+    let conversation = conversation_body
+        .as_array()
+        .expect("conversation after document delete");
     assert!(
-        conversation.iter().any(|item| item["message"] == patient_message),
+        conversation
+            .iter()
+            .any(|item| item["message"] == patient_message),
         "patient-manager chat should stay available after portal document deletion"
     );
 }
@@ -1104,6 +1117,86 @@ async fn patient_cannot_message_unassigned_staff() {
     assert_eq!(
         body["message"],
         "You cannot exchange messages with this user"
+    );
+}
+
+#[tokio::test]
+async fn sales_cannot_use_internal_chat_workspace_and_are_hidden_from_staff_peers() {
+    let Some((app, pool, _admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("staff-chat-sales-deny");
+    let patient_manager_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    let billing_id = seed_user(&pool, &format!("{tag}-billing"), "billing").await;
+    let sales_id = seed_user(&pool, &format!("{tag}-sales"), "sales").await;
+
+    let pm_auth = auth_header_for(patient_manager_id, "patient_manager");
+    let sales_auth = auth_header_for(sales_id, "sales");
+
+    let (status, peers) = json_request(
+        &app,
+        "GET",
+        "/api/v1/messages/allowed-peers",
+        &pm_auth,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let peer_rows = peers.as_array().unwrap();
+    assert!(
+        peer_rows
+            .iter()
+            .any(|item| item["id"] == billing_id.to_string()),
+        "billing peer should remain visible to patient manager"
+    );
+    assert!(
+        peer_rows
+            .iter()
+            .all(|item| item["id"] != sales_id.to_string()),
+        "sales must not appear in internal allowed-peer list"
+    );
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/messages/allowed-peers",
+        &sales_auth,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(
+        body["message"],
+        "Your role cannot access the chat workspace"
+    );
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/messages/conversations",
+        &sales_auth,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(
+        body["message"],
+        "Your role cannot access the chat workspace"
+    );
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/messages/{patient_manager_id}"),
+        &sales_auth,
+        Some(json!({ "message": "Can we coordinate a partner offer?" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(
+        body["message"],
+        "Your role cannot access the chat workspace"
     );
 }
 

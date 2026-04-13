@@ -126,6 +126,9 @@ async fn messages_ws(
         Ok(value) => value,
         Err(resp) => return resp,
     };
+    if let Err(resp) = ensure_chat_workspace_role(&auth) {
+        return resp;
+    }
 
     ws.on_upgrade(move |socket| handle_messages_ws(socket, state, auth.user_id))
         .into_response()
@@ -270,6 +273,9 @@ async fn list_allowed_peers(
     Extension(auth): Extension<AuthUser>,
     Query(query): Query<AllowedPeersQuery>,
 ) -> axum::response::Response {
+    if let Err(resp) = ensure_chat_workspace_role(&auth) {
+        return resp;
+    }
     let search_pattern = format!("%{}%", query.search.unwrap_or_default().trim());
     let rows = match load_allowed_peer_rows(&state, &auth, &search_pattern).await {
         Ok(rows) => rows,
@@ -386,6 +392,9 @@ async fn get_my_e2e_key(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
+    if let Err(resp) = ensure_chat_workspace_role(&auth) {
+        return resp;
+    }
     match load_message_key_row(&state, auth.user_id, None).await {
         Ok(Some(row)) => Json(build_message_key_json(&row)).into_response(),
         Ok(None) => err(StatusCode::NOT_FOUND, "Message key not found"),
@@ -399,6 +408,9 @@ async fn get_peer_e2e_key(
     Path(user_id): Path<Uuid>,
     Query(query): Query<MessageKeyQuery>,
 ) -> axum::response::Response {
+    if let Err(resp) = ensure_chat_workspace_role(&auth) {
+        return resp;
+    }
     if user_id != auth.user_id
         && let Err(resp) = ensure_message_peer_access(&state, &auth, user_id).await
     {
@@ -417,6 +429,9 @@ async fn upsert_my_e2e_key(
     Extension(auth): Extension<AuthUser>,
     Json(body): Json<UpsertMessageKeyRequest>,
 ) -> axum::response::Response {
+    if let Err(resp) = ensure_chat_workspace_role(&auth) {
+        return resp;
+    }
     if !is_valid_message_key_algorithm(&body.algorithm) {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -500,6 +515,9 @@ async fn list_conversations(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
+    if let Err(resp) = ensure_chat_workspace_role(&auth) {
+        return resp;
+    }
     match sqlx::query(
         r#"WITH latest AS (
             SELECT DISTINCT ON (peer)
@@ -630,6 +648,9 @@ async fn get_conversation(
     Path(user_id): Path<Uuid>,
     Query(q): Query<PaginationQuery>,
 ) -> axum::response::Response {
+    if let Err(resp) = ensure_chat_workspace_role(&auth) {
+        return resp;
+    }
     let limit = q.limit.unwrap_or(50).min(200);
     if let Err(resp) = ensure_message_peer_access(&state, &auth, user_id).await {
         return resp;
@@ -790,6 +811,9 @@ async fn send_message(
     Path(user_id): Path<Uuid>,
     Json(body): Json<SendReq>,
 ) -> axum::response::Response {
+    if let Err(resp) = ensure_chat_workspace_role(&auth) {
+        return resp;
+    }
     if let Err(resp) = ensure_message_peer_access(&state, &auth, user_id).await {
         return resp;
     }
@@ -1040,6 +1064,9 @@ async fn upload_file(
     Path(user_id): Path<Uuid>,
     mut multipart: Multipart,
 ) -> axum::response::Response {
+    if let Err(resp) = ensure_chat_workspace_role(&auth) {
+        return resp;
+    }
     if let Err(resp) = ensure_message_peer_access(&state, &auth, user_id).await {
         return resp;
     }
@@ -1540,6 +1567,9 @@ async fn download_file(
     Path(file_key): Path<String>,
     State(state): State<AppState>,
 ) -> axum::response::Response {
+    if let Err(resp) = ensure_chat_workspace_role(&auth) {
+        return resp;
+    }
     // Verify the user is a participant of this conversation.
     let row = sqlx::query(
         r#"SELECT id, from_user, to_user, attachment_filename, attachment_mime, attachment_size,
@@ -1659,6 +1689,9 @@ async fn mark_conversation_read(
     Extension(auth): Extension<AuthUser>,
     Path(user_id): Path<Uuid>,
 ) -> axum::response::Response {
+    if let Err(resp) = ensure_chat_workspace_role(&auth) {
+        return resp;
+    }
     if let Err(resp) = ensure_message_peer_access(&state, &auth, user_id).await {
         return resp;
     }
@@ -1728,6 +1761,9 @@ async fn unread_total(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
+    if let Err(resp) = ensure_chat_workspace_role(&auth) {
+        return resp;
+    }
     let count = sqlx::query_scalar!(
         r#"SELECT count(*) AS "c!" FROM direct_messages WHERE to_user = $1 AND NOT is_read"#,
         auth.user_id
@@ -1784,6 +1820,46 @@ fn can_have_patient_chat(role: Role) -> bool {
             | Role::Interpreter
             | Role::Concierge
     )
+}
+
+fn can_access_chat_workspace(role: Role) -> bool {
+    matches!(
+        role,
+        Role::Ceo
+            | Role::CeoAssistant
+            | Role::PatientManager
+            | Role::TeamleadInterpreter
+            | Role::Interpreter
+            | Role::Concierge
+            | Role::Billing
+            | Role::ItAdmin
+            | Role::Patient
+    )
+}
+
+fn can_message_internal_staff(role: Role) -> bool {
+    matches!(
+        role,
+        Role::Ceo
+            | Role::CeoAssistant
+            | Role::PatientManager
+            | Role::TeamleadInterpreter
+            | Role::Interpreter
+            | Role::Concierge
+            | Role::Billing
+            | Role::ItAdmin
+    )
+}
+
+#[allow(clippy::result_large_err)]
+fn ensure_chat_workspace_role(auth: &AuthUser) -> Result<(), axum::response::Response> {
+    if can_access_chat_workspace(auth.role) {
+        return Ok(());
+    }
+    Err(err(
+        StatusCode::FORBIDDEN,
+        "Your role cannot access the chat workspace",
+    ))
 }
 
 async fn resolve_linked_patient_id_for_user(
@@ -1908,7 +1984,7 @@ async fn can_message_known_peer(
             });
     }
 
-    Ok(true)
+    Ok(can_message_internal_staff(auth.role) && can_message_internal_staff(peer_role))
 }
 
 async fn ensure_message_peer_access(
@@ -1979,9 +2055,18 @@ async fn load_allowed_peer_rows(
            FROM users
            WHERE is_active = true
              AND id <> $1
-             AND role <> 'patient'
+             AND role IN (
+                'ceo',
+                'ceo_assistant',
+                'patient_manager',
+                'teamlead_interpreter',
+                'interpreter',
+                'concierge',
+                'billing',
+                'it_admin'
+             )
              AND ($2::text = '%%' OR name ILIKE $2 OR email ILIKE $2)
-           ORDER BY role, name"#,
+            ORDER BY role, name"#,
     )
     .bind(auth.user_id)
     .bind(search_pattern)

@@ -51,11 +51,18 @@ import { cn } from "@/lib/utils";
 import {
   buildPatientLabelPrintHtml,
   buildPatientTimelineSummary,
+  canOpenPatientDocumentsWorkspace,
+  canViewPatientContractsSurface,
+  canViewPatientDocumentsSurface,
+  canViewPatientInvoicesSurface,
+  canViewPatientOperationalSurface,
   DEFAULT_PATIENT_LABEL_FORMAT_ID,
   filterPatientTimelineItems,
   formatRelatedPatientName,
   formatRelatedPatientOption,
+  normalizePatientDetailTab,
   PATIENT_LABEL_FORMAT_OPTIONS,
+  resolvePatientTimelineRoute,
   type PatientLabelFormatId,
   type PatientLabelPayload,
   type PatientTimelineRangeFilter,
@@ -349,6 +356,15 @@ type WorkflowChecklistFormState = {
   priority: string;
   dueDate: string;
 };
+
+const PATIENT_OPERATIONAL_TABS = new Set([
+  "relations",
+  "cases",
+  "orders",
+  "appointments",
+  "workflow",
+  "timeline",
+]);
 
 function patientName(p: PatientDetail) {
   const t = p.title ? `${p.title} ` : "";
@@ -755,8 +771,14 @@ export function PatientDetailPage() {
   const canManage = user?.role === "ceo" || user?.role === "patient_manager" || user?.role === "teamlead_interpreter";
   const assignableStaff = useMemo(() => staff.filter((s) => canAssignTarget(user?.role, s.role)), [staff, user?.role]);
   const canManageRelations = user?.role === "ceo" || user?.role === "patient_manager";
+  const canViewOperationalSurface = canViewPatientOperationalSurface(user?.role);
+  const canViewDocuments = canViewPatientDocumentsSurface(user?.role);
+  const canOpenDocumentsWorkspace = canOpenPatientDocumentsWorkspace(user?.role);
   const canManageDocuments = user?.role === "ceo" || user?.role === "patient_manager";
-  const canManageContracts = user?.role === "patient_manager" || user?.role === "billing";
+  const canViewContracts = canViewPatientContractsSurface(user?.role);
+  const canManageContracts =
+    user?.role === "ceo" || user?.role === "patient_manager" || user?.role === "billing";
+  const canViewInvoices = canViewPatientInvoicesSurface(user?.role);
   const canManageInvoices = user?.role === "ceo" || user?.role === "billing";
   const canEditPatientProfile = user?.role === "ceo" || user?.role === "patient_manager";
   const canExportPatientCompliance = user?.role === "patient_manager";
@@ -912,11 +934,36 @@ export function PatientDetailPage() {
   }, [activeWorkflowAssignees, user?.id, workflowForm.ownerUserId]);
 
   useEffect(() => {
-    const requestedTab = searchParams.get("tab") || "profile";
-    if (requestedTab !== activeTab) {
-      setActiveTab(requestedTab);
+    const requestedTab = searchParams.get("tab");
+    const normalizedTab = normalizePatientDetailTab(requestedTab, {
+      canViewOperationalSurface,
+      canViewDocuments,
+      canViewContracts,
+      canViewInvoices,
+    });
+
+    if (activeTab !== normalizedTab) {
+      setActiveTab(normalizedTab);
     }
-  }, [activeTab, searchParams]);
+
+    if ((requestedTab ?? "profile") !== normalizedTab) {
+      const nextParams = new URLSearchParams(searchParams);
+      if (normalizedTab === "profile") {
+        nextParams.delete("tab");
+      } else {
+        nextParams.set("tab", normalizedTab);
+      }
+      setSearchParams(nextParams, { replace: true });
+    }
+  }, [
+    activeTab,
+    canViewContracts,
+    canViewDocuments,
+    canViewInvoices,
+    canViewOperationalSurface,
+    searchParams,
+    setSearchParams,
+  ]);
 
   useEffect(() => {
     if (!id) return;
@@ -949,7 +996,14 @@ export function PatientDetailPage() {
   }, [activeTab]);
 
   useEffect(() => {
-    if (!id || activeTab === "profile") return;
+    if (
+      !id ||
+      activeTab === "profile" ||
+      (PATIENT_OPERATIONAL_TABS.has(activeTab) && !canViewOperationalSurface) ||
+      (activeTab === "documents" && !canViewDocuments) ||
+      (activeTab === "contracts" && !canViewContracts) ||
+      (activeTab === "invoices" && !canViewInvoices)
+    ) return;
     let cancelled = false;
     setTabLoading(true);
 
@@ -1069,6 +1123,10 @@ export function PatientDetailPage() {
     timelineOffset,
     timelineRangeFilter,
     timelineSourceFilter,
+    canViewDocuments,
+    canViewContracts,
+    canViewInvoices,
+    canViewOperationalSurface,
   ]);
 
   useEffect(() => {
@@ -1683,15 +1741,15 @@ export function PatientDetailPage() {
         <div className="border-b border-slate-200 flex justify-center">
           <TabsList variant="line" className="w-auto">
             <TabsTrigger value="profile" className="px-4 py-2">{t.patients_profile}</TabsTrigger>
-            <TabsTrigger value="relations" className="px-4 py-2">Relations</TabsTrigger>
-            <TabsTrigger value="cases" className="px-4 py-2">{t.cases_title}</TabsTrigger>
-            <TabsTrigger value="orders" className="px-4 py-2">{t.orders_title}</TabsTrigger>
-            <TabsTrigger value="appointments" className="px-4 py-2">{t.appointments_title}</TabsTrigger>
-            <TabsTrigger value="documents" className="px-4 py-2">Documents</TabsTrigger>
-            <TabsTrigger value="contracts" className="px-4 py-2">Contracts</TabsTrigger>
-            <TabsTrigger value="invoices" className="px-4 py-2">Invoices</TabsTrigger>
-            <TabsTrigger value="workflow" className="px-4 py-2">Workflow</TabsTrigger>
-            <TabsTrigger value="timeline" className="px-4 py-2">Timeline</TabsTrigger>
+            {canViewOperationalSurface ? <TabsTrigger value="relations" className="px-4 py-2">Relations</TabsTrigger> : null}
+            {canViewOperationalSurface ? <TabsTrigger value="cases" className="px-4 py-2">{t.cases_title}</TabsTrigger> : null}
+            {canViewOperationalSurface ? <TabsTrigger value="orders" className="px-4 py-2">{t.orders_title}</TabsTrigger> : null}
+            {canViewOperationalSurface ? <TabsTrigger value="appointments" className="px-4 py-2">{t.appointments_title}</TabsTrigger> : null}
+            {canViewDocuments ? <TabsTrigger value="documents" className="px-4 py-2">Documents</TabsTrigger> : null}
+            {canViewContracts ? <TabsTrigger value="contracts" className="px-4 py-2">Contracts</TabsTrigger> : null}
+            {canViewInvoices ? <TabsTrigger value="invoices" className="px-4 py-2">Invoices</TabsTrigger> : null}
+            {canViewOperationalSurface ? <TabsTrigger value="workflow" className="px-4 py-2">Workflow</TabsTrigger> : null}
+            {canViewOperationalSurface ? <TabsTrigger value="timeline" className="px-4 py-2">Timeline</TabsTrigger> : null}
           </TabsList>
         </div>
 
@@ -1835,22 +1893,26 @@ export function PatientDetailPage() {
                       Open DSGVO workspace
                     </Button>
                   ) : null}
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="rounded-xl"
-                    onClick={() => navigate(`/documents?patient=${id}`)}
-                  >
-                    Open documents
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="rounded-xl"
-                    onClick={() => navigate(`/contracts?patient=${id}`)}
-                  >
-                    Open contracts
-                  </Button>
+                  {canOpenDocumentsWorkspace ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="rounded-xl"
+                      onClick={() => navigate(`/documents?patient=${id}`)}
+                    >
+                      Open documents
+                    </Button>
+                  ) : null}
+                  {canViewContracts ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="rounded-xl"
+                      onClick={() => navigate(`/contracts?patient=${id}`)}
+                    >
+                      Open contracts
+                    </Button>
+                  ) : null}
                 </div>
               </div>
 
@@ -2106,9 +2168,11 @@ export function PatientDetailPage() {
               <h3 className="mt-1 text-sm font-semibold text-slate-950">Documents linked to this patient</h3>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="outline" className="rounded-xl" onClick={() => navigate(`/documents?patient=${id}`)}>
-                Open workspace
-              </Button>
+              {canOpenDocumentsWorkspace ? (
+                <Button type="button" variant="outline" className="rounded-xl" onClick={() => navigate(`/documents?patient=${id}`)}>
+                  Open workspace
+                </Button>
+              ) : null}
               {canManageDocuments ? (
                 <Button type="button" className="rounded-xl bg-slate-950 text-white hover:bg-slate-800" onClick={() => setDocumentUploadOpen(true)}>
                   <Plus className="mr-2 size-4" />
@@ -2203,7 +2267,7 @@ export function PatientDetailPage() {
           )}
         </TabsContent>
 
-        <TabsContent value="contracts" className="mt-4 min-h-[400px]">
+        {canViewContracts ? <TabsContent value="contracts" className="mt-4 min-h-[400px]">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Framework billing</p>
@@ -2257,9 +2321,9 @@ export function PatientDetailPage() {
               ))}
             </div>
           )}
-        </TabsContent>
+        </TabsContent> : null}
 
-        <TabsContent value="invoices" className="mt-4 min-h-[400px]">
+        {canViewInvoices ? <TabsContent value="invoices" className="mt-4 min-h-[400px]">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Patient billing</p>
@@ -2312,7 +2376,7 @@ export function PatientDetailPage() {
               ))}
             </div>
           )}
-        </TabsContent>
+        </TabsContent> : null}
 
         <TabsContent value="workflow" className="mt-4 min-h-[400px]">
           {tabLoading ? (
@@ -2724,28 +2788,30 @@ export function PatientDetailPage() {
                   </Button>
                 </div>
               </div>
-              {filteredTimeline.map((item) => (
-                <button
-                  key={`${item.entity_type}-${item.entity_id}`}
-                  type="button"
-                  onClick={() => {
-                    if (item.entity_type === "case") navigate(`/cases?case=${item.entity_id}`);
-                    else if (item.entity_type === "order") navigate(`/orders?order=${item.entity_id}`);
-                    else if (item.entity_type === "appointment") navigate(`/appointments?appointment=${item.entity_id}`);
-                    else if (item.entity_type === "document") navigate(`/documents?document=${item.entity_id}`);
-                    else if (item.entity_type === "contract") navigate(`/contracts?contract=${item.entity_id}`);
-                    else if (item.entity_type === "invoice") navigate(`/invoices?invoice=${item.entity_id}`);
-                    else if (item.entity_type === "compliance" && canOpenComplianceWorkspace) navigate("/admin/compliance");
-                  }}
-                  className={card(
-                    cn(
-                      "w-full p-5 text-left transition",
-                      item.entity_type === "compliance" && !canOpenComplianceWorkspace
-                        ? ""
-                        : "hover:-translate-y-0.5 hover:shadow-lg"
-                    )
-                  )}
-                >
+              {filteredTimeline.map((item) => {
+                const route = resolvePatientTimelineRoute(item, {
+                  canOpenDocumentsWorkspace,
+                  canViewContracts,
+                  canViewInvoices,
+                  canOpenComplianceWorkspace,
+                });
+
+                return (
+                  <button
+                    key={`${item.entity_type}-${item.entity_id}`}
+                    type="button"
+                    onClick={() => {
+                      if (route) {
+                        navigate(route);
+                      }
+                    }}
+                    className={card(
+                      cn(
+                        "w-full p-5 text-left transition",
+                        route ? "hover:-translate-y-0.5 hover:shadow-lg" : ""
+                      )
+                    )}
+                  >
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2">
                       <Badge variant="outline" className="rounded-full text-[10px]">{item.entity_type}</Badge>
@@ -2758,8 +2824,9 @@ export function PatientDetailPage() {
                     <span>{item.category}</span>
                     {item.source_label ? <span>· {item.source_label}</span> : null}
                   </div>
-                </button>
-                  ))}
+                  </button>
+                );
+              })}
                 </div>
               )}
             </div>

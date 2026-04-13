@@ -104,11 +104,26 @@ async function installSecureChatApiMocks(
   page: Page,
   myKey: LocalMessageKeyRecord,
   peerKey: LocalMessageKeyRecord,
+  options?: {
+    meId?: string;
+    meEmail?: string;
+    meName?: string;
+    meRole?: string;
+    peerId?: string;
+    peerName?: string;
+    peerEmail?: string;
+    peerRole?: string;
+  },
 ) {
-  const myId = "00000000-0000-0000-0000-000000000001";
-  const peerId = "00000000-0000-0000-0000-000000000777";
+  const myId = options?.meId ?? "00000000-0000-0000-0000-000000000001";
+  const peerId = options?.peerId ?? "00000000-0000-0000-0000-000000000777";
   const attachmentKey = "secure-attachment-key-1";
-
+  const meRole = options?.meRole ?? "ceo";
+  const meName = options?.meName ?? "Admin GMED";
+  const meEmail = options?.meEmail ?? "admin@gmed.de";
+  const peerName = options?.peerName ?? "Dr Secure Peer";
+  const peerEmail = options?.peerEmail ?? "peer@gmed.de";
+  const peerRole = options?.peerRole ?? "patient_manager";
   let messages = [
     {
       id: "00000000-0000-0000-0000-000000001001",
@@ -137,27 +152,36 @@ async function installSecureChatApiMocks(
   ];
   let latestAttachmentBytes = Buffer.from("secure-attachment-placeholder");
 
-  const buildConversations = () => [
-    {
-      user_id: peerId,
-      name: "Dr Secure Peer",
-      email: "peer@gmed.de",
-      role: "patient_manager",
-      last_message:
-        messages.length > 0
-          ? messages[messages.length - 1]?.message ?? "[Encrypted message]"
-          : "",
-      last_at:
-        messages.length > 0
-          ? messages[messages.length - 1]?.created_at ?? "2026-04-13T09:00:00Z"
-          : "2026-04-13T09:00:00Z",
-      is_read: true,
-      last_read_at: "2026-04-13T09:00:00Z",
-      is_mine: false,
-      unread: 0,
-      is_e2e: true,
-    },
-  ];
+  const buildConversations = () => {
+    const unreadIncoming = messages.filter(
+      (message) => message.to_user === myId && !message.read_at,
+    ).length;
+    const lastIncomingReadAt = [...messages]
+      .reverse()
+      .find((message) => message.to_user === myId && message.read_at)?.read_at;
+
+    return [
+      {
+        user_id: peerId,
+        name: peerName,
+        email: peerEmail,
+        role: peerRole,
+        last_message:
+          messages.length > 0
+            ? messages[messages.length - 1]?.message ?? "[Encrypted message]"
+            : "",
+        last_at:
+          messages.length > 0
+            ? messages[messages.length - 1]?.created_at ?? "2026-04-13T09:00:00Z"
+            : "2026-04-13T09:00:00Z",
+        is_read: unreadIncoming === 0,
+        last_read_at: lastIncomingReadAt ?? "2026-04-13T09:00:00Z",
+        is_mine: false,
+        unread: unreadIncoming,
+        is_e2e: true,
+      },
+    ];
+  };
 
   await page.addInitScript(
     ({ keyRecord }) => {
@@ -202,9 +226,9 @@ async function installSecureChatApiMocks(
     if (path === "/me") {
       return json(route, {
         id: myId,
-        email: "admin@gmed.de",
-        name: "Admin GMED",
-        role: "ceo",
+        email: meEmail,
+        name: meName,
+        role: meRole,
         created_at: "2026-01-01T00:00:00Z",
       });
     }
@@ -242,6 +266,27 @@ async function installSecureChatApiMocks(
 
     if (path === "/messages/conversations") {
       return json(route, buildConversations());
+    }
+
+    if (path === "/messages/allowed-peers") {
+      const search = url.searchParams.get("search")?.toLowerCase().trim();
+      const candidates = [
+        {
+          id: peerId,
+          name: peerName,
+          email: peerEmail,
+          role: peerRole,
+          is_active: true,
+        },
+      ];
+      const filtered = search
+        ? candidates.filter(
+            (item) =>
+              item.name.toLowerCase().includes(search) ||
+              item.email.toLowerCase().includes(search),
+          )
+        : candidates;
+      return json(route, filtered);
     }
 
     if (path === `/messages/${peerId}` && route.request().method() === "GET") {
@@ -432,5 +477,144 @@ test.describe("chat secure flows", () => {
     );
     await page.getByRole("button", { name: /secure-result\.pdf/i }).click();
     await downloadRequest;
+  });
+
+  test("patient can use secure chat with assigned care team in browser E2E", async ({
+    page,
+  }) => {
+    const peerId = "00000000-0000-0000-0000-000000000778";
+    const attachmentKey = "secure-attachment-key-1";
+    const myKey = await generateLocalMessageKey();
+    const peerKey = await generateLocalMessageKey();
+
+    await installSecureChatApiMocks(page, myKey, peerKey, {
+      meId: "00000000-0000-0000-0000-000000000009",
+      meEmail: "patient@gmed.de",
+      meName: "Anna Portal",
+      meRole: "patient",
+      peerId,
+      peerName: "Assigned Care Manager",
+      peerEmail: "pm@gmed.de",
+      peerRole: "patient_manager",
+    });
+
+    await page.goto("/login");
+    await page.locator("#email").fill("patient@gmed.de");
+    await page.locator("#password").fill("patient123");
+    await page.getByRole("button", { name: /Anmelden|Войти/i }).click();
+    await page.waitForURL(/\/$/, { timeout: 15_000 });
+
+    await page.goto("/chat");
+    await page.getByRole("button", { name: /Assigned Care Manager/i }).click();
+
+    await expect(
+      page.getByText(/End-to-end encrypted chat/i),
+    ).toBeVisible();
+
+    await page
+      .getByPlaceholder(/Nachricht eingeben/i)
+      .fill("Patient secure update for the care team");
+    await page.locator("form button[type='submit']").click();
+    await expect(
+      page.getByText("Patient secure update for the care team"),
+    ).toBeVisible();
+
+    await page.locator("form input[type='file']").setInputFiles({
+      name: "patient-secure-note.pdf",
+      mimeType: "application/pdf",
+      buffer: Buffer.from("patient-secure-attachment-browser"),
+    });
+    await page
+      .getByPlaceholder(/Nachricht eingeben/i)
+      .fill("Please see the attached secure note.");
+
+    const uploadRequest = page.waitForRequest((request) =>
+      request.method() === "POST" &&
+      request.url().includes(`/api/v1/messages/${peerId}/upload`),
+    );
+    await page.locator("form button[type='submit']").click();
+    await uploadRequest;
+
+    await expect(page.getByText("patient-secure-note.pdf")).toBeVisible();
+    await expect(
+      page.getByText("Please see the attached secure note."),
+    ).toBeVisible();
+
+    const downloadRequest = page.waitForRequest((request) =>
+      request.method() === "GET" &&
+      request.url().includes(`/api/v1/messages/file/${attachmentKey}`),
+    );
+    await page.getByRole("button", { name: /patient-secure-note\.pdf/i }).click();
+    await downloadRequest;
+  });
+
+  test("patient portal chat clears unread state and only exposes allowed peers", async ({
+    page,
+  }) => {
+    const peerId = "00000000-0000-0000-0000-000000000779";
+    const hiddenPeerName = "Unrelated Billing";
+    const myKey = await generateLocalMessageKey();
+    const peerKey = await generateLocalMessageKey();
+
+    await installSecureChatApiMocks(page, myKey, peerKey, {
+      meId: "00000000-0000-0000-0000-000000000010",
+      meEmail: "patient@gmed.de",
+      meName: "Anna Portal",
+      meRole: "patient",
+      peerId,
+      peerName: "Assigned Care Manager",
+      peerEmail: "pm@gmed.de",
+      peerRole: "patient_manager",
+    });
+
+    await page.goto("/login");
+    await page.locator("#email").fill("patient@gmed.de");
+    await page.locator("#password").fill("patient123");
+    await page.getByRole("button", { name: /Anmelden|Войти/i }).click();
+    await page.waitForURL(/\/$/, { timeout: 15_000 });
+
+    await page.goto("/chat");
+    const convoButton = page
+      .locator("button")
+      .filter({ hasText: "Assigned Care Manager" })
+      .first();
+    await expect(convoButton.getByText("1", { exact: true })).toBeVisible();
+
+    const readRequest = page.waitForRequest((request) =>
+      request.method() === "POST" &&
+      request.url().includes(`/api/v1/messages/${peerId}/read`),
+    );
+    await convoButton.click();
+    await readRequest;
+
+    await expect(
+      page.getByTestId("chat-message-text-00000000-0000-0000-0000-000000001001"),
+    ).toHaveText("Secure history bootstrap");
+    await expect(convoButton.getByText("1", { exact: true })).toHaveCount(0);
+
+    await page.getByRole("button", { name: /Neue Nachricht|Новое сообщение/i }).click();
+    const picker = page.getByTestId("chat-new-picker");
+    const pickerSearch = picker.getByPlaceholder(/Benutzer suchen|Поиск пользователей/i);
+
+    const assignedSearchRequest = page.waitForRequest((request) =>
+      request.method() === "GET" &&
+      request.url().includes("/api/v1/messages/allowed-peers?search=Assigned"),
+    );
+    await pickerSearch.fill("Assigned");
+    await assignedSearchRequest;
+    await expect(
+      picker.getByRole("button", { name: /Assigned Care Manager/i }),
+    ).toBeVisible();
+
+    const hiddenSearchRequest = page.waitForRequest((request) =>
+      request.method() === "GET" &&
+      request.url().includes("/api/v1/messages/allowed-peers?search=Billing"),
+    );
+    await pickerSearch.fill("Billing");
+    await hiddenSearchRequest;
+    await expect(
+      picker.getByRole("button", { name: /Assigned Care Manager/i }),
+    ).toHaveCount(0);
+    await expect(picker.getByText(hiddenPeerName)).toHaveCount(0);
   });
 });

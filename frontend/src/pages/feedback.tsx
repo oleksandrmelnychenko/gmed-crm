@@ -115,6 +115,16 @@ function roleCanCaptureFeedback(role?: string) {
   return role === "ceo" || role === "patient_manager";
 }
 
+function canViewStaffFeedback(role?: string) {
+  return (
+    role === "ceo" ||
+    role === "ceo_assistant" ||
+    role === "patient_manager" ||
+    role === "teamlead_interpreter" ||
+    role === "concierge"
+  );
+}
+
 function buildFeedbackQuery(search: string, status: string, source: string) {
   const params = new URLSearchParams();
   if (search.trim()) params.set("search", search.trim());
@@ -519,6 +529,7 @@ function PatientFeedbackWorkspace() {
 
 function StaffFeedbackWorkspace() {
   const { user } = useAuth();
+  const canViewWorkspace = canViewStaffFeedback(user?.role);
   const [feedback, setFeedback] = useState<PortalFeedbackItem[]>([]);
   const [summary, setSummary] = useState<PortalFeedbackSummary | null>(null);
   const [patients, setPatients] = useState<PatientOption[]>([]);
@@ -548,6 +559,15 @@ function StaffFeedbackWorkspace() {
 
   useEffect(() => {
     let cancelled = false;
+    if (!canViewWorkspace) {
+      setFeedback([]);
+      setSummary(null);
+      setLoading(false);
+      setRefreshing(false);
+      return () => {
+        cancelled = true;
+      };
+    }
 
     async function load() {
       if (loading) setRefreshing(false);
@@ -579,10 +599,10 @@ function StaffFeedbackWorkspace() {
     return () => {
       cancelled = true;
     };
-  }, [loading, queryString, version]);
+  }, [canViewWorkspace, loading, queryString, version]);
 
   useEffect(() => {
-    if (!canCapture) return;
+    if (!canViewWorkspace || !canCapture) return;
     let cancelled = false;
 
     async function loadPatients() {
@@ -598,10 +618,10 @@ function StaffFeedbackWorkspace() {
     return () => {
       cancelled = true;
     };
-  }, [canCapture]);
+  }, [canCapture, canViewWorkspace]);
 
   useEffect(() => {
-    if (!canCapture || !selectedPatientId) {
+    if (!canViewWorkspace || !canCapture || !selectedPatientId) {
       setPatientAppointments([]);
       setForm((current) => ({ ...current, appointmentId: "" }));
       return;
@@ -621,7 +641,7 @@ function StaffFeedbackWorkspace() {
     return () => {
       cancelled = true;
     };
-  }, [canCapture, selectedPatientId]);
+  }, [canCapture, canViewWorkspace, selectedPatientId]);
 
   async function handleCapture(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -706,6 +726,19 @@ function StaffFeedbackWorkspace() {
           Loading feedback workspace...
         </div>
       </div>
+    );
+  }
+
+  if (!canViewWorkspace) {
+    return (
+      <section className={shellCard("px-6 py-6")}>
+        <h1 className="text-3xl font-semibold tracking-tight text-slate-950">
+          Feedback workspace
+        </h1>
+        <p className="mt-3 text-sm text-slate-500">
+          This role cannot access feedback operations.
+        </p>
+      </section>
     );
   }
 

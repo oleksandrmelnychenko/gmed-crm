@@ -8901,14 +8901,23 @@ async fn list_document_shares(
     Extension(auth): Extension<AuthUser>,
     Path(id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+    if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::CeoAssistant, Role::PatientManager])
+    {
         return resp;
     }
 
-    match fetch_document_row(&state, id, auth.user_id).await {
-        Ok(Some(_)) => {}
+    let assignment_set = match load_assignment_set(&state, &auth).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let row = match fetch_document_row(&state, id, auth.user_id).await {
+        Ok(Some(row)) => row,
         Ok(None) => return err(StatusCode::NOT_FOUND, "Document not found"),
         Err(resp) => return resp,
+    };
+
+    if !can_view_document_row(&auth, &row, &assignment_set) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     match sqlx::query(
@@ -8989,6 +8998,10 @@ async fn create_bulk_document_shares(
         }
     }
 
+    let assignment_set = match load_assignment_set(&state, &auth).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
     let mut contexts = Vec::with_capacity(unique_document_ids.len());
     for document_id in unique_document_ids.iter().copied() {
         let row = match fetch_document_row(&state, document_id, auth.user_id).await {
@@ -8996,6 +9009,9 @@ async fn create_bulk_document_shares(
             Ok(None) => return err(StatusCode::NOT_FOUND, "Document not found"),
             Err(resp) => return resp,
         };
+        if !can_view_document_row(&auth, &row, &assignment_set) {
+            return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+        }
         let context = match shareable_document_context_from_row(&row) {
             Ok(value) => value,
             Err(resp) => return resp,
@@ -9096,11 +9112,18 @@ async fn create_document_share(
         Err(resp) => return resp,
     };
 
+    let assignment_set = match load_assignment_set(&state, &auth).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
     let row = match fetch_document_row(&state, id, auth.user_id).await {
         Ok(Some(row)) => row,
         Ok(None) => return err(StatusCode::NOT_FOUND, "Document not found"),
         Err(resp) => return resp,
     };
+    if !can_view_document_row(&auth, &row, &assignment_set) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
     let document = match shareable_document_context_from_row(&row) {
         Ok(value) => value,
         Err(resp) => return resp,
@@ -9160,6 +9183,19 @@ async fn revoke_document_share(
 ) -> axum::response::Response {
     if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
         return resp;
+    }
+
+    let assignment_set = match load_assignment_set(&state, &auth).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let row = match fetch_document_row(&state, id, auth.user_id).await {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Document not found"),
+        Err(resp) => return resp,
+    };
+    if !can_view_document_row(&auth, &row, &assignment_set) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let result = match sqlx::query(

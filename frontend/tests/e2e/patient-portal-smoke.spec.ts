@@ -118,6 +118,63 @@ async function installPatientPortalMocks(page: Page) {
       can_cancel: true,
     },
   ];
+  const portalAppointments = [
+    {
+      id: "00000000-0000-0000-0000-000000009101",
+      title: "Clinic follow-up",
+      date: "2026-04-20",
+      time_start: "09:00",
+      time_end: "10:00",
+      appointment_type: "medical",
+      status: "confirmed",
+      location: "Clinic Cologne",
+      category: "followup",
+      provider_name: "Clinic Cologne",
+      doctor_name: "Doctor Cologne",
+      created_at: "2026-04-01T09:00:00Z",
+    },
+  ];
+  let feedbackRows = [
+    {
+      id: "00000000-0000-0000-0000-000000009901",
+      patient_id: "00000000-0000-0000-0000-000000009001",
+      appointment_id: null,
+      appointment_title: null,
+      provider_id: null,
+      provider_name: null,
+      doctor_id: null,
+      doctor_name: null,
+      patient_manager_id: null,
+      patient_manager_name: null,
+      interpreter_id: null,
+      interpreter_name: null,
+      concierge_id: null,
+      concierge_name: null,
+      source: "patient_portal",
+      status: "reviewed",
+      overall_score: 5,
+      patient_manager_score: null,
+      interpreter_score: null,
+      concierge_score: null,
+      treatment_score: 5,
+      doctor_score: 5,
+      organization_score: 5,
+      service_score: 5,
+      infrastructure_score: 5,
+      price_value_score: 4,
+      treatment_success: "yes",
+      complication_reported: false,
+      nps_score: 10,
+      comments: "Everything clear.",
+      improvement_notes: null,
+      internal_note: null,
+      review_note: null,
+      submitted_by_name: "Anna Portal",
+      reviewed_by_name: "Admin GMED",
+      submitted_at: "2026-04-05T10:00:00Z",
+      reviewed_at: "2026-04-06T10:00:00Z",
+    },
+  ];
 
   const buildPortalInvoice = () => ({
     id: "00000000-0000-0000-0000-000000009501",
@@ -179,22 +236,7 @@ async function installPatientPortalMocks(page: Page) {
     }
 
     if (path === "/me/appointments") {
-      return json(route, [
-        {
-          id: "00000000-0000-0000-0000-000000009101",
-          title: "Clinic follow-up",
-          date: "2026-04-20",
-          time_start: "09:00",
-          time_end: "10:00",
-          appointment_type: "medical",
-          status: "confirmed",
-          location: "Clinic Cologne",
-          category: "followup",
-          provider_name: "Clinic Cologne",
-          doctor_name: "Doctor Cologne",
-          created_at: "2026-04-01T09:00:00Z",
-        },
-      ]);
+      return json(route, portalAppointments);
     }
 
     if (path === "/me/appointment-requests" && route.request().method() === "POST") {
@@ -485,48 +527,72 @@ async function installPatientPortalMocks(page: Page) {
       return json(route, privacyRequests);
     }
 
+    if (path === "/me/feedback" && route.request().method() === "POST") {
+      const payload = JSON.parse(route.request().postData() ?? "{}") as {
+        appointment_id?: string | null;
+        overall_score?: number;
+        patient_manager_score?: number | null;
+        interpreter_score?: number | null;
+        concierge_score?: number | null;
+        treatment_score?: number | null;
+        doctor_score?: number | null;
+        organization_score?: number | null;
+        service_score?: number | null;
+        infrastructure_score?: number | null;
+        price_value_score?: number | null;
+        treatment_success?: string | null;
+        complication_reported?: boolean;
+        nps_score?: number;
+        comments?: string | null;
+        improvement_notes?: string | null;
+      };
+      const linkedAppointment =
+        portalAppointments.find((item) => item.id === payload.appointment_id) ?? null;
+      const createdFeedback = {
+        id: `00000000-0000-0000-0000-0000000099${10 + feedbackRows.length}`,
+        patient_id: "00000000-0000-0000-0000-000000009001",
+        appointment_id: linkedAppointment?.id ?? null,
+        appointment_title: linkedAppointment?.title ?? null,
+        provider_id: linkedAppointment ? "00000000-0000-0000-0000-000000009301" : null,
+        provider_name: linkedAppointment?.provider_name ?? null,
+        doctor_id: linkedAppointment ? "00000000-0000-0000-0000-000000009302" : null,
+        doctor_name: linkedAppointment?.doctor_name ?? null,
+        patient_manager_id: null,
+        patient_manager_name: null,
+        interpreter_id: null,
+        interpreter_name: null,
+        concierge_id: null,
+        concierge_name: null,
+        source: "patient_portal",
+        status: "submitted",
+        overall_score: payload.overall_score ?? 5,
+        patient_manager_score: payload.patient_manager_score ?? null,
+        interpreter_score: payload.interpreter_score ?? null,
+        concierge_score: payload.concierge_score ?? null,
+        treatment_score: payload.treatment_score ?? null,
+        doctor_score: payload.doctor_score ?? null,
+        organization_score: payload.organization_score ?? null,
+        service_score: payload.service_score ?? null,
+        infrastructure_score: payload.infrastructure_score ?? null,
+        price_value_score: payload.price_value_score ?? null,
+        treatment_success: payload.treatment_success ?? null,
+        complication_reported: payload.complication_reported ?? false,
+        nps_score: payload.nps_score ?? 10,
+        comments: payload.comments ?? null,
+        improvement_notes: payload.improvement_notes ?? null,
+        internal_note: null,
+        review_note: null,
+        submitted_by_name: "Anna Portal",
+        reviewed_by_name: null,
+        submitted_at: "2026-04-13T16:00:00Z",
+        reviewed_at: null,
+      };
+      feedbackRows = [createdFeedback, ...feedbackRows];
+      return json(route, createdFeedback, 201);
+    }
+
     if (path === "/me/feedback") {
-      return json(route, [
-        {
-          id: "00000000-0000-0000-0000-000000009901",
-          patient_id: "00000000-0000-0000-0000-000000009001",
-          appointment_id: "00000000-0000-0000-0000-000000009101",
-          appointment_title: "Clinic follow-up",
-          provider_id: "00000000-0000-0000-0000-000000009301",
-          provider_name: "Clinic Cologne",
-          doctor_id: "00000000-0000-0000-0000-000000009302",
-          doctor_name: "Doctor Cologne",
-          patient_manager_id: null,
-          patient_manager_name: null,
-          interpreter_id: null,
-          interpreter_name: null,
-          concierge_id: null,
-          concierge_name: null,
-          source: "patient_portal",
-          status: "reviewed",
-          overall_score: 5,
-          patient_manager_score: null,
-          interpreter_score: null,
-          concierge_score: null,
-          treatment_score: 5,
-          doctor_score: 5,
-          organization_score: 5,
-          service_score: 5,
-          infrastructure_score: 5,
-          price_value_score: 4,
-          treatment_success: "yes",
-          complication_reported: false,
-          nps_score: 10,
-          comments: "Everything clear.",
-          improvement_notes: null,
-          internal_note: null,
-          review_note: null,
-          submitted_by_name: "Anna Portal",
-          reviewed_by_name: "Admin GMED",
-          submitted_at: "2026-04-05T10:00:00Z",
-          reviewed_at: "2026-04-06T10:00:00Z",
-        },
-      ]);
+      return json(route, feedbackRows);
     }
 
     return json(route, []);
@@ -723,5 +789,36 @@ test.describe("patient portal smoke flows", () => {
     await expect(page.getByText("Service request cancelled.")).toBeVisible();
     await expect(createdCard.getByText("cancelled")).toBeVisible();
     await expect(createdCard.getByRole("button", { name: /Cancel request/i })).toHaveCount(0);
+  });
+
+  test("patient can submit appointment-linked feedback and see it in history", async ({
+    page,
+  }) => {
+    await page.goto("/feedback");
+    await expect(page).toHaveURL(/\/feedback$/);
+
+    const form = page.locator("form").first();
+    await form.locator("select").first().selectOption(
+      "00000000-0000-0000-0000-000000009101",
+    );
+    await form
+      .getByPlaceholder("What worked well?")
+      .fill("The doctor explained the next steps clearly.");
+    await form
+      .getByPlaceholder("What should the team improve?")
+      .fill("Waiting area signage could be clearer.");
+    await form.getByRole("button", { name: /Submit feedback/i }).click();
+
+    await expect(page.getByText("Feedback submitted. Thank you.")).toBeVisible();
+    await expect(page.getByText(/Submitted feedback/i)).toBeVisible();
+
+    const feedbackCard = page
+      .locator("article")
+      .filter({ hasText: "The doctor explained the next steps clearly." })
+      .first();
+    await expect(feedbackCard).toBeVisible();
+    await expect(feedbackCard.getByText("Clinic follow-up")).toBeVisible();
+    await expect(feedbackCard.getByText("submitted")).toBeVisible();
+    await expect(feedbackCard.getByText("Waiting area signage could be clearer.")).toBeVisible();
   });
 });

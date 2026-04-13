@@ -269,12 +269,23 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
         .into_response()
 }
 
+fn can_read_contracts(role: Role) -> bool {
+    matches!(
+        role,
+        Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing
+    )
+}
+
+fn can_manage_contracts(role: Role) -> bool {
+    matches!(role, Role::Ceo | Role::PatientManager | Role::Billing)
+}
+
 async fn can_access_patient(
     state: &AppState,
     auth: &AuthUser,
     patient_id: Uuid,
 ) -> Result<bool, axum::response::Response> {
-    if matches!(auth.role, Role::Ceo | Role::Billing) {
+    if matches!(auth.role, Role::Ceo | Role::CeoAssistant | Role::Billing) {
         return Ok(true);
     }
 
@@ -378,8 +389,8 @@ async fn list_framework_contracts(
     Extension(auth): Extension<AuthUser>,
     Query(query): Query<ListFrameworkContractsQuery>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Billing]) {
-        return e;
+    if !can_read_contracts(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     if let Some(ref status) = query.status
@@ -458,8 +469,8 @@ async fn create_framework_contract(
     Extension(auth): Extension<AuthUser>,
     Json(body): Json<CreateFrameworkContractRequest>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Billing]) {
-        return e;
+    if !can_manage_contracts(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     match ensure_patient_access(&state, &auth, body.patient_id).await {
@@ -568,8 +579,8 @@ async fn get_framework_contract(
     Extension(auth): Extension<AuthUser>,
     Path(contract_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Billing]) {
-        return e;
+    if !can_read_contracts(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     match load_contract_detail(&state, contract_id, &auth).await {
@@ -585,8 +596,8 @@ async fn update_framework_contract_status(
     Path(contract_id): Path<Uuid>,
     Json(body): Json<UpdateFrameworkContractStatusRequest>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Billing]) {
-        return e;
+    if !can_manage_contracts(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     if !is_valid_contract_status(&body.status) {
@@ -907,8 +918,8 @@ async fn list_quotes(
     Extension(auth): Extension<AuthUser>,
     Query(query): Query<ListQuotesQuery>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Billing]) {
-        return e;
+    if !can_read_contracts(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     if let Some(ref status) = query.status
@@ -1015,8 +1026,8 @@ async fn create_quote(
     Path(order_id): Path<Uuid>,
     Json(body): Json<CreateQuoteRequest>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Billing]) {
-        return e;
+    if !can_manage_contracts(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let order_ctx = match load_order_access_context(&state, order_id).await {
@@ -1200,8 +1211,8 @@ async fn get_quote(
     Extension(auth): Extension<AuthUser>,
     Path(quote_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Billing]) {
-        return e;
+    if !can_read_contracts(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     match load_quote_detail(&state, quote_id, &auth).await {
@@ -1216,8 +1227,8 @@ async fn list_quote_versions(
     Extension(auth): Extension<AuthUser>,
     Path(quote_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Billing]) {
-        return e;
+    if !can_read_contracts(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let patient_id = match load_quote_patient_id(&state, quote_id).await {
@@ -1293,8 +1304,8 @@ async fn update_quote_status(
     Path(quote_id): Path<Uuid>,
     Json(body): Json<UpdateQuoteStatusRequest>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Billing]) {
-        return e;
+    if !can_manage_contracts(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     if !is_valid_quote_status(&body.status) {

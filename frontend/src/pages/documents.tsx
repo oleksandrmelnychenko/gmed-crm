@@ -357,6 +357,10 @@ function canUpdateTranslations(role?: string) {
   ].includes(role ?? "");
 }
 
+function canViewDocumentShares(role?: string) {
+  return ["ceo", "ceo_assistant", "patient_manager"].includes(role ?? "");
+}
+
 function buildDocumentsPath(filters: FiltersState) {
   const params = new URLSearchParams();
   if (filters.search.trim()) params.set("search", filters.search.trim());
@@ -719,6 +723,7 @@ function StaffDocumentsPage() {
   const canManageIntake = canManageDocumentIntake(user?.role);
   const canRequestTranslation = canRequestTranslations(user?.role);
   const canUpdateTranslation = canUpdateTranslations(user?.role);
+  const canViewShares = canViewDocumentShares(user?.role);
 
   const [filters, setFilters] = useState<FiltersState>(() => ({
     search: searchParams.get("search") ?? "",
@@ -1004,7 +1009,7 @@ function StaffDocumentsPage() {
         ] =
           await Promise.all([
             apiFetch<DocumentItem>(`/documents/${selectedId}`),
-            canManage
+            canViewShares
               ? apiFetch<DocumentShare[]>(
                   `/documents/${selectedId}/shares`,
                 ).catch(() => [])
@@ -1048,7 +1053,7 @@ function StaffDocumentsPage() {
     return () => {
       active = false;
     };
-  }, [canManage, canView, documentsFailedLoadDocumentText, selectedId]);
+  }, [canViewShares, canView, documentsFailedLoadDocumentText, selectedId]);
 
   useEffect(() => {
     if (!uploadOpen || !uploadForm.patientId) {
@@ -4224,7 +4229,8 @@ function StaffDocumentsPage() {
                   </div>
                 </SectionCard>
 
-                <SectionCard title={t.documents_share}>
+                {canViewShares ? (
+                  <SectionCard title={t.documents_share}>
                   {shareError ? (
                     <Banner tone="error">{shareError}</Banner>
                   ) : null}
@@ -4490,7 +4496,8 @@ function StaffDocumentsPage() {
                       </div>
                     </form>
                   ) : null}
-                </SectionCard>
+                  </SectionCard>
+                ) : null}
               </div>
             ) : null}
           </div>

@@ -1217,6 +1217,51 @@ async fn billing_can_access_financial_documents_but_not_medical_ones() {
 }
 
 #[tokio::test]
+async fn sales_and_it_admin_cannot_access_documents_workspace_or_meta_routes() {
+    let Some((app, pool, admin_id, _admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-deny-surface");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let appointment_id =
+        seed_appointment(&pool, patient_id, provider_id, doctor_id, admin_id, &tag).await;
+    let document_id = seed_document(
+        &pool,
+        admin_id,
+        patient_id,
+        appointment_id,
+        "released_internal",
+        false,
+        "general",
+        &format!("{tag}-general"),
+    )
+    .await;
+
+    for role in ["sales", "it_admin"] {
+        let user_id = seed_user(&pool, &format!("{tag}-{role}"), role).await;
+        let bearer = auth_header_for(user_id, role);
+
+        for path in [
+            "/api/v1/documents",
+            "/api/v1/documents/meta/staff",
+            "/api/v1/documents/meta/categories",
+            "/api/v1/documents/templates",
+            &format!("/api/v1/documents/{document_id}"),
+        ] {
+            let (status, body) = json_request(&app, "GET", path, &bearer, None).await;
+            assert_eq!(
+                status,
+                StatusCode::FORBIDDEN,
+                "role {role} must be denied on {path}"
+            );
+            assert_eq!(body["message"], "Forbidden");
+        }
+    }
+}
+
+#[tokio::test]
 async fn document_user_share_can_be_confirmed_and_revoked() {
     let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
         return;
@@ -2031,6 +2076,268 @@ async fn translation_workspace_can_store_source_and_translated_text() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(list_body[0]["translated_text"], "Hello world");
+}
+
+#[tokio::test]
+async fn ceo_assistant_can_review_translation_requests_but_cannot_mutate_them() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("doc-translation-assistant");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let appointment_id =
+        seed_appointment(&pool, patient_id, provider_id, doctor_id, admin_id, &tag).await;
+    let document_id = seed_document(
+        &pool,
+        admin_id,
+        patient_id,
+        appointment_id,
+        "released_internal",
+        true,
+        "arztbrief",
+        &tag,
+    )
+    .await;
+    let assistant_id = seed_user(&pool, &tag, "ceo_assistant").await;
+    let assistant_bearer = auth_header_for(assistant_id, "ceo_assistant");
+
+    let (status, create_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/translation-requests"),
+        &admin_bearer,
+        Some(json!({
+            "requested_language": "en",
+            "note": "Prepare a patient-facing English summary."
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let request_id = create_body["id"].as_str().unwrap().to_string();
+
+    let (status, list_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/translation-requests"),
+        &assistant_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(list_body.as_array().unwrap().len(), 1);
+    assert_eq!(list_body[0]["id"], request_id);
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/translation-requests"),
+        &assistant_bearer,
+        Some(json!({
+            "requested_language": "uk",
+            "note": "Assistant should stay read-only."
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["message"], "Forbidden");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/translation-requests/{request_id}/update"),
+        &assistant_bearer,
+        Some(json!({
+            "status": "completed",
+            "translated_text": "Assistant cannot complete translations."
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["message"], "Forbidden");
+}
+
+#[tokio::test]
+async fn ceo_assistant_can_view_provider_share_trail_but_cannot_mutate_provider_shares() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-share-assistant");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider_with_type(&pool, &format!("{tag}-med"), "medical").await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let appointment_id =
+        seed_appointment(&pool, patient_id, provider_id, doctor_id, admin_id, &tag).await;
+    let document_id = seed_document(
+        &pool,
+        admin_id,
+        patient_id,
+        appointment_id,
+        "released_external",
+        true,
+        "arztbrief",
+        &format!("{tag}-arztbrief"),
+    )
+    .await;
+    let assistant_id = seed_user(&pool, &tag, "ceo_assistant").await;
+    let assistant_bearer = auth_header_for(assistant_id, "ceo_assistant");
+
+    let cover_message = "Please review the attached summary for the upcoming visit.";
+    let (status, create_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/shares"),
+        &admin_bearer,
+        Some(json!({
+            "shared_with_provider_id": provider_id,
+            "channel": "email",
+            "message": cover_message,
+            "requires_confirmation": true
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let share_id = create_body["id"].as_str().unwrap().to_string();
+
+    let (status, list_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/shares"),
+        &assistant_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(list_body.as_array().unwrap().len(), 1);
+    assert_eq!(list_body[0]["id"], share_id);
+    assert_eq!(list_body[0]["provider_name"], format!("Clinic {tag}-med"));
+    assert_eq!(list_body[0]["message"], cover_message);
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/shares"),
+        &assistant_bearer,
+        Some(json!({
+            "shared_with_provider_id": provider_id,
+            "channel": "email",
+            "message": "Assistant mutation should stay blocked.",
+            "requires_confirmation": true
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["message"], "Forbidden");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/shares/{share_id}/revoke"),
+        &assistant_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["message"], "Forbidden");
+}
+
+#[tokio::test]
+async fn patient_manager_cannot_manage_provider_shares_for_unassigned_documents() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-share-assignment");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider_with_type(&pool, &format!("{tag}-med"), "medical").await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let appointment_id =
+        seed_appointment(&pool, patient_id, provider_id, doctor_id, admin_id, &tag).await;
+    let document_id = seed_document(
+        &pool,
+        admin_id,
+        patient_id,
+        appointment_id,
+        "released_external",
+        true,
+        "arztbrief",
+        &format!("{tag}-arztbrief"),
+    )
+    .await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/shares"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["message"], "Insufficient permissions");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/shares"),
+        &pm_bearer,
+        Some(json!({
+            "shared_with_provider_id": provider_id,
+            "channel": "email",
+            "message": "Patient manager is not assigned to this patient.",
+            "requires_confirmation": true
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["message"], "Insufficient permissions");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/shares/bulk",
+        &pm_bearer,
+        Some(json!({
+            "document_ids": [document_id],
+            "shared_with_provider_id": provider_id,
+            "channel": "email",
+            "message": "Bulk sharing should stay assignment-bound.",
+            "requires_confirmation": true
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["message"], "Insufficient permissions");
+
+    let (status, create_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/shares"),
+        &admin_bearer,
+        Some(json!({
+            "shared_with_provider_id": provider_id,
+            "channel": "email",
+            "message": "CEO share for revoke regression.",
+            "requires_confirmation": true
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let share_id = create_body["id"].as_str().unwrap().to_string();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/shares/{share_id}/revoke"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["message"], "Insufficient permissions");
 }
 
 #[tokio::test]

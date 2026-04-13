@@ -277,6 +277,27 @@ async fn patient_can_submit_feedback_and_pm_gets_summary() {
 }
 
 #[tokio::test]
+async fn billing_sales_interpreter_and_it_admin_cannot_open_feedback_workspace() {
+    let Some((app, pool, _admin_id)) = test_context().await else {
+        return;
+    };
+
+    for role in ["billing", "sales", "interpreter", "it_admin"] {
+        let user_id = seed_user(&pool, &unique_tag(&format!("feedback-{role}")), role).await;
+        let bearer = auth_header_for(user_id, role);
+
+        let (status, body) = json_request(&app, "GET", "/api/v1/feedback", &bearer, None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "role {role} must be denied");
+        assert_eq!(body["message"], "Forbidden");
+
+        let (status, body) =
+            json_request(&app, "GET", "/api/v1/feedback/summary", &bearer, None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "role {role} must be denied");
+        assert_eq!(body["message"], "Forbidden");
+    }
+}
+
+#[tokio::test]
 async fn teamlead_and_concierge_only_see_relevant_feedback_rows() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;
@@ -462,5 +483,228 @@ async fn review_writes_timeline_feedback_events() {
             .iter()
             .any(|item| item["title"] == "Patient feedback reviewed"),
         "feedback review should appear in patient timeline"
+    );
+}
+
+#[tokio::test]
+async fn reviewed_portal_feedback_flows_back_into_patient_history() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("feedback-portal-review");
+    let patient_user_id = seed_user(&pool, &tag, "patient").await;
+    let patient_manager_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    let interpreter_id = seed_user(&pool, &format!("{tag}-interp"), "interpreter").await;
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let appointment_id = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        interpreter_id,
+        admin_id,
+        &tag,
+    )
+    .await;
+
+    seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, patient_manager_id, admin_id).await;
+
+    let patient_auth = auth_header_for(patient_user_id, "patient");
+    let pm_auth = auth_header_for(patient_manager_id, "patient_manager");
+
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/me/feedback",
+        &patient_auth,
+        Some(json!({
+            "appointment_id": appointment_id,
+            "overall_score": 5,
+            "patient_manager_score": 5,
+            "interpreter_score": 4,
+            "treatment_score": 5,
+            "doctor_score": 5,
+            "organization_score": 4,
+            "service_score": 5,
+            "infrastructure_score": 4,
+            "price_value_score": 4,
+            "treatment_success": "yes",
+            "complication_reported": false,
+            "nps_score": 9,
+            "comments": "Everything felt coordinated."
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let feedback_id = created["id"].as_str().expect("feedback id");
+
+    let (status, reviewed) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/feedback/{feedback_id}/review"),
+        &pm_auth,
+        Some(json!({
+            "status": "reviewed",
+            "review_note": "Reviewed with the clinic and no follow-up is needed."
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(reviewed["status"], "reviewed");
+    assert_eq!(
+        reviewed["review_note"],
+        "Reviewed with the clinic and no follow-up is needed."
+    );
+
+    let (status, history) =
+        json_request(&app, "GET", "/api/v1/me/feedback", &patient_auth, None).await;
+    assert_eq!(status, StatusCode::OK);
+    let items = history.as_array().expect("feedback history");
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["status"], "reviewed");
+    assert_eq!(
+        items[0]["review_note"],
+        "Reviewed with the clinic and no follow-up is needed."
+    );
+    assert_eq!(
+        items[0]["reviewed_by_name"],
+        format!("patient_manager {tag}-pm")
+    );
+    assert!(
+        items[0]["reviewed_at"].as_str().is_some(),
+        "patient portal history should expose reviewed_at after staff review"
+    );
+    assert!(
+        items[0].get("internal_note").is_none(),
+        "patient portal history must not expose internal feedback notes"
+    );
+
+    let (status, summary) =
+        json_request(&app, "GET", "/api/v1/feedback/summary", &pm_auth, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(summary["total_feedback"], 1);
+    assert_eq!(summary["reviewed_feedback"], 1);
+}
+
+#[tokio::test]
+async fn portal_feedback_notifications_are_scoped_to_assigned_patient_roles() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("feedback-notify-scope");
+    let patient_user_id = seed_user(&pool, &tag, "patient").await;
+    let patient_manager_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    let teamlead_id = seed_user(&pool, &format!("{tag}-tl"), "teamlead_interpreter").await;
+    let concierge_id = seed_user(&pool, &format!("{tag}-concierge"), "concierge").await;
+    let unrelated_pm_id = seed_user(&pool, &format!("{tag}-other-pm"), "patient_manager").await;
+    let unrelated_concierge_id =
+        seed_user(&pool, &format!("{tag}-other-concierge"), "concierge").await;
+    let interpreter_id = seed_user(&pool, &format!("{tag}-interp"), "interpreter").await;
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let appointment_id = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        interpreter_id,
+        admin_id,
+        &tag,
+    )
+    .await;
+
+    seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, patient_manager_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, teamlead_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, concierge_id, admin_id).await;
+
+    let patient_auth = auth_header_for(patient_user_id, "patient");
+    let teamlead_auth = auth_header_for(teamlead_id, "teamlead_interpreter");
+    let concierge_auth = auth_header_for(concierge_id, "concierge");
+    let unrelated_pm_auth = auth_header_for(unrelated_pm_id, "patient_manager");
+
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/me/feedback",
+        &patient_auth,
+        Some(json!({
+            "appointment_id": appointment_id,
+            "overall_score": 4,
+            "patient_manager_score": 5,
+            "interpreter_score": 4,
+            "concierge_score": 5,
+            "treatment_score": 4,
+            "doctor_score": 4,
+            "organization_score": 4,
+            "service_score": 5,
+            "infrastructure_score": 4,
+            "price_value_score": 4,
+            "treatment_success": "partial",
+            "complication_reported": false,
+            "nps_score": 8,
+            "comments": "Coordination and support were strong."
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(created["source"], "patient_portal");
+
+    for (user_id, expected_count) in [
+        (patient_manager_id, 1_i64),
+        (teamlead_id, 1_i64),
+        (concierge_id, 1_i64),
+        (unrelated_pm_id, 0_i64),
+        (unrelated_concierge_id, 0_i64),
+    ] {
+        let count: i64 = sqlx::query_scalar(
+            r#"SELECT count(*)
+               FROM user_notifications
+               WHERE user_id = $1
+                 AND kind = 'feedback'
+                 AND entity_type = 'patient'
+                 AND entity_id = $2"#,
+        )
+        .bind(user_id)
+        .bind(patient_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            count, expected_count,
+            "unexpected feedback notification scope"
+        );
+    }
+
+    let (status, teamlead_rows) =
+        json_request(&app, "GET", "/api/v1/feedback", &teamlead_auth, None).await;
+    assert_eq!(status, StatusCode::OK);
+    let teamlead_items = teamlead_rows.as_array().expect("teamlead feedback queue");
+    assert_eq!(teamlead_items.len(), 1);
+    assert_eq!(teamlead_items[0]["patient_id"], patient_id.to_string());
+
+    let (status, concierge_rows) =
+        json_request(&app, "GET", "/api/v1/feedback", &concierge_auth, None).await;
+    assert_eq!(status, StatusCode::OK);
+    let concierge_items = concierge_rows.as_array().expect("concierge feedback queue");
+    assert_eq!(concierge_items.len(), 1);
+    assert_eq!(concierge_items[0]["patient_id"], patient_id.to_string());
+
+    let (status, unrelated_pm_rows) =
+        json_request(&app, "GET", "/api/v1/feedback", &unrelated_pm_auth, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        unrelated_pm_rows
+            .as_array()
+            .expect("unrelated pm queue")
+            .len(),
+        0,
+        "unrelated PM must not see feedback from unassigned patient"
     );
 }

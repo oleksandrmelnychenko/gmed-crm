@@ -291,6 +291,22 @@ async fn patient_can_create_appointment_request_and_pm_can_review_queue() {
 }
 
 #[tokio::test]
+async fn sales_billing_ceo_assistant_and_it_admin_cannot_open_appointments_workspace() {
+    let Some((app, pool, _admin_id)) = test_context().await else {
+        return;
+    };
+
+    for role in ["sales", "billing", "ceo_assistant", "it_admin"] {
+        let user_id = seed_user(&pool, &unique_tag(&format!("appointments-{role}")), role).await;
+        let bearer = auth_header_for(user_id, role);
+
+        let (status, body) = json_request(&app, "GET", "/api/v1/appointments", &bearer, None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "role {role} must be denied");
+        assert_eq!(body["message"], "Forbidden");
+    }
+}
+
+#[tokio::test]
 async fn approved_request_can_be_converted_and_patient_sees_schedule() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;
@@ -326,8 +342,41 @@ async fn approved_request_can_be_converted_and_patient_sees_schedule() {
     .await;
     assert_eq!(status, StatusCode::CREATED);
     let request_id = body["id"].as_str().unwrap().to_string();
+    assert_eq!(body["status"], "requested");
+    assert_eq!(body["order_id"], order_id.to_string());
+    assert_eq!(body["appointment_type"], "medical");
+    assert!(body["requested_at"].as_str().unwrap_or_default().len() > 10);
 
-    let (status, _) = json_request(
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/me/appointment-requests",
+        &patient_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body.as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["id"], request_id);
+    assert_eq!(items[0]["status"], "requested");
+    assert!(items[0]["converted_appointment_id"].is_null());
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/appointments/requests?status=requested",
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body.as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["id"], request_id);
+    assert_eq!(items[0]["status"], "requested");
+
+    let (status, body) = json_request(
         &app,
         "POST",
         &format!("/api/v1/appointments/requests/{request_id}/review"),
@@ -336,6 +385,36 @@ async fn approved_request_can_be_converted_and_patient_sees_schedule() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["status"], "approved");
+    assert_eq!(body["reviewed_by"], patient_manager_id.to_string());
+    assert!(body["reviewed_at"].as_str().unwrap_or_default().len() > 10);
+    assert_eq!(body["patient_id"], patient_id.to_string());
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/appointments/requests?status=requested",
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.as_array().unwrap().is_empty());
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/appointments/requests?status=approved",
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body.as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["id"], request_id);
+    assert_eq!(items[0]["status"], "approved");
+    assert_eq!(items[0]["reviewed_by"], patient_manager_id.to_string());
 
     let (status, body) = json_request(
         &app,
@@ -370,7 +449,41 @@ async fn approved_request_can_be_converted_and_patient_sees_schedule() {
     let items = body.as_array().unwrap();
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["id"], appointment_id);
+    assert_eq!(items[0]["title"], "Scheduled cardiology consultation");
     assert_eq!(items[0]["provider_name"], format!("Clinic {tag}"));
+    assert_eq!(items[0]["doctor_name"], format!("Doctor {tag}"));
+    assert_eq!(items[0]["status"], "planned");
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/appointments/requests?status=approved",
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.as_array().unwrap().is_empty());
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/appointments/requests?status=converted",
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body.as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["id"], request_id);
+    assert_eq!(items[0]["status"], "converted");
+    assert_eq!(items[0]["converted_appointment_id"], appointment_id);
+    assert_eq!(
+        items[0]["converted_appointment_title"],
+        "Scheduled cardiology consultation"
+    );
+    assert_eq!(items[0]["converted_appointment_date"], "2026-05-22");
 
     let (status, body) = json_request(
         &app,
@@ -386,6 +499,25 @@ async fn approved_request_can_be_converted_and_patient_sees_schedule() {
         body.as_array().unwrap()[0]["converted_appointment_id"],
         appointment_id
     );
+    assert_eq!(
+        body.as_array().unwrap()[0]["converted_appointment_title"],
+        "Scheduled cardiology consultation"
+    );
+    assert_eq!(
+        body.as_array().unwrap()[0]["converted_appointment_date"],
+        "2026-05-22"
+    );
+    assert_eq!(
+        body.as_array().unwrap()[0]["reviewed_by"],
+        patient_manager_id.to_string()
+    );
+    assert!(
+        body.as_array().unwrap()[0]["reviewed_at"]
+            .as_str()
+            .unwrap_or_default()
+            .len()
+            > 10
+    );
 
     let patient_notifications: i64 = sqlx::query_scalar(
         r#"SELECT count(*)
@@ -398,6 +530,149 @@ async fn approved_request_can_be_converted_and_patient_sees_schedule() {
     .await
     .unwrap();
     assert_eq!(patient_notifications, 2);
+}
+
+#[tokio::test]
+async fn rejected_request_stays_in_patient_history_and_never_creates_appointment() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("portal-appointment-reject");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let patient_user_id = seed_user(&pool, &tag, "patient").await;
+    let patient_manager_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+
+    seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, patient_manager_id, admin_id).await;
+
+    let patient_bearer = auth_header_for(patient_user_id, "patient");
+    let pm_bearer = auth_header_for(patient_manager_id, "patient_manager");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/me/appointment-requests",
+        &patient_bearer,
+        Some(json!({
+            "appointment_type": "medical",
+            "preferred_date_from": "2026-06-03",
+            "preferred_date_to": "2026-06-05",
+            "preferred_time_of_day": "morning",
+            "specialty": "Neurology",
+            "reason": "Need a specialist but dates are flexible"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let request_id = body["id"].as_str().unwrap().to_string();
+    assert_eq!(body["status"], "requested");
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/appointments/requests?status=requested",
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body.as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["id"], request_id);
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/requests/{request_id}/review"),
+        &pm_bearer,
+        Some(json!({
+            "status": "rejected",
+            "review_note": "The requested slot range is not available; please submit a new range."
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["status"], "rejected");
+    assert_eq!(
+        body["review_note"],
+        "The requested slot range is not available; please submit a new range."
+    );
+    assert_eq!(body["reviewed_by"], patient_manager_id.to_string());
+    assert!(body["reviewed_at"].as_str().unwrap_or_default().len() > 10);
+    assert!(body["converted_appointment_id"].is_null());
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/appointments/requests?status=requested",
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.as_array().unwrap().is_empty());
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/appointments/requests?status=rejected",
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body.as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["id"], request_id);
+    assert_eq!(items[0]["status"], "rejected");
+    assert_eq!(
+        items[0]["review_note"],
+        "The requested slot range is not available; please submit a new range."
+    );
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/me/appointment-requests",
+        &patient_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body.as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["id"], request_id);
+    assert_eq!(items[0]["status"], "rejected");
+    assert_eq!(
+        items[0]["review_note"],
+        "The requested slot range is not available; please submit a new range."
+    );
+    assert_eq!(items[0]["reviewed_by"], patient_manager_id.to_string());
+    assert!(items[0]["converted_appointment_id"].is_null());
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/me/appointments",
+        &patient_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.as_array().unwrap().is_empty());
+
+    let patient_notifications: i64 = sqlx::query_scalar(
+        r#"SELECT count(*)
+           FROM user_notifications
+           WHERE user_id = $1
+             AND kind = 'appointment_request_update'"#,
+    )
+    .bind(patient_user_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(patient_notifications, 1);
 }
 
 #[tokio::test]
