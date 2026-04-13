@@ -12,6 +12,7 @@ use serde_json::{Value, json};
 use sqlx::Row;
 use uuid::Uuid;
 
+use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::state::AppState;
 use gmed_domain::role::Role;
@@ -491,13 +492,13 @@ async fn create_lead(
     .await
     {
         Ok(id) => {
-            let _ = sqlx::query(
-                "INSERT INTO audit_log (user_id, action, entity_type, entity_id) VALUES ($1, 'create_lead', 'lead', $2)",
-            )
-            .bind(auth.user_id)
-            .bind(id)
-            .execute(&state.db)
-            .await;
+            state.audit_sender.try_send(audit::domain_event(
+                "create_lead",
+                Some(auth.user_id),
+                "lead",
+                Some(id),
+                json!({}),
+            ));
             if let Err(resp) = crate::routes::workflow_lifecycle::record_event(
                 &state,
                 crate::routes::workflow_lifecycle::RecordEvent {
@@ -910,22 +911,20 @@ async fn update_lead(
                 Err(resp) => return resp,
             };
 
-            let _ = sqlx::query(
-                "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context)
-                 VALUES ($1, 'update_lead', 'lead', $2, $3)",
-            )
-            .bind(auth.user_id)
-            .bind(lead_id)
-            .bind(json!({
-                "compliance_status": body.compliance_status,
-                "date_of_birth": body.date_of_birth,
-                "legal_sex": body.legal_sex,
-                "contact_updated": body.email.is_some() || body.phone.is_some(),
-                "consent_healthcare": body.consent_healthcare,
-                "consent_privacy_practices": body.consent_privacy_practices,
-            }))
-            .execute(&state.db)
-            .await;
+            state.audit_sender.try_send(audit::domain_event(
+                "update_lead",
+                Some(auth.user_id),
+                "lead",
+                Some(lead_id),
+                json!({
+                    "compliance_status": body.compliance_status,
+                    "date_of_birth": body.date_of_birth,
+                    "legal_sex": body.legal_sex,
+                    "contact_updated": body.email.is_some() || body.phone.is_some(),
+                    "consent_healthcare": body.consent_healthcare,
+                    "consent_privacy_practices": body.consent_privacy_practices,
+                }),
+            ));
 
             Json(json!({
                 "ok": true,
@@ -1018,14 +1017,13 @@ async fn qualify_lead(
         .await
     {
         Ok(r) if r.rows_affected() > 0 => {
-            let _ = sqlx::query(
-                "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'qualify_lead', 'lead', $2, $3)",
-            )
-            .bind(auth.user_id)
-            .bind(lead_id)
-            .bind(json!({ "status": body.status.clone() }))
-            .execute(&state.db)
-            .await;
+            state.audit_sender.try_send(audit::domain_event(
+                "qualify_lead",
+                Some(auth.user_id),
+                "lead",
+                Some(lead_id),
+                json!({ "status": body.status.clone() }),
+            ));
             if current_status != body.status
                 && let Err(resp) = crate::routes::workflow_lifecycle::record_event(
                     &state,
@@ -1196,14 +1194,13 @@ async fn convert_lead(
         return resp;
     }
 
-    let _ = sqlx::query(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'convert_lead', 'lead', $2, $3)",
-    )
-    .bind(auth.user_id)
-    .bind(lead_id)
-    .bind(json!({ "patient_id": patient_id, "patient_pid": pid.clone() }))
-    .execute(&state.db)
-    .await;
+    state.audit_sender.try_send(audit::domain_event(
+        "convert_lead",
+        Some(auth.user_id),
+        "lead",
+        Some(lead_id),
+        json!({ "patient_id": patient_id, "patient_pid": pid.clone() }),
+    ));
     let previous_status: String = lead.try_get("qualification_status").unwrap_or_default();
     if let Err(resp) = crate::routes::workflow_lifecycle::record_event(
         &state,
@@ -1426,20 +1423,18 @@ async fn resolve_failed_lead(
 
     match update_result {
         Ok(result) if result.rows_affected() > 0 => {
-            let _ = sqlx::query(
-                "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context)
-                 VALUES ($1, 'resolve_failed_lead', 'lead', $2, $3)",
-            )
-            .bind(auth.user_id)
-            .bind(lead_id)
-            .bind(json!({
-                "resolution": resolution.clone(),
-                "reason": reason,
-                "note": note,
-                "failed_from_status": current_status.clone(),
-            }))
-            .execute(&state.db)
-            .await;
+            state.audit_sender.try_send(audit::domain_event(
+                "resolve_failed_lead",
+                Some(auth.user_id),
+                "lead",
+                Some(lead_id),
+                json!({
+                    "resolution": resolution.clone(),
+                    "reason": reason,
+                    "note": note,
+                    "failed_from_status": current_status.clone(),
+                }),
+            ));
 
             if let Err(resp) = crate::routes::workflow_lifecycle::record_event(
                 &state,
