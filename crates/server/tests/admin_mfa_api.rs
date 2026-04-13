@@ -2,7 +2,9 @@ use axum::body::Body;
 use axum::http::Request;
 use axum::http::StatusCode;
 use serde_json::{Value, json};
+use sqlx::PgPool;
 use tower::ServiceExt;
+use uuid::Uuid;
 
 use gmed_server::auth::jwt;
 use gmed_server::settings::{SettingsCache, TokenSettings};
@@ -11,25 +13,47 @@ use gmed_server::state::AppState;
 const TEST_SECRET: &str = "test-secret-at-least-32-characters-long!!";
 
 async fn test_app() -> Option<axum::Router> {
+    Some(test_context().await?.0)
+}
+
+/// Returns `(router, it_admin_user_id)`. Tests that exercise routes which
+/// audit-log the actor (e.g. settings updates) need a real user row so the
+/// `users(id)` foreign keys resolve.
+async fn test_context() -> Option<(axum::Router, Uuid)> {
     let db_url = match std::env::var("DATABASE_URL") {
         Ok(url) => url,
         Err(_) => return None,
     };
     let pool = gmed_db::create_pool(&db_url).await.ok()?;
     gmed_db::run_migrations(&pool).await.ok()?;
+    let it_admin_id = seed_user(&pool, "admin_mfa_api", "it_admin").await;
     let settings_cache = SettingsCache::new(TokenSettings::default());
     let state = AppState::new(pool, TEST_SECRET, settings_cache);
-    Some(gmed_server::build_app(state))
+    Some((gmed_server::build_app(state), it_admin_id))
+}
+
+async fn seed_user(pool: &PgPool, tag: &str, role: &str) -> Uuid {
+    let suffix = Uuid::new_v4().simple().to_string();
+    sqlx::query_scalar(
+        r#"INSERT INTO users (email, password_hash, name, role)
+           VALUES ($1, $2, $3, $4)
+           RETURNING id"#,
+    )
+    .bind(format!("{tag}-{role}-{suffix}@example.com"))
+    .bind("test-password-hash")
+    .bind(format!("{role} {tag}"))
+    .bind(role)
+    .fetch_one(pool)
+    .await
+    .unwrap()
 }
 
 fn auth_header(role: &str) -> String {
-    let token = jwt::issue_access_token(
-        TEST_SECRET,
-        uuid::Uuid::new_v4(),
-        role,
-        uuid::Uuid::new_v4(),
-    )
-    .unwrap();
+    auth_header_for(role, Uuid::new_v4())
+}
+
+fn auth_header_for(role: &str, user_id: Uuid) -> String {
+    let token = jwt::issue_access_token(TEST_SECRET, user_id, role, Uuid::new_v4()).unwrap();
     format!("Bearer {token}")
 }
 
@@ -151,8 +175,8 @@ async fn settings_update_validates_bounds() {
 
 #[tokio::test]
 async fn settings_update_valid_value() {
-    let Some(app) = test_app().await else { return };
-    let admin = auth_header("it_admin");
+    let Some((app, admin_id)) = test_context().await else { return };
+    let admin = auth_header_for("it_admin", admin_id);
 
     let (status, body) = json_request(
         &app,
@@ -179,8 +203,8 @@ async fn settings_update_valid_value() {
 
 #[tokio::test]
 async fn settings_update_accepts_agency_profile_values() {
-    let Some(app) = test_app().await else { return };
-    let admin = auth_header("it_admin");
+    let Some((app, admin_id)) = test_context().await else { return };
+    let admin = auth_header_for("it_admin", admin_id);
 
     let (status, body) = json_request(
         &app,

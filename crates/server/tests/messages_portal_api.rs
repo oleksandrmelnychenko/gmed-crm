@@ -2,7 +2,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use serde_json::{Value, json};
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 use tower::ServiceExt;
 use uuid::Uuid;
 
@@ -413,7 +413,9 @@ async fn patient_text_messages_can_use_e2e_envelopes() {
     .await
     .unwrap();
 
-    let plain_message = row.try_get::<Option<String>, _>("message").unwrap_or_default();
+    let plain_message = row
+        .try_get::<Option<String>, _>("message")
+        .unwrap_or_default();
     let legacy_ciphertext = row
         .try_get::<Option<Vec<u8>>, _>("message_ciphertext")
         .unwrap_or_default();

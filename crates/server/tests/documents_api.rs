@@ -308,7 +308,7 @@ async fn seed_appointment(
                 patient_id, provider_id, doctor_id, appointment_type, title, date, status, created_by
            ) VALUES (
                 $1, $2, $3, 'medical', $4, '2026-04-15', 'planned', $5
-           )"#,
+           ) RETURNING id"#,
     )
     .bind(patient_id)
     .bind(provider_id)
@@ -1875,7 +1875,8 @@ async fn document_translation_requests_can_be_created_and_completed() {
         &format!("/api/v1/documents/translation-requests/{request_id}/update"),
         &admin_bearer,
         Some(json!({
-            "status": "completed"
+            "status": "completed",
+            "translated_text": "Patient summary in English."
         })),
     )
     .await;

@@ -9,3 +9,5 @@ node_modules/
 .agent-extract/
 /.claude/settings.local.json
 /target-patient-slice/
+/crates/server/uploads/
+/uploads/
