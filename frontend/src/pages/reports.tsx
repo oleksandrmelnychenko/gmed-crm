@@ -74,6 +74,47 @@ type ServiceTypeReportRow = {
   gross_total?: string | null;
 };
 
+type MedicalProviderReportRow = {
+  provider_id: string;
+  name: string;
+  address_city?: string | null;
+  address_country?: string | null;
+  active_patients_90d: number;
+  appointments_90d: number;
+  active_orders: number;
+  delivered_items: number;
+  doctor_count: number;
+  gross_service_volume?: string | null;
+  doctor_specialties: string[];
+  service_focus: string[];
+  patient_country_mix: string[];
+  last_activity_at?: string | null;
+};
+
+type ProviderCostTrendPoint = {
+  month: string;
+  avg_unit_gross: string | number;
+  sample_count: number;
+};
+
+type ProviderCostRow = {
+  provider_id: string;
+  provider_name: string;
+  address_city?: string | null;
+  address_country?: string | null;
+  service_label: string;
+  sample_count: number;
+  first_recorded_at?: string | null;
+  last_recorded_at?: string | null;
+  earliest_unit_gross?: string | null;
+  latest_unit_gross?: string | null;
+  avg_unit_gross?: string | null;
+  min_unit_gross?: string | null;
+  max_unit_gross?: string | null;
+  change_pct?: number | null;
+  trend_points: ProviderCostTrendPoint[];
+};
+
 type DoctorReportRow = {
   doctor_id: string;
   provider_id: string;
@@ -133,6 +174,8 @@ type ReportsWorkspacePayload = {
   clinics: ClinicReportRow[];
   countries: CountryReportRow[];
   service_types: ServiceTypeReportRow[];
+  medical_providers: MedicalProviderReportRow[];
+  provider_costs: ProviderCostRow[];
   doctors: DoctorReportRow[];
   non_medical_providers: NonMedicalProviderReportRow[];
   financial_metrics_visible: boolean;
@@ -240,6 +283,16 @@ function formatMoney(value?: string | null) {
   }).format(Number.isFinite(numeric) ? numeric : 0);
 }
 
+function formatMoneyMetric(value?: string | number | null) {
+  const numeric =
+    typeof value === "number" ? value : Number(value ?? 0);
+  return new Intl.NumberFormat("de-DE", {
+    style: "currency",
+    currency: "EUR",
+    maximumFractionDigits: 0,
+  }).format(Number.isFinite(numeric) ? numeric : 0);
+}
+
 function formatRating(value?: number | null) {
   if (typeof value !== "number" || Number.isNaN(value)) return "Not rated";
   return `${value.toFixed(1)}/5`;
@@ -253,6 +306,12 @@ function formatPercent(value?: number | null) {
 function formatHours(value?: number | null) {
   if (typeof value !== "number" || Number.isNaN(value)) return "No responses";
   return `${value.toFixed(1)} h`;
+}
+
+function formatChange(value?: number | null) {
+  if (typeof value !== "number" || Number.isNaN(value)) return "No baseline";
+  const prefix = value > 0 ? "+" : "";
+  return `${prefix}${value.toFixed(1)}%`;
 }
 
 function serviceTypeLabel(value: string) {
@@ -341,12 +400,19 @@ export function ReportsPage() {
     () => data?.clinics.find((item) => item.provider_id === selectedClinicId) ?? null,
     [data?.clinics, selectedClinicId],
   );
+  const visibleProviderCosts = useMemo(() => {
+    if (!data?.provider_costs) return [];
+    if (!selectedClinicId) return data.provider_costs;
+    return data.provider_costs.filter((item) => item.provider_id === selectedClinicId);
+  }, [data?.provider_costs, selectedClinicId]);
 
   async function exportSection(
     section:
       | "clinics"
       | "countries"
       | "service_types"
+      | "medical_providers"
+      | "provider_costs"
       | "doctors"
       | "non_medical_providers",
   ) {
@@ -356,7 +422,7 @@ export function ReportsPage() {
     try {
       const token = getAccessToken();
       const params = new URLSearchParams({ section });
-      if (section === "doctors" && selectedClinicId) {
+      if ((section === "doctors" || section === "provider_costs") && selectedClinicId) {
         params.set("provider_id", selectedClinicId);
       }
 
@@ -856,6 +922,225 @@ export function ReportsPage() {
                     ) : (
                       <div className="rounded-[1.5rem] border border-dashed border-slate-200 bg-slate-50/70 px-5 py-8 text-center text-sm text-slate-500">
                         No service type report data available yet.
+                      </div>
+                    )}
+                  </div>
+                </section>
+              ) : null}
+
+              {allowedSections.has("medical_providers") ? (
+                <section className={card("p-6")}>
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <h2 className="text-base font-semibold text-slate-950">Medical provider performance</h2>
+                      <p className="mt-1 text-sm text-slate-500">
+                        Partner-facing clinic activity and revenue view for service mix, patient geography and sales comparisons without patient-level detail.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge className="bg-slate-100 text-slate-700 hover:bg-slate-100">
+                        {data.medical_providers.length}
+                      </Badge>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={exportingSection === "medical_providers"}
+                        onClick={() => void exportSection("medical_providers")}
+                      >
+                        {exportingSection === "medical_providers" ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}
+                        Export CSV
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="mt-5 space-y-3">
+                    {data.medical_providers.length > 0 ? (
+                      data.medical_providers.map((item) => (
+                        <article key={item.provider_id} className="rounded-[1.5rem] border border-slate-200 bg-white px-4 py-4 shadow-sm">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-semibold text-slate-950">{item.name}</p>
+                              <p className="mt-2 text-sm text-slate-500">
+                                {[item.address_city, item.address_country].filter(Boolean).join(", ") || "Location not set"}
+                              </p>
+                            </div>
+                            <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100">
+                              {formatMoney(item.gross_service_volume ?? "0")}
+                            </Badge>
+                          </div>
+                          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
+                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Patients / 90d</p>
+                              <p className="mt-2 text-sm font-semibold text-slate-950">{item.active_patients_90d}</p>
+                            </div>
+                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
+                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Appointments / 90d</p>
+                              <p className="mt-2 text-sm font-semibold text-slate-950">{item.appointments_90d}</p>
+                            </div>
+                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
+                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Orders / delivered</p>
+                              <p className="mt-2 text-sm font-semibold text-slate-950">{item.active_orders} / {item.delivered_items}</p>
+                            </div>
+                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
+                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Doctor network</p>
+                              <p className="mt-2 text-sm font-semibold text-slate-950">{item.doctor_count}</p>
+                              <p className="mt-1 text-[11px] text-slate-500">
+                                {item.last_activity_at ? `Last activity ${new Date(item.last_activity_at).toLocaleDateString("de-DE")}` : "No recent activity"}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="mt-4 space-y-3">
+                            <div>
+                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Specialties</p>
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                {item.doctor_specialties.length > 0 ? (
+                                  item.doctor_specialties.map((specialty) => (
+                                    <Badge key={`${item.provider_id}-${specialty}`} className="bg-slate-100 text-slate-700 hover:bg-slate-100">
+                                      {specialty}
+                                    </Badge>
+                                  ))
+                                ) : (
+                                  <Badge className="bg-slate-100 text-slate-600 hover:bg-slate-100">No specialty data</Badge>
+                                )}
+                              </div>
+                            </div>
+                            <div>
+                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Service mix</p>
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                {item.service_focus.length > 0 ? (
+                                  item.service_focus.map((service) => (
+                                    <Badge key={`${item.provider_id}-${service}`} className="bg-slate-100 text-slate-700 hover:bg-slate-100">
+                                      {service}
+                                    </Badge>
+                                  ))
+                                ) : (
+                                  <Badge className="bg-slate-100 text-slate-600 hover:bg-slate-100">No delivered services yet</Badge>
+                                )}
+                              </div>
+                            </div>
+                            <div>
+                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Patient country mix</p>
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                {item.patient_country_mix.length > 0 ? (
+                                  item.patient_country_mix.map((country) => (
+                                    <Badge key={`${item.provider_id}-${country}`} className="bg-sky-100 text-sky-700 hover:bg-sky-100">
+                                      {country}
+                                    </Badge>
+                                  ))
+                                ) : (
+                                  <Badge className="bg-slate-100 text-slate-600 hover:bg-slate-100">No country data</Badge>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            <Link to={`/providers?provider=${item.provider_id}`}>
+                              <Button variant="outline" size="sm">Open provider</Button>
+                            </Link>
+                          </div>
+                        </article>
+                      ))
+                    ) : (
+                      <div className="rounded-[1.5rem] border border-dashed border-slate-200 bg-slate-50/70 px-5 py-8 text-center text-sm text-slate-500">
+                        No medical provider report data available yet.
+                      </div>
+                    )}
+                  </div>
+                </section>
+              ) : null}
+
+              {allowedSections.has("provider_costs") ? (
+                <section className={card("p-6")}>
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <h2 className="text-base font-semibold text-slate-950">Provider cost intelligence</h2>
+                      <p className="mt-1 text-sm text-slate-500">
+                        Historical unit-cost movement by clinic and delivered service to support pricing estimates and market comparisons.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {selectedClinic ? (
+                        <Badge className="bg-sky-100 text-sky-700 hover:bg-sky-100">
+                          {selectedClinic.name}
+                        </Badge>
+                      ) : null}
+                      <Badge className="bg-slate-100 text-slate-700 hover:bg-slate-100">
+                        {visibleProviderCosts.length}
+                      </Badge>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={exportingSection === "provider_costs"}
+                        onClick={() => void exportSection("provider_costs")}
+                      >
+                        {exportingSection === "provider_costs" ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}
+                        Export CSV
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="mt-5 space-y-3">
+                    {visibleProviderCosts.length > 0 ? (
+                      visibleProviderCosts.map((item) => (
+                        <article key={`${item.provider_id}-${item.service_label}`} className="rounded-[1.5rem] border border-slate-200 bg-white px-4 py-4 shadow-sm">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-semibold text-slate-950">{item.service_label}</p>
+                              <p className="mt-2 text-sm text-slate-500">
+                                {item.provider_name}
+                                {item.address_city || item.address_country
+                                  ? ` · ${[item.address_city, item.address_country].filter(Boolean).join(", ")}`
+                                  : ""}
+                              </p>
+                            </div>
+                            <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100">
+                              {formatMoneyMetric(item.latest_unit_gross)}
+                            </Badge>
+                          </div>
+                          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
+                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Samples</p>
+                              <p className="mt-2 text-sm font-semibold text-slate-950">{item.sample_count}</p>
+                            </div>
+                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
+                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Latest vs first</p>
+                              <p className="mt-2 text-sm font-semibold text-slate-950">{formatChange(item.change_pct)}</p>
+                              <p className="mt-1 text-[11px] text-slate-500">
+                                {formatMoneyMetric(item.earliest_unit_gross)} → {formatMoneyMetric(item.latest_unit_gross)}
+                              </p>
+                            </div>
+                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
+                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Average</p>
+                              <p className="mt-2 text-sm font-semibold text-slate-950">{formatMoneyMetric(item.avg_unit_gross)}</p>
+                              <p className="mt-1 text-[11px] text-slate-500">
+                                Min {formatMoneyMetric(item.min_unit_gross)} · Max {formatMoneyMetric(item.max_unit_gross)}
+                              </p>
+                            </div>
+                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
+                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Observed range</p>
+                              <p className="mt-2 text-sm font-semibold text-slate-950">
+                                {item.first_recorded_at ? new Date(item.first_recorded_at).toLocaleDateString("de-DE") : "Unknown"}
+                              </p>
+                              <p className="mt-1 text-[11px] text-slate-500">
+                                latest {item.last_recorded_at ? new Date(item.last_recorded_at).toLocaleDateString("de-DE") : "Unknown"}
+                              </p>
+                            </div>
+                          </div>
+                          {item.trend_points.length > 0 ? (
+                            <div className="mt-4 flex flex-wrap gap-2">
+                              {item.trend_points.map((point) => (
+                                <Badge
+                                  key={`${item.provider_id}-${item.service_label}-${point.month}`}
+                                  className="bg-slate-100 text-slate-700 hover:bg-slate-100"
+                                >
+                                  {point.month}: {formatMoneyMetric(point.avg_unit_gross)}
+                                </Badge>
+                              ))}
+                            </div>
+                          ) : null}
+                        </article>
+                      ))
+                    ) : (
+                      <div className="rounded-[1.5rem] border border-dashed border-slate-200 bg-slate-50/70 px-5 py-8 text-center text-sm text-slate-500">
+                        No provider cost intelligence data available yet.
                       </div>
                     )}
                   </div>

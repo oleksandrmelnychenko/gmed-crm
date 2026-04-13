@@ -319,6 +319,14 @@ async fn reports_workspace(
         role,
         Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing | Role::Sales
     );
+    let include_medical_providers = matches!(
+        role,
+        Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing | Role::Sales
+    );
+    let include_provider_costs = matches!(
+        role,
+        Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing
+    );
     let include_doctors = matches!(
         role,
         Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing
@@ -382,6 +390,34 @@ async fn reports_workspace(
     } else {
         Vec::new()
     };
+    let medical_providers = if include_medical_providers {
+        match load_report_medical_providers(&state).await {
+            Ok(value) => value,
+            Err(e) => {
+                tracing::error!(error = %e, "load report medical providers");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to load reports workspace",
+                );
+            }
+        }
+    } else {
+        Vec::new()
+    };
+    let provider_costs = if include_provider_costs {
+        match load_report_provider_costs(&state, None).await {
+            Ok(value) => value,
+            Err(e) => {
+                tracing::error!(error = %e, "load report provider costs");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to load reports workspace",
+                );
+            }
+        }
+    } else {
+        Vec::new()
+    };
     let doctors = if include_doctors {
         match load_report_doctors(&state, can_see_financial, None).await {
             Ok(value) => value,
@@ -421,6 +457,12 @@ async fn reports_workspace(
     if include_service_types {
         allowed_sections.push("service_types");
     }
+    if include_medical_providers {
+        allowed_sections.push("medical_providers");
+    }
+    if include_provider_costs {
+        allowed_sections.push("provider_costs");
+    }
     if include_doctors {
         allowed_sections.push("doctors");
     }
@@ -434,6 +476,8 @@ async fn reports_workspace(
         "clinics": clinics,
         "countries": countries,
         "service_types": service_types,
+        "medical_providers": medical_providers,
+        "provider_costs": provider_costs,
         "doctors": doctors,
         "non_medical_providers": non_medical_providers,
         "financial_metrics_visible": can_see_financial,
@@ -505,6 +549,32 @@ async fn reports_export(
                     .map(export_service_types_csv),
             )
         }
+        "medical_providers"
+            if matches!(
+                role,
+                Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing | Role::Sales
+            ) =>
+        {
+            (
+                "medical-provider-report.csv",
+                load_report_medical_providers(&state)
+                    .await
+                    .map(export_medical_providers_csv),
+            )
+        }
+        "provider_costs"
+            if matches!(
+                role,
+                Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing
+            ) =>
+        {
+            (
+                "provider-cost-report.csv",
+                load_report_provider_costs(&state, query.provider_id)
+                    .await
+                    .map(export_provider_costs_csv),
+            )
+        }
         "doctors"
             if matches!(
                 role,
@@ -531,7 +601,12 @@ async fn reports_export(
                     .map(export_non_medical_providers_csv),
             )
         }
-        "clinics" | "countries" | "service_types" | "doctors" | "non_medical_providers" => {
+        "clinics"
+        | "countries"
+        | "service_types"
+        | "medical_providers"
+        | "doctors"
+        | "non_medical_providers" => {
             return err(StatusCode::FORBIDDEN, "Insufficient permissions");
         }
         _ => {
@@ -2041,6 +2116,341 @@ async fn load_report_service_types(
         .collect())
 }
 
+async fn load_report_medical_providers(state: &AppState) -> Result<Vec<Value>, sqlx::Error> {
+    let rows = sqlx::query(
+        r#"WITH patient_country AS (
+                SELECT
+                    id,
+                    COALESCE(
+                        NULLIF(TRIM(residence_country), ''),
+                        NULLIF(TRIM(address_country), ''),
+                        NULLIF(TRIM(nationality), ''),
+                        'Unknown'
+                    ) AS country
+                FROM patients
+            )
+            SELECT
+                p.id,
+                p.name,
+                p.address_city,
+                p.address_country,
+                (
+                    SELECT COUNT(DISTINCT a.patient_id)::bigint
+                    FROM appointments a
+                    WHERE a.provider_id = p.id
+                      AND a.status <> 'cancelled'
+                      AND a.date >= CURRENT_DATE - 90
+                ) AS active_patients_90d,
+                (
+                    SELECT COUNT(*)::bigint
+                    FROM appointments a
+                    WHERE a.provider_id = p.id
+                      AND a.status <> 'cancelled'
+                      AND a.date >= CURRENT_DATE - 90
+                ) AS appointments_90d,
+                (
+                    SELECT COUNT(DISTINCT ol.order_id)::bigint
+                    FROM order_leistungen ol
+                    WHERE ol.provider_id = p.id
+                      AND ol.status IN ('delivered', 'approved', 'invoiced')
+                ) AS active_orders,
+                (
+                    SELECT COUNT(*)::bigint
+                    FROM order_leistungen ol
+                    WHERE ol.provider_id = p.id
+                      AND ol.status IN ('delivered', 'approved', 'invoiced')
+                ) AS delivered_items,
+                (
+                    SELECT COUNT(*)::bigint
+                    FROM provider_doctors pd
+                    WHERE pd.provider_id = p.id
+                ) AS doctor_count,
+                (
+                    SELECT COALESCE(
+                        SUM(ol.quantity * ol.unit_price * (1 + (ol.vat_rate / 100))),
+                        0
+                    )
+                    FROM order_leistungen ol
+                    WHERE ol.provider_id = p.id
+                      AND ol.status IN ('delivered', 'approved', 'invoiced')
+                ) AS gross_service_volume,
+                (
+                    SELECT COALESCE(json_agg(item.label ORDER BY item.label), '[]'::json)
+                    FROM (
+                        SELECT
+                            COALESCE(NULLIF(TRIM(pd.fachbereich), ''), 'General') AS label,
+                            COUNT(*) AS usage_count
+                        FROM provider_doctors pd
+                        WHERE pd.provider_id = p.id
+                        GROUP BY 1
+                        ORDER BY usage_count DESC, label
+                        LIMIT 5
+                    ) item
+                ) AS doctor_specialties,
+                (
+                    SELECT COALESCE(json_agg(item.label ORDER BY item.label), '[]'::json)
+                    FROM (
+                        SELECT
+                            COALESCE(NULLIF(TRIM(ol.description), ''), 'Unnamed service') AS label,
+                            COUNT(*) AS usage_count
+                        FROM order_leistungen ol
+                        WHERE ol.provider_id = p.id
+                          AND ol.status IN ('delivered', 'approved', 'invoiced')
+                        GROUP BY 1
+                        ORDER BY usage_count DESC, label
+                        LIMIT 5
+                    ) item
+                ) AS service_focus,
+                (
+                    SELECT COALESCE(json_agg(item.country ORDER BY item.country), '[]'::json)
+                    FROM (
+                        SELECT
+                            pc.country,
+                            COUNT(DISTINCT linked.patient_id) AS patient_count
+                        FROM (
+                            SELECT a.patient_id
+                            FROM appointments a
+                            WHERE a.provider_id = p.id
+                              AND a.status <> 'cancelled'
+                              AND a.date >= CURRENT_DATE - 365
+                            UNION
+                            SELECT o.patient_id
+                            FROM order_leistungen ol
+                            JOIN orders o ON o.id = ol.order_id
+                            WHERE ol.provider_id = p.id
+                              AND ol.status IN ('delivered', 'approved', 'invoiced')
+                              AND COALESCE(ol.approved_at, ol.delivered_at, ol.created_at) >=
+                                  now() - INTERVAL '365 days'
+                        ) linked
+                        JOIN patient_country pc ON pc.id = linked.patient_id
+                        GROUP BY pc.country
+                        ORDER BY patient_count DESC, pc.country
+                        LIMIT 5
+                    ) item
+                ) AS patient_country_mix,
+                (
+                    SELECT MAX(item.activity_at)
+                    FROM (
+                        SELECT
+                            COALESCE(ol.approved_at, ol.delivered_at, ol.created_at) AS activity_at
+                        FROM order_leistungen ol
+                        WHERE ol.provider_id = p.id
+                          AND ol.status IN ('delivered', 'approved', 'invoiced')
+                        UNION ALL
+                        SELECT
+                            (a.date::timestamp + COALESCE(a.time_end, a.time_start, TIME '00:00'))
+                                AT TIME ZONE 'UTC' AS activity_at
+                        FROM appointments a
+                        WHERE a.provider_id = p.id
+                          AND a.status <> 'cancelled'
+                    ) item
+                ) AS last_activity_at
+           FROM providers p
+           WHERE p.is_active = true
+             AND p.provider_type = 'medical'
+           ORDER BY gross_service_volume DESC, appointments_90d DESC, p.name
+           LIMIT 30"#,
+    )
+    .fetch_all(&state.db)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            json!({
+                "provider_id": row.try_get::<uuid::Uuid, _>("id").unwrap_or_else(|_| uuid::Uuid::nil()),
+                "name": row.try_get::<String, _>("name").unwrap_or_default(),
+                "address_city": row.try_get::<Option<String>, _>("address_city").unwrap_or_default(),
+                "address_country": row.try_get::<Option<String>, _>("address_country").unwrap_or_default(),
+                "active_patients_90d": row.try_get::<i64, _>("active_patients_90d").unwrap_or_default(),
+                "appointments_90d": row.try_get::<i64, _>("appointments_90d").unwrap_or_default(),
+                "active_orders": row.try_get::<i64, _>("active_orders").unwrap_or_default(),
+                "delivered_items": row.try_get::<i64, _>("delivered_items").unwrap_or_default(),
+                "doctor_count": row.try_get::<i64, _>("doctor_count").unwrap_or_default(),
+                "gross_service_volume": decimal_to_string(
+                    row.try_get::<Decimal, _>("gross_service_volume").unwrap_or(Decimal::ZERO)
+                ),
+                "doctor_specialties": row.try_get::<Value, _>("doctor_specialties").unwrap_or_else(|_| json!([])),
+                "service_focus": row.try_get::<Value, _>("service_focus").unwrap_or_else(|_| json!([])),
+                "patient_country_mix": row.try_get::<Value, _>("patient_country_mix").unwrap_or_else(|_| json!([])),
+                "last_activity_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("last_activity_at").ok().map(|value| value.to_rfc3339()),
+            })
+        })
+        .collect())
+}
+
+async fn load_report_provider_costs(
+    state: &AppState,
+    provider_filter: Option<uuid::Uuid>,
+) -> Result<Vec<Value>, sqlx::Error> {
+    let rows = sqlx::query(
+        r#"WITH scoped AS (
+                SELECT
+                    p.id AS provider_id,
+                    p.name AS provider_name,
+                    p.address_city,
+                    p.address_country,
+                    COALESCE(NULLIF(TRIM(ol.description), ''), 'Unnamed service') AS service_label,
+                    (ol.unit_price * (1 + (ol.vat_rate / 100)))::numeric AS unit_gross,
+                    COALESCE(ol.approved_at, ol.delivered_at, ol.created_at) AS effective_at
+                FROM order_leistungen ol
+                JOIN providers p ON p.id = ol.provider_id
+                WHERE ol.status IN ('delivered', 'approved', 'invoiced')
+                  AND p.provider_type = 'medical'
+                  AND ($1::uuid IS NULL OR p.id = $1)
+            ),
+            summary AS (
+                SELECT
+                    provider_id,
+                    provider_name,
+                    address_city,
+                    address_country,
+                    service_label,
+                    COUNT(*)::bigint AS sample_count,
+                    MIN(effective_at) AS first_recorded_at,
+                    MAX(effective_at) AS last_recorded_at,
+                    ROUND(MIN(unit_gross)::numeric, 2) AS min_unit_gross,
+                    ROUND(MAX(unit_gross)::numeric, 2) AS max_unit_gross,
+                    ROUND(AVG(unit_gross)::numeric, 2) AS avg_unit_gross
+                FROM scoped
+                GROUP BY provider_id, provider_name, address_city, address_country, service_label
+            ),
+            latest AS (
+                SELECT DISTINCT ON (provider_id, service_label)
+                    provider_id,
+                    service_label,
+                    ROUND(unit_gross::numeric, 2) AS latest_unit_gross
+                FROM scoped
+                ORDER BY provider_id, service_label, effective_at DESC, unit_gross DESC
+            ),
+            earliest AS (
+                SELECT DISTINCT ON (provider_id, service_label)
+                    provider_id,
+                    service_label,
+                    ROUND(unit_gross::numeric, 2) AS earliest_unit_gross
+                FROM scoped
+                ORDER BY provider_id, service_label, effective_at ASC, unit_gross ASC
+            ),
+            monthly AS (
+                SELECT
+                    provider_id,
+                    service_label,
+                    date_trunc('month', effective_at) AS month_bucket,
+                    ROUND(AVG(unit_gross)::numeric, 2) AS avg_unit_gross,
+                    COUNT(*)::bigint AS sample_count
+                FROM scoped
+                GROUP BY provider_id, service_label, date_trunc('month', effective_at)
+            ),
+            monthly_ranked AS (
+                SELECT
+                    provider_id,
+                    service_label,
+                    month_bucket,
+                    avg_unit_gross,
+                    sample_count,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY provider_id, service_label
+                        ORDER BY month_bucket DESC
+                    ) AS month_rank
+                FROM monthly
+            ),
+            trends AS (
+                SELECT
+                    provider_id,
+                    service_label,
+                    COALESCE(
+                        jsonb_agg(
+                            jsonb_build_object(
+                                'month',
+                                to_char(month_bucket, 'YYYY-MM'),
+                                'avg_unit_gross',
+                                avg_unit_gross,
+                                'sample_count',
+                                sample_count
+                            )
+                            ORDER BY month_bucket DESC
+                        ) FILTER (WHERE month_rank <= 6),
+                        '[]'::jsonb
+                    ) AS trend_points
+                FROM monthly_ranked
+                GROUP BY provider_id, service_label
+            )
+            SELECT
+                s.provider_id,
+                s.provider_name,
+                s.address_city,
+                s.address_country,
+                s.service_label,
+                s.sample_count,
+                s.first_recorded_at,
+                s.last_recorded_at,
+                s.min_unit_gross,
+                s.max_unit_gross,
+                s.avg_unit_gross,
+                l.latest_unit_gross,
+                e.earliest_unit_gross,
+                COALESCE(t.trend_points, '[]'::jsonb) AS trend_points
+            FROM summary s
+            JOIN latest l
+              ON l.provider_id = s.provider_id
+             AND l.service_label = s.service_label
+            JOIN earliest e
+              ON e.provider_id = s.provider_id
+             AND e.service_label = s.service_label
+            LEFT JOIN trends t
+              ON t.provider_id = s.provider_id
+             AND t.service_label = s.service_label
+            ORDER BY s.last_recorded_at DESC, s.provider_name, s.service_label
+            LIMIT 60"#,
+    )
+    .bind(provider_filter)
+    .fetch_all(&state.db)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            let earliest_unit_gross = row
+                .try_get::<Decimal, _>("earliest_unit_gross")
+                .unwrap_or(Decimal::ZERO);
+            let latest_unit_gross = row
+                .try_get::<Decimal, _>("latest_unit_gross")
+                .unwrap_or(Decimal::ZERO);
+            let change_pct = if earliest_unit_gross > Decimal::ZERO {
+                ((latest_unit_gross - earliest_unit_gross) / earliest_unit_gross * Decimal::from(100))
+                    .round_dp(2)
+                    .to_f64()
+            } else {
+                None
+            };
+
+            json!({
+                "provider_id": row.try_get::<uuid::Uuid, _>("provider_id").unwrap_or_else(|_| uuid::Uuid::nil()),
+                "provider_name": row.try_get::<String, _>("provider_name").unwrap_or_default(),
+                "address_city": row.try_get::<Option<String>, _>("address_city").unwrap_or_default(),
+                "address_country": row.try_get::<Option<String>, _>("address_country").unwrap_or_default(),
+                "service_label": row.try_get::<String, _>("service_label").unwrap_or_default(),
+                "sample_count": row.try_get::<i64, _>("sample_count").unwrap_or_default(),
+                "first_recorded_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("first_recorded_at").ok().map(|value| value.to_rfc3339()),
+                "last_recorded_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("last_recorded_at").ok().map(|value| value.to_rfc3339()),
+                "earliest_unit_gross": decimal_to_string(earliest_unit_gross),
+                "latest_unit_gross": decimal_to_string(latest_unit_gross),
+                "avg_unit_gross": decimal_to_string(
+                    row.try_get::<Decimal, _>("avg_unit_gross").unwrap_or(Decimal::ZERO)
+                ),
+                "min_unit_gross": decimal_to_string(
+                    row.try_get::<Decimal, _>("min_unit_gross").unwrap_or(Decimal::ZERO)
+                ),
+                "max_unit_gross": decimal_to_string(
+                    row.try_get::<Decimal, _>("max_unit_gross").unwrap_or(Decimal::ZERO)
+                ),
+                "change_pct": change_pct,
+                "trend_points": row.try_get::<Value, _>("trend_points").unwrap_or_else(|_| json!([])),
+            })
+        })
+        .collect())
+}
+
 async fn load_report_doctors(
     state: &AppState,
     can_see_financial: bool,
@@ -3056,6 +3466,189 @@ fn export_service_types_csv(rows: Vec<Value>) -> String {
                 .to_string(),
             row["order_count"].as_i64().unwrap_or_default().to_string(),
             row["gross_total"].as_str().unwrap_or_default().to_string(),
+        ]));
+    }
+
+    lines.join("\n")
+}
+
+fn export_medical_providers_csv(rows: Vec<Value>) -> String {
+    let mut lines = vec![csv_row(&[
+        "provider".to_string(),
+        "city".to_string(),
+        "country".to_string(),
+        "active_patients_90d".to_string(),
+        "appointments_90d".to_string(),
+        "active_orders".to_string(),
+        "delivered_items".to_string(),
+        "doctor_count".to_string(),
+        "gross_service_volume".to_string(),
+        "doctor_specialties".to_string(),
+        "service_focus".to_string(),
+        "patient_country_mix".to_string(),
+        "last_activity_at".to_string(),
+    ])];
+
+    for row in rows {
+        let doctor_specialties = row["doctor_specialties"]
+            .as_array()
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            })
+            .unwrap_or_default();
+        let service_focus = row["service_focus"]
+            .as_array()
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            })
+            .unwrap_or_default();
+        let patient_country_mix = row["patient_country_mix"]
+            .as_array()
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            })
+            .unwrap_or_default();
+
+        lines.push(csv_row(&[
+            row["name"].as_str().unwrap_or_default().to_string(),
+            row["address_city"].as_str().unwrap_or_default().to_string(),
+            row["address_country"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            row["active_patients_90d"]
+                .as_i64()
+                .unwrap_or_default()
+                .to_string(),
+            row["appointments_90d"]
+                .as_i64()
+                .unwrap_or_default()
+                .to_string(),
+            row["active_orders"]
+                .as_i64()
+                .unwrap_or_default()
+                .to_string(),
+            row["delivered_items"]
+                .as_i64()
+                .unwrap_or_default()
+                .to_string(),
+            row["doctor_count"].as_i64().unwrap_or_default().to_string(),
+            row["gross_service_volume"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            doctor_specialties,
+            service_focus,
+            patient_country_mix,
+            row["last_activity_at"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+        ]));
+    }
+
+    lines.join("\n")
+}
+
+fn export_provider_costs_csv(rows: Vec<Value>) -> String {
+    let mut lines = vec![csv_row(&[
+        "provider".to_string(),
+        "service".to_string(),
+        "city".to_string(),
+        "country".to_string(),
+        "sample_count".to_string(),
+        "first_recorded_at".to_string(),
+        "last_recorded_at".to_string(),
+        "earliest_unit_gross".to_string(),
+        "latest_unit_gross".to_string(),
+        "avg_unit_gross".to_string(),
+        "min_unit_gross".to_string(),
+        "max_unit_gross".to_string(),
+        "change_pct".to_string(),
+        "trend_points".to_string(),
+    ])];
+
+    for row in rows {
+        let trend_points = row["trend_points"]
+            .as_array()
+            .map(|items| {
+                items
+                    .iter()
+                    .map(|item| {
+                        format!(
+                            "{}:{}",
+                            item["month"].as_str().unwrap_or_default(),
+                            item["avg_unit_gross"]
+                                .as_str()
+                                .map(str::to_string)
+                                .unwrap_or_else(|| item["avg_unit_gross"].to_string())
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            })
+            .unwrap_or_default();
+
+        lines.push(csv_row(&[
+            row["provider_name"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            row["service_label"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            row["address_city"].as_str().unwrap_or_default().to_string(),
+            row["address_country"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            row["sample_count"].as_i64().unwrap_or_default().to_string(),
+            row["first_recorded_at"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            row["last_recorded_at"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            row["earliest_unit_gross"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            row["latest_unit_gross"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            row["avg_unit_gross"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            row["min_unit_gross"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            row["max_unit_gross"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            row["change_pct"]
+                .as_f64()
+                .map(|value| format!("{value:.2}"))
+                .unwrap_or_default(),
+            trend_points,
         ]));
     }
 

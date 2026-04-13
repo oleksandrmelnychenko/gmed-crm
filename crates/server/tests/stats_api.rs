@@ -256,6 +256,33 @@ async fn seed_order_service(
     .unwrap();
 }
 
+async fn seed_order_service_at(
+    pool: &PgPool,
+    order_id: Uuid,
+    provider_id: Uuid,
+    description: &str,
+    unit_price: i32,
+    days_ago: i32,
+) {
+    sqlx::query(
+        r#"INSERT INTO order_leistungen (
+                order_id, description, quantity, unit_price, vat_rate, provider_id, status, created_at, approved_at
+           ) VALUES (
+                $1, $2, 1, $3, 19, $4, 'approved',
+                CURRENT_TIMESTAMP - ($5::int * interval '1 day'),
+                CURRENT_TIMESTAMP - ($5::int * interval '1 day')
+           )"#,
+    )
+    .bind(order_id)
+    .bind(description)
+    .bind(unit_price)
+    .bind(provider_id)
+    .bind(days_ago)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
 async fn seed_provider_service(pool: &PgPool, provider_id: Uuid, service_name: &str) {
     sqlx::query(
         r#"INSERT INTO service_catalog (
@@ -1088,6 +1115,152 @@ async fn ceo_can_open_risk_analysis_workspace() {
 }
 
 #[tokio::test]
+async fn ceo_assistant_can_open_reports_forecasting_and_risk_workspaces() {
+    let Some((app, pool, _admin_id)) = test_context().await else {
+        return;
+    };
+
+    let assistant_id = seed_user(&pool, &unique_tag("assistant-stats"), "ceo_assistant").await;
+    let assistant_auth = auth_header_for(assistant_id, "ceo_assistant");
+
+    let (reports_status, reports_body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/stats/reports/workspace",
+        &assistant_auth,
+        None,
+    )
+    .await;
+    assert_eq!(reports_status, StatusCode::OK);
+    assert!(
+        reports_body["financial_metrics_visible"]
+            .as_bool()
+            .unwrap_or(false)
+    );
+    for section in [
+        "clinics",
+        "countries",
+        "service_types",
+        "medical_providers",
+        "provider_costs",
+        "doctors",
+        "non_medical_providers",
+    ] {
+        assert!(
+            reports_body["allowed_sections"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|value| value == section),
+            "expected ceo_assistant reports section {section}"
+        );
+    }
+
+    let (export_status, export_body, content_type, content_disposition) = text_request(
+        &app,
+        "GET",
+        "/api/v1/stats/reports/export?section=clinics",
+        &assistant_auth,
+    )
+    .await;
+    assert_eq!(export_status, StatusCode::OK);
+    assert!(content_type.unwrap_or_default().contains("text/csv"));
+    assert!(
+        content_disposition
+            .unwrap_or_default()
+            .contains("clinic-report.csv")
+    );
+    assert!(export_body.contains("clinic"));
+
+    let (forecast_status, forecast_body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/stats/forecasting",
+        &assistant_auth,
+        None,
+    )
+    .await;
+    assert_eq!(forecast_status, StatusCode::OK);
+    for section in [
+        "quote_pipeline",
+        "collections",
+        "followup",
+        "clinic_capacity",
+    ] {
+        assert!(
+            forecast_body["allowed_sections"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|value| value == section),
+            "expected ceo_assistant forecasting section {section}"
+        );
+    }
+
+    let (risk_status, risk_body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/stats/risk-analysis",
+        &assistant_auth,
+        None,
+    )
+    .await;
+    assert_eq!(risk_status, StatusCode::OK);
+    assert!(
+        risk_body["allowed_sections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == "patient_manager")
+    );
+    assert!(
+        risk_body["allowed_sections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == "billing")
+    );
+}
+
+#[tokio::test]
+async fn operational_roles_without_analytics_scope_are_forbidden_from_stats_workspaces() {
+    let Some((app, pool, _admin_id)) = test_context().await else {
+        return;
+    };
+
+    let roles = [
+        ("teamlead_interpreter", "teamlead_interpreter"),
+        ("interpreter", "interpreter"),
+        ("concierge", "concierge"),
+    ];
+
+    for (tag, role) in roles {
+        let user_id = seed_user(&pool, &unique_tag(tag), role).await;
+        let auth = auth_header_for(user_id, role);
+
+        let (reports_status, _) =
+            json_request(&app, "GET", "/api/v1/stats/reports/workspace", &auth, None).await;
+        assert_eq!(
+            reports_status,
+            StatusCode::FORBIDDEN,
+            "reports access for {role}"
+        );
+
+        let (forecast_status, _) =
+            json_request(&app, "GET", "/api/v1/stats/forecasting", &auth, None).await;
+        assert_eq!(
+            forecast_status,
+            StatusCode::FORBIDDEN,
+            "forecasting access for {role}"
+        );
+
+        let (risk_status, _) =
+            json_request(&app, "GET", "/api/v1/stats/risk-analysis", &auth, None).await;
+        assert_eq!(risk_status, StatusCode::FORBIDDEN, "risk access for {role}");
+    }
+}
+
+#[tokio::test]
 async fn reports_workspace_returns_role_scoped_sections() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;
@@ -1530,6 +1703,357 @@ async fn reports_workspace_returns_role_scoped_sections() {
     assert!(non_medical_export_body.contains("Airport transfer"));
     assert!(non_medical_export_body.contains("Elite Drives"));
     assert!(non_medical_export_body.contains("concierge_score"));
+}
+
+#[tokio::test]
+async fn provider_cost_report_tracks_historical_price_changes() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("provider-costs");
+    let billing_id = seed_user(&pool, &format!("{tag}-billing"), "billing").await;
+    let sales_id = seed_user(&pool, &format!("{tag}-sales"), "sales").await;
+    let patient_id = seed_patient(&pool, admin_id, &tag, "DE").await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag, "active").await;
+
+    seed_order_service_at(&pool, order_id, provider_id, "Gastroscopy", 1000, 900).await;
+    seed_order_service_at(&pool, order_id, provider_id, "Gastroscopy", 2000, 30).await;
+    seed_order_service_at(&pool, order_id, provider_id, "Colonoscopy", 1500, 120).await;
+
+    let (billing_status, billing_body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/stats/reports/workspace",
+        &auth_header_for(billing_id, "billing"),
+        None,
+    )
+    .await;
+    assert_eq!(billing_status, StatusCode::OK);
+    assert!(
+        billing_body["allowed_sections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == "provider_costs")
+    );
+
+    let provider_costs = billing_body["provider_costs"].as_array().unwrap();
+    let gastroscopy = provider_costs
+        .iter()
+        .find(|row| {
+            row["provider_id"] == provider_id.to_string() && row["service_label"] == "Gastroscopy"
+        })
+        .expect("expected gastroscopy cost row");
+    assert_eq!(gastroscopy["sample_count"], 2);
+    assert_eq!(
+        gastroscopy["earliest_unit_gross"]
+            .as_str()
+            .unwrap_or_default(),
+        "1190"
+    );
+    assert_eq!(
+        gastroscopy["latest_unit_gross"]
+            .as_str()
+            .unwrap_or_default(),
+        "2380"
+    );
+    assert_eq!(
+        gastroscopy["avg_unit_gross"].as_str().unwrap_or_default(),
+        "1785"
+    );
+    assert_eq!(
+        gastroscopy["change_pct"].as_f64().unwrap_or_default(),
+        100.0
+    );
+    assert!(
+        gastroscopy["trend_points"]
+            .as_array()
+            .is_some_and(|items| items.len() >= 2)
+    );
+
+    let (sales_status, sales_body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/stats/reports/workspace",
+        &auth_header_for(sales_id, "sales"),
+        None,
+    )
+    .await;
+    assert_eq!(sales_status, StatusCode::OK);
+    assert!(
+        sales_body["allowed_sections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|value| value != "provider_costs")
+    );
+    assert_eq!(sales_body["provider_costs"].as_array().unwrap().len(), 0);
+
+    let (export_status, export_body, content_type, content_disposition) = text_request(
+        &app,
+        "GET",
+        &format!("/api/v1/stats/reports/export?section=provider_costs&provider_id={provider_id}"),
+        &auth_header_for(billing_id, "billing"),
+    )
+    .await;
+    assert_eq!(export_status, StatusCode::OK);
+    assert!(content_type.unwrap_or_default().contains("text/csv"));
+    assert!(
+        content_disposition
+            .unwrap_or_default()
+            .contains("provider-cost-report.csv")
+    );
+    assert!(export_body.contains("Gastroscopy"));
+    assert!(export_body.contains("latest_unit_gross"));
+    assert!(export_body.contains("2380"));
+    assert!(export_body.contains("100.00"));
+}
+
+#[tokio::test]
+async fn sales_medical_provider_report_exposes_partner_revenue_without_restricted_exports() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("sales-med-provider");
+    let sales_id = seed_user(&pool, &format!("{tag}-sales"), "sales").await;
+    let patient_id = seed_patient(&pool, admin_id, &tag, "UA").await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag, "active").await;
+
+    seed_order_service(&pool, order_id, provider_id, Some(doctor_id), &tag, 1800).await;
+    seed_order_service(
+        &pool,
+        order_id,
+        provider_id,
+        Some(doctor_id),
+        &format!("{tag}-followup"),
+        900,
+    )
+    .await;
+    let _ = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        Some(doctor_id),
+        order_id,
+        admin_id,
+        admin_id,
+        admin_id,
+        &tag,
+    )
+    .await;
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/stats/reports/workspace",
+        &auth_header_for(sales_id, "sales"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        body["allowed_sections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == "medical_providers")
+    );
+    assert!(
+        body["allowed_sections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|value| value != "clinics" && value != "doctors")
+    );
+
+    let row = body["medical_providers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["provider_id"] == provider_id.to_string())
+        .expect("expected medical provider report row for sales");
+    assert_eq!(row["appointments_90d"], 1);
+    assert_eq!(row["active_patients_90d"], 1);
+    assert_eq!(row["active_orders"], 1);
+    assert_eq!(row["delivered_items"], 2);
+    assert_eq!(row["doctor_count"], 1);
+    assert_eq!(
+        row["gross_service_volume"].as_str().unwrap_or_default(),
+        "3213"
+    );
+    assert!(
+        row["doctor_specialties"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == "Cardiology")
+    );
+    assert!(
+        row["patient_country_mix"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == "UA")
+    );
+
+    let (export_status, export_body, content_type, content_disposition) = text_request(
+        &app,
+        "GET",
+        "/api/v1/stats/reports/export?section=medical_providers",
+        &auth_header_for(sales_id, "sales"),
+    )
+    .await;
+    assert_eq!(export_status, StatusCode::OK);
+    assert!(content_type.unwrap_or_default().contains("text/csv"));
+    assert!(
+        content_disposition
+            .unwrap_or_default()
+            .contains("medical-provider-report.csv")
+    );
+    assert!(export_body.contains(&format!("Clinic {tag}")));
+    assert!(export_body.contains("gross_service_volume"));
+    assert!(export_body.contains("3213"));
+    assert!(export_body.contains("Cardiology"));
+}
+
+#[tokio::test]
+async fn patient_manager_forecasting_hides_collections_but_keeps_operational_sections() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("forecasting-pm");
+    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    let patient_id = seed_patient(&pool, admin_id, &tag, "UA").await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag, "active").await;
+
+    seed_order_service(&pool, order_id, provider_id, Some(doctor_id), &tag, 2100).await;
+    seed_quote(
+        &pool,
+        order_id,
+        admin_id,
+        &format!("{tag}-sent"),
+        "sent",
+        2100,
+        "CURRENT_DATE + 9",
+    )
+    .await;
+    seed_invoice(
+        &pool,
+        order_id,
+        patient_id,
+        admin_id,
+        &format!("{tag}-overdue"),
+        "overdue",
+        900,
+        0,
+        "CURRENT_DATE - 5",
+        "NULL",
+    )
+    .await;
+    sqlx::query(
+        r#"INSERT INTO order_followup_flows (
+                order_id, doctor_followup_status, followup_1w_status, followup_1m_status,
+                package_end_date, package_end_status, results_handoff_status
+           ) VALUES (
+                $1, 'pending', 'pending', 'pending',
+                CURRENT_DATE + 18, 'pending', 'pending'
+           )
+           ON CONFLICT (order_id) DO UPDATE
+           SET doctor_followup_status = EXCLUDED.doctor_followup_status,
+               followup_1w_status = EXCLUDED.followup_1w_status,
+               followup_1m_status = EXCLUDED.followup_1m_status,
+               package_end_date = EXCLUDED.package_end_date,
+               package_end_status = EXCLUDED.package_end_status,
+               results_handoff_status = EXCLUDED.results_handoff_status"#,
+    )
+    .bind(order_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO appointments (
+                patient_id, provider_id, doctor_id, order_id, owner_user_id,
+                appointment_type, title, date, time_start, time_end, status, checklist_phase, created_by
+           ) VALUES (
+                $1, $2, $3, $4, $5,
+                'medical', $6, CURRENT_DATE + 6, '10:00', '11:00', 'planned', 'followup', $5
+           )"#,
+    )
+    .bind(patient_id)
+    .bind(provider_id)
+    .bind(doctor_id)
+    .bind(order_id)
+    .bind(pm_id)
+    .bind(format!("PM forecast follow-up {tag}"))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/stats/forecasting",
+        &auth_header_for(pm_id, "patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        body["allowed_sections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == "quote_pipeline")
+    );
+    assert!(
+        body["allowed_sections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == "followup")
+    );
+    assert!(
+        body["allowed_sections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == "clinic_capacity")
+    );
+    assert!(
+        body["allowed_sections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|value| value != "collections")
+    );
+    assert!(body["collections"].is_null());
+    assert_eq!(
+        body["quote_pipeline"]["gross_total"]
+            .as_str()
+            .unwrap_or_default(),
+        "2100"
+    );
+    assert!(
+        body["followup"]["milestones_due_next_30d"]
+            .as_i64()
+            .unwrap_or_default()
+            >= 2
+    );
+    assert!(
+        body["clinic_capacity"]["clinics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["provider_id"] == provider_id.to_string())
+    );
 }
 
 #[tokio::test]
