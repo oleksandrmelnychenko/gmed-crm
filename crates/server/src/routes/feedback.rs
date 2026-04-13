@@ -14,6 +14,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use crate::access::has_active_patient_assignment;
+use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::routes::me::resolve_self_patient_id;
 use crate::state::AppState;
@@ -604,18 +605,17 @@ async fn review_feedback(
         );
     }
 
-    let _ = sqlx::query(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'feedback_reviewed', 'patient', $2, $3)",
-    )
-    .bind(auth.user_id)
-    .bind(patient_id)
-    .bind(json!({
-        "feedback_id": feedback_id,
-        "status": status,
-        "review_note": review_note,
-    }))
-    .execute(&state.db)
-    .await;
+    state.audit_sender.try_send(audit::domain_event(
+        "feedback_reviewed",
+        Some(auth.user_id),
+        "patient",
+        Some(patient_id),
+        json!({
+            "feedback_id": feedback_id,
+            "status": status,
+            "review_note": review_note,
+        }),
+    ));
 
     Json(json!({
         "ok": true,
@@ -730,22 +730,21 @@ async fn create_feedback_record(
         }
     };
 
-    let _ = sqlx::query(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'feedback_submitted', 'patient', $2, $3)",
-    )
-    .bind(auth.user_id)
-    .bind(patient_id)
-    .bind(json!({
-        "feedback_id": feedback_id,
-        "source": source,
-        "appointment_id": context.appointment_id,
-        "provider_id": context.provider_id,
-        "doctor_id": context.doctor_id,
-        "overall_score": body.overall_score,
-        "nps_score": body.nps_score,
-    }))
-    .execute(&state.db)
-    .await;
+    state.audit_sender.try_send(audit::domain_event(
+        "feedback_submitted",
+        Some(auth.user_id),
+        "patient",
+        Some(patient_id),
+        json!({
+            "feedback_id": feedback_id,
+            "source": source,
+            "appointment_id": context.appointment_id,
+            "provider_id": context.provider_id,
+            "doctor_id": context.doctor_id,
+            "overall_score": body.overall_score,
+            "nps_score": body.nps_score,
+        }),
+    ));
 
     if source == "patient_portal" {
         let patient_label = load_patient_label(state, patient_id)

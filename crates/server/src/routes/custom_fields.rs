@@ -8,6 +8,7 @@ use axum::{
 use serde::Deserialize;
 use uuid::Uuid;
 
+use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::state::AppState;
 use gmed_domain::role::Role;
@@ -87,10 +88,16 @@ async fn create_field(
         body.sort_order.unwrap_or(0), auth.user_id
     ).fetch_one(&state.db).await {
         Ok(r) => {
-            let _ = sqlx::query!(
-                "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'create_custom_field', 'custom_field', $2, $3)",
-                auth.user_id, r.id, serde_json::json!({"entity_type": body.entity_type, "field_key": body.field_key})
-            ).execute(&state.db).await;
+            state.audit_sender.try_send(audit::domain_event(
+                "create_custom_field",
+                Some(auth.user_id),
+                "custom_field",
+                Some(r.id),
+                serde_json::json!({
+                    "entity_type": body.entity_type,
+                    "field_key": body.field_key,
+                }),
+            ));
             Json(serde_json::json!({"ok": true, "id": r.id})).into_response()
         }
         Err(e) => {
@@ -142,10 +149,13 @@ async fn delete_field(
     )
     .execute(&state.db)
     .await;
-    let _ = sqlx::query!(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id) VALUES ($1, 'delete_custom_field', 'custom_field', $2)",
-        auth.user_id, id
-    ).execute(&state.db).await;
+    state.audit_sender.try_send(audit::domain_event(
+        "delete_custom_field",
+        Some(auth.user_id),
+        "custom_field",
+        Some(id),
+        serde_json::json!({}),
+    ));
     Json(serde_json::json!({"ok": true})).into_response()
 }
 

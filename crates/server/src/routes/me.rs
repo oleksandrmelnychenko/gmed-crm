@@ -13,6 +13,7 @@ use serde::Deserialize;
 use sqlx::Row;
 use uuid::Uuid;
 
+use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::routes::patients::{
     load_patient_document_alerts_summary, patient_document_alerts_payload,
@@ -224,21 +225,20 @@ async fn create_my_privacy_request(
         }
     };
 
-    let _ = sqlx::query(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'privacy_request_created', 'patient', $2, $3)",
-    )
-    .bind(auth.user_id)
-    .bind(patient_id)
-    .bind(serde_json::json!({
-        "request_id": request_id,
-        "request_type": request_type,
-        "source": "patient_request",
-        "reason": reason,
-        "due_at": due_at.to_rfc3339(),
-        "created_via": "patient_self_service",
-    }))
-    .execute(&state.db)
-    .await;
+    state.audit_sender.try_send(audit::domain_event(
+        "privacy_request_created",
+        Some(auth.user_id),
+        "patient",
+        Some(patient_id),
+        serde_json::json!({
+            "request_id": request_id,
+            "request_type": request_type,
+            "source": "patient_request",
+            "reason": reason,
+            "due_at": due_at.to_rfc3339(),
+            "created_via": "patient_self_service",
+        }),
+    ));
 
     let patient_label = load_patient_label(&state, patient_id)
         .await
@@ -556,17 +556,16 @@ async fn confirm_my_document_release(
         .unwrap_or_default()
         .map(|value| value.to_rfc3339());
 
-    let _ = sqlx::query(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'confirm_document_share', 'document', $2, $3)",
-    )
-    .bind(auth.user_id)
-    .bind(id)
-    .bind(serde_json::json!({
-        "share_id": share_id,
-        "source": "patient_portal",
-    }))
-    .execute(&state.db)
-    .await;
+    state.audit_sender.try_send(audit::domain_event(
+        "confirm_document_share",
+        Some(auth.user_id),
+        "document",
+        Some(id),
+        serde_json::json!({
+            "share_id": share_id,
+            "source": "patient_portal",
+        }),
+    ));
 
     Json(serde_json::json!({
         "ok": true,
