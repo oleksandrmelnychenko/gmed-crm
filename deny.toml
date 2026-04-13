@@ -1,0 +1,91 @@
+# cargo-deny configuration.
+#
+# Enforced by the `security` job in `.github/workflows/ci.yml`.
+# Run locally with: `cargo deny check`
+#
+# Ignored advisories must carry a rationale and a re-evaluation trigger.
+# Revisit every ignore on the Dependabot bump of the originating crate.
+
+[graph]
+all-features = false
+no-default-features = false
+
+[advisories]
+version = 2
+yanked = "deny"
+ignore = [
+    # rsa 0.9.x — Marvin Attack timing sidechannel on RSA decryption.
+    # Pulled in transitively by sqlx-macros-core -> sqlx-mysql, which is a
+    # compile-time dependency of the sqlx macros (they must be able to parse
+    # queries for every supported backend). We use Postgres exclusively; the
+    # vulnerable RSA decryption path is MySQL `caching_sha2_password` /
+    # `sha256_password` authentication, which is never executed at runtime.
+    # Re-evaluate: when sqlx ships 0.9 or the `rsa` crate releases a fix
+    # (https://github.com/RustCrypto/RSA/issues/19).
+    "RUSTSEC-2023-0071",
+
+    # proc-macro-error 1.x — unmaintained.
+    # Pulled in transitively by printpdf -> allsorts -> ouroboros ->
+    # ouroboros_macro. This is a compile-time-only proc macro crate with zero
+    # runtime surface. An unmaintained proc macro does not expose the final
+    # binary to any known vulnerability.
+    # Re-evaluate: when printpdf upgrades its transitive graph, or when we
+    # replace printpdf with an alternative PDF generator.
+    "RUSTSEC-2024-0370",
+
+    # rand 0.8.5 / 0.9.2 — unsound with a custom global logger replacing
+    # `rand::rng()`. We do not replace the global rand logger anywhere in
+    # our code or in any dependency we audit. This advisory is a soundness
+    # issue that surfaces only under a very specific misuse pattern.
+    # Re-evaluate: when `rand` ships a fixed release that can be pinned by
+    # sqlx / tungstenite / lopdf / printpdf.
+    "RUSTSEC-2026-0097",
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# Path-based workspace dependencies (gmed-domain, gmed-db, gmed-shared) are
+# declared without a version and therefore look like wildcards to cargo-deny.
+# This flag whitelists that specific pattern without weakening external wildcard
+# detection.
+allow-wildcard-paths = true
+highlight = "all"
+# Pure allow list — we are not banning specific crates yet, but this section
+# exists so new dependencies surface in CI and get reviewed.
+deny = []
+skip = []
+skip-tree = []
+
+[licenses]
+version = 2
+# Permissive licenses compatible with a proprietary SaaS distribution.
+# CDLA-Permissive-2.0 is allowed because `webpki-roots` publishes the Mozilla
+# CA bundle under it; it is a permissive data license with no copyleft effect.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "0BSD",
+    "BSL-1.0",
+    "CDLA-Permissive-2.0",
+]
+confidence-threshold = 0.93
+unused-allowed-license = "allow"
+exceptions = []
+
+# Internal workspace crates (publish = false) carry no license metadata and
+# must not be required to — they are proprietary and never leave the repo.
+[licenses.private]
+ignore = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

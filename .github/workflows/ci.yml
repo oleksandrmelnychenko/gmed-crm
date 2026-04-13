@@ -31,6 +31,18 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
+  rust-security:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install cargo-deny
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+          arguments: --all-features
+
   frontend:
     runs-on: ubuntu-latest
     steps:
@@ -46,6 +58,9 @@ jobs:
 
       - name: Install dependencies
         run: npm --prefix frontend ci
+
+      - name: Audit dependencies
+        run: npm --prefix frontend audit --audit-level=high --omit=dev
 
       - name: Lint
         run: npm --prefix frontend run lint
