@@ -178,6 +178,33 @@ impl AuditSender {
         };
         hash_client_ip(ip, salt)
     }
+
+    /// Parse a string-form IP (for example from `X-Forwarded-For`) and
+    /// hash it with the configured salt. Returns `None` when the string
+    /// is not a valid IP — useful for handlers that already extracted
+    /// an IP from a header and do not want to parse twice.
+    pub fn hash_ip_from_str(&self, raw: &str) -> Option<String> {
+        raw.parse::<IpAddr>().ok().map(|ip| self.hash_ip(ip))
+    }
+}
+
+/// Build an authentication-flow audit event. All login, refresh and
+/// logout rows share `entity_type = "auth"` so compliance queries can
+/// group them cleanly, and the `entity_id` is the user id when known.
+pub fn auth_event(
+    action: impl Into<String>,
+    user_id: Option<Uuid>,
+    ip_hash: Option<String>,
+    context: Value,
+) -> AuditEvent {
+    AuditEvent {
+        user_id,
+        action: action.into(),
+        entity_type: "auth".to_string(),
+        entity_id: user_id,
+        context,
+        ip_hash,
+    }
 }
 
 /// Start the background writer task and return a sender handle.
@@ -376,5 +403,43 @@ mod tests {
         assert_eq!(v["route"], "/api/v1/patients/{id}");
         assert_eq!(v["status"], 200);
         assert_eq!(v["latency_ms"], 42);
+    }
+
+    #[test]
+    fn hash_ip_from_str_parses_valid_ipv4() {
+        let sender = AuditSender::noop();
+        let hash = sender.hash_ip_from_str("203.0.113.1");
+        assert!(hash.is_some());
+        assert!(hash.unwrap().starts_with("sha256:"));
+    }
+
+    #[test]
+    fn hash_ip_from_str_parses_valid_ipv6() {
+        let sender = AuditSender::noop();
+        assert!(sender.hash_ip_from_str("2001:db8::1").is_some());
+    }
+
+    #[test]
+    fn hash_ip_from_str_returns_none_on_garbage() {
+        let sender = AuditSender::noop();
+        assert!(sender.hash_ip_from_str("not-an-ip").is_none());
+        assert!(sender.hash_ip_from_str("").is_none());
+    }
+
+    #[test]
+    fn auth_event_has_stable_entity_type_and_copies_user_id_to_entity_id() {
+        let uid = Uuid::new_v4();
+        let event = auth_event("login_success", Some(uid), None, json!({ "k": "v" }));
+        assert_eq!(event.action, "login_success");
+        assert_eq!(event.entity_type, "auth");
+        assert_eq!(event.entity_id, Some(uid));
+        assert_eq!(event.user_id, Some(uid));
+    }
+
+    #[test]
+    fn auth_event_with_no_user_leaves_entity_id_none() {
+        let event = auth_event("login_failure", None, None, json!({}));
+        assert_eq!(event.user_id, None);
+        assert_eq!(event.entity_id, None);
     }
 }

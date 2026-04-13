@@ -9,8 +9,18 @@ use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use uuid::Uuid;
 
+use serde_json::json;
+
+use crate::audit;
 use crate::auth::{blacklist, middleware::AuthUser, password, tokens};
 use crate::state::AppState;
+
+/// Hash an optional string-form IP through the current audit sender.
+/// Used by the auth handlers to attach a pseudonymised peer IP to every
+/// login / refresh audit event.
+fn ip_hash_opt(state: &AppState, ip: Option<&str>) -> Option<String> {
+    ip.and_then(|raw| state.audit_sender.hash_ip_from_str(raw))
+}
 
 pub fn public_router() -> Router<AppState> {
     Router::new()
@@ -118,6 +128,12 @@ async fn login(
 
         if !allowed {
             tracing::warn!(ip = client_ip, "Login blocked by IP whitelist");
+            state.audit_sender.try_send(audit::auth_event(
+                "login_blocked",
+                None,
+                ip_hash_opt(&state, ip.as_deref()),
+                json!({ "reason": "ip_whitelist" }),
+            ));
             return err(
                 StatusCode::FORBIDDEN,
                 "ip_blocked",
@@ -148,6 +164,12 @@ async fn login(
         Some(u) => u,
         None => {
             let _ = password::hash_password("dummy-for-timing");
+            state.audit_sender.try_send(audit::auth_event(
+                "login_failure",
+                None,
+                ip_hash_opt(&state, ip.as_deref()),
+                json!({ "reason": "unknown_email" }),
+            ));
             return err(
                 StatusCode::UNAUTHORIZED,
                 "unauthorized",
@@ -157,12 +179,24 @@ async fn login(
     };
 
     if !user.is_active {
+        state.audit_sender.try_send(audit::auth_event(
+            "login_blocked",
+            Some(user.id),
+            ip_hash_opt(&state, ip.as_deref()),
+            json!({ "reason": "account_inactive" }),
+        ));
         return err(StatusCode::FORBIDDEN, "forbidden", "Account is deactivated");
     }
 
     if let Some(locked_until) = user.locked_until
         && locked_until > chrono::Utc::now()
     {
+        state.audit_sender.try_send(audit::auth_event(
+            "login_blocked",
+            Some(user.id),
+            ip_hash_opt(&state, ip.as_deref()),
+            json!({ "reason": "account_locked", "locked_until": locked_until }),
+        ));
         return err(
             StatusCode::FORBIDDEN,
             "account_locked",
@@ -205,6 +239,16 @@ async fn login(
             .execute(&state.db)
             .await;
             tracing::warn!(user_id = %user.id, attempts = new_attempts, "Account locked");
+            state.audit_sender.try_send(audit::auth_event(
+                "login_blocked",
+                Some(user.id),
+                ip_hash_opt(&state, ip.as_deref()),
+                json!({
+                    "reason": "auto_locked",
+                    "failed_attempts": new_attempts,
+                    "locked_until": lock_until,
+                }),
+            ));
             return err(
                 StatusCode::FORBIDDEN,
                 "account_locked",
@@ -220,6 +264,12 @@ async fn login(
             .await;
         }
 
+        state.audit_sender.try_send(audit::auth_event(
+            "login_failure",
+            Some(user.id),
+            ip_hash_opt(&state, ip.as_deref()),
+            json!({ "reason": "wrong_password", "failed_attempts": new_attempts }),
+        ));
         return err(
             StatusCode::UNAUTHORIZED,
             "unauthorized",
@@ -254,6 +304,12 @@ async fn login(
         match pending {
             Ok(row) => {
                 tracing::info!(user_id = %user.id, pending = %row.id, "MFA pending login created");
+                state.audit_sender.try_send(audit::auth_event(
+                    "login_mfa_requested",
+                    Some(user.id),
+                    ip_hash_opt(&state, ip.as_deref()),
+                    json!({ "pending_id": row.id }),
+                ));
                 return Json(serde_json::json!({
                     "status": "mfa_pending",
                     "pending_id": row.id,
@@ -297,6 +353,12 @@ async fn login(
     };
 
     tracing::info!(user_id = %user.id, role = %user.role, "User logged in");
+    state.audit_sender.try_send(audit::auth_event(
+        "login_success",
+        Some(user.id),
+        ip_hash_opt(&state, ip.as_deref()),
+        json!({ "role": user.role }),
+    ));
 
     Json(AuthResponse {
         access_token: pair.access_token,
@@ -309,8 +371,14 @@ async fn login(
 
 async fn refresh(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(body): Json<RefreshRequest>,
 ) -> impl IntoResponse {
+    let ip = headers
+        .get("x-forwarded-for")
+        .or_else(|| headers.get("x-real-ip"))
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.split(',').next().unwrap_or(s).trim().to_string());
     if let Err(msg) = validate_refresh(&body) {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "validation_error", msg);
     }
@@ -332,21 +400,37 @@ async fn refresh(
         })
         .into_response(),
 
-        Err(tokens::TokenError::TheftDetected) => err(
-            StatusCode::UNAUTHORIZED,
-            "token_theft_detected",
-            "Suspicious token reuse detected. All sessions have been revoked.",
-        ),
+        Err(tokens::TokenError::TheftDetected) => {
+            state.audit_sender.try_send(audit::auth_event(
+                "refresh_token_theft",
+                None,
+                ip_hash_opt(&state, ip.as_deref()),
+                json!({ "severity": "critical" }),
+            ));
+            err(
+                StatusCode::UNAUTHORIZED,
+                "token_theft_detected",
+                "Suspicious token reuse detected. All sessions have been revoked.",
+            )
+        }
         Err(tokens::TokenError::InvalidToken | tokens::TokenError::Expired) => err(
             StatusCode::UNAUTHORIZED,
             "invalid_token",
             "Refresh token is invalid or expired",
         ),
-        Err(tokens::TokenError::FamilyRevoked) => err(
-            StatusCode::UNAUTHORIZED,
-            "session_revoked",
-            "This session has been revoked",
-        ),
+        Err(tokens::TokenError::FamilyRevoked) => {
+            state.audit_sender.try_send(audit::auth_event(
+                "refresh_family_revoked",
+                None,
+                ip_hash_opt(&state, ip.as_deref()),
+                json!({}),
+            ));
+            err(
+                StatusCode::UNAUTHORIZED,
+                "session_revoked",
+                "This session has been revoked",
+            )
+        }
         Err(tokens::TokenError::Internal) => err(
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal",
