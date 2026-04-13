@@ -1,14 +1,10 @@
 use tower_http::cors::CorsLayer;
-use tower_http::trace::TraceLayer;
-use tracing_subscriber::EnvFilter;
 
-use gmed_server::{build_app, config, settings, state};
+use gmed_server::{build_app, config, settings, state, telemetry};
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
-        .init();
+    telemetry::init_subscriber();
 
     dotenvy::dotenv().ok();
 
@@ -69,10 +65,10 @@ async fn main() {
 
     // Security-header baseline is applied inside `build_app` so integration
     // tests exercise it too; here we only add the CORS layer (which needs
-    // config-time origin values) and HTTP tracing.
+    // config-time origin values) and the PII-safe HTTP tracing layer.
     let app = build_app(app_state)
         .layer(cors)
-        .layer(TraceLayer::new_for_http());
+        .layer(telemetry::http_trace_layer());
 
     tracing::info!("Server starting on {}", cfg.listen_addr);
 

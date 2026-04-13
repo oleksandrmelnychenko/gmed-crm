@@ -9,6 +9,7 @@ pub mod routes;
 pub mod security_headers;
 pub mod settings;
 pub mod state;
+pub mod telemetry;
 
 use axum::{Router, middleware};
 
