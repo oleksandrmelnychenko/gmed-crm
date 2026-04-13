@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type FormEvent,
+  type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -29,6 +30,7 @@ import {
   CalendarDays,
   CheckCircle2,
   Clock3,
+  MoreHorizontal,
   LoaderCircle,
   MapPin,
   Plus,
@@ -48,13 +50,16 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { useAuth } from "@/lib/auth";
-import { useLang } from "@/lib/i18n";
+import { useLang, type Translations } from "@/lib/i18n";
 import { apiFetch } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import {
+  buildInterpreterMobileAgendaSections,
   buildAppointmentTimelineEvents,
   canResubmitInterpreterReport,
+  shouldUseInterpreterMobileAgenda,
   type AppointmentTimelineEvent,
   type AppointmentTimelineKind,
 } from "@/pages/appointments.helpers";
@@ -69,6 +74,7 @@ type AppointmentStatus =
   | "cancelled";
 type InterpreterResponse = "pending" | "accepted" | "declined" | "discussion";
 type AppointmentRecurrenceFrequency = "daily" | "weekly" | "monthly";
+type AppointmentRecurringActionScope = "single" | "following" | "series";
 
 type AppointmentListItem = {
   id: string;
@@ -109,7 +115,35 @@ type AppointmentDetail = AppointmentListItem & {
   followup_notes: string | null;
   notes: string | null;
   order_id: string | null;
+  recurrence_parent_series_id: string | null;
+  recurrence_split_from_appointment_id: string | null;
+  recurrence_split_from_index: number | null;
+  recurring_scope_preview: RecurringScopePreviewItem[];
+  recurring_lineage_history: RecurringLineageHistoryItem[];
   created_at: string;
+};
+
+type RecurringScopePreviewItem = {
+  id: string;
+  date: string;
+  status: AppointmentStatus;
+  recurrence_index: number;
+  open_checklist_count: number;
+};
+
+type RecurringLineageHistoryItem = {
+  series_id: string;
+  parent_series_id: string | null;
+  split_from_appointment_id: string | null;
+  split_from_index: number | null;
+  first_date: string;
+  last_date: string;
+  total_occurrences: number;
+  active_occurrences: number;
+  completed_occurrences: number;
+  cancelled_occurrences: number;
+  relation: "ancestor" | "current" | "descendant" | string;
+  depth: number;
 };
 
 type AppointmentAttentionItem = AppointmentListItem & {
@@ -319,7 +353,14 @@ type CalendarEventExtendedProps = {
   location: string | null;
   appointmentType: AppointmentKind;
   appointmentStatus: AppointmentStatus;
+  recurrenceFrequency: AppointmentRecurrenceFrequency | null;
   isBlocked: boolean;
+};
+
+type CalendarQuickActionMenuState = {
+  appointmentId: string;
+  top: number;
+  left: number;
 };
 
 type LocalScheduleWarningScope = "owner" | "doctor" | "clinic";
@@ -1184,6 +1225,7 @@ function toCalendarEvent(
       location: item.location,
       appointmentType: item.type,
       appointmentStatus: item.status,
+      recurrenceFrequency: item.recurrence_frequency,
       isBlocked: item.is_blocked,
     } satisfies CalendarEventExtendedProps,
   };
@@ -1430,45 +1472,6 @@ function operationalScopeOptions(
   return options;
 }
 
-function renderCalendarEventContent(arg: EventContentArg) {
-  const props = arg.event.extendedProps as CalendarEventExtendedProps;
-  const secondaryLine =
-    props.doctorName ||
-    props.providerName ||
-    props.location ||
-    props.ownerName ||
-    "Appointment";
-  const isListView = arg.view.type.startsWith("list");
-
-  return (
-    <div
-      className={cn(
-        "fc-apt-event-card",
-        isListView && "fc-apt-event-card-list",
-      )}
-    >
-      <div className="fc-apt-event-head">
-        {arg.timeText ? (
-          <span className="fc-apt-event-time">{arg.timeText}</span>
-        ) : null}
-        <span className="fc-apt-event-tag">
-          {appointmentTypeLabel(props.appointmentType)}
-        </span>
-      </div>
-      <div className="fc-apt-event-title">{arg.event.title}</div>
-      <div className="fc-apt-event-meta">{props.patientName}</div>
-      <div className="fc-apt-event-submeta">{secondaryLine}</div>
-      {props.isBlocked ? (
-        <div className="fc-apt-event-note">Blocked visibility</div>
-      ) : props.interpreterName ? (
-        <div className="fc-apt-event-note">
-          Interpreter: {props.interpreterName}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 function buildAppointmentsQuery(filters: FiltersState) {
   const params = new URLSearchParams();
   if (filters.search.trim()) params.set("search", filters.search.trim());
@@ -1623,6 +1626,99 @@ function recurrenceCadenceLabel(item: {
           ? "month"
           : "months";
   return `Every ${interval} ${unit}`;
+}
+
+function recurrenceLineageText(
+  detail: AppointmentDetail,
+  t: Translations | Record<string, string>,
+) {
+  if (
+    !detail.recurrence_frequency ||
+    !detail.recurrence_parent_series_id ||
+    detail.recurrence_split_from_index === null
+  ) {
+    return "";
+  }
+  const occurrenceNumber = detail.recurrence_split_from_index + 1;
+  return detail.recurrence_split_from_appointment_id === detail.id
+    ? `${t.appointments_lineage_tail_root} ${occurrenceNumber} ${t.appointments_lineage_previous_plan}`
+    : `${t.appointments_lineage_tail_member} ${occurrenceNumber} ${t.appointments_lineage_previous_plan}`;
+}
+
+function recurrenceLineageBadge(
+  detail: AppointmentDetail,
+  t: Translations | Record<string, string>,
+) {
+  if (!detail.recurrence_frequency || !detail.recurrence_parent_series_id) {
+    return "";
+  }
+  return detail.recurrence_split_from_appointment_id === detail.id
+    ? t.appointments_lineage_child
+    : t.appointments_lineage_related;
+}
+
+function recurringStatusTargetsForScope(
+  detail: AppointmentDetail,
+  scope: AppointmentRecurringActionScope,
+) {
+  const items = detail.recurring_scope_preview ?? [];
+  if (!detail.recurrence_frequency) return [];
+  if (scope === "single") {
+    return items.filter((item) => item.id === detail.id);
+  }
+  if (scope === "following") {
+    return items.filter((item) => item.recurrence_index >= detail.recurrence_index);
+  }
+  return items;
+}
+
+function recurringOccurrenceLabel(item: {
+  date: string;
+  recurrence_index: number;
+  open_checklist_count: number;
+}, t: Translations | Record<string, string>) {
+  const checklistLabel =
+    item.open_checklist_count === 1
+      ? t.appointments_open_checklist
+      : t.appointments_open_checklists;
+  return `Occurrence ${item.recurrence_index + 1} on ${item.date} (${item.open_checklist_count} ${checklistLabel})`;
+}
+
+function recurringLineageRelationLabel(
+  item: RecurringLineageHistoryItem,
+  t: Translations | Record<string, string>,
+) {
+  switch (item.relation) {
+    case "ancestor":
+      return item.depth <= 1
+        ? t.appointments_lineage_parent
+        : `${t.appointments_lineage_ancestor} +${item.depth}`;
+    case "current":
+      return t.appointments_lineage_current;
+    case "descendant":
+      return item.depth <= 1
+        ? t.appointments_lineage_child
+        : `${t.appointments_lineage_descendant} +${item.depth}`;
+    default:
+      return t.appointments_lineage_related;
+  }
+}
+
+function recurringLineageSplitLabel(
+  item: RecurringLineageHistoryItem,
+  t: Translations | Record<string, string>,
+) {
+  if (item.split_from_index === null) return t.appointments_lineage_current;
+  return `${t.appointments_lineage_split_from_occurrence} ${item.split_from_index + 1}`;
+}
+
+function currentRecurringLineageHistory(detail: AppointmentDetail) {
+  return (
+    detail.recurring_lineage_history.find(
+      (item) =>
+        item.relation === "current" || item.series_id === detail.recurrence_series_id,
+    ) ?? null
+  );
 }
 
 function parsePositiveIntegerInput(value: string) {
@@ -1925,6 +2021,7 @@ function StaffAppointmentsPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const permissions = appointmentPermissions(user?.role);
+  const isMobile = useIsMobile();
   const calendarRef = useRef<FullCalendar | null>(null);
   const [calendarView, setCalendarView] = useState<CalendarView>(() =>
     readStoredCalendarView(),
@@ -1994,6 +2091,10 @@ function StaffAppointmentsPage() {
   const [detailVersion, setDetailVersion] = useState(0);
 
   const [editForm, setEditForm] = useState<AppointmentFormState | null>(null);
+  const [editRecurrenceScope, setEditRecurrenceScope] =
+    useState<AppointmentRecurringActionScope>("single");
+  const [statusRecurrenceScope, setStatusRecurrenceScope] =
+    useState<AppointmentRecurringActionScope>("single");
   const [editDoctors, setEditDoctors] = useState<DoctorOption[]>([]);
   const [editConflicts, setEditConflicts] = useState<ConflictSummary | null>(
     null,
@@ -2047,6 +2148,11 @@ function StaffAppointmentsPage() {
     "all" | AppointmentTimelineKind
   >("all");
   const [actionBusy, setActionBusy] = useState("");
+  const [calendarQuickActionMenu, setCalendarQuickActionMenu] =
+    useState<CalendarQuickActionMenuState | null>(null);
+  const [calendarQuickActionScope, setCalendarQuickActionScope] =
+    useState<AppointmentRecurringActionScope>("single");
+  const calendarQuickActionMenuRef = useRef<HTMLDivElement | null>(null);
 
   const todayDate = currentDateInput();
   const weekStart = startOfWeekInput(todayDate);
@@ -2289,6 +2395,42 @@ function StaffAppointmentsPage() {
   const detailAttention = detail
     ? (attentionIndex.get(detail.id) ?? null)
     : null;
+  const activeCalendarQuickActionItem = calendarQuickActionMenu
+    ? appointments.find(
+        (item) => item.id === calendarQuickActionMenu.appointmentId,
+      ) ?? null
+    : null;
+  const detailLineageText = detail ? recurrenceLineageText(detail, t) : "";
+  const detailLineageBadge = detail ? recurrenceLineageBadge(detail, t) : "";
+  const detailCurrentLineageHistory = detail
+    ? currentRecurringLineageHistory(detail)
+    : null;
+  const detailRelatedLineageCount = detail
+    ? Math.max(0, detail.recurring_lineage_history.length - 1)
+    : 0;
+  const activeCalendarQuickActionScope =
+    activeCalendarQuickActionItem?.recurrence_frequency
+      ? calendarQuickActionScope
+      : "single";
+  const selectedRecurringStatusTargets =
+    detail && detail.recurrence_frequency
+      ? recurringStatusTargetsForScope(detail, statusRecurrenceScope)
+      : detail
+        ? [
+            {
+              id: detail.id,
+              date: detail.date,
+              status: detail.status,
+              recurrence_index: detail.recurrence_index,
+              open_checklist_count: openChecklistCount,
+            },
+          ]
+        : [];
+  const completionScopeBlockers = selectedRecurringStatusTargets.filter(
+    (item) =>
+      !["completed", "cancelled"].includes(item.status) &&
+      item.open_checklist_count > 0,
+  );
 
   function syncQuery(next: Record<string, string | null>) {
     const params = new URLSearchParams(searchParams);
@@ -2301,6 +2443,48 @@ function StaffAppointmentsPage() {
     });
     setSearchParams(params, { replace: true });
   }
+
+  useEffect(() => {
+    if (!calendarQuickActionMenu) return;
+    function handlePointerDown(event: PointerEvent) {
+      if (
+        calendarQuickActionMenuRef.current &&
+        event.target instanceof Node &&
+        calendarQuickActionMenuRef.current.contains(event.target)
+      ) {
+        return;
+      }
+      setCalendarQuickActionMenu(null);
+    }
+    function dismissMenu() {
+      setCalendarQuickActionMenu(null);
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setCalendarQuickActionMenu(null);
+      }
+    }
+    calendarQuickActionMenuRef.current?.focus();
+    window.addEventListener("pointerdown", handlePointerDown, true);
+    window.addEventListener("resize", dismissMenu);
+    window.addEventListener("scroll", dismissMenu, true);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown, true);
+      window.removeEventListener("resize", dismissMenu);
+      window.removeEventListener("scroll", dismissMenu, true);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [calendarQuickActionMenu]);
+
+  useEffect(() => {
+    setCalendarQuickActionMenu(null);
+  }, [calendarView, calendarDate, appointmentsVersion, detailOpen]);
+
+  useEffect(() => {
+    setCalendarQuickActionScope("single");
+  }, [calendarQuickActionMenu?.appointmentId]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -2821,6 +3005,8 @@ function StaffAppointmentsPage() {
         );
         setReportRejectReason("");
         setEditError("");
+        setEditRecurrenceScope("single");
+        setStatusRecurrenceScope("single");
         setEditForm({
           patientId: appointmentDetail.patient_id,
           providerId: appointmentDetail.provider_id ?? "",
@@ -2835,11 +3021,16 @@ function StaffAppointmentsPage() {
           location: appointmentDetail.location ?? "",
           category: appointmentDetail.category ?? "",
           notes: appointmentDetail.notes ?? "",
-          repeatEnabled: false,
-          repeatFrequency: "weekly",
-          repeatInterval: "1",
-          repeatCount: "4",
-          repeatUntil: "",
+          repeatEnabled: Boolean(appointmentDetail.recurrence_frequency),
+          repeatFrequency:
+            appointmentDetail.recurrence_frequency ?? "weekly",
+          repeatInterval: String(
+            appointmentDetail.recurrence_interval ?? 1,
+          ),
+          repeatCount: appointmentDetail.recurrence_count
+            ? String(appointmentDetail.recurrence_count)
+            : "",
+          repeatUntil: appointmentDetail.recurrence_until ?? "",
         });
       } catch (error) {
         if (!active) return;
@@ -2927,6 +3118,26 @@ function StaffAppointmentsPage() {
       ),
     )
     .slice(0, 10);
+  const useInterpreterMobileAgenda = shouldUseInterpreterMobileAgenda(
+    user?.role,
+    isMobile,
+  );
+  const mobileAgendaSections = useInterpreterMobileAgenda
+    ? buildInterpreterMobileAgendaSections(scopedAppointments, todayDate).slice(
+        0,
+        8,
+      )
+    : [];
+  const mobileAgendaPendingCount = scopedAppointments.filter(
+    (item) =>
+      item.status !== "cancelled" && item.interpreter_response === "pending",
+  ).length;
+  const mobileAgendaWeekCount = scopedAppointments.filter(
+    (item) =>
+      item.status !== "cancelled" &&
+      item.date >= weekStart &&
+      item.date <= weekEnd,
+  ).length;
 
   function refreshAppointments() {
     startTransition(() => setAppointmentsVersion((current) => current + 1));
@@ -2937,6 +3148,16 @@ function StaffAppointmentsPage() {
       setDetailVersion((current) => current + 1);
       setAppointmentsVersion((current) => current + 1);
     });
+  }
+
+  function statusActionKey(
+    appointmentId: string,
+    status: AppointmentStatus,
+    recurrenceScope: AppointmentRecurringActionScope = "single",
+  ) {
+    return recurrenceScope === "single"
+      ? `status:${appointmentId}:${status}`
+      : `status:${appointmentId}:${status}:${recurrenceScope}`;
   }
 
   function syncCalendar(nextView?: CalendarView, nextDate?: string) {
@@ -3035,11 +3256,34 @@ function StaffAppointmentsPage() {
   }
 
   function openDetailSheet(id: string) {
+    setCalendarQuickActionMenu(null);
     startTransition(() => {
       setSelectedId(id);
       setDetailOpen(true);
     });
     syncQuery({ appointment: id });
+  }
+
+  function openCalendarQuickActionLayer(
+    event: ReactMouseEvent<HTMLButtonElement>,
+    appointmentId: string,
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+    const rect = event.currentTarget.getBoundingClientRect();
+    const menuWidth = 220;
+    setCalendarQuickActionMenu((current) =>
+      current?.appointmentId === appointmentId
+        ? null
+        : {
+            appointmentId,
+            top: Math.min(rect.bottom + 8, window.innerHeight - 16),
+            left: Math.min(
+              Math.max(16, rect.right - menuWidth),
+              Math.max(16, window.innerWidth - menuWidth - 16),
+            ),
+          },
+    );
   }
 
   function handleEventClick(info: EventClickArg) {
@@ -3048,6 +3292,117 @@ function StaffAppointmentsPage() {
 
   function handleCalendarDateClick(info: DateClickArg) {
     openCreateSheetFromDate(info);
+  }
+
+  function renderCalendarEventContent(arg: EventContentArg) {
+    const props = arg.event.extendedProps as CalendarEventExtendedProps;
+    const secondaryLine =
+      props.doctorName ||
+      props.providerName ||
+      props.location ||
+      props.ownerName ||
+      "Appointment";
+    const isListView = arg.view.type.startsWith("list");
+    const canQuickManage =
+      isListView &&
+      permissions.canManageStatus &&
+      !props.isBlocked &&
+      props.appointmentStatus !== "completed" &&
+      props.appointmentStatus !== "cancelled";
+    const canGridQuickManage =
+      !isListView &&
+      permissions.canManageStatus &&
+      !props.isBlocked &&
+      props.appointmentStatus !== "completed" &&
+      props.appointmentStatus !== "cancelled";
+
+    return (
+      <div
+        className={cn(
+          "fc-apt-event-card relative",
+          isListView && "fc-apt-event-card-list",
+        )}
+      >
+        {canGridQuickManage ? (
+          <button
+            type="button"
+            aria-label="Open quick appointment actions"
+            aria-haspopup="menu"
+            aria-expanded={
+              calendarQuickActionMenu?.appointmentId === arg.event.id
+            }
+            aria-controls={`appointment-quick-actions-${arg.event.id}`}
+            className="absolute top-1 right-1 inline-flex size-6 items-center justify-center rounded-full border border-slate-300/80 bg-white/90 text-slate-600 shadow-sm transition hover:bg-white hover:text-slate-950"
+            onClick={(event) => openCalendarQuickActionLayer(event, arg.event.id)}
+          >
+            <MoreHorizontal className="size-3.5" />
+          </button>
+        ) : null}
+        <div className="fc-apt-event-head">
+          {arg.timeText ? (
+            <span className="fc-apt-event-time">{arg.timeText}</span>
+          ) : null}
+          <span className="fc-apt-event-tag">
+            {appointmentTypeLabel(props.appointmentType)}
+          </span>
+        </div>
+        <div className="fc-apt-event-title">{arg.event.title}</div>
+        <div className="fc-apt-event-meta">{props.patientName}</div>
+        <div className="fc-apt-event-submeta">{secondaryLine}</div>
+        {props.isBlocked ? (
+          <div className="fc-apt-event-note">Blocked visibility</div>
+        ) : props.interpreterName ? (
+          <div className="fc-apt-event-note">
+            Interpreter: {props.interpreterName}
+          </div>
+        ) : null}
+        {canQuickManage ? (
+          <div className="mt-2 flex flex-wrap gap-1">
+            {props.appointmentStatus !== "confirmed" ? (
+              <button
+                type="button"
+                className="rounded-full border border-slate-300 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-700"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  void performStatusChange(arg.event.id, "confirmed");
+                }}
+              >
+                {t.common_confirm}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="rounded-full border border-slate-300 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-700"
+              onClick={(event) => {
+                event.preventDefault();
+                  event.stopPropagation();
+                  void performStatusChange(arg.event.id, "completed");
+                }}
+              >
+                {t.dash_completed}
+              </button>
+            {props.recurrenceFrequency ? (
+              <button
+                type="button"
+                className="rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-rose-700"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  void performStatusChange(
+                    arg.event.id,
+                    "cancelled",
+                    "following",
+                  );
+                }}
+              >
+                {t.appointments_cancel_this_and_following}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    );
   }
 
   async function handleCreateSubmit(event: FormEvent<HTMLFormElement>) {
@@ -3184,22 +3539,45 @@ function StaffAppointmentsPage() {
     }
   }
 
-  async function handleStatusChange(status: AppointmentStatus) {
-    if (!detail) return;
-    setActionBusy(`status:${status}`);
+  async function performStatusChange(
+    appointmentId: string,
+    status: AppointmentStatus,
+    recurrenceScope: AppointmentRecurringActionScope = "single",
+  ) {
+    setCalendarQuickActionMenu(null);
+    setActionBusy(statusActionKey(appointmentId, status, recurrenceScope));
     try {
-      await apiFetch<{ ok: boolean }>(`/appointments/${detail.id}/status`, {
+      await apiFetch<{ ok: boolean }>(`/appointments/${appointmentId}/status`, {
         method: "POST",
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({
+          status,
+          recurrence_scope: recurrenceScope,
+        }),
       });
-      refreshDetail();
+      if (selectedId === appointmentId) {
+        refreshDetail();
+      } else {
+        refreshAppointments();
+      }
     } catch (error) {
-      setDetailError(
-        error instanceof Error ? error.message : "Failed to change status",
-      );
+      const message =
+        error instanceof Error ? error.message : "Failed to change status";
+      if (selectedId === appointmentId) {
+        setDetailError(message);
+      } else {
+        setAppointmentsError(message);
+      }
     } finally {
       setActionBusy("");
     }
+  }
+
+  async function handleStatusChange(
+    status: AppointmentStatus,
+    recurrenceScope: AppointmentRecurringActionScope = "single",
+  ) {
+    if (!detail) return;
+    await performStatusChange(detail.id, status, recurrenceScope);
   }
 
   async function handleAssignInterpreter(event: FormEvent<HTMLFormElement>) {
@@ -3251,6 +3629,22 @@ function StaffAppointmentsPage() {
     setEditBusy(true);
     setEditError("");
     try {
+      const applyRecurrenceRule =
+        Boolean(detail.recurrence_frequency) && editRecurrenceScope !== "single";
+      const repeatInterval = parsePositiveIntegerInput(editForm.repeatInterval);
+      const repeatCount = parsePositiveIntegerInput(editForm.repeatCount);
+      if (applyRecurrenceRule) {
+        if (!repeatInterval) {
+          setEditError("Repeat interval must be a positive number.");
+          return;
+        }
+        if (!repeatCount && !editForm.repeatUntil) {
+          setEditError(
+            "Set either total occurrences or a repeat-until date for recurring updates.",
+          );
+          return;
+        }
+      }
       const result = await apiFetch<{
         ok: boolean;
         conflicts?: ConflictSummary;
@@ -3266,6 +3660,18 @@ function StaffAppointmentsPage() {
           time_start: editForm.timeStart || null,
           time_end: editForm.timeEnd || null,
           location: editForm.location.trim() || null,
+          recurrence_frequency: applyRecurrenceRule
+            ? editForm.repeatFrequency
+            : null,
+          recurrence_interval: applyRecurrenceRule ? repeatInterval : null,
+          recurrence_count: applyRecurrenceRule ? repeatCount : null,
+          recurrence_until:
+            applyRecurrenceRule && editForm.repeatUntil
+              ? editForm.repeatUntil
+              : null,
+          recurrence_scope: detail.recurrence_frequency
+            ? editRecurrenceScope
+            : "single",
         }),
       });
       setAppointmentsNotice(
@@ -4575,6 +4981,132 @@ function StaffAppointmentsPage() {
         ) : null}
         {metadataError ? <Banner tone="warning">{metadataError}</Banner> : null}
 
+        {useInterpreterMobileAgenda ? (
+          <div className="space-y-4">
+            <section className={sectionCardClass("p-4")}>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <StatsCard
+                  icon={CalendarDays}
+                  label={t.dash_patients_today}
+                  value={String(todayAppointments)}
+                  tone="sky"
+                />
+                <StatsCard
+                  icon={UsersRound}
+                  label={tr.mfa_pending ?? "Pending interpreter"}
+                  value={String(mobileAgendaPendingCount)}
+                  tone="amber"
+                />
+                <StatsCard
+                  icon={CalendarClock}
+                  label={tr.dash_this_week ?? "This week"}
+                  value={String(mobileAgendaWeekCount)}
+                  tone="slate"
+                />
+              </div>
+            </section>
+
+            <section className={sectionCardClass("p-4")}>
+              <div className="space-y-4">
+                <Field label={t.common_search}>
+                  <Input
+                    value={filters.search}
+                    onChange={(event) =>
+                      setFilters((current) => ({
+                        ...current,
+                        search: event.target.value,
+                      }))
+                    }
+                    placeholder={tr.common_search}
+                    className="h-10 rounded-xl bg-slate-50"
+                  />
+                </Field>
+                <div className="flex flex-wrap items-center gap-2">
+                  <QuickScopeButton
+                    active={
+                      filters.dateFrom === todayDate && filters.dateTo === todayDate
+                    }
+                    onClick={applyTodayScope}
+                  >
+                    Today
+                  </QuickScopeButton>
+                  <QuickScopeButton
+                    active={
+                      filters.dateFrom === weekStart && filters.dateTo === weekEnd
+                    }
+                    onClick={applyWeekScope}
+                  >
+                    This week
+                  </QuickScopeButton>
+                  <QuickScopeButton
+                    active={mineFilterActive}
+                    onClick={applyMineScope}
+                  >
+                    Mine
+                  </QuickScopeButton>
+                  {scopeOptions.length > 1
+                    ? scopeOptions.map((option) => (
+                        <QuickScopeButton
+                          key={option.id}
+                          active={operationalScope === option.id}
+                          onClick={() => applyOperationalScope(option.id)}
+                        >
+                          {option.label}
+                        </QuickScopeButton>
+                      ))
+                    : null}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="rounded-full px-3"
+                    onClick={resetQuickScopes}
+                  >
+                    Reset
+                  </Button>
+                </div>
+              </div>
+            </section>
+
+            {mobileAgendaSections.length === 0 ? (
+              <section className={sectionCardClass("p-5")}>
+                <EmptyState text="No appointments in the current mobile scope." />
+              </section>
+            ) : (
+              mobileAgendaSections.map((section) => (
+                <section
+                  key={section.date}
+                  className={sectionCardClass("p-4 md:p-5")}
+                >
+                  <div className="mb-3 flex items-start justify-between gap-3">
+                    <div>
+                      <h2 className="text-sm font-semibold text-slate-950">
+                        {section.label}
+                      </h2>
+                      <p className="text-xs text-muted-foreground">
+                        {section.itemCount} slot(s)
+                        {section.pendingResponseCount > 0
+                          ? ` · ${section.pendingResponseCount} response pending`
+                          : ""}
+                      </p>
+                    </div>
+                    <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                      {section.itemCount}
+                    </span>
+                  </div>
+                  <div className="space-y-3">
+                    {section.items.map((item) => (
+                      <MobileAgendaCard
+                        key={item.id}
+                        item={item}
+                        onOpen={() => openDetailSheet(item.id)}
+                      />
+                    ))}
+                  </div>
+                </section>
+              ))
+            )}
+          </div>
+        ) : (
         <div className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
           <aside className="space-y-6">
             <section className={sectionCardClass("p-5")}>
@@ -4805,17 +5337,19 @@ function StaffAppointmentsPage() {
                   <EmptyState text={tr.common_not_set} />
                 ) : (
                   queueAppointments.map((item) => (
-                    <button
+                    <div
                       key={item.id}
-                      type="button"
-                      onClick={() => openDetailSheet(item.id)}
-                      className="w-full rounded-2xl border border-slate-200/80 bg-slate-50/80 px-4 py-3 text-left transition hover:border-sky-200 hover:bg-white"
+                      className="rounded-2xl border border-slate-200/80 bg-slate-50/80 px-4 py-3 transition hover:border-sky-200 hover:bg-white"
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold text-slate-950">
+                          <button
+                            type="button"
+                            onClick={() => openDetailSheet(item.id)}
+                            className="truncate text-left text-sm font-semibold text-slate-950 hover:text-sky-700"
+                          >
                             {item.title}
-                          </p>
+                          </button>
                           <p className="truncate text-xs text-slate-500">
                             {item.patient_pid} · {item.patient_name}
                           </p>
@@ -4850,7 +5384,110 @@ function StaffAppointmentsPage() {
                           tr,
                         )}
                       </p>
-                    </button>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="rounded-2xl"
+                          onClick={() => openDetailSheet(item.id)}
+                        >
+                          {t.providers_open}
+                        </Button>
+                        {permissions.canManageStatus &&
+                        item.status !== "confirmed" &&
+                        item.status !== "completed" &&
+                        item.status !== "cancelled" ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="rounded-2xl"
+                            disabled={Boolean(actionBusy)}
+                            onClick={() =>
+                              void performStatusChange(item.id, "confirmed")
+                            }
+                          >
+                            {actionBusy ===
+                            statusActionKey(item.id, "confirmed") ? (
+                              <LoaderCircle className="size-4 animate-spin" />
+                            ) : null}
+                            {t.common_confirm}
+                          </Button>
+                        ) : null}
+                        {permissions.canManageStatus &&
+                        item.status !== "completed" &&
+                        item.status !== "cancelled" ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="rounded-2xl"
+                            disabled={Boolean(actionBusy)}
+                            onClick={() =>
+                              void performStatusChange(item.id, "completed")
+                            }
+                          >
+                            {actionBusy ===
+                            statusActionKey(item.id, "completed") ? (
+                              <LoaderCircle className="size-4 animate-spin" />
+                            ) : null}
+                            {t.dash_completed}
+                          </Button>
+                        ) : null}
+                        {permissions.canManageStatus &&
+                        item.recurrence_frequency &&
+                        item.status !== "completed" &&
+                        item.status !== "cancelled" ? (
+                          <>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="rounded-2xl border-rose-200 text-rose-700 hover:bg-rose-50"
+                              disabled={Boolean(actionBusy)}
+                              onClick={() =>
+                                void performStatusChange(
+                                  item.id,
+                                  "cancelled",
+                                  "following",
+                                )
+                              }
+                            >
+                              {actionBusy ===
+                              statusActionKey(
+                                item.id,
+                                "cancelled",
+                                "following",
+                              ) ? (
+                                <LoaderCircle className="size-4 animate-spin" />
+                              ) : null}
+                              {t.appointments_cancel_this_and_following}
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="rounded-2xl border-rose-200 text-rose-700 hover:bg-rose-50"
+                              disabled={Boolean(actionBusy)}
+                              onClick={() =>
+                                void performStatusChange(
+                                  item.id,
+                                  "cancelled",
+                                  "series",
+                                )
+                              }
+                            >
+                              {actionBusy ===
+                              statusActionKey(item.id, "cancelled", "series") ? (
+                                <LoaderCircle className="size-4 animate-spin" />
+                              ) : null}
+                              {t.appointments_cancel_whole_series}
+                            </Button>
+                          </>
+                        ) : null}
+                      </div>
+                    </div>
                   ))
                 )}
               </div>
@@ -4911,8 +5548,151 @@ function StaffAppointmentsPage() {
                 )}
               />
             </div>
+            {calendarQuickActionMenu && activeCalendarQuickActionItem ? (
+              <div
+                ref={calendarQuickActionMenuRef}
+                id={`appointment-quick-actions-${activeCalendarQuickActionItem.id}`}
+                role="menu"
+                tabIndex={-1}
+                aria-label={t.appointments_quick_actions}
+                className="fixed z-50 w-56 rounded-2xl border border-slate-200 bg-white p-2 shadow-[0_24px_60px_rgba(15,23,42,0.18)]"
+                style={{
+                  top: `${calendarQuickActionMenu.top}px`,
+                  left: `${calendarQuickActionMenu.left}px`,
+                }}
+              >
+                <div className="border-b border-slate-200 px-2 pb-2">
+                  <p className="truncate text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                    {t.appointments_quick_actions}
+                  </p>
+                  <p className="mt-1 truncate text-sm font-semibold text-slate-950">
+                    {activeCalendarQuickActionItem.title}
+                  </p>
+                  <p className="truncate text-xs text-slate-500">
+                    {activeCalendarQuickActionItem.patient_pid} ·{" "}
+                    {activeCalendarQuickActionItem.patient_name}
+                  </p>
+                </div>
+                <div className="mt-2 space-y-1">
+                  {activeCalendarQuickActionItem.recurrence_frequency ? (
+                    <label className="block rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                      <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                        {t.appointments_scope_apply_status}
+                      </span>
+                      <select
+                        value={calendarQuickActionScope}
+                        onChange={(event) =>
+                          setCalendarQuickActionScope(
+                            event.target.value as AppointmentRecurringActionScope,
+                          )
+                        }
+                        className="mt-2 h-9 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900"
+                      >
+                        <option value="single">
+                          {t.appointments_scope_single}
+                        </option>
+                        <option value="following">
+                          {t.appointments_scope_following}
+                        </option>
+                        <option value="series">
+                          {t.appointments_scope_series}
+                        </option>
+                      </select>
+                    </label>
+                  ) : null}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100 hover:text-slate-950"
+                    onClick={() => openDetailSheet(activeCalendarQuickActionItem.id)}
+                  >
+                    <span>{t.appointments_open_detail}</span>
+                  </button>
+                  {activeCalendarQuickActionItem.status !== "confirmed" ? (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
+                      disabled={Boolean(actionBusy)}
+                      onClick={() =>
+                        void performStatusChange(
+                          activeCalendarQuickActionItem.id,
+                          "confirmed",
+                          activeCalendarQuickActionScope,
+                        )
+                      }
+                    >
+                      <span>{t.common_confirm}</span>
+                      {actionBusy ===
+                      statusActionKey(
+                        activeCalendarQuickActionItem.id,
+                        "confirmed",
+                        activeCalendarQuickActionScope,
+                      ) ? (
+                        <LoaderCircle className="size-4 animate-spin" />
+                      ) : null}
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={Boolean(actionBusy)}
+                    onClick={() =>
+                      void performStatusChange(
+                        activeCalendarQuickActionItem.id,
+                        "completed",
+                        activeCalendarQuickActionScope,
+                      )
+                    }
+                  >
+                    <span>{t.dash_completed}</span>
+                    {actionBusy ===
+                    statusActionKey(
+                      activeCalendarQuickActionItem.id,
+                      "completed",
+                      activeCalendarQuickActionScope,
+                    ) ? (
+                      <LoaderCircle className="size-4 animate-spin" />
+                    ) : null}
+                  </button>
+                  {activeCalendarQuickActionItem.recurrence_frequency ? (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
+                      disabled={Boolean(actionBusy)}
+                      onClick={() =>
+                        void performStatusChange(
+                          activeCalendarQuickActionItem.id,
+                          "cancelled",
+                          activeCalendarQuickActionScope,
+                        )
+                      }
+                    >
+                      <span>
+                        {activeCalendarQuickActionScope === "following"
+                          ? t.appointments_cancel_this_and_following
+                          : activeCalendarQuickActionScope === "series"
+                            ? t.appointments_cancel_whole_series
+                            : statusLabel("cancelled")}
+                      </span>
+                      {actionBusy ===
+                      statusActionKey(
+                        activeCalendarQuickActionItem.id,
+                        "cancelled",
+                        activeCalendarQuickActionScope,
+                      ) ? (
+                        <LoaderCircle className="size-4 animate-spin" />
+                      ) : null}
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
           </section>
         </div>
+        )}
       </div>
 
       <Sheet open={createOpen} onOpenChange={setCreateOpen}>
@@ -5323,6 +6103,8 @@ function StaffAppointmentsPage() {
             setReportRejectReason("");
             setActionBusy("");
             setEditForm(null);
+            setEditRecurrenceScope("single");
+            setStatusRecurrenceScope("single");
             setFollowUpVisitForm(null);
             setFollowUpVisitDoctors([]);
             setFollowUpVisitConflicts(null);
@@ -5377,6 +6159,11 @@ function StaffAppointmentsPage() {
                         {" "}series
                       </span>
                     ) : null}
+                    {detailLineageBadge ? (
+                      <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-700">
+                        {detailLineageBadge}
+                      </span>
+                    ) : null}
                     {detail.interpreter_response ? (
                       <span className="rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
                         Interpreter {responseLabel(detail.interpreter_response)}
@@ -5412,15 +6199,174 @@ function StaffAppointmentsPage() {
                   ) : null}
                   {!detail.is_blocked && detail.recurrence_frequency ? (
                     <div className="mt-4 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
-                      Recurring series: occurrence {detail.recurrence_index + 1} of{" "}
-                      {detail.recurrence_series_size}. {recurrenceCadenceLabel(detail)}
+                      {t.appointments_recurring_series}:{" "}
+                      {t.appointments_occurrence.toLowerCase()}{" "}
+                      {detail.recurrence_index + 1}/{detail.recurrence_series_size}.{" "}
+                      {recurrenceCadenceLabel(detail)}
                       {detail.recurrence_until
-                        ? ` until ${detail.recurrence_until}.`
+                        ? ` ${t.appointments_until} ${detail.recurrence_until}.`
                         : detail.recurrence_count
-                          ? ` Total planned occurrences: ${detail.recurrence_count}.`
+                          ? ` ${t.appointments_total_planned_occurrences}: ${detail.recurrence_count}.`
                           : "."}{" "}
-                      Edit and reschedule actions on this page apply only to the
-                      current occurrence.
+                      {t.appointments_scope_bulk_status_hint}{" "}
+                      {t.appointments_scope_following_hint}
+                      {detailLineageText ? (
+                        <span className="mt-2 block rounded-xl border border-sky-300/70 bg-white/70 px-3 py-2 text-xs font-medium text-sky-900">
+                          {detailLineageText}
+                        </span>
+                      ) : null}
+                      {detailCurrentLineageHistory ? (
+                        <div className="mt-3 grid gap-2 md:grid-cols-4">
+                          <div className="rounded-xl border border-sky-300/70 bg-white/70 px-3 py-2">
+                            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-sky-700">
+                              {t.appointments_lineage_current_branch}
+                            </p>
+                            <p className="mt-1 text-lg font-semibold text-sky-950">
+                              {detailCurrentLineageHistory.total_occurrences}
+                            </p>
+                            <p className="text-[11px] text-sky-800">
+                              {t.appointments_lineage_total_occurrences}
+                            </p>
+                          </div>
+                          <div className="rounded-xl border border-sky-300/70 bg-white/70 px-3 py-2">
+                            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-sky-700">
+                              {t.common_active}
+                            </p>
+                            <p className="mt-1 text-lg font-semibold text-sky-950">
+                              {detailCurrentLineageHistory.active_occurrences}
+                            </p>
+                            <p className="text-[11px] text-sky-800">
+                              {t.appointments_lineage_still_operational}
+                            </p>
+                          </div>
+                          <div className="rounded-xl border border-sky-300/70 bg-white/70 px-3 py-2">
+                            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-sky-700">
+                              {t.dash_completed}
+                            </p>
+                            <p className="mt-1 text-lg font-semibold text-sky-950">
+                              {detailCurrentLineageHistory.completed_occurrences}
+                            </p>
+                            <p className="text-[11px] text-sky-800">
+                              {t.appointments_lineage_completed_occurrences}
+                            </p>
+                          </div>
+                          <div className="rounded-xl border border-sky-300/70 bg-white/70 px-3 py-2">
+                            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-sky-700">
+                              {t.appointments_lineage_related_branches}
+                            </p>
+                            <p className="mt-1 text-lg font-semibold text-sky-950">
+                              {detailRelatedLineageCount}
+                            </p>
+                            <p className="text-[11px] text-sky-800">
+                              {t.appointments_lineage_related_branches_meta}
+                            </p>
+                          </div>
+                        </div>
+                      ) : null}
+                      {detail.recurring_scope_preview.length > 0 ? (
+                        <div className="mt-3 rounded-xl border border-sky-300/70 bg-white/70 p-3">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-sky-900">
+                            {t.appointments_active_series_path}
+                          </p>
+                          <div className="mt-2 space-y-1.5">
+                            {detail.recurring_scope_preview.map((item) => (
+                              <div
+                                key={item.id}
+                                className={cn(
+                                  "flex flex-wrap items-center gap-2 rounded-lg px-2 py-1.5 text-xs",
+                                  item.id === detail.id
+                                    ? "bg-sky-100 text-sky-950"
+                                    : "bg-sky-50 text-sky-900",
+                                )}
+                              >
+                                <span className="font-semibold">
+                                  #{item.recurrence_index + 1}
+                                </span>
+                                <span>{item.date}</span>
+                                {item.id === detail.id ? (
+                                  <span className="rounded-full border border-sky-300 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em]">
+                                    {t.appointments_current_occurrence}
+                                  </span>
+                                ) : null}
+                                {item.open_checklist_count > 0 ? (
+                                  <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-amber-800">
+                                    {item.open_checklist_count}{" "}
+                                    {item.open_checklist_count === 1
+                                      ? t.appointments_open_checklist
+                                      : t.appointments_open_checklists}
+                                  </span>
+                                ) : null}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                      {detail.recurring_lineage_history.length > 0 ? (
+                        <div className="mt-3 rounded-xl border border-sky-300/70 bg-white/70 p-3">
+                          <div className="flex flex-col gap-1 md:flex-row md:items-end md:justify-between">
+                            <div>
+                              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-sky-900">
+                                {t.appointments_lineage_history}
+                              </p>
+                              <p className="text-xs text-sky-800">
+                                {t.appointments_lineage_history_hint}
+                              </p>
+                            </div>
+                            <span className="text-[11px] font-medium text-sky-800">
+                              {detail.recurring_lineage_history.length}{" "}
+                              {t.appointments_lineage_related_series}
+                            </span>
+                          </div>
+                          <div className="mt-3 grid gap-2">
+                            {detail.recurring_lineage_history.map((item) => (
+                              <div
+                                key={item.series_id}
+                                className={cn(
+                                  "rounded-xl border px-3 py-2",
+                                  item.relation === "current"
+                                    ? "border-sky-400 bg-sky-100/80 text-sky-950"
+                                    : "border-sky-200 bg-sky-50 text-sky-900",
+                                )}
+                              >
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="rounded-full border border-sky-300 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em]">
+                                    {recurringLineageRelationLabel(item, t)}
+                                  </span>
+                                  <span className="text-xs font-medium">
+                                    {recurringLineageSplitLabel(item, t)}
+                                  </span>
+                                  <span className="text-xs text-sky-700">
+                                    {item.first_date} to {item.last_date}
+                                  </span>
+                                  {item.series_id !== detail.id ? (
+                                    <button
+                                      type="button"
+                                      className="rounded-full border border-sky-300 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-sky-900 transition hover:bg-sky-100"
+                                      onClick={() => openDetailSheet(item.series_id)}
+                                    >
+                                      {t.appointments_open_branch_root}
+                                    </button>
+                                  ) : null}
+                                </div>
+                                <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-sky-900">
+                                  <span className="rounded-full border border-sky-200 bg-white px-2 py-0.5">
+                                    {item.total_occurrences} {t.appointments_lineage_total_short}
+                                  </span>
+                                  <span className="rounded-full border border-sky-200 bg-white px-2 py-0.5">
+                                    {item.active_occurrences} {t.appointments_lineage_active_short}
+                                  </span>
+                                  <span className="rounded-full border border-sky-200 bg-white px-2 py-0.5">
+                                    {item.completed_occurrences} {t.appointments_lineage_completed_short}
+                                  </span>
+                                  <span className="rounded-full border border-sky-200 bg-white px-2 py-0.5">
+                                    {item.cancelled_occurrences} {t.appointments_lineage_cancelled_short}
+                                  </span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
                   ) : null}
                 </section>
@@ -7908,7 +8854,7 @@ function StaffAppointmentsPage() {
                             disabled={completionBusy || Boolean(actionBusy)}
                             onClick={() => handleStatusChange("completed")}
                           >
-                            Complete only
+                            {t.appointments_complete_only}
                           </Button>
                           <Button
                             type="button"
@@ -7924,7 +8870,7 @@ function StaffAppointmentsPage() {
                             {completionBusy ? (
                               <LoaderCircle className="size-4 animate-spin" />
                             ) : null}
-                            Complete and schedule
+                            {t.appointments_complete_and_schedule}
                           </Button>
                         </div>
                       </div>
@@ -7933,9 +8879,44 @@ function StaffAppointmentsPage() {
                 ) : null}
                 {permissions.canManageStatus ? (
                   <section className={sectionCardClass("p-5")}>
-                    <h3 className="text-sm font-semibold text-slate-950">
-                      {t.users_status}
-                    </h3>
+                    <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+                      <div>
+                        <h3 className="text-sm font-semibold text-slate-950">
+                          {t.users_status}
+                        </h3>
+                        {detail.recurrence_frequency ? (
+                          <p className="mt-1 text-xs text-slate-500">
+                            {t.appointments_scope_bulk_status_hint}
+                          </p>
+                        ) : null}
+                      </div>
+                      {detail.recurrence_frequency ? (
+                        <div className="w-full md:w-[240px]">
+                          <Field label={t.appointments_scope_apply_status}>
+                            <select
+                              value={statusRecurrenceScope}
+                              onChange={(event) =>
+                                setStatusRecurrenceScope(
+                                  event.target
+                                    .value as AppointmentRecurringActionScope,
+                                )
+                              }
+                              className={selectClassName}
+                            >
+                              <option value="single">
+                                {t.appointments_scope_single}
+                              </option>
+                              <option value="following">
+                                {t.appointments_scope_following}
+                              </option>
+                              <option value="series">
+                                {t.appointments_scope_series}
+                              </option>
+                            </select>
+                          </Field>
+                        </div>
+                      ) : null}
+                    </div>
                     <div className="mt-4 flex flex-wrap gap-2">
                       {STATUS_OPTIONS.map((status) => (
                         <Button
@@ -7950,15 +8931,59 @@ function StaffAppointmentsPage() {
                               : "",
                           )}
                           disabled={Boolean(actionBusy)}
-                          onClick={() => handleStatusChange(status)}
+                          onClick={() =>
+                            handleStatusChange(
+                              status,
+                              detail.recurrence_frequency
+                                ? statusRecurrenceScope
+                                : "single",
+                            )
+                          }
                         >
-                          {actionBusy === `status:${status}` ? (
+                          {actionBusy ===
+                          statusActionKey(
+                            detail.id,
+                            status,
+                            detail.recurrence_frequency
+                              ? statusRecurrenceScope
+                              : "single",
+                          ) ? (
                             <LoaderCircle className="size-4 animate-spin" />
                           ) : null}
-                          {statusLabel(status)}
+                          {detail.recurrence_frequency && status === "cancelled"
+                            ? statusRecurrenceScope === "following"
+                              ? t.appointments_cancel_this_and_following
+                              : statusRecurrenceScope === "series"
+                                ? t.appointments_cancel_whole_series
+                                : "Cancel this occurrence"
+                            : statusLabel(status)}
                         </Button>
                       ))}
                     </div>
+                    {detail.recurrence_frequency ? (
+                      <div className="mt-4 space-y-3">
+                        <p className="text-xs text-slate-500">
+                          {t.appointments_scope_targets}{" "}
+                          <span className="font-semibold text-slate-700">
+                            {selectedRecurringStatusTargets.length}
+                          </span>{" "}
+                          {selectedRecurringStatusTargets.length === 1
+                            ? t.appointments_active_occurrence
+                            : t.appointments_active_occurrences}
+                          .
+                        </p>
+                        {completionScopeBlockers.length > 0 ? (
+                          <Banner tone="warning">
+                            Completing this scope is currently blocked by{" "}
+                            {completionScopeBlockers.length} occurrence
+                            {completionScopeBlockers.length === 1 ? "" : "s"}:{" "}
+                            {completionScopeBlockers
+                              .map((item) => recurringOccurrenceLabel(item, t))
+                              .join("; ")}
+                          </Banner>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </section>
                 ) : null}
                 {permissions.canEditSchedule && editForm ? (
@@ -8144,6 +9169,123 @@ function StaffAppointmentsPage() {
                           className="h-10 rounded-xl bg-slate-50"
                         />
                       </Field>
+                      {detail.recurrence_frequency ? (
+                        <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3">
+                          <Field label={t.appointments_scope_apply_schedule}>
+                            <select
+                              value={editRecurrenceScope}
+                              onChange={(event) =>
+                                setEditRecurrenceScope(
+                                  event.target.value as AppointmentRecurringActionScope,
+                                )
+                              }
+                              className={selectClassName}
+                            >
+                              <option value="single">
+                                {t.appointments_scope_single}
+                              </option>
+                              <option value="following">
+                                {t.appointments_scope_following}
+                              </option>
+                              <option value="series">
+                                {t.appointments_scope_series}
+                              </option>
+                            </select>
+                          </Field>
+                          <p className="mt-2 text-xs text-sky-800">
+                            {t.appointments_scope_following_hint}
+                          </p>
+                          <div className="mt-4 grid gap-4 md:grid-cols-2">
+                            <Field label="Repeat frequency">
+                              <select
+                                value={editForm.repeatFrequency}
+                                onChange={(event) =>
+                                  setEditForm((current) =>
+                                    current
+                                      ? {
+                                          ...current,
+                                          repeatFrequency:
+                                            event.target
+                                              .value as AppointmentRecurrenceFrequency,
+                                        }
+                                      : current,
+                                  )
+                                }
+                                className={selectClassName}
+                                disabled={editRecurrenceScope === "single"}
+                              >
+                                <option value="daily">Daily</option>
+                                <option value="weekly">Weekly</option>
+                                <option value="monthly">Monthly</option>
+                              </select>
+                            </Field>
+                            <Field label="Repeat every">
+                              <Input
+                                inputMode="numeric"
+                                pattern="[0-9]*"
+                                value={editForm.repeatInterval}
+                                onChange={(event) =>
+                                  setEditForm((current) =>
+                                    current
+                                      ? {
+                                          ...current,
+                                          repeatInterval: event.target.value,
+                                        }
+                                      : current,
+                                  )
+                                }
+                                className="h-10 rounded-xl bg-white/80"
+                                disabled={editRecurrenceScope === "single"}
+                              />
+                            </Field>
+                            <Field label="Total occurrences">
+                              <Input
+                                inputMode="numeric"
+                                pattern="[0-9]*"
+                                value={editForm.repeatCount}
+                                onChange={(event) =>
+                                  setEditForm((current) =>
+                                    current
+                                      ? {
+                                          ...current,
+                                          repeatCount: event.target.value,
+                                        }
+                                      : current,
+                                  )
+                                }
+                                className="h-10 rounded-xl bg-white/80"
+                                placeholder="Optional when repeat-until is set"
+                                disabled={editRecurrenceScope === "single"}
+                              />
+                            </Field>
+                            <Field label="Repeat until">
+                              <Input
+                                type="date"
+                                value={editForm.repeatUntil}
+                                onChange={(event) =>
+                                  setEditForm((current) =>
+                                    current
+                                      ? {
+                                          ...current,
+                                          repeatUntil: event.target.value,
+                                        }
+                                      : current,
+                                  )
+                                }
+                                className="h-10 rounded-xl bg-white/80"
+                                disabled={editRecurrenceScope === "single"}
+                              />
+                            </Field>
+                          </div>
+                          <p className="mt-3 text-xs text-sky-800">
+                            Recurrence rule edits only apply when you target
+                            <span className="font-semibold"> this and following</span>
+                            {" "}or the <span className="font-semibold">whole series</span>.
+                            Single-occurrence updates keep the current slot
+                            detached from rule changes.
+                          </p>
+                        </div>
+                      ) : null}
                       <ConflictPanel conflicts={editConflicts} />
                       <ScheduleWarningsPanel warnings={editLocalWarnings} />
                       <div className="flex justify-end">
@@ -9775,6 +10917,93 @@ function QuickScopeButton({
     >
       {children}
     </Button>
+  );
+}
+
+function MobileAgendaCard({
+  item,
+  onOpen,
+}: {
+  item: AppointmentListItem;
+  onOpen: () => void;
+}) {
+  const summary =
+    item.doctor_name ||
+    item.provider_name ||
+    item.location ||
+    item.owner_name ||
+    "Operational slot";
+
+  return (
+    <div className="rounded-[1.5rem] border border-slate-200/80 bg-slate-50/85 p-4 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <button
+            type="button"
+            onClick={onOpen}
+            className="truncate text-left text-sm font-semibold text-slate-950 hover:text-sky-700"
+          >
+            {item.title}
+          </button>
+          <p className="mt-1 truncate text-xs text-slate-500">
+            {item.patient_pid} · {item.patient_name}
+          </p>
+        </div>
+        <span
+          className={cn(
+            "rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em]",
+            statusBadgeClass(item.status),
+          )}
+        >
+          {statusLabel(item.status)}
+        </span>
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-slate-500">
+        <span className="inline-flex items-center gap-1">
+          <Clock3 className="size-3.5" />
+          {slotLabel(item)}
+        </span>
+        {item.location ? (
+          <span className="inline-flex items-center gap-1">
+            <MapPin className="size-3.5" />
+            {item.location}
+          </span>
+        ) : null}
+      </div>
+
+      <p className="mt-3 text-xs font-medium text-slate-600">{summary}</p>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        {item.interpreter_response ? (
+          <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-sky-700">
+            Interpreter {responseLabel(item.interpreter_response)}
+          </span>
+        ) : null}
+        {item.recurrence_frequency ? (
+          <span className="rounded-full border border-slate-200 bg-white px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+            {recurrenceCadenceLabel(item)}
+          </span>
+        ) : null}
+        {item.is_blocked ? (
+          <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-amber-700">
+            Blocked visibility
+          </span>
+        ) : null}
+      </div>
+
+      <div className="mt-4 flex justify-end">
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="rounded-2xl"
+          onClick={onOpen}
+        >
+          Open
+        </Button>
+      </div>
+    </div>
   );
 }
 

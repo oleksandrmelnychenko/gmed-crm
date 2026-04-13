@@ -9,6 +9,70 @@ function json(route: Route, body: unknown, status = 200) {
 }
 
 async function installStaffApiMocks(page: Page) {
+  let portalShareActive = false;
+  const documentId = "00000000-0000-0000-0000-000000000501";
+
+  const buildDocument = () => ({
+    id: documentId,
+    patient_id: "00000000-0000-0000-0000-000000000301",
+    order_id: null,
+    appointment_id: "00000000-0000-0000-0000-000000000401",
+    patient_pid: "PT-001",
+    patient_name: "Anna Muster",
+    order_number: null,
+    appointment_title: "Follow-up slot",
+    auto_name: "MRI report",
+    original_filename: "mri-report.pdf",
+    art: "medical_report",
+    category: "report",
+    status: "active",
+    visibility: portalShareActive ? "patient_visible" : "internal",
+    is_medical: true,
+    mime_type: "application/pdf",
+    file_size: 2048,
+    has_stored_file: true,
+    klinik: "Clinic Cologne",
+    ursprung: "provider",
+    notes: null,
+    uploaded_by_name: "Admin GMED",
+    version_root_document_id: documentId,
+    replaces_document_id: null,
+    superseded_by_document_id: null,
+    version_number: 1,
+    version_count: 1,
+    is_latest_version: true,
+    file_deleted_at: null,
+    file_deleted_by: null,
+    file_deleted_by_name: null,
+    file_delete_reason: null,
+    created_at: "2026-04-01T09:00:00Z",
+    updated_at: "2026-04-01T09:00:00Z",
+    share_count: portalShareActive ? 1 : 0,
+    shared_to_current: false,
+    data_sensitivity: "medical",
+    needs_categorization: false,
+    classification_suggestion: null,
+  });
+
+  const buildPortalShares = () => [
+    {
+      id: "00000000-0000-0000-0000-000000000901",
+      shared_with_provider_id: null,
+      shared_with_user_id: null,
+      provider_name: null,
+      target_user_name: null,
+      target_user_role: null,
+      shared_by_name: "Admin GMED",
+      channel: "patient_portal",
+      message: null,
+      requires_confirmation: true,
+      confirmed: false,
+      confirmed_at: null,
+      shared_at: "2026-04-05T09:00:00Z",
+      revoked_at: null,
+    },
+  ];
+
   await page.route("**/auth/**", async (route) => {
     const url = new URL(route.request().url());
     const { pathname } = url;

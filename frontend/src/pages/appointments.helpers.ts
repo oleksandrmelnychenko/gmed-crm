@@ -22,6 +22,23 @@ export type AppointmentTimelineEvent = {
   tone: AppointmentTimelineTone;
 };
 
+export type InterpreterMobileAgendaItem = {
+  id: string;
+  date: string;
+  time_start: string | null;
+  time_end?: string | null;
+  status: string;
+  interpreter_response?: string | null;
+};
+
+export type InterpreterMobileAgendaSection<T extends InterpreterMobileAgendaItem> = {
+  date: string;
+  label: string;
+  itemCount: number;
+  pendingResponseCount: number;
+  items: T[];
+};
+
 type TimelineDetail = {
   id: string;
   title: string;
@@ -182,6 +199,60 @@ function communicationTargetLabel(entry: TimelineCommunicationEntry) {
     default:
       return entry.provider_name || "Clinic";
   }
+}
+
+function formatInterpreterMobileAgendaDateLabel(date: string, todayDate: string) {
+  if (date === todayDate) return "Today";
+  try {
+    return new Intl.DateTimeFormat("en-GB", {
+      weekday: "long",
+      day: "2-digit",
+      month: "short",
+    }).format(new Date(`${date}T00:00:00`));
+  } catch {
+    return date;
+  }
+}
+
+export function shouldUseInterpreterMobileAgenda(
+  role: string | undefined,
+  isMobile: boolean,
+) {
+  return (
+    isMobile && (role === "interpreter" || role === "teamlead_interpreter")
+  );
+}
+
+export function buildInterpreterMobileAgendaSections<
+  T extends InterpreterMobileAgendaItem,
+>(items: T[], todayDate: string): InterpreterMobileAgendaSection<T>[] {
+  const grouped = new Map<string, T[]>();
+  const sorted = items
+    .filter((item) => item.status !== "cancelled")
+    .toSorted((left, right) =>
+      `${left.date}T${left.time_start ?? "23:59"}${left.id}`.localeCompare(
+        `${right.date}T${right.time_start ?? "23:59"}${right.id}`,
+      ),
+    );
+
+  for (const item of sorted) {
+    const existing = grouped.get(item.date);
+    if (existing) {
+      existing.push(item);
+    } else {
+      grouped.set(item.date, [item]);
+    }
+  }
+
+  return [...grouped.entries()].map(([date, groupItems]) => ({
+    date,
+    label: formatInterpreterMobileAgendaDateLabel(date, todayDate),
+    itemCount: groupItems.length,
+    pendingResponseCount: groupItems.filter(
+      (item) => item.interpreter_response === "pending",
+    ).length,
+    items: groupItems,
+  }));
 }
 
 export function canResubmitInterpreterReport(params: {

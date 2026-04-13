@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildInterpreterMobileAgendaSections,
   buildAppointmentTimelineEvents,
   canResubmitInterpreterReport,
+  shouldUseInterpreterMobileAgenda,
 } from "./appointments.helpers";
 
 describe("canResubmitInterpreterReport", () => {
@@ -214,5 +216,74 @@ describe("buildAppointmentTimelineEvents", () => {
       tone: "danger",
       detail: "Marta PM · Clarify the missing travel handoff.",
     });
+  });
+});
+
+describe("shouldUseInterpreterMobileAgenda", () => {
+  it("enables the compact mobile agenda only for interpreter roles on mobile", () => {
+    expect(shouldUseInterpreterMobileAgenda("interpreter", true)).toBe(true);
+    expect(shouldUseInterpreterMobileAgenda("teamlead_interpreter", true)).toBe(
+      true,
+    );
+    expect(shouldUseInterpreterMobileAgenda("patient_manager", true)).toBe(
+      false,
+    );
+    expect(shouldUseInterpreterMobileAgenda("interpreter", false)).toBe(false);
+  });
+});
+
+describe("buildInterpreterMobileAgendaSections", () => {
+  it("groups visible appointments by day in ascending slot order and skips cancelled rows", () => {
+    const sections = buildInterpreterMobileAgendaSections(
+      [
+        {
+          id: "apt-2",
+          date: "2026-04-14",
+          time_start: "12:00",
+          status: "confirmed",
+          interpreter_response: "accepted",
+        },
+        {
+          id: "apt-1",
+          date: "2026-04-14",
+          time_start: "08:30",
+          status: "planned",
+          interpreter_response: "pending",
+        },
+        {
+          id: "apt-3",
+          date: "2026-04-15",
+          time_start: null,
+          status: "planned",
+          interpreter_response: null,
+        },
+        {
+          id: "apt-4",
+          date: "2026-04-15",
+          time_start: "07:00",
+          status: "cancelled",
+          interpreter_response: "pending",
+        },
+      ],
+      "2026-04-14",
+    );
+
+    expect(sections).toHaveLength(2);
+    expect(sections[0]).toMatchObject({
+      date: "2026-04-14",
+      label: "Today",
+      itemCount: 2,
+      pendingResponseCount: 1,
+    });
+    expect(sections[0].items.map((item) => item.id)).toEqual([
+      "apt-1",
+      "apt-2",
+    ]);
+    expect(sections[1]).toMatchObject({
+      date: "2026-04-15",
+      itemCount: 1,
+      pendingResponseCount: 0,
+    });
+    expect(sections[1].items.map((item) => item.id)).toEqual(["apt-3"]);
   });
 });
