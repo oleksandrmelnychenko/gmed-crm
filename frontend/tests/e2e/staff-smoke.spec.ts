@@ -13,6 +13,7 @@ async function installStaffApiMocks(page: Page) {
   const documentId = "00000000-0000-0000-0000-000000000501";
   let nextGeneratedDocumentIndex = 1;
   let nextProviderShareIndex = 1;
+  let nextTranslationRequestIndex = 1;
 
   const templateCatalog = {
     templates: [
@@ -103,6 +104,21 @@ async function installStaffApiMocks(page: Page) {
     confirmed_at: string | null;
     shared_at: string;
     revoked_at: string | null;
+  }> = [];
+  let translationRequests: Array<{
+    id: string;
+    document_id: string;
+    requested_language: string;
+    status: string;
+    note: string | null;
+    requested_at: string;
+    requested_by_name: string | null;
+    source_language: string | null;
+    source_text: string | null;
+    translated_text: string | null;
+    translated_at: string | null;
+    translated_by_name: string | null;
+    completed_at: string | null;
   }> = [];
 
   const buildPortalShares = () => [
@@ -585,8 +601,101 @@ async function installStaffApiMocks(page: Page) {
       return json(route, requested ? [requested] : []);
     }
 
+    if (
+      path.startsWith("/documents/") &&
+      path.endsWith("/translation-requests") &&
+      route.request().method() === "POST"
+    ) {
+      const payload = JSON.parse(route.request().postData() ?? "{}") as {
+        requested_language?: string;
+        note?: string | null;
+      };
+      const createdRequest = {
+        id: `00000000-0000-0000-0000-0000000011${10 + nextTranslationRequestIndex}`,
+        document_id: path
+          .replace("/documents/", "")
+          .replace("/translation-requests", ""),
+        requested_language: payload.requested_language ?? "en",
+        status: "pending",
+        note: payload.note ?? null,
+        requested_at: `2026-04-1${nextTranslationRequestIndex}T09:00:00Z`,
+        requested_by_name: "Admin GMED",
+        source_language: null,
+        source_text: null,
+        translated_text: null,
+        translated_at: null,
+        translated_by_name: null,
+        completed_at: null,
+      };
+      nextTranslationRequestIndex += 1;
+      translationRequests = [createdRequest, ...translationRequests];
+      return json(route, createdRequest);
+    }
+
     if (path.startsWith("/documents/") && path.endsWith("/translation-requests")) {
-      return json(route, []);
+      const requestedId = path
+        .replace("/documents/", "")
+        .replace("/translation-requests", "");
+      return json(
+        route,
+        translationRequests.filter((item) => item.document_id === requestedId),
+      );
+    }
+
+    if (
+      path.startsWith("/documents/translation-requests/") &&
+      path.endsWith("/update") &&
+      route.request().method() === "POST"
+    ) {
+      const requestId = path
+        .replace("/documents/translation-requests/", "")
+        .replace("/update", "");
+      const payload = JSON.parse(route.request().postData() ?? "{}") as {
+        status?: string;
+        note?: string | null;
+        source_language?: string | null;
+        source_text?: string | null;
+        translated_text?: string | null;
+      };
+      let updatedRequest: (typeof translationRequests)[number] | null = null;
+      translationRequests = translationRequests.map((item) => {
+        if (item.id !== requestId) return item;
+        updatedRequest = {
+          ...item,
+          status: payload.status ?? item.status,
+          note: payload.note ?? item.note,
+          source_language:
+            payload.source_language !== undefined
+              ? payload.source_language
+              : item.source_language,
+          source_text:
+            payload.source_text !== undefined
+              ? payload.source_text
+              : item.source_text,
+          translated_text:
+            payload.translated_text !== undefined
+              ? payload.translated_text
+              : item.translated_text,
+          translated_at:
+            payload.source_text !== undefined ||
+            payload.translated_text !== undefined ||
+            payload.source_language !== undefined
+              ? "2026-04-13T10:15:00Z"
+              : item.translated_at,
+          translated_by_name:
+            payload.source_text !== undefined ||
+            payload.translated_text !== undefined ||
+            payload.source_language !== undefined
+              ? "Admin GMED"
+              : item.translated_by_name,
+          completed_at:
+            (payload.status ?? item.status) === "completed"
+              ? "2026-04-13T10:30:00Z"
+              : item.completed_at,
+        };
+        return updatedRequest;
+      });
+      return json(route, updatedRequest ?? { message: "Not found" }, updatedRequest ? 200 : 404);
     }
 
     if (path.startsWith("/documents/") && path.endsWith("/text-extraction")) {
@@ -849,5 +958,67 @@ test.describe("staff smoke flows", () => {
     await expect(sheet.getByText(/Gespeicherte Datei entfernt/i)).toBeVisible();
     await expect(sheet.getByText("Patient requested binary removal after handoff.")).toBeVisible();
     await expect(sheet.getByRole("button", { name: /Herunterladen/i })).toBeDisabled();
+  });
+
+  test("staff can create and complete a document translation workspace flow", async ({
+    page,
+  }) => {
+    await page.goto("/documents");
+    await expect(page.getByText("MRI report")).toBeVisible();
+
+    await page.getByText("MRI report").click();
+    const sheet = page.getByRole("dialog");
+    await expect(
+      sheet.getByRole("heading", { name: "MRI report" }),
+    ).toBeVisible();
+    await expect(
+      sheet.getByRole("heading", { name: /Übersetzungsanfragen/i }),
+    ).toBeVisible();
+
+    await sheet.getByRole("combobox").filter({ has: page.locator("option[value='en']") }).first().selectOption("en");
+    await sheet
+      .getByPlaceholder(/Umfang, Frist oder Lieferhinweise/i)
+      .first()
+      .fill("Patient-safe English version for portal handoff.");
+    await sheet
+      .getByRole("button", { name: /Übersetzung anfordern/i })
+      .click();
+
+    await expect(
+      page.locator('[role="status"]').filter({ hasText: /Übersetzungsanfrage erstellt\./i }),
+    ).toBeVisible();
+    await expect(
+      sheet.locator("p").filter({ hasText: /^Admin GMED$/ }),
+    ).toBeVisible();
+    await expect(
+      sheet.getByRole("button", { name: "Starten", exact: true }),
+    ).toBeVisible();
+
+    await sheet.getByRole("button", { name: "Starten", exact: true }).click();
+    await expect(
+      page.locator('[role="status"]').filter({ hasText: /In Bearbeitung/i }),
+    ).toBeVisible();
+
+    await sheet.getByRole("button", { name: /Extrahierten Text übernehmen/i }).click();
+    await sheet.getByLabel(/Ausgangstext/i).fill("Original German report");
+    await sheet.getByLabel(/Übersetzter Text/i).fill("Patient-safe English report");
+    await sheet
+      .getByPlaceholder(/Umfang, Frist oder Lieferhinweise/i)
+      .nth(1)
+      .fill("Ready for patient delivery.");
+    await sheet.getByRole("button", { name: /Workspace speichern/i }).click();
+
+    await expect(
+      page.locator('[role="status"]').filter({ hasText: /Übersetzungs-Workspace gespeichert\./i }),
+    ).toBeVisible();
+    await expect(
+      sheet.getByLabel(/Übersetzter Text/i),
+    ).toHaveValue("Patient-safe English report");
+
+    await sheet.getByRole("button", { name: /Abschließen/i }).click();
+    await expect(
+      page.locator('[role="status"]').filter({ hasText: /Abgeschlossen/i }),
+    ).toBeVisible();
+    await expect(sheet.getByText("Ready for patient delivery.")).toBeVisible();
   });
 });

@@ -155,6 +155,13 @@
   Covers:
   template catalog, treatment-plan PDF generation with text blocks, saved PDF document and download flow.
 
+- `ceo_assistant_can_list_document_templates_but_cannot_generate_documents`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:9`
+  `docs/requirements/03_product-backlog_ua.md:51`
+  Covers:
+  `ceo_assistant` can open the document-template catalog in read-only mode, but the actual generation endpoint remains blocked so template execution stays limited to `ceo` and `patient_manager`.
+
 - `staff can generate a document from template`
   Source:
   `docs/requirements/03_product-backlog_ua.md:51`
@@ -200,6 +207,13 @@
   `docs/requirements/03_product-backlog_ua.md:149`
   Covers:
   translation workspace stores source language, source text, translated text and blocks completion without final translated content.
+
+- `staff can create and complete a document translation workspace flow`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:149`
+  `docs/requirements/04_non-functional-requirements_ua.md:131`
+  Covers:
+  browser-level document detail can create a translation request, move it into active work, reuse extracted text, save source and translated workspace content and complete the request through the same staff UI used in operations.
 
 - `document_templates_can_generate_medication_summary_pdf_document`
   Source:

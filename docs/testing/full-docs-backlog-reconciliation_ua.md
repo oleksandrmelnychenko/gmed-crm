@@ -163,6 +163,7 @@
 Додатково вже regression-підтверджено:
 
 - `CEO Assistant` read-only patient registry scope з field-level masking
+- `CEO Assistant` read-only document-template catalog access without generation rights
 - `sales` deny на patient registry, executive dashboard, risk-analysis і restricted clinic/doctor exports
 - `CEO Assistant` access до reports / forecasting / risk workspaces як partial executive read model
 - `teamlead_interpreter` assignment-scoped patient/appointment visibility
@@ -367,7 +368,7 @@ Target-state, але не повністю підтверджено:
 
 - blocking non-AI/non-integration product gaps у core scope зараз не видно
 - залишаються stabilization / inventory і подальше ущільнення regression coverage
-- базовий browser-level `E2E` harness уже є і не обмежується навігацією: Playwright покриває staff shell (`dashboard -> patients -> appointments -> documents -> invoices`), staff document portal release/revoke flow, staff template-based document generation flow, provider share/revoke з cover message, staff file-delete lifecycle, patient portal (`dashboard -> documents -> invoices`), patient invoice payment-proof upload, patient data export + privacy request submission, portal document receipt confirmation, portal self-upload + re-download loop, recurring appointment whole-series cancellation з detail drawer і secure chat text-send flow з browser keyring/mock envelope path; окремо backend regression already цементує `logout` / `logout-all` session revocation semantics. Незакритим лишається вже не наявність browser/session coverage, а поступове розширення mutation-сценаріїв
+- базовий browser-level `E2E` harness уже є і не обмежується навігацією: Playwright покриває staff shell (`dashboard -> patients -> appointments -> documents -> invoices`), staff document portal release/revoke flow, staff template-based document generation flow, provider share/revoke з cover message, staff file-delete lifecycle, staff translation-workspace request/save/complete flow, patient portal (`dashboard -> documents -> invoices`), patient invoice payment-proof upload, patient data export + privacy request submission, portal document receipt confirmation, portal self-upload + re-download loop, recurring appointment whole-series cancellation з detail drawer і secure chat text-send + secure attachment-send flows з browser keyring/mock envelope path; окремо backend regression already цементує `logout` / `logout-all` session revocation semantics. Незакритим лишається вже не наявність browser/session coverage, а поступове розширення mutation-сценаріїв
 - `Documents / Sharing` уже підтверджені end-to-end: upload/release, OCR/translation workspace, policy checks, file delete lifecycle, provider cover-message trail і patient-requested third-party revoke workflow тепер автоматизовані regression tests
 - `AI / pseudonymization -> AI handoff`
 

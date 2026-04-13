@@ -2336,6 +2336,54 @@ async fn document_templates_can_generate_treatment_plan_pdf_document() {
 }
 
 #[tokio::test]
+async fn ceo_assistant_can_list_document_templates_but_cannot_generate_documents() {
+    let Some((app, pool, admin_id, _admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-template-assistant");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let appointment_id =
+        seed_appointment(&pool, patient_id, provider_id, doctor_id, admin_id, &tag).await;
+    let assistant_id = seed_user(&pool, &tag, "ceo_assistant").await;
+    let assistant_bearer = auth_header_for(assistant_id, "ceo_assistant");
+
+    let (status, catalog_body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/documents/templates",
+        &assistant_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        catalog_body["templates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["id"] == "treatment_plan")
+    );
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &assistant_bearer,
+        Some(json!({
+            "template_id": "treatment_plan",
+            "patient_id": patient_id,
+            "appointment_id": appointment_id,
+            "language": "de"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["message"], "Forbidden");
+}
+
+#[tokio::test]
 async fn document_templates_default_to_patient_language_when_omitted() {
     let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
         return;

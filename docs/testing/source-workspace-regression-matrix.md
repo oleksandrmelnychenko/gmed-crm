@@ -534,6 +534,14 @@
   Covers:
   browser-level secure chat flow boots a local keyring, fetches the peer public key, submits an encrypted text envelope and renders the just-sent secure message through the actual UI path instead of API-only assertions.
 
+- `staff can send a secure attachment in browser E2E`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:213`
+  `docs/requirements/04_non-functional-requirements_ua.md:83`
+  `docs/backlog/04_implementation-tasks_ua.md:295`
+  Covers:
+  browser-level secure chat flow can encrypt a file attachment for the active peer, submit the multipart E2E envelope through the real upload form, render the secure attachment chip back in the conversation and hit the encrypted download path.
+
 - `patient_cannot_message_unassigned_staff`
   Source:
   `docs/requirements/03_product-backlog_ua.md:213`

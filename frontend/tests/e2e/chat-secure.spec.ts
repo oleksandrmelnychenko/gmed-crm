@@ -20,6 +20,51 @@ function json(route: Route, body: unknown, status = 200) {
   });
 }
 
+function parseMultipart(route: Route) {
+  const contentType = route.request().headers()["content-type"] ?? "";
+  const boundaryMatch = contentType.match(/boundary=([^;]+)/i);
+  const boundary = boundaryMatch?.[1];
+  const bodyBuffer = route.request().postDataBuffer() ?? Buffer.alloc(0);
+
+  if (!boundary) {
+    return {
+      fields: {} as Record<string, string>,
+      fileName: null as string | null,
+      fileMime: null as string | null,
+      fileBytes: Buffer.alloc(0),
+    };
+  }
+
+  const text = bodyBuffer.toString("latin1");
+  const parts = text.split(`--${boundary}`);
+  const fields: Record<string, string> = {};
+  let fileName: string | null = null;
+  let fileMime: string | null = null;
+  let fileBytes = Buffer.alloc(0);
+
+  for (const part of parts) {
+    if (!part.trim() || part.trim() === "--") continue;
+    const separatorIndex = part.indexOf("\r\n\r\n");
+    if (separatorIndex === -1) continue;
+
+    const headers = part.slice(0, separatorIndex);
+    const rawBody = part.slice(separatorIndex + 4).replace(/\r\n$/, "");
+    const fieldName = headers.match(/name="([^"]+)"/i)?.[1];
+    if (!fieldName) continue;
+
+    if (fieldName === "file") {
+      fileName = headers.match(/filename="([^"]+)"/i)?.[1] ?? null;
+      fileMime = headers.match(/Content-Type:\s*([^\r\n]+)/i)?.[1] ?? null;
+      fileBytes = Buffer.from(rawBody, "latin1");
+      continue;
+    }
+
+    fields[fieldName] = rawBody.trim();
+  }
+
+  return { fields, fileName, fileMime, fileBytes };
+}
+
 function bytesToBase64(bytes: Uint8Array) {
   return Buffer.from(bytes).toString("base64");
 }
@@ -62,6 +107,7 @@ async function installSecureChatApiMocks(
 ) {
   const myId = "00000000-0000-0000-0000-000000000001";
   const peerId = "00000000-0000-0000-0000-000000000777";
+  const attachmentKey = "secure-attachment-key-1";
 
   let messages = [
     {
@@ -89,6 +135,7 @@ async function installSecureChatApiMocks(
       attachment_e2e_salt: null,
     },
   ];
+  let latestAttachmentBytes = Buffer.from("secure-attachment-placeholder");
 
   const buildConversations = () => [
     {
@@ -252,6 +299,59 @@ async function installSecureChatApiMocks(
       return json(route, { ok: true });
     }
 
+    if (
+      path === `/messages/${peerId}/upload` &&
+      route.request().method() === "POST"
+    ) {
+      const multipart = parseMultipart(route);
+      latestAttachmentBytes = multipart.fileBytes;
+      messages = [
+        ...messages,
+        {
+          id: "00000000-0000-0000-0000-000000001003",
+          from_user: myId,
+          to_user: peerId,
+          message: null,
+          is_e2e: Boolean(multipart.fields.e2e_ciphertext),
+          e2e_algorithm: multipart.fields.e2e_algorithm ?? null,
+          e2e_ciphertext: multipart.fields.e2e_ciphertext ?? null,
+          e2e_nonce: multipart.fields.e2e_nonce ?? null,
+          e2e_salt: multipart.fields.e2e_salt ?? null,
+          sender_key_fingerprint:
+            multipart.fields.sender_key_fingerprint ?? null,
+          recipient_key_fingerprint:
+            multipart.fields.recipient_key_fingerprint ?? null,
+          is_read: false,
+          read_at: null,
+          created_at: "2026-04-13T09:06:00Z",
+          attachment_filename: multipart.fileName,
+          attachment_mime: multipart.fileMime ?? "application/octet-stream",
+          attachment_size: Number(
+            multipart.fields.attachment_plaintext_size ?? multipart.fileBytes.length,
+          ),
+          attachment_key: attachmentKey,
+          attachment_is_e2e: Boolean(
+            multipart.fields.attachment_e2e_algorithm,
+          ),
+          attachment_e2e_algorithm:
+            multipart.fields.attachment_e2e_algorithm ?? null,
+          attachment_e2e_nonce:
+            multipart.fields.attachment_e2e_nonce ?? null,
+          attachment_e2e_salt:
+            multipart.fields.attachment_e2e_salt ?? null,
+        },
+      ];
+      return json(route, { ok: true, attachment_key: attachmentKey });
+    }
+
+    if (path === `/messages/file/${attachmentKey}`) {
+      return route.fulfill({
+        status: 200,
+        contentType: "application/octet-stream",
+        body: latestAttachmentBytes,
+      });
+    }
+
     return json(route, []);
   });
 }
@@ -282,5 +382,55 @@ test.describe("chat secure flows", () => {
     await page.locator("form button[type='submit']").click();
 
     await expect(page.getByText("Secure browser hello")).toBeVisible();
+  });
+
+  test("staff can send a secure attachment in browser E2E", async ({
+    page,
+  }) => {
+    const peerId = "00000000-0000-0000-0000-000000000777";
+    const attachmentKey = "secure-attachment-key-1";
+    const myKey = await generateLocalMessageKey();
+    const peerKey = await generateLocalMessageKey();
+
+    await installSecureChatApiMocks(page, myKey, peerKey);
+
+    await page.goto("/login");
+    await page.locator("#email").fill("admin@gmed.de");
+    await page.locator("#password").fill("admin123");
+    await page.getByRole("button", { name: /Anmelden|Войти/i }).click();
+    await page.waitForURL(/\/$/, { timeout: 15_000 });
+
+    await page.goto("/chat");
+    await page.getByRole("button", { name: /Dr Secure Peer/i }).click();
+
+    await expect(
+      page.getByText(/End-to-end encrypted chat/i),
+    ).toBeVisible();
+
+    await page.locator("form input[type='file']").setInputFiles({
+      name: "secure-result.pdf",
+      mimeType: "application/pdf",
+      buffer: Buffer.from("secure-attachment-browser"),
+    });
+    await page
+      .getByPlaceholder(/Nachricht eingeben/i)
+      .fill("Secure attachment browser hello");
+
+    const uploadRequest = page.waitForRequest((request) =>
+      request.method() === "POST" &&
+      request.url().includes(`/api/v1/messages/${peerId}/upload`),
+    );
+    await page.locator("form button[type='submit']").click();
+    await uploadRequest;
+
+    await expect(page.getByText("secure-result.pdf")).toBeVisible();
+    await expect(page.getByText("Secure attachment browser hello")).toBeVisible();
+
+    const downloadRequest = page.waitForRequest((request) =>
+      request.method() === "GET" &&
+      request.url().includes(`/api/v1/messages/file/${attachmentKey}`),
+    );
+    await page.getByRole("button", { name: /secure-result\.pdf/i }).click();
+    await downloadRequest;
   });
 });
