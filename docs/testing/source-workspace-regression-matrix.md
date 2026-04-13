@@ -224,6 +224,14 @@
   Covers:
   `sales` and `concierge` stay outside patient-bound finance surfaces: invoice workspace routes and nested patient invoice list reject them instead of exposing billing state.
 
+- `ceo_assistant_patient_profile_shell_hides_operational_tabs`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:8`
+  `docs/backlog/02_rbac-matrix_ua.md:9`
+  `docs/backlog/02_rbac-matrix_ua.md:14`
+  Covers:
+  browser-level patient profile redirects a forbidden `?tab=documents` deep-link back to profile for `ceo_assistant`, keeps operational/document patient-bound tabs hidden, but still leaves read-only `Contracts` and `Invoices` tabs available inside the shell.
+
 ### Providers and patients
 
 - `providers_list_supports_country_and_doctor_filters`
@@ -1122,6 +1130,31 @@
   `docs/backlog/04_implementation-tasks_ua.md:142`
   Covers:
   lead gate data can be completed in-place, after which qualification and `Lead -> Customer` conversion proceed through explicit readiness checks.
+
+- `lead_card_convert_button_reflects_conversion_ready_state`
+  Source:
+  `docs/requirements/01_process-mapping_ua.md:48`
+  `docs/backlog/04_implementation-tasks_ua.md:142`
+  Covers:
+  browser-level PM lead cards render `Convert` only for qualified leads, keep it disabled with a blocking tooltip when `conversion_ready=false`, and leave it enabled for conversion-ready leads without waiting for a backend `422`.
+
+- `list_leads_exposes_conversion_ready_field`
+  Source:
+  `docs/requirements/01_process-mapping_ua.md:48`
+  `docs/backlog/04_implementation-tasks_ua.md:142`
+  Covers:
+  local DB-backed backend integration keeps `conversion_ready` present on the leads list payload as a real boolean, so the card-level convert gate does not regress into blind POST/422 behavior.
+  Note:
+  this test executes only with live `DATABASE_URL`; under `SQLX_OFFLINE=true` CI the suite compiles but the test body returns early without a database.
+
+- `list_leads_conversion_ready_is_false_for_converted_lead`
+  Source:
+  `docs/requirements/01_process-mapping_ua.md:48`
+  `docs/backlog/04_implementation-tasks_ua.md:142`
+  Covers:
+  local DB-backed backend integration drives a lead through `update -> qualify -> convert` and verifies that the resulting `converted` list row still reports `conversion_ready=false`.
+  Note:
+  this test executes only with live `DATABASE_URL`; under `SQLX_OFFLINE=true` CI the suite compiles but the test body returns early without a database.
 
 - `failed_lead_resolution_requires_controlled_flow_and_records_history`
   Source:

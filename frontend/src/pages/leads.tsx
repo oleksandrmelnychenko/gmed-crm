@@ -482,6 +482,12 @@ export function LeadsPage() {
     setSearchParams(params, { replace: true });
   }
 
+  function openLeadDetail(leadId: string) {
+    setSelectedLeadId(leadId);
+    setDetailOpen(true);
+    syncLeadQuery(leadId);
+  }
+
   function reload() {
     setVersion((current) => current + 1);
   }
@@ -858,13 +864,20 @@ export function LeadsPage() {
                     lead.failed_outcome?.status !== "delete_anonymized";
 
                   return (
-                    <button
+                    <div
                       key={lead.id}
-                      type="button"
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`Open lead ${lead.first_name} ${lead.last_name}`}
                       onClick={() => {
-                        setSelectedLeadId(lead.id);
-                        setDetailOpen(true);
-                        syncLeadQuery(lead.id);
+                        openLeadDetail(lead.id);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.target !== event.currentTarget) return;
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          openLeadDetail(lead.id);
+                        }
                       }}
                       className="rounded-[1.6rem] border border-slate-200 bg-white p-5 text-left transition hover:-translate-y-0.5 hover:shadow-[0_18px_48px_rgba(15,23,42,0.08)]"
                     >
@@ -961,16 +974,14 @@ export function LeadsPage() {
                             disabled={Boolean(actionBusy) || lead.failed_outcome?.status === "delete_anonymized"}
                             onClick={(event) => {
                               event.stopPropagation();
-                              setSelectedLeadId(lead.id);
-                              setDetailOpen(true);
-                              syncLeadQuery(lead.id);
+                              openLeadDetail(lead.id);
                             }}
                           >
                             Resolve failed
                           </Button>
                         ) : null}
                       </div>
-                    </button>
+                    </div>
                   );
                 })}
               </div>

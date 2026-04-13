@@ -169,6 +169,8 @@
 - `CEO` full commercial access plus `CEO Assistant` read-only access for contracts/quotes workspace, while `sales` and `concierge` stay denied from patient-bound commercial routes
 - `CEO Assistant` read-only invoice/PDF/dunning access, while `CEO` and `billing` retain finance mutation rights and `sales` / `concierge` stay denied from invoice workspace surfaces
 - patient profile shell більше не обходить ці RBAC межі через UI: restricted operational/document/commercial tabs не рендеряться, `documents` quick-link лишається тільки для document-workspace roles, а timeline не deep-links у `documents / contracts / invoices`, якщо ця surface для ролі закрита
+- browser smoke тепер окремо цементує цей patient-profile shell для `CEO Assistant`: заборонений `?tab=documents` redirect-иться назад у `profile`, operational tabs не з’являються, а read-only `Contracts` / `Invoices` surfaces залишаються доступними
+- lead conversion gating теж уже зацементований на browser-рівні: `patient_manager` бачить disabled `Convert` на `qualified` lead, якщо backend list payload віддає `conversion_ready=false`, і enabled state для ready lead без зайвого 422 round-trip
 - `sales` deny на patient registry, executive dashboard, risk-analysis і restricted clinic/doctor exports
 - `CEO Assistant` access до reports / forecasting / risk workspaces як partial executive read model
 - `teamlead_interpreter` assignment-scoped patient/appointment visibility

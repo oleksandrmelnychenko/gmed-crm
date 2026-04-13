@@ -6,8 +6,8 @@ import type { Lead } from "@/lib/api/types";
  * The business rules are:
  *
  * 1. Only users with the `canConvert` permission bit ever see the button.
- *    In practice this is the patient-manager role (and the CEO, who
- *    inherits it).
+ *    In the current UI and backend contract this is the patient-manager
+ *    role.
  * 2. The lead must be in the `qualified` state — sales has to flag it as
  *    conversion-ready before the PM can press Convert.
  * 3. The backend also enforces a readiness gate (DOB / legal_sex /

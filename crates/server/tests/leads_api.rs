@@ -554,7 +554,7 @@ async fn list_leads_conversion_ready_is_false_for_converted_lead() {
     let Some(app) = test_app().await else { return };
     let pm = auth_header("patient_manager");
 
-    let (status, _) = json_request(
+    let (status, created) = json_request(
         &app,
         "POST",
         "/api/v1/leads",
@@ -570,21 +570,60 @@ async fn list_leads_conversion_ready_is_false_for_converted_lead() {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED);
+    let lead_id = created["id"].as_str().unwrap().to_string();
 
-    let (_, list) = json_request(&app, "GET", "/api/v1/leads?status=converted", &pm, None).await;
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/update"),
+        &pm,
+        Some(json!({
+            "primary_language": "de",
+            "date_of_birth": "1990-01-01",
+            "legal_sex": "female",
+            "compliance_status": "signed",
+            "consent_healthcare": true,
+            "consent_privacy_practices": true
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
 
-    // Either there are zero converted leads in the fixture — in which
-    // case we have nothing to assert but the endpoint still returned
-    // ok — or every returned row reports `conversion_ready = false`.
-    // A regression that lets `conversion_ready = true` escape for a
-    // row with converted_patient_id would be caught here.
-    for entry in list.as_array().unwrap_or(&Vec::new()) {
-        if entry["qualification_status"] == "converted" {
-            assert_eq!(
-                entry["conversion_ready"].as_bool(),
-                Some(false),
-                "converted leads must report conversion_ready=false; entry was {entry}"
-            );
-        }
-    }
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/qualify"),
+        &pm,
+        Some(json!({ "status": "qualified" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, convert_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/convert"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(convert_body["patient_id"].is_string());
+
+    let (status, list) = json_request(&app, "GET", "/api/v1/leads?status=converted", &pm, None).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let entry = list
+        .as_array()
+        .expect("converted leads list returns an array")
+        .iter()
+        .find(|l| l["id"] == lead_id)
+        .expect("converted lead must appear in converted list");
+
+    assert_eq!(entry["qualification_status"], "converted");
+    assert_eq!(
+        entry["conversion_ready"].as_bool(),
+        Some(false),
+        "converted leads must report conversion_ready=false; entry was {entry}"
+    );
 }

@@ -181,6 +181,106 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
       quote_number: null,
     },
   ];
+  const leads = [
+    {
+      id: "00000000-0000-0000-0000-000000000901",
+      first_name: "Blocked",
+      last_name: "Lead",
+      email: "blocked.lead@example.com",
+      phone: "+49 30 100001",
+      source: "website",
+      country: "DE",
+      intake_source: "website",
+      flow: "standard",
+      qualification_status: "qualified",
+      compliance_status: "pending",
+      conversion_ready: false,
+      failed_outcome: { status: "none", reason: null, note: null, processed_at: null },
+      submitted_at: "2026-04-01T09:00:00Z",
+      created_at: "2026-04-01T09:00:00Z",
+      attachment_count: 0,
+    },
+    {
+      id: "00000000-0000-0000-0000-000000000902",
+      first_name: "Ready",
+      last_name: "Lead",
+      email: "ready.lead@example.com",
+      phone: "+49 30 100002",
+      source: "referral",
+      country: "DE",
+      intake_source: "referral",
+      flow: "standard",
+      qualification_status: "qualified",
+      compliance_status: "signed",
+      conversion_ready: true,
+      failed_outcome: { status: "none", reason: null, note: null, processed_at: null },
+      submitted_at: "2026-04-02T09:00:00Z",
+      created_at: "2026-04-02T09:00:00Z",
+      attachment_count: 0,
+    },
+  ];
+  const leadDetails = new Map(
+    leads.map((lead) => [
+      lead.id,
+      {
+        ...lead,
+        middle_name: null,
+        suffix: null,
+        date_of_birth: lead.conversion_ready ? "1990-01-01" : null,
+        legal_sex: lead.conversion_ready ? "female" : null,
+        primary_language: lead.conversion_ready ? "de" : "",
+        notes: lead.conversion_ready
+          ? "Ready for conversion."
+          : "Needs compliance and identity completion.",
+        attachments: [],
+        converted_patient_id: null,
+        converted_patient_pid: null,
+        readiness: {
+          qualification_ready: true,
+          conversion_ready: lead.conversion_ready,
+          qualification_reasons: [],
+          blocking_reasons: lead.conversion_ready
+            ? []
+            : [
+                "Date of birth is missing",
+                "Legal sex is missing",
+                "Compliance status is not signed",
+              ],
+          checks: [
+            {
+              key: "contact",
+              label: "Contact data complete",
+              passed: true,
+              blocking_for: "qualification",
+            },
+            {
+              key: "compliance",
+              label: "Compliance signed",
+              passed: lead.conversion_ready,
+              blocking_for: "convert",
+            },
+          ],
+        },
+        lifecycle: {
+          current_stage: "qualified",
+          stage_entered_at: "2026-04-03T09:00:00Z",
+          can_convert: lead.conversion_ready,
+          can_resolve_failed: true,
+          history: [
+            {
+              from_stage: "new",
+              to_stage: "qualified",
+              transition_kind: "qualify",
+              note: null,
+              metadata: {},
+              changed_by: userId,
+              created_at: "2026-04-03T09:00:00Z",
+            },
+          ],
+        },
+      },
+    ]),
+  );
 
   const buildDocument = (overrides: Record<string, unknown> = {}) => ({
     id: documentId,
@@ -388,6 +488,13 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
       return json(route, [{ month: "2026-04", count: 4 }]);
     }
 
+    if (path === "/stats/leads/by-status") {
+      return json(route, [
+        { status: "qualified", count: 2 },
+        { status: "new", count: 1 },
+      ]);
+    }
+
     if (path === "/stats/orders/by-phase") {
       return json(route, [{ phase: "execution", count: 3 }]);
     }
@@ -574,6 +681,20 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
 
     if (path === `/patients/${patientId}/invoices`) {
       return json(route, patientInvoices);
+    }
+
+    if (path === "/leads" || path.startsWith("/leads?")) {
+      return json(route, leads);
+    }
+
+    if (path.startsWith("/leads/")) {
+      const leadSuffix = path.replace("/leads/", "");
+      if (!leadSuffix.includes("/")) {
+        const detail = leadDetails.get(leadSuffix);
+        if (detail) {
+          return json(route, detail);
+        }
+      }
     }
 
     if (path === "/appointments/meta/staff") {
@@ -1285,7 +1406,7 @@ test.describe("patient-profile RBAC shell", () => {
     await expect(page.getByRole("tab", { name: "Relations" })).toHaveCount(0);
     await expect(page.getByRole("tab", { name: "Workflow" })).toHaveCount(0);
     await expect(page.getByRole("tab", { name: "Timeline" })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Open documents" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Open documents" })).toBeVisible();
 
     await expect(page.getByRole("tab", { name: "Contracts" })).toBeVisible();
     await expect(page.getByRole("tab", { name: "Invoices" })).toBeVisible();
@@ -1295,5 +1416,39 @@ test.describe("patient-profile RBAC shell", () => {
 
     await page.getByRole("tab", { name: "Invoices" }).click();
     await expect(page.getByText("INV-001")).toBeVisible();
+  });
+});
+
+test.describe("lead conversion gating", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      window.localStorage.setItem("gmed_lang", "de");
+    });
+    await installStaffApiMocks(page, {
+      role: "patient_manager",
+      email: "pm@gmed.de",
+      name: "PM GMED",
+      userId: "00000000-0000-0000-0000-000000000003",
+    });
+    await loginAsStaff(page, "pm@gmed.de");
+  });
+
+  test("patient manager sees blocked and ready convert states directly on lead cards", async ({
+    page,
+  }) => {
+    await page.goto("/leads");
+    await expect(page.getByText("Blocked Lead")).toBeVisible();
+    await expect(page.getByText("Ready Lead")).toBeVisible();
+
+    const convertButtons = page.locator('button[data-slot="button"]', {
+      hasText: "Convert",
+    });
+    await expect(convertButtons).toHaveCount(2);
+    await expect(convertButtons.nth(0)).toBeDisabled();
+    await expect(convertButtons.nth(0)).toHaveAttribute(
+      "title",
+      /Missing required data/i,
+    );
+    await expect(convertButtons.nth(1)).toBeEnabled();
   });
 });
