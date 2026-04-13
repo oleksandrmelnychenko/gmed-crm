@@ -17,6 +17,7 @@ use uuid::Uuid;
 use zip::write::FileOptions;
 
 use crate::access;
+use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::state::AppState;
 use gmed_domain::role::Role;
@@ -505,10 +506,13 @@ pub(crate) async fn build_patient_export_payload(
         }).collect::<Vec<_>>(),
     });
 
-    let _ = sqlx::query!(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'dsgvo_data_export', 'patient', $2, $3)",
-        actor_id, patient_id, serde_json::json!({"article": "Art. 15"})
-    ).execute(&state.db).await;
+    state.audit_sender.try_send(audit::domain_event(
+        "dsgvo_data_export",
+        Some(actor_id),
+        "patient",
+        Some(patient_id),
+        json!({ "article": "Art. 15" }),
+    ));
 
     Ok(export)
 }
@@ -800,20 +804,18 @@ async fn upsert_patient_consent(
     } else {
         "consent_revoked"
     };
-    let _ = sqlx::query(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, $2, 'patient', $3, $4)",
-    )
-    .bind(auth.user_id)
-    .bind(audit_action)
-    .bind(patient_id)
-    .bind(json!({
-        "consent_type": consent_type,
-        "note": note,
-        "closed_active_rows": closed_active_rows,
-        "expires_at": expires_at.map(|value| value.to_rfc3339()),
-    }))
-    .execute(&state.db)
-    .await;
+    state.audit_sender.try_send(audit::domain_event(
+        audit_action,
+        Some(auth.user_id),
+        "patient",
+        Some(patient_id),
+        json!({
+            "consent_type": consent_type,
+            "note": note,
+            "closed_active_rows": closed_active_rows,
+            "expires_at": expires_at.map(|value| value.to_rfc3339()),
+        }),
+    ));
 
     (
         StatusCode::CREATED,
@@ -911,20 +913,19 @@ async fn create_patient_privacy_request(
         }
     };
 
-    let _ = sqlx::query(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'privacy_request_created', 'patient', $2, $3)",
-    )
-    .bind(auth.user_id)
-    .bind(patient_id)
-    .bind(json!({
-        "request_id": request_id,
-        "request_type": request_type,
-        "source": source,
-        "reason": reason,
-        "due_at": due_at.to_rfc3339(),
-    }))
-    .execute(&state.db)
-    .await;
+    state.audit_sender.try_send(audit::domain_event(
+        "privacy_request_created",
+        Some(auth.user_id),
+        "patient",
+        Some(patient_id),
+        json!({
+            "request_id": request_id,
+            "request_type": request_type,
+            "source": source,
+            "reason": reason,
+            "due_at": due_at.to_rfc3339(),
+        }),
+    ));
 
     match fetch_privacy_request_payload(&state, request_id).await {
         Ok(payload) => (StatusCode::CREATED, Json(payload)).into_response(),
@@ -1144,23 +1145,22 @@ async fn review_privacy_request(
         );
     }
 
-    let _ = sqlx::query(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'privacy_request_reviewed', 'patient', $2, $3)",
-    )
-    .bind(auth.user_id)
-    .bind(request.patient_id)
-    .bind(json!({
-        "request_id": request.id,
-        "request_type": request.request_type,
-        "source": request.source,
-        "reason": request.reason,
-        "review_action": action,
-        "status": next_status,
-        "retention_until": retention_until.map(|value| value.to_rfc3339()),
-        "review_note": review_note,
-    }))
-    .execute(&state.db)
-    .await;
+    state.audit_sender.try_send(audit::domain_event(
+        "privacy_request_reviewed",
+        Some(auth.user_id),
+        "patient",
+        Some(request.patient_id),
+        json!({
+            "request_id": request.id,
+            "request_type": request.request_type,
+            "source": request.source,
+            "reason": request.reason,
+            "review_action": action,
+            "status": next_status,
+            "retention_until": retention_until.map(|value| value.to_rfc3339()),
+            "review_note": review_note,
+        }),
+    ));
 
     match fetch_privacy_request_payload(&state, request_id).await {
         Ok(payload) => Json(payload).into_response(),
@@ -1746,36 +1746,34 @@ async fn create_manual_erasure_request(
         }
     })?;
 
-    let _ = sqlx::query(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'privacy_request_created', 'patient', $2, $3)",
-    )
-    .bind(actor_id)
-    .bind(patient_id)
-    .bind(json!({
-        "request_id": request_id,
-        "request_type": "erasure",
-        "source": "admin_intake",
-        "reason": "Legacy direct anonymize endpoint",
-        "manual_override": true,
-    }))
-    .execute(&state.db)
-    .await;
+    state.audit_sender.try_send(audit::domain_event(
+        "privacy_request_created",
+        Some(actor_id),
+        "patient",
+        Some(patient_id),
+        json!({
+            "request_id": request_id,
+            "request_type": "erasure",
+            "source": "admin_intake",
+            "reason": "Legacy direct anonymize endpoint",
+            "manual_override": true,
+        }),
+    ));
 
-    let _ = sqlx::query(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'privacy_request_reviewed', 'patient', $2, $3)",
-    )
-    .bind(actor_id)
-    .bind(patient_id)
-    .bind(json!({
-        "request_id": request_id,
-        "request_type": "erasure",
-        "review_action": "approve",
-        "status": "approved",
-        "review_note": "Automatic approval for direct anonymization",
-        "manual_override": true,
-    }))
-    .execute(&state.db)
-    .await;
+    state.audit_sender.try_send(audit::domain_event(
+        "privacy_request_reviewed",
+        Some(actor_id),
+        "patient",
+        Some(patient_id),
+        json!({
+            "request_id": request_id,
+            "request_type": "erasure",
+            "review_action": "approve",
+            "status": "approved",
+            "review_note": "Automatic approval for direct anonymization",
+            "manual_override": true,
+        }),
+    ));
 
     Ok(request_id)
 }
@@ -1823,20 +1821,19 @@ async fn complete_privacy_request_execution(
         )
     })?;
 
-    let _ = sqlx::query(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'privacy_request_executed', 'patient', $2, $3)",
-    )
-    .bind(actor_id)
-    .bind(patient_id)
-    .bind(json!({
-        "request_id": request_id,
-        "request_type": request_type,
-        "manual_override": manual_override,
-        "executed_at": executed_at.to_rfc3339(),
-        "execution": execution,
-    }))
-    .execute(&state.db)
-    .await;
+    state.audit_sender.try_send(audit::domain_event(
+        "privacy_request_executed",
+        Some(actor_id),
+        "patient",
+        Some(patient_id),
+        json!({
+            "request_id": request_id,
+            "request_type": request_type,
+            "manual_override": manual_override,
+            "executed_at": executed_at.to_rfc3339(),
+            "execution": execution,
+        }),
+    ));
 
     Ok(json!({
         "ok": true,
@@ -1969,23 +1966,22 @@ async fn anonymize_patient_record(
     let (redacted_messages, removed_attachments) =
         redact_patient_direct_messages(state, patient_id).await?;
 
-    let _ = sqlx::query(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'dsgvo_anonymize', 'patient', $2, $3)",
-    )
-    .bind(actor_id)
-    .bind(patient_id)
-    .bind(json!({
-        "article": "Art. 17",
-        "anonymized_to": anon,
-        "request_id": request_id,
-        "manual_override": manual_override,
-        "assignments_revoked": assignments_revoked,
-        "consents_revoked": consents_revoked,
-        "redacted_messages": redacted_messages,
-        "removed_message_attachments": removed_attachments,
-    }))
-    .execute(&state.db)
-    .await;
+    state.audit_sender.try_send(audit::domain_event(
+        "dsgvo_anonymize",
+        Some(actor_id),
+        "patient",
+        Some(patient_id),
+        json!({
+            "article": "Art. 17",
+            "anonymized_to": anon,
+            "request_id": request_id,
+            "manual_override": manual_override,
+            "assignments_revoked": assignments_revoked,
+            "consents_revoked": consents_revoked,
+            "redacted_messages": redacted_messages,
+            "removed_message_attachments": removed_attachments,
+        }),
+    ));
 
     tracing::warn!(admin = %actor_id, patient = %patient_id, "Patient anonymized (DSGVO Art. 17)");
 
@@ -2166,21 +2162,20 @@ async fn revoke_third_party_consents(
         )
     })?;
 
-    let _ = sqlx::query(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'consent_revoked', 'patient', $2, $3)",
-    )
-    .bind(actor_id)
-    .bind(patient_id)
-    .bind(json!({
-        "request_id": request_id,
-        "mode": "third_party_revoke",
-        "consent_type": "third_party_sharing_bundle",
-        "revoked_types": revoked_types,
-        "revoked_count": revoked_count,
-        "revoked_at": revoked_at.to_rfc3339(),
-    }))
-    .execute(&state.db)
-    .await;
+    state.audit_sender.try_send(audit::domain_event(
+        "consent_revoked",
+        Some(actor_id),
+        "patient",
+        Some(patient_id),
+        json!({
+            "request_id": request_id,
+            "mode": "third_party_revoke",
+            "consent_type": "third_party_sharing_bundle",
+            "revoked_types": revoked_types,
+            "revoked_count": revoked_count,
+            "revoked_at": revoked_at.to_rfc3339(),
+        }),
+    ));
 
     Ok(json!({
         "mode": "third_party_revoke",

@@ -286,6 +286,57 @@ pub fn auth_event(
     }
 }
 
+/// Build a domain audit event — the non-HTTP, non-auth case. Use this
+/// inside handlers or helpers that need to emit an extra audit row
+/// *beyond* the one the [`middleware`] will already produce. Multi-step
+/// compliance workflows (privacy-request execution, anonymisation,
+/// consent revocation) typically emit one of these per logical action.
+///
+/// `ip_hash` is always `None` — helpers do not see request extensions
+/// and the IP is already on the middleware-written `http_request` row
+/// for the same request.
+pub fn domain_event(
+    action: impl Into<String>,
+    user_id: Option<Uuid>,
+    entity_type: impl Into<String>,
+    entity_id: Option<Uuid>,
+    context: Value,
+) -> AuditEvent {
+    AuditEvent {
+        user_id,
+        action: action.into(),
+        entity_type: entity_type.into(),
+        entity_id,
+        context,
+        old_value: None,
+        new_value: None,
+        ip_hash: None,
+    }
+}
+
+/// Build a domain audit event that records a before/after diff on a
+/// mutated entity. See the module-level migration policy for when it
+/// is safe to replace a handler-side diff insert with this helper.
+pub fn domain_diff_event(
+    action: impl Into<String>,
+    user_id: Option<Uuid>,
+    entity_type: impl Into<String>,
+    entity_id: Option<Uuid>,
+    old_value: Value,
+    new_value: Value,
+) -> AuditEvent {
+    AuditEvent {
+        user_id,
+        action: action.into(),
+        entity_type: entity_type.into(),
+        entity_id,
+        context: json!({}),
+        old_value: Some(old_value),
+        new_value: Some(new_value),
+        ip_hash: None,
+    }
+}
+
 /// Start the background writer task and return a sender handle.
 pub fn spawn_writer(pool: DbPool, ip_salt: String) -> AuditSender {
     let (tx, mut rx) = mpsc::channel::<AuditEvent>(CHANNEL_CAPACITY);
@@ -599,5 +650,42 @@ mod tests {
         let event = auth_event("login_success", Some(Uuid::new_v4()), None, json!({}));
         assert!(event.old_value.is_none());
         assert!(event.new_value.is_none());
+    }
+
+    #[test]
+    fn domain_event_carries_supplied_entity_and_no_ip() {
+        let actor = Uuid::new_v4();
+        let target = Uuid::new_v4();
+        let event = domain_event(
+            "anonymize_patient",
+            Some(actor),
+            "patient",
+            Some(target),
+            json!({ "article": "Art. 17" }),
+        );
+        assert_eq!(event.action, "anonymize_patient");
+        assert_eq!(event.entity_type, "patient");
+        assert_eq!(event.entity_id, Some(target));
+        assert_eq!(event.user_id, Some(actor));
+        assert!(event.ip_hash.is_none());
+        assert!(event.old_value.is_none());
+        assert!(event.new_value.is_none());
+    }
+
+    #[test]
+    fn domain_diff_event_populates_old_and_new() {
+        let actor = Uuid::new_v4();
+        let target = Uuid::new_v4();
+        let event = domain_diff_event(
+            "update_case",
+            Some(actor),
+            "case",
+            Some(target),
+            json!({ "status": "draft" }),
+            json!({ "status": "signed" }),
+        );
+        assert_eq!(event.old_value, Some(json!({ "status": "draft" })));
+        assert_eq!(event.new_value, Some(json!({ "status": "signed" })));
+        assert_eq!(event.action, "update_case");
     }
 }
