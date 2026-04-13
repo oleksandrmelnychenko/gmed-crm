@@ -1343,70 +1343,14 @@ async fn resolve_failed_lead(
         .execute(&state.db)
         .await
     } else {
-        let deleted_result = sqlx::query(
-            r#"UPDATE leads
-               SET first_name = 'Deleted',
-                   middle_name = NULL,
-                   last_name = 'Lead',
-                   suffix = NULL,
-                   date_of_birth = NULL,
-                   legal_sex = NULL,
-                   email = NULL,
-                   email_consent = NULL,
-                   phone = NULL,
-                   primary_phone_type = NULL,
-                   phones = '[]'::jsonb,
-                   whatsapp_consent = NULL,
-                   whatsapp_number = NULL,
-                   source = 'Deleted',
-                   country = NULL,
-                   street_address = NULL,
-                   city = NULL,
-                   state = NULL,
-                   zip_code = NULL,
-                   primary_language = NULL,
-                   needs_interpreter = NULL,
-                   location = NULL,
-                   location_detailed = NULL,
-                   wants_membership = NULL,
-                   selected_program = NULL,
-                   can_travel = NULL,
-                   has_medical_records = NULL,
-                   records_in_accepted_language = NULL,
-                   has_travel_documents = NULL,
-                   currently_in_treatment = NULL,
-                   has_health_risk_for_travel = NULL,
-                   primary_concern_text = NULL,
-                   additional_concerns = NULL,
-                   services = '{}'::text[],
-                   has_insurance = NULL,
-                   insurance_covers_germany = NULL,
-                   preferred_location = NULL,
-                   visit_timing = NULL,
-                   message = NULL,
-                   consent_automated_contact = false,
-                   consent_healthcare = false,
-                   consent_opt_out = false,
-                   consent_privacy_practices = false,
-                   raw_payload = NULL,
-                   remote_ip = NULL,
-                   user_agent = NULL,
-                   notes = NULL,
-                   qualification_status = 'archived',
-                   failed_outcome_status = 'delete_anonymized',
-                   failed_from_status = $2,
-                   failed_reason = $3,
-                   failed_note = $4,
-                   failed_processed_at = now(),
-                   failed_processed_by = $5
-               WHERE id = $1"#,
+        let deleted_result = anonymize_lead_pii(
+            &state.db,
+            lead_id,
+            Some(current_status.clone()),
+            reason,
+            note,
+            Some(auth.user_id),
         )
-        .bind(lead_id)
-        .bind(current_status.clone())
-        .bind(reason)
-        .bind(note)
-        .bind(auth.user_id)
-        .execute(&state.db)
         .await;
 
         if let Ok(result) = &deleted_result
@@ -1964,4 +1908,372 @@ async fn ingest_lead_intake(
         })),
     )
         .into_response()
+}
+
+// ============================================================================
+// GDPR Art. 5(1)(e) storage-limitation enforcement
+// ============================================================================
+//
+// A lead that never converted into a patient carries a full intake payload —
+// medical concerns, phone numbers, insurance status, consent flags. Keeping
+// those rows indefinitely is a direct Storage Limitation breach.
+//
+// The flow is:
+//   1. A `failed_outcome_status = 'archived'` row ages past the retention
+//      window read from `system_settings.cleanup_archived_leads_days`.
+//   2. The background sweeper spawned in `main::spawn_lead_purger` calls
+//      `auto_purge_stale_archived` once per day.
+//   3. `auto_purge_stale_archived` selects candidates, runs the same NULL
+//      blob that the manual `resolve_failed_lead` / `delete_anonymized`
+//      resolution uses — extracted into `anonymize_lead_pii` — deletes the
+//      attachments, and records a domain-level audit event so the auditor
+//      can reconstruct *which* lead was erased *when* and *why*.
+//
+// The pure decision function `should_auto_purge` exists so the age /
+// already-anonymised guard is unit-testable without a database.
+
+/// Identification sentinels left by the anonymisation blob. Used by the
+/// sweeper to detect leads that have already been purged and should not be
+/// touched again.
+pub const ANONYMIZED_FIRST_NAME: &str = "Deleted";
+pub const ANONYMIZED_LAST_NAME: &str = "Lead";
+
+/// Default retention window in days when the `cleanup_archived_leads_days`
+/// system setting is missing or unparseable.
+pub const DEFAULT_ARCHIVED_LEAD_RETENTION_DAYS: i64 = 180;
+
+/// Summary of a single purge sweep, logged and returned so operators and
+/// future readers can see how much the sweeper actually did.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct LeadPurgeReport {
+    pub retention_days: i64,
+    pub scanned: u64,
+    pub anonymized: u64,
+    pub errors: u64,
+}
+
+/// Anonymise every PII field on a lead row in-place. This is the single
+/// source of truth for what "delete a lead" means at the database layer;
+/// both the manual `resolve_failed_lead` handler and the background
+/// sweeper funnel through it.
+async fn anonymize_lead_pii(
+    pool: &gmed_db::DbPool,
+    lead_id: Uuid,
+    failed_from_status: Option<String>,
+    reason: &str,
+    note: Option<&str>,
+    processed_by: Option<Uuid>,
+) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error> {
+    sqlx::query(
+        r#"UPDATE leads
+           SET first_name = 'Deleted',
+               middle_name = NULL,
+               last_name = 'Lead',
+               suffix = NULL,
+               date_of_birth = NULL,
+               legal_sex = NULL,
+               email = NULL,
+               email_consent = NULL,
+               phone = NULL,
+               primary_phone_type = NULL,
+               phones = '[]'::jsonb,
+               whatsapp_consent = NULL,
+               whatsapp_number = NULL,
+               source = 'Deleted',
+               country = NULL,
+               street_address = NULL,
+               city = NULL,
+               state = NULL,
+               zip_code = NULL,
+               primary_language = NULL,
+               needs_interpreter = NULL,
+               location = NULL,
+               location_detailed = NULL,
+               wants_membership = NULL,
+               selected_program = NULL,
+               can_travel = NULL,
+               has_medical_records = NULL,
+               records_in_accepted_language = NULL,
+               has_travel_documents = NULL,
+               currently_in_treatment = NULL,
+               has_health_risk_for_travel = NULL,
+               primary_concern_text = NULL,
+               additional_concerns = NULL,
+               services = '{}'::text[],
+               has_insurance = NULL,
+               insurance_covers_germany = NULL,
+               preferred_location = NULL,
+               visit_timing = NULL,
+               message = NULL,
+               consent_automated_contact = false,
+               consent_healthcare = false,
+               consent_opt_out = false,
+               consent_privacy_practices = false,
+               raw_payload = NULL,
+               remote_ip = NULL,
+               user_agent = NULL,
+               notes = NULL,
+               qualification_status = 'archived',
+               failed_outcome_status = 'delete_anonymized',
+               failed_from_status = $2,
+               failed_reason = $3,
+               failed_note = $4,
+               failed_processed_at = now(),
+               failed_processed_by = $5
+           WHERE id = $1"#,
+    )
+    .bind(lead_id)
+    .bind(failed_from_status)
+    .bind(reason)
+    .bind(note)
+    .bind(processed_by)
+    .execute(pool)
+    .await
+}
+
+/// Load the retention window from `system_settings`. Falls back to
+/// [`DEFAULT_ARCHIVED_LEAD_RETENTION_DAYS`] on any parse or DB failure so
+/// the sweeper never silently "skips" a run because of a misconfigured
+/// value.
+async fn load_archived_lead_retention_days(pool: &gmed_db::DbPool) -> i64 {
+    let raw: Option<String> = sqlx::query_scalar(
+        r#"SELECT value::TEXT FROM system_settings
+           WHERE key = 'cleanup_archived_leads_days'"#,
+    )
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten();
+
+    raw.and_then(|v| v.trim_matches('"').parse::<i64>().ok())
+        .filter(|days| *days > 0)
+        .unwrap_or(DEFAULT_ARCHIVED_LEAD_RETENTION_DAYS)
+}
+
+/// Pure decision function. Kept outside the SQL query for unit testing —
+/// the SQL WHERE clause in `auto_purge_stale_archived` mirrors this logic
+/// 1:1, so a test that changes a boundary here is a reminder to review the
+/// query too. Only compiled into the test build; production code asks the
+/// database, not this function.
+#[cfg(test)]
+pub(crate) fn should_auto_purge(
+    qualification_status: &str,
+    failed_outcome_status: Option<&str>,
+    first_name: &str,
+    reference_at: chrono::DateTime<chrono::Utc>,
+    now: chrono::DateTime<chrono::Utc>,
+    retention_days: i64,
+) -> bool {
+    let is_archivable = matches!(qualification_status, "archived" | "not_qualified");
+    let already_anonymized =
+        failed_outcome_status == Some("delete_anonymized") || first_name == ANONYMIZED_FIRST_NAME;
+    let age_days = (now - reference_at).num_days();
+    let stale = age_days >= retention_days;
+    is_archivable && !already_anonymized && stale
+}
+
+/// Run one purge sweep: find every lead that has been sitting in an
+/// archived/failed state past the retention window, anonymise it, delete
+/// its attachments, and emit an `auto_purge_lead` audit event for each
+/// anonymised row.
+pub async fn auto_purge_stale_archived(
+    state: &crate::state::AppState,
+) -> Result<LeadPurgeReport, sqlx::Error> {
+    let retention_days = load_archived_lead_retention_days(&state.db).await;
+
+    // Coarse filtering happens in SQL. The WHERE clause here mirrors the
+    // guards in `should_auto_purge` — if you edit one, edit both.
+    let candidates: Vec<Uuid> = sqlx::query_scalar(
+        r#"
+        SELECT id FROM leads
+        WHERE qualification_status IN ('archived', 'not_qualified')
+          AND COALESCE(failed_outcome_status, 'none') != 'delete_anonymized'
+          AND first_name != $2
+          AND COALESCE(failed_processed_at, updated_at)
+              < now() - make_interval(days => $1::int)
+        "#,
+    )
+    .bind(retention_days as i32)
+    .bind(ANONYMIZED_FIRST_NAME)
+    .fetch_all(&state.db)
+    .await?;
+
+    let mut report = LeadPurgeReport {
+        retention_days,
+        scanned: candidates.len() as u64,
+        anonymized: 0,
+        errors: 0,
+    };
+
+    for lead_id in candidates {
+        match anonymize_lead_pii(
+            &state.db,
+            lead_id,
+            None,
+            "auto_purge_storage_limitation",
+            Some("Auto-purged per cleanup_archived_leads_days retention"),
+            None,
+        )
+        .await
+        {
+            Ok(result) if result.rows_affected() > 0 => {
+                report.anonymized += 1;
+                let _ = sqlx::query("DELETE FROM lead_attachments WHERE lead_id = $1")
+                    .bind(lead_id)
+                    .execute(&state.db)
+                    .await;
+                state.audit_sender.try_send(audit::domain_event(
+                    "auto_purge_lead",
+                    None,
+                    "lead",
+                    Some(lead_id),
+                    json!({
+                        "reason": "storage_limitation_retention",
+                        "retention_days": retention_days,
+                        "gdpr_article": "5(1)(e)",
+                    }),
+                ));
+            }
+            Ok(_) => {
+                // Row was concurrently anonymised between SELECT and
+                // UPDATE. Not an error, just a no-op.
+            }
+            Err(e) => {
+                tracing::error!(
+                    lead_id = %lead_id,
+                    error = %e,
+                    "Auto-purge anonymisation failed"
+                );
+                report.errors += 1;
+            }
+        }
+    }
+
+    Ok(report)
+}
+
+#[cfg(test)]
+mod auto_purge_tests {
+    use super::*;
+    use chrono::{Duration, Utc};
+
+    fn now() -> chrono::DateTime<chrono::Utc> {
+        Utc::now()
+    }
+
+    #[test]
+    fn archived_older_than_retention_is_purged() {
+        let ref_at = now() - Duration::days(200);
+        assert!(should_auto_purge(
+            "archived",
+            None,
+            "Alice",
+            ref_at,
+            now(),
+            180
+        ));
+    }
+
+    #[test]
+    fn not_qualified_older_than_retention_is_purged() {
+        let ref_at = now() - Duration::days(200);
+        assert!(should_auto_purge(
+            "not_qualified",
+            None,
+            "Bob",
+            ref_at,
+            now(),
+            180
+        ));
+    }
+
+    #[test]
+    fn archived_within_retention_is_kept() {
+        let ref_at = now() - Duration::days(90);
+        assert!(!should_auto_purge(
+            "archived",
+            None,
+            "Alice",
+            ref_at,
+            now(),
+            180
+        ));
+    }
+
+    #[test]
+    fn already_anonymized_sentinel_name_is_skipped() {
+        // Belt and braces: if the row is older than retention but its
+        // first_name is the anonymisation sentinel, do not touch it.
+        let ref_at = now() - Duration::days(365);
+        assert!(!should_auto_purge(
+            "archived",
+            None,
+            ANONYMIZED_FIRST_NAME,
+            ref_at,
+            now(),
+            180
+        ));
+    }
+
+    #[test]
+    fn already_marked_delete_anonymized_is_skipped() {
+        let ref_at = now() - Duration::days(365);
+        assert!(!should_auto_purge(
+            "archived",
+            Some("delete_anonymized"),
+            "Alice",
+            ref_at,
+            now(),
+            180
+        ));
+    }
+
+    #[test]
+    fn converted_lead_is_never_purged() {
+        // Converted leads live under a different lifecycle (they have a
+        // patient row). The sweeper must not touch them regardless of age.
+        let ref_at = now() - Duration::days(3650);
+        assert!(!should_auto_purge(
+            "converted",
+            None,
+            "Alice",
+            ref_at,
+            now(),
+            180
+        ));
+    }
+
+    #[test]
+    fn boundary_at_exactly_retention_days_is_purged() {
+        // Edge case: a row that turned 180 days old today should be
+        // eligible — Storage Limitation does not get a grace day.
+        let ref_at = now() - Duration::days(180);
+        assert!(should_auto_purge(
+            "archived",
+            None,
+            "Alice",
+            ref_at,
+            now(),
+            180
+        ));
+    }
+
+    #[test]
+    fn new_lead_is_never_purged() {
+        let ref_at = now() - Duration::days(3650);
+        assert!(!should_auto_purge("new", None, "Alice", ref_at, now(), 180));
+    }
+
+    #[test]
+    fn in_progress_lead_is_never_purged() {
+        let ref_at = now() - Duration::days(3650);
+        assert!(!should_auto_purge(
+            "in_progress",
+            None,
+            "Alice",
+            ref_at,
+            now(),
+            180
+        ));
+    }
 }

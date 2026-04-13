@@ -46,6 +46,7 @@ async fn main() {
     gmed_server::routes::invoices::spawn_auto_dunning_scheduler(app_state.clone());
     spawn_blacklist_purger(app_state.db.clone());
     spawn_message_rewrap_sweeper(app_state.clone());
+    spawn_lead_purger(app_state.clone());
 
     let cors = CorsLayer::new()
         .allow_origin(
@@ -129,6 +130,41 @@ fn spawn_message_rewrap_sweeper(state: state::AppState) {
                 }
                 Ok(_) => {}
                 Err(e) => tracing::warn!(error = ?e, "Periodic rewrap failed"),
+            }
+        }
+    });
+}
+
+/// Enforces GDPR Art. 5(1)(e) Storage Limitation on the lead table.
+/// Once per day the sweeper calls `leads::auto_purge_stale_archived`,
+/// which anonymises every lead that has been sitting in an archived or
+/// failed state past the retention window configured in
+/// `system_settings.cleanup_archived_leads_days` (default 180 days).
+///
+/// The sweeper is fail-safe: a DB error logs a warning and the loop
+/// continues, so one bad day never leaves the next day unattended.
+fn spawn_lead_purger(state: state::AppState) {
+    tokio::spawn(async move {
+        // Once per 24 hours — the window the retention policy operates
+        // on is days, so sub-day cadence adds noise without benefit.
+        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(86_400));
+        ticker.tick().await; // skip initial fire so startup is not noisy
+        loop {
+            ticker.tick().await;
+            match gmed_server::routes::leads::auto_purge_stale_archived(&state).await {
+                Ok(report) if report.scanned > 0 => {
+                    tracing::info!(
+                        retention_days = report.retention_days,
+                        scanned = report.scanned,
+                        anonymized = report.anonymized,
+                        errors = report.errors,
+                        "Lead auto-purge sweep complete"
+                    );
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::error!(error = %e, "Lead auto-purge sweep failed");
+                }
             }
         }
     });
