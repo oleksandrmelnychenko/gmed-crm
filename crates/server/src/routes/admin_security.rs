@@ -8,6 +8,7 @@ use axum::{
 use serde::Deserialize;
 use uuid::Uuid;
 
+use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::state::AppState;
 use gmed_domain::role::Role;
@@ -77,10 +78,13 @@ async fn add_ip(
     .await
     {
         Ok(r) => {
-            let _ = sqlx::query!(
-                "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'add_ip_whitelist', 'ip_whitelist', $2, $3)",
-                auth.user_id, r.id, serde_json::json!({"cidr": body.cidr})
-            ).execute(&state.db).await;
+            state.audit_sender.try_send(audit::domain_event(
+                "add_ip_whitelist",
+                Some(auth.user_id),
+                "ip_whitelist",
+                Some(r.id),
+                serde_json::json!({ "cidr": body.cidr }),
+            ));
             Json(serde_json::json!({"ok": true, "id": r.id})).into_response()
         }
         Err(e) => {
@@ -102,10 +106,13 @@ async fn delete_ip(
     let _ = sqlx::query!("DELETE FROM ip_whitelist WHERE id = $1", id)
         .execute(&state.db)
         .await;
-    let _ = sqlx::query!(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id) VALUES ($1, 'delete_ip_whitelist', 'ip_whitelist', $2)",
-        auth.user_id, id
-    ).execute(&state.db).await;
+    state.audit_sender.try_send(audit::domain_event(
+        "delete_ip_whitelist",
+        Some(auth.user_id),
+        "ip_whitelist",
+        Some(id),
+        serde_json::json!({}),
+    ));
     Json(serde_json::json!({"ok": true})).into_response()
 }
 
@@ -125,10 +132,13 @@ async fn unlock_user(
     .execute(&state.db)
     .await;
 
-    let _ = sqlx::query!(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id) VALUES ($1, 'unlock_user', 'user', $2)",
-        auth.user_id, user_id
-    ).execute(&state.db).await;
+    state.audit_sender.try_send(audit::domain_event(
+        "unlock_user",
+        Some(auth.user_id),
+        "user",
+        Some(user_id),
+        serde_json::json!({}),
+    ));
 
     tracing::info!(admin = %auth.user_id, target = %user_id, "User unlocked");
     Json(serde_json::json!({"ok": true})).into_response()
@@ -150,10 +160,13 @@ async fn force_password_reset(
     .execute(&state.db)
     .await;
 
-    let _ = sqlx::query!(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id) VALUES ($1, 'force_password_reset', 'user', $2)",
-        auth.user_id, user_id
-    ).execute(&state.db).await;
+    state.audit_sender.try_send(audit::domain_event(
+        "force_password_reset",
+        Some(auth.user_id),
+        "user",
+        Some(user_id),
+        serde_json::json!({}),
+    ));
 
     tracing::info!(admin = %auth.user_id, target = %user_id, "Forced password reset");
     Json(serde_json::json!({"ok": true})).into_response()
@@ -190,10 +203,13 @@ async fn toggle_maintenance(
 
     state.settings.reload(&state.db).await;
 
-    let _ = sqlx::query!(
-        "INSERT INTO audit_log (user_id, action, entity_type, context) VALUES ($1, 'toggle_maintenance', 'system', $2)",
-        auth.user_id, serde_json::json!({"enabled": body.enabled, "message": body.message})
-    ).execute(&state.db).await;
+    state.audit_sender.try_send(audit::domain_event(
+        "toggle_maintenance",
+        Some(auth.user_id),
+        "system",
+        None,
+        serde_json::json!({ "enabled": body.enabled, "message": body.message }),
+    ));
 
     tracing::warn!(admin = %auth.user_id, maintenance = body.enabled, "Maintenance mode toggled");
     Json(serde_json::json!({"ok": true, "maintenance_mode": body.enabled})).into_response()
