@@ -4,10 +4,11 @@ import { Download, LoaderCircle, ShieldCheck } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, downloadApiFile } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import {
   appointmentStatusTone,
+  feedbackStatusTone,
   formatPortalCurrency,
   formatPortalDate,
   formatPortalDateTime,
@@ -17,7 +18,10 @@ import {
 } from "@/pages/patient-portal.shared";
 import type {
   PortalAppointmentItem,
+  PortalConciergeServiceItem,
+  PortalDocumentAlertsSummary,
   PortalDocumentItem,
+  PortalFeedbackItem,
   PortalInvoiceItem,
   PortalPrivacyRequest,
 } from "@/pages/patient-portal.shared";
@@ -35,11 +39,15 @@ export function PatientDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [documents, setDocuments] = useState<PortalDocumentItem[]>([]);
+  const [documentAlerts, setDocumentAlerts] = useState<PortalDocumentAlertsSummary | null>(null);
   const [appointments, setAppointments] = useState<PortalAppointmentItem[]>([]);
+  const [services, setServices] = useState<PortalConciergeServiceItem[]>([]);
   const [invoices, setInvoices] = useState<PortalInvoiceItem[]>([]);
   const [requests, setRequests] = useState<PortalPrivacyRequest[]>([]);
+  const [feedback, setFeedback] = useState<PortalFeedbackItem[]>([]);
   const [error, setError] = useState("");
   const [version, setVersion] = useState(0);
+  const [exportBusy, setExportBusy] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -52,19 +60,25 @@ export function PatientDashboardPage() {
       }
 
       try {
-        const [portalAppointments, docs, portalInvoices, privacy] = await Promise.all([
+        const [portalAppointments, portalServices, docs, portalInvoices, privacy, feedbackRows, portalDocumentAlerts] = await Promise.all([
           apiFetch<PortalAppointmentItem[]>("/me/appointments").catch(() => []),
+          apiFetch<PortalConciergeServiceItem[]>("/me/concierge-services").catch(() => []),
           apiFetch<PortalDocumentItem[]>("/me/documents").catch(() => []),
           apiFetch<PortalInvoiceItem[]>("/me/invoices").catch(() => []),
           apiFetch<PortalPrivacyRequest[]>("/me/privacy-requests").catch(() => []),
+          apiFetch<PortalFeedbackItem[]>("/me/feedback").catch(() => []),
+          apiFetch<PortalDocumentAlertsSummary>("/me/document-alerts").catch(() => null),
         ]);
 
         if (cancelled) return;
         startTransition(() => {
           setAppointments(portalAppointments);
+          setServices(portalServices);
           setDocuments(docs);
+          setDocumentAlerts(portalDocumentAlerts);
           setInvoices(portalInvoices);
           setRequests(privacy);
+          setFeedback(feedbackRows);
           setError("");
         });
       } catch (err) {
@@ -93,6 +107,10 @@ export function PatientDashboardPage() {
     () => documents.filter((item) => item.requires_confirmation && !item.confirmed).length,
     [documents],
   );
+  const openServiceRequests = useMemo(
+    () => services.filter((item) => !["completed", "cancelled"].includes(item.status)).length,
+    [services],
+  );
   const openRequests = useMemo(
     () =>
       requests.filter(
@@ -104,10 +122,29 @@ export function PatientDashboardPage() {
     () => invoices.reduce((sum, item) => sum + Number(item.balance_due ?? 0), 0),
     [invoices],
   );
+  const promoterCount = useMemo(
+    () => feedback.filter((item) => Number(item.nps_score) >= 9).length,
+    [feedback],
+  );
+  const recentFeedback = useMemo(() => feedback.slice(0, 4), [feedback]);
   const recentDocuments = useMemo(() => documents.slice(0, 4), [documents]);
   const recentAppointments = useMemo(() => appointments.slice(0, 4), [appointments]);
   const recentInvoices = useMemo(() => invoices.slice(0, 4), [invoices]);
   const recentRequests = useMemo(() => requests.slice(0, 4), [requests]);
+
+  async function handleExportData() {
+    setExportBusy(true);
+    try {
+      await downloadApiFile(
+        "/me/export?format=zip",
+        `patient-export-${new Date().toISOString().slice(0, 10)}.zip`,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to export patient data.");
+    } finally {
+      setExportBusy(false);
+    }
+  }
 
   if (loading) {
     return (
@@ -154,6 +191,27 @@ export function PatientDashboardPage() {
                 Privacy requests
               </Button>
             </Link>
+            <Button
+              variant="outline"
+              className="border-white/15 bg-white/8 text-white hover:bg-white/12 hover:text-white"
+              onClick={() => void handleExportData()}
+              disabled={exportBusy}
+            >
+              {exportBusy ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}
+              Export my data
+            </Button>
+            <Link to="/feedback">
+              <Button variant="outline" className="border-white/15 bg-white/8 text-white hover:bg-white/12 hover:text-white">
+                <ShieldCheck className="size-4" />
+                My feedback
+              </Button>
+            </Link>
+            <Link to="/services">
+              <Button variant="outline" className="border-white/15 bg-white/8 text-white hover:bg-white/12 hover:text-white">
+                <Download className="size-4" />
+                My services
+              </Button>
+            </Link>
             <Link to="/invoices">
               <Button variant="outline" className="border-white/15 bg-white/8 text-white hover:bg-white/12 hover:text-white">
                 <Download className="size-4" />
@@ -178,13 +236,73 @@ export function PatientDashboardPage() {
         </section>
       ) : null}
 
-      <section className="grid gap-4 md:grid-cols-3">
+      {documentAlerts && documentAlerts.configured_rule_count > 0 ? (
+        <section
+          className={shellCard(
+            cn(
+              "px-5 py-4",
+              documentAlerts.document_pack_complete
+                ? "border-emerald-200 bg-emerald-50"
+                : "border-amber-200 bg-amber-50",
+            ),
+          )}
+        >
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                Required documents
+              </p>
+              <h2 className="mt-2 text-lg font-semibold text-slate-950">
+                {documentAlerts.document_pack_complete
+                  ? "Your minimum document pack is complete"
+                  : `${documentAlerts.missing_count} required document${documentAlerts.missing_count === 1 ? "" : "s"} still missing`}
+              </h2>
+              <p className="mt-2 text-sm text-slate-600">
+                {documentAlerts.document_pack_complete
+                  ? "Your care team already has the minimum required document set."
+                  : "Upload the missing items in the portal so your care team can continue without manual follow-up."}
+              </p>
+              {documentAlerts.missing_count > 0 ? (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {documentAlerts.missing_documents.map((item) => (
+                    <Badge
+                      key={item.key}
+                      variant="outline"
+                      className="rounded-full border-amber-300 bg-white text-amber-800"
+                    >
+                      {item.label}
+                    </Badge>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+            <div className="flex shrink-0 items-center gap-3">
+              <div className="rounded-2xl border border-white/60 bg-white/70 px-4 py-2 text-sm text-slate-700">
+                Fulfilled:{" "}
+                <span className="font-semibold text-slate-950">
+                  {documentAlerts.required_documents.filter((item) => item.fulfilled).length}/
+                  {documentAlerts.configured_rule_count}
+                </span>
+              </div>
+              <Link to="/documents">
+                <Button variant="outline" className="rounded-2xl bg-white/80">
+                  Open documents
+                </Button>
+              </Link>
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      <section className="grid gap-4 md:grid-cols-5">
         <MetricCard label="Upcoming visits" value={upcomingAppointments} description={`${releasedDocuments} released documents`} />
+        <MetricCard label="Open service requests" value={openServiceRequests} description={`${services.length} total concierge entries`} />
         <MetricCard label="Outstanding balance" value={outstandingBalance === 0 ? "EUR 0.00" : formatPortalCurrency(outstandingBalance)} />
         <MetricCard label="Open privacy requests" value={openRequests} description={`${pendingConfirmations} pending confirmations`} />
+        <MetricCard label="Feedback sent" value={feedback.length} description={`${promoterCount} promoter ratings`} />
       </section>
 
-      <section className="grid gap-6 xl:grid-cols-[1fr_1fr_1fr_1fr]">
+      <section className="grid gap-6 xl:grid-cols-[1fr_1fr_1fr_1fr_1fr]">
         <section className={shellCard("p-5")}>
           <div className="flex items-center justify-between gap-3">
             <div>
@@ -354,6 +472,49 @@ export function PatientDashboardPage() {
                   <p className="mt-3 text-xs text-slate-500">
                     Due {formatPortalDate(item.due_at)}
                   </p>
+                </div>
+              ))
+            )}
+          </div>
+        </section>
+
+        <section className={shellCard("p-5")}>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-950">Recent feedback</h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Submitted quality surveys and review follow-up.
+              </p>
+            </div>
+            <Link to="/feedback" className="text-sm font-medium text-sky-700 hover:text-sky-800">
+              Open all
+            </Link>
+          </div>
+          <div className="mt-5 space-y-3">
+            {recentFeedback.length === 0 ? (
+              <EmptyState message="No feedback submitted yet." />
+            ) : (
+              recentFeedback.map((item) => (
+                <div
+                  key={item.id}
+                  className="rounded-[1.35rem] border border-slate-200 bg-slate-50/80 px-4 py-4"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-950">
+                        {item.appointment_title || item.provider_name || "General feedback"}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        NPS {item.nps_score} · {formatPortalDateTime(item.submitted_at)}
+                      </p>
+                    </div>
+                    <Badge
+                      variant="outline"
+                      className={cn("rounded-full", feedbackStatusTone(item.status))}
+                    >
+                      {item.status.replaceAll("_", " ")}
+                    </Badge>
+                  </div>
                 </div>
               ))
             )}

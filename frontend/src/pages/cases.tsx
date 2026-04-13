@@ -53,6 +53,7 @@ type CaseStatus = "open" | "in_progress" | "closed";
 
 type CaseItem = {
   id: string;
+  case_uuid?: string;
   case_id: string;
   patient_id: string;
   patient_name: string;
@@ -76,8 +77,22 @@ type AllergieItem = {
 type OperationItem = {
   datum?: string | null;
   grund: string;
+  arzt_id?: string | null;
   arzt?: string | null;
+  arzt_registry_name?: string | null;
+  arzt_provider_name?: string | null;
   notiz?: string | null;
+};
+
+type CaseHistoryEntry = {
+  id: number;
+  section: string;
+  old_value?: unknown;
+  new_value?: unknown;
+  created_at: string;
+  changed_by: string;
+  changed_by_name: string;
+  changed_by_role: string;
 };
 
 type MedikamentItem = {
@@ -91,7 +106,10 @@ type MedikamentItem = {
   anmerkung?: string | null;
   grund?: string | null;
   seit?: string | null;
+  verordnender_arzt_id?: string | null;
   verordnender_arzt?: string | null;
+  verordnender_arzt_registry_name?: string | null;
+  verordnender_arzt_provider_name?: string | null;
   med_typ?: string | null;
 };
 
@@ -123,24 +141,49 @@ type VegetativeState = {
   grund: string;
 };
 
+type CardiologyAssessment = {
+  is_relevant: boolean;
+  chest_pain: boolean;
+  dyspnea: boolean;
+  palpitations: boolean;
+  syncope: boolean;
+  edema: boolean;
+  known_diagnosis: string;
+  prior_cardiac_workup: string;
+  cardiovascular_risk_factors: string;
+  anticoagulation: string;
+  family_history: string;
+  red_flags: string;
+  notes: string;
+};
+
 type CaseDetail = {
   id: string;
+  case_uuid?: string;
   case_id: string;
   patient_id: string;
   manager_id: string;
   status: CaseStatus | string;
   hauptanfragegrund: string | null;
   aktuelle_anamnese: string | null;
+  zuweiser_doctor_id?: string | null;
   zuweiser: string | null;
+  zuweiser_registry_name?: string | null;
+  zuweiser_provider_name?: string | null;
   notes: string | null;
   created_at: string;
   updated_at: string;
+  retention_until?: string | null;
+  last_clinical_update_at?: string | null;
+  version_count?: number;
   vorerkrankungen: VorerkrankungItem[];
   allergien: AllergieItem[];
   operationen: OperationItem[];
   medikamente: MedikamentItem[];
   pain_records: PainItem[];
   symptome: SymptomItem[];
+  cardiology_recommended?: boolean;
+  cardiology?: Partial<CardiologyAssessment> | null;
   vegetative_anamnese?: {
     appetit_durst?: string | null;
     koerpergroesse?: number | null;
@@ -149,6 +192,7 @@ type CaseDetail = {
     grund?: string | null;
   } | null;
   impfstatus?: string | null;
+  history?: CaseHistoryEntry[];
 };
 
 type PatientOption = {
@@ -156,6 +200,15 @@ type PatientOption = {
   patient_id: string;
   first_name?: string;
   last_name?: string;
+};
+
+type DoctorOption = {
+  id: string;
+  provider_id: string;
+  provider_name: string;
+  name: string;
+  title?: string | null;
+  fachbereich?: string | null;
 };
 
 type CaseFilters = {
@@ -168,12 +221,14 @@ type CaseCreateFormState = {
   patientId: string;
   hauptanfragegrund: string;
   aktuelleAnamnese: string;
+  zuweiserDoctorId: string;
   zuweiser: string;
 };
 
 type CaseOverviewFormState = {
   hauptanfragegrund: string;
   aktuelle_anamnese: string;
+  zuweiser_doctor_id: string;
   zuweiser: string;
 };
 
@@ -191,6 +246,7 @@ type SectionStatusKey =
   | "medikamente"
   | "pain"
   | "symptome"
+  | "cardiology"
   | "vegetative"
   | "impfstatus";
 
@@ -246,16 +302,20 @@ const DEFAULT_CREATE_FORM: CaseCreateFormState = {
   patientId: "",
   hauptanfragegrund: "",
   aktuelleAnamnese: "",
+  zuweiserDoctorId: "",
   zuweiser: "",
 };
 const DEFAULT_OVERVIEW_FORM: CaseOverviewFormState = {
   hauptanfragegrund: "",
   aktuelle_anamnese: "",
+  zuweiser_doctor_id: "",
   zuweiser: "",
 };
 
 const textareaClassName =
   "min-h-[104px] w-full rounded-xl border border-input bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100";
+const nativeSelectClassName =
+  "h-10 w-full rounded-xl border border-input bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100";
 
 function casePermissions(role?: string): CasePermissions {
   return {
@@ -310,7 +370,7 @@ function blankAllergie(): AllergieItem {
 }
 
 function blankOperation(): OperationItem {
-  return { datum: "", grund: "", arzt: "", notiz: "" };
+  return { datum: "", grund: "", arzt_id: "", arzt: "", notiz: "" };
 }
 
 function blankMedikament(): MedikamentItem {
@@ -325,6 +385,7 @@ function blankMedikament(): MedikamentItem {
     anmerkung: "",
     grund: "",
     seit: "",
+    verordnender_arzt_id: "",
     verordnender_arzt: "",
     med_typ: "permanent",
   };
@@ -361,6 +422,24 @@ function blankVegetative(): VegetativeState {
   };
 }
 
+function blankCardiology(): CardiologyAssessment {
+  return {
+    is_relevant: false,
+    chest_pain: false,
+    dyspnea: false,
+    palpitations: false,
+    syncope: false,
+    edema: false,
+    known_diagnosis: "",
+    prior_cardiac_workup: "",
+    cardiovascular_risk_factors: "",
+    anticoagulation: "",
+    family_history: "",
+    red_flags: "",
+    notes: "",
+  };
+}
+
 function buildCasesPath(filters: CaseFilters) {
   const params = new URLSearchParams();
   if (filters.search.trim()) params.set("search", filters.search.trim());
@@ -375,11 +454,62 @@ function patientLabel(patient: PatientOption) {
   return `${name || "Patient"} (${patient.patient_id})`;
 }
 
+function doctorOptionLabel(doctor: DoctorOption) {
+  const titlePrefix = doctor.title?.trim() ? `${doctor.title.trim()} ` : "";
+  const specialty = doctor.fachbereich?.trim() ? ` · ${doctor.fachbereich.trim()}` : "";
+  return `${doctor.provider_name} | ${titlePrefix}${doctor.name}${specialty}`;
+}
+
 function formatDate(value: string | null | undefined) {
   if (!value) return "Not set";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return new Intl.DateTimeFormat("en-GB", { dateStyle: "medium" }).format(date);
+}
+
+function formatDateTime(value: string | null | undefined) {
+  if (!value) return "Not set";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("en-GB", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}
+
+function historyValuePreview(value: unknown) {
+  if (value == null) return "empty";
+  if (typeof value === "string") return value || "empty";
+  const serialized = JSON.stringify(value);
+  if (!serialized) return "empty";
+  return serialized.length > 180 ? `${serialized.slice(0, 177)}...` : serialized;
+}
+
+function historySectionLabel(section: string) {
+  switch (section) {
+    case "overview":
+      return "Overview";
+    case "vorerkrankungen":
+      return "Preconditions";
+    case "allergien":
+      return "Allergies";
+    case "operationen":
+      return "Operations";
+    case "medikamente":
+      return "Medication";
+    case "pain_records":
+      return "Pain records";
+    case "symptome":
+      return "Symptoms";
+    case "cardiology":
+      return "Cardiology";
+    case "vegetative":
+      return "Vegetative";
+    case "impfstatus":
+      return "Vaccination";
+    default:
+      return section;
+  }
 }
 
 function textValue(value: string | null | undefined) {
@@ -459,6 +589,7 @@ function sanitizeOperationen(items: OperationItem[]) {
     .map((item) => ({
       datum: toOptionalText(item.datum ?? ""),
       grund: item.grund.trim(),
+      arzt_id: toOptionalText(item.arzt_id ?? ""),
       arzt: toOptionalText(item.arzt ?? ""),
       notiz: toOptionalText(item.notiz ?? ""),
     }));
@@ -478,6 +609,7 @@ function sanitizeMedikamente(items: MedikamentItem[]) {
       anmerkung: toOptionalText(item.anmerkung ?? ""),
       grund: toOptionalText(item.grund ?? ""),
       seit: toOptionalText(item.seit ?? ""),
+      verordnender_arzt_id: toOptionalText(item.verordnender_arzt_id ?? ""),
       verordnender_arzt: toOptionalText(item.verordnender_arzt ?? ""),
       med_typ: toOptionalText(item.med_typ ?? "") ?? "permanent",
     }));
@@ -511,6 +643,24 @@ function sanitizeSymptome(items: SymptomItem[]) {
     }));
 }
 
+function cardiologyToPayload(cardiology: CardiologyAssessment) {
+  return {
+    is_relevant: cardiology.is_relevant,
+    chest_pain: cardiology.chest_pain,
+    dyspnea: cardiology.dyspnea,
+    palpitations: cardiology.palpitations,
+    syncope: cardiology.syncope,
+    edema: cardiology.edema,
+    known_diagnosis: toOptionalText(cardiology.known_diagnosis),
+    prior_cardiac_workup: toOptionalText(cardiology.prior_cardiac_workup),
+    cardiovascular_risk_factors: toOptionalText(cardiology.cardiovascular_risk_factors),
+    anticoagulation: toOptionalText(cardiology.anticoagulation),
+    family_history: toOptionalText(cardiology.family_history),
+    red_flags: toOptionalText(cardiology.red_flags),
+    notes: toOptionalText(cardiology.notes),
+  };
+}
+
 export function CasesPage() {
   const { t } = useLang();
   const { user } = useAuth();
@@ -521,6 +671,7 @@ export function CasesPage() {
   const [filters, setFilters] = useState<CaseFilters>(DEFAULT_FILTERS);
   const deferredSearch = useDeferredValue(filters.search);
   const [patients, setPatients] = useState<PatientOption[]>([]);
+  const [doctors, setDoctors] = useState<DoctorOption[]>([]);
   const [cases, setCases] = useState<CaseItem[]>([]);
   const [listBusy, setListBusy] = useState(false);
   const [listError, setListError] = useState("");
@@ -546,6 +697,7 @@ export function CasesPage() {
   const [medikamente, setMedikamente] = useState<MedikamentItem[]>([]);
   const [painRecords, setPainRecords] = useState<PainItem[]>([]);
   const [symptome, setSymptome] = useState<SymptomItem[]>([]);
+  const [cardiology, setCardiology] = useState<CardiologyAssessment>(blankCardiology());
   const [vegetative, setVegetative] = useState<VegetativeState>(blankVegetative());
   const [impfstatus, setImpfstatus] = useState("");
   const [sectionBusy, setSectionBusy] = useState<SectionStatusKey | "">("");
@@ -576,22 +728,39 @@ export function CasesPage() {
       { total: 0, open: 0, inProgress: 0, closed: 0 },
     );
   }, [cases]);
+  const cardiologyTriggered = useMemo(
+    () =>
+      cardiology.is_relevant ||
+      Boolean(detail?.cardiology_recommended) ||
+      symptome.some((item) => {
+        const fachrichtung = (item.fachrichtung ?? "").trim().toLowerCase();
+        return fachrichtung.includes("cardio") || fachrichtung.includes("kardio");
+      }),
+    [cardiology.is_relevant, detail?.cardiology_recommended, symptome],
+  );
 
   useEffect(() => {
     if (!permissions.canViewPage) return;
     let cancelled = false;
 
-    void apiFetch<PatientOption[]>("/patients")
-      .then((items) => {
-        if (!cancelled) {
-          startTransition(() => setPatients(items));
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
+    void Promise.all([
+      apiFetch<PatientOption[]>("/patients").catch(() => []),
+      apiFetch<DoctorOption[]>("/cases/meta/doctors").catch(() => []),
+    ]).then(([patientItems, doctorItems]) => {
+      if (!cancelled) {
+        startTransition(() => {
+          setPatients(patientItems);
+          setDoctors(doctorItems);
+        });
+      }
+    }).catch(() => {
+      if (!cancelled) {
+        startTransition(() => {
           setPatients([]);
-        }
-      });
+          setDoctors([]);
+        });
+      }
+    });
 
     return () => {
       cancelled = true;
@@ -667,6 +836,7 @@ export function CasesPage() {
           setOverviewForm({
             hauptanfragegrund: item.hauptanfragegrund ?? "",
             aktuelle_anamnese: item.aktuelle_anamnese ?? "",
+            zuweiser_doctor_id: item.zuweiser_doctor_id ?? "",
             zuweiser: item.zuweiser ?? "",
           });
           setVorerkrankungen(item.vorerkrankungen);
@@ -675,6 +845,22 @@ export function CasesPage() {
           setMedikamente(item.medikamente);
           setPainRecords(item.pain_records);
           setSymptome(item.symptome);
+          setCardiology({
+            ...blankCardiology(),
+            is_relevant: item.cardiology?.is_relevant ?? item.cardiology_recommended ?? false,
+            chest_pain: item.cardiology?.chest_pain ?? false,
+            dyspnea: item.cardiology?.dyspnea ?? false,
+            palpitations: item.cardiology?.palpitations ?? false,
+            syncope: item.cardiology?.syncope ?? false,
+            edema: item.cardiology?.edema ?? false,
+            known_diagnosis: item.cardiology?.known_diagnosis ?? "",
+            prior_cardiac_workup: item.cardiology?.prior_cardiac_workup ?? "",
+            cardiovascular_risk_factors: item.cardiology?.cardiovascular_risk_factors ?? "",
+            anticoagulation: item.cardiology?.anticoagulation ?? "",
+            family_history: item.cardiology?.family_history ?? "",
+            red_flags: item.cardiology?.red_flags ?? "",
+            notes: item.cardiology?.notes ?? "",
+          });
           setVegetative({
             appetit_durst: item.vegetative_anamnese?.appetit_durst ?? "",
             koerpergroesse:
@@ -763,12 +949,13 @@ export function CasesPage() {
     try {
       const created = await apiFetch<{ id: string }>("/cases", {
         method: "POST",
-        body: JSON.stringify({
-          patient_id: createForm.patientId,
-          hauptanfragegrund: toOptionalText(createForm.hauptanfragegrund),
-          aktuelle_anamnese: toOptionalText(createForm.aktuelleAnamnese),
-          zuweiser: toOptionalText(createForm.zuweiser),
-        }),
+          body: JSON.stringify({
+            patient_id: createForm.patientId,
+            hauptanfragegrund: toOptionalText(createForm.hauptanfragegrund),
+            aktuelle_anamnese: toOptionalText(createForm.aktuelleAnamnese),
+            zuweiser_doctor_id: toOptionalText(createForm.zuweiserDoctorId),
+            zuweiser: toOptionalText(createForm.zuweiser),
+          }),
       });
       setCreateOpen(false);
       setCreateForm(DEFAULT_CREATE_FORM);
@@ -808,6 +995,7 @@ export function CasesPage() {
           body: JSON.stringify({
             hauptanfragegrund: toOptionalText(overviewForm.hauptanfragegrund),
             aktuelle_anamnese: toOptionalText(overviewForm.aktuelle_anamnese),
+            zuweiser_doctor_id: toOptionalText(overviewForm.zuweiser_doctor_id),
             zuweiser: toOptionalText(overviewForm.zuweiser),
           }),
         }),
@@ -894,6 +1082,20 @@ export function CasesPage() {
         apiFetch(`/cases/${detail.id}/symptome`, {
           method: "POST",
           body: JSON.stringify({ items: sanitizeSymptome(symptome) }),
+        }),
+      t.common_failed_update,
+    );
+  }
+
+  async function handleSaveCardiology(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!detail) return;
+    await runSectionSave(
+      "cardiology",
+      () =>
+        apiFetch(`/cases/${detail.id}/cardiology`, {
+          method: "POST",
+          body: JSON.stringify(cardiologyToPayload(cardiology)),
         }),
       t.common_failed_update,
     );
@@ -1247,6 +1449,28 @@ export function CasesPage() {
               />
             </Field>
             <Field label={t.cases_referrer}>
+              <select
+                value={createForm.zuweiserDoctorId}
+                onChange={(event) => {
+                  const doctorId = event.target.value;
+                  const selectedDoctor = doctors.find((doctor) => doctor.id === doctorId);
+                  setCreateForm((current) => ({
+                    ...current,
+                    zuweiserDoctorId: doctorId,
+                    zuweiser: selectedDoctor ? selectedDoctor.name : current.zuweiser,
+                  }));
+                }}
+                className={nativeSelectClassName}
+              >
+                <option value="">{t.common_not_set}</option>
+                {doctors.map((doctor) => (
+                  <option key={doctor.id} value={doctor.id}>
+                    {doctorOptionLabel(doctor)}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label={`${t.cases_referrer} label`}>
               <Input
                 value={createForm.zuweiser}
                 onChange={(event) =>
@@ -1279,6 +1503,7 @@ export function CasesPage() {
           if (!open) {
             setSelectedId("");
             setDetail(null);
+            setCardiology(blankCardiology());
             setDetailError("");
             updateQuery({ case: null });
           }
@@ -1327,6 +1552,38 @@ export function CasesPage() {
                             ? patientLabel(selectedPatient)
                             : detail.patient_id}
                       </p>
+                      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                            Reference code
+                          </div>
+                          <div className="mt-2 font-mono text-sm text-slate-900">{detail.case_id}</div>
+                        </div>
+                        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                            System case UUID
+                          </div>
+                          <div className="mt-2 break-all font-mono text-xs text-slate-900">
+                            {detail.case_uuid ?? detail.id}
+                          </div>
+                        </div>
+                        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                            Retention until
+                          </div>
+                          <div className="mt-2 text-sm text-slate-900">
+                            {formatDate(detail.retention_until)}
+                          </div>
+                        </div>
+                        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                            Last clinical update
+                          </div>
+                          <div className="mt-2 text-sm text-slate-900">
+                            {formatDateTime(detail.last_clinical_update_at ?? detail.updated_at)}
+                          </div>
+                        </div>
+                      </div>
                     </div>
                     <div className="flex flex-wrap gap-2">
                       <Button type="button" variant="outline" className="rounded-2xl" onClick={openPatientWorkspace}>
@@ -1349,6 +1606,7 @@ export function CasesPage() {
                     <MetricCard label={t.cases_allergies} value={detail.allergien.length.toString()} description={t.cases_subtitle} icon={<Plus className="size-4" />} />
                     <MetricCard label={t.cases_medication} value={detail.medikamente.length.toString()} description={t.cases_subtitle} icon={<ClipboardList className="size-4" />} />
                     <MetricCard label={t.cases_symptoms} value={detail.symptome.length.toString()} description={t.cases_subtitle} icon={<Search className="size-4" />} />
+                    <MetricCard label="Clinical revisions" value={String(detail.version_count ?? detail.history?.length ?? 0)} description="Append-only case history entries" icon={<RefreshCw className="size-4" />} />
                   </div>
                 </section>
 
@@ -1372,6 +1630,28 @@ export function CasesPage() {
                         />
                       </Field>
                       <Field label={t.cases_referrer}>
+                        <select
+                          value={overviewForm.zuweiser_doctor_id}
+                          onChange={(event) => {
+                            const doctorId = event.target.value;
+                            const selectedDoctor = doctors.find((doctor) => doctor.id === doctorId);
+                            setOverviewForm((current) => ({
+                              ...current,
+                              zuweiser_doctor_id: doctorId,
+                              zuweiser: selectedDoctor ? selectedDoctor.name : current.zuweiser,
+                            }));
+                          }}
+                          className={nativeSelectClassName}
+                        >
+                          <option value="">{t.common_not_set}</option>
+                          {doctors.map((doctor) => (
+                            <option key={doctor.id} value={doctor.id}>
+                              {doctorOptionLabel(doctor)}
+                            </option>
+                          ))}
+                        </select>
+                      </Field>
+                      <Field label={`${t.cases_referrer} label`}>
                         <Input
                           value={overviewForm.zuweiser}
                           onChange={(event) =>
@@ -1436,10 +1716,35 @@ export function CasesPage() {
                 <ItemEditorSection title={t.cases_operations} description={t.cases_subtitle} count={countFilled(operationen, "grund")} addLabel={t.providers_add_service} emptyTitle={t.common_not_set} emptyText={t.cases_subtitle} busy={sectionBusy === "operationen"} error={sectionErrors.operationen ?? ""} canEdit={permissions.canEdit} onAdd={() => setOperationen((current) => [...current, blankOperation()])} onSave={handleSaveOperationen}>
                   {operationen.map((item, index) => (
                     <div key={`op-${index}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
                         <Field label={t.appointments_date}><Input type="date" value={item.datum ?? ""} onChange={(event) => setOperationen((current) => updateItemAtIndex(current, index, { datum: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_reason}><Input value={item.grund} onChange={(event) => setOperationen((current) => updateItemAtIndex(current, index, { grund: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label={t.common_doctor}><Input value={item.arzt ?? ""} onChange={(event) => setOperationen((current) => updateItemAtIndex(current, index, { arzt: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={`${t.common_doctor} registry`}>
+                          <select
+                            value={item.arzt_id ?? ""}
+                            onChange={(event) => {
+                              const doctorId = event.target.value;
+                              const selectedDoctor = doctors.find((doctor) => doctor.id === doctorId);
+                              setOperationen((current) =>
+                                updateItemAtIndex(current, index, {
+                                  arzt_id: doctorId,
+                                  arzt: selectedDoctor
+                                    ? selectedDoctor.name
+                                    : (current[index]?.arzt ?? ""),
+                                }),
+                              );
+                            }}
+                            className={nativeSelectClassName}
+                          >
+                            <option value="">{t.common_not_set}</option>
+                            {doctors.map((doctor) => (
+                              <option key={doctor.id} value={doctor.id}>
+                                {doctorOptionLabel(doctor)}
+                              </option>
+                            ))}
+                          </select>
+                        </Field>
+                        <Field label={`${t.common_doctor} label`}><Input value={item.arzt ?? ""} onChange={(event) => setOperationen((current) => updateItemAtIndex(current, index, { arzt: event.target.value }))} className="h-10 rounded-xl bg-white" placeholder="Legacy / manual fallback" /></Field>
                         <Field label={t.cases_note}><Input value={item.notiz ?? ""} onChange={(event) => setOperationen((current) => updateItemAtIndex(current, index, { notiz: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                       </div>
                       <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-2xl" onClick={() => setOperationen((current) => removeItemAtIndex(current, index))}>Remove</Button></div>
@@ -1450,7 +1755,7 @@ export function CasesPage() {
                 <ItemEditorSection title={t.cases_medication} description={t.cases_subtitle} count={countFilled(medikamente, "handelsname")} addLabel={t.providers_add_service} emptyTitle={t.common_not_set} emptyText={t.cases_subtitle} busy={sectionBusy === "medikamente"} error={sectionErrors.medikamente ?? ""} canEdit={permissions.canEdit} onAdd={() => setMedikamente((current) => [...current, blankMedikament()])} onSave={handleSaveMedikamente}>
                   {medikamente.map((item, index) => (
                     <div key={`med-${index}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                         <Field label={t.cases_medications}><Input value={item.handelsname} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { handelsname: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_medications}><Input value={item.wirkstoff ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { wirkstoff: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.documents_category}><Input value={item.med_typ ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { med_typ: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
@@ -1461,7 +1766,32 @@ export function CasesPage() {
                         <Field label={t.cases_medications}><Input value={item.einheit ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { einheit: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.providers_service_valid_from}><Input value={item.seit ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { seit: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_reason}><Input value={item.grund ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { grund: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label={t.common_doctor}><Input value={item.verordnender_arzt ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { verordnender_arzt: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={`${t.common_doctor} registry`}>
+                          <select
+                            value={item.verordnender_arzt_id ?? ""}
+                            onChange={(event) => {
+                              const doctorId = event.target.value;
+                              const selectedDoctor = doctors.find((doctor) => doctor.id === doctorId);
+                              setMedikamente((current) =>
+                                updateItemAtIndex(current, index, {
+                                  verordnender_arzt_id: doctorId,
+                                  verordnender_arzt: selectedDoctor
+                                    ? selectedDoctor.name
+                                    : (current[index]?.verordnender_arzt ?? ""),
+                                }),
+                              );
+                            }}
+                            className={nativeSelectClassName}
+                          >
+                            <option value="">{t.common_not_set}</option>
+                            {doctors.map((doctor) => (
+                              <option key={doctor.id} value={doctor.id}>
+                                {doctorOptionLabel(doctor)}
+                              </option>
+                            ))}
+                          </select>
+                        </Field>
+                        <Field label={`${t.common_doctor} label`}><Input value={item.verordnender_arzt ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { verordnender_arzt: event.target.value }))} className="h-10 rounded-xl bg-white" placeholder="Legacy / manual fallback" /></Field>
                         <Field label={t.patients_notes}><Input value={item.anmerkung ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { anmerkung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                       </div>
                       <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-2xl" onClick={() => setMedikamente((current) => removeItemAtIndex(current, index))}>Remove</Button></div>
@@ -1503,6 +1833,94 @@ export function CasesPage() {
                   ))}
                 </ItemEditorSection>
 
+                <Panel
+                  title="Cardiology sub-flow"
+                  description={
+                    cardiologyTriggered
+                      ? "Specialty branch for cardiology-related symptoms and prior cardiac workup."
+                      : "Enable when symptoms or referral indicate cardiology."
+                  }
+                >
+                  <form onSubmit={handleSaveCardiology} className="space-y-4">
+                    {sectionErrors.cardiology ? <Banner tone="error">{sectionErrors.cardiology}</Banner> : null}
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                      <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={cardiology.is_relevant}
+                          onChange={(event) =>
+                            setCardiology((current) => ({
+                              ...current,
+                              is_relevant: event.target.checked,
+                            }))
+                          }
+                        />
+                        Cardiology relevant
+                      </label>
+                      {[
+                        ["chest_pain", "Chest pain"],
+                        ["dyspnea", "Dyspnea"],
+                        ["palpitations", "Palpitations"],
+                        ["syncope", "Syncope"],
+                        ["edema", "Edema"],
+                      ].map(([key, label]) => (
+                        <label
+                          key={key}
+                          className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={Boolean(cardiology[key as keyof CardiologyAssessment])}
+                            onChange={(event) =>
+                              setCardiology((current) => ({
+                                ...current,
+                                [key]: event.target.checked,
+                              }))
+                            }
+                          />
+                          {label}
+                        </label>
+                      ))}
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                      <Field label="Known diagnosis">
+                        <Input value={cardiology.known_diagnosis} onChange={(event) => setCardiology((current) => ({ ...current, known_diagnosis: event.target.value }))} className="h-10 rounded-xl bg-slate-50" />
+                      </Field>
+                      <Field label="Prior ECG / echo / workup">
+                        <Input value={cardiology.prior_cardiac_workup} onChange={(event) => setCardiology((current) => ({ ...current, prior_cardiac_workup: event.target.value }))} className="h-10 rounded-xl bg-slate-50" />
+                      </Field>
+                      <Field label="Anticoagulation">
+                        <Input value={cardiology.anticoagulation} onChange={(event) => setCardiology((current) => ({ ...current, anticoagulation: event.target.value }))} className="h-10 rounded-xl bg-slate-50" />
+                      </Field>
+                      <Field label="CV risk factors">
+                        <Input value={cardiology.cardiovascular_risk_factors} onChange={(event) => setCardiology((current) => ({ ...current, cardiovascular_risk_factors: event.target.value }))} className="h-10 rounded-xl bg-slate-50" />
+                      </Field>
+                      <Field label="Family history">
+                        <Input value={cardiology.family_history} onChange={(event) => setCardiology((current) => ({ ...current, family_history: event.target.value }))} className="h-10 rounded-xl bg-slate-50" />
+                      </Field>
+                      <Field label="Red flags">
+                        <Input value={cardiology.red_flags} onChange={(event) => setCardiology((current) => ({ ...current, red_flags: event.target.value }))} className="h-10 rounded-xl bg-slate-50" />
+                      </Field>
+                    </div>
+                    <Field label="Cardiology notes">
+                      <textarea
+                        value={cardiology.notes}
+                        onChange={(event) =>
+                          setCardiology((current) => ({ ...current, notes: event.target.value }))
+                        }
+                        className={textareaClassName}
+                        rows={4}
+                      />
+                    </Field>
+                    <div className="flex justify-end border-t border-border/70 pt-4">
+                      <Button type="submit" className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800" disabled={sectionBusy === "cardiology" || !permissions.canEdit}>
+                        {sectionBusy === "cardiology" ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                        Save cardiology
+                      </Button>
+                    </div>
+                  </form>
+                </Panel>
+
                 <Panel title={t.cases_vegetative} description={t.cases_subtitle}>
                   <form onSubmit={handleSaveVegetative} className="space-y-4">
                     {sectionErrors.vegetative ? <Banner tone="error">{sectionErrors.vegetative}</Banner> : null}
@@ -1535,6 +1953,63 @@ export function CasesPage() {
                       </Button>
                     </div>
                   </form>
+                </Panel>
+
+                <Panel
+                  title="Clinical history"
+                  description="Append-only section history with retention metadata for audit and review."
+                >
+                  {detail.history?.length ? (
+                    <div className="space-y-3">
+                      {detail.history.map((entry) => (
+                        <article
+                          key={entry.id}
+                          className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div>
+                              <h4 className="text-sm font-semibold text-slate-950">
+                                {historySectionLabel(entry.section)}
+                              </h4>
+                              <p className="mt-1 text-xs text-slate-600">
+                                {entry.changed_by_name} · {entry.changed_by_role} ·{" "}
+                                {formatDateTime(entry.created_at)}
+                              </p>
+                            </div>
+                            <Badge
+                              variant="outline"
+                              className="rounded-full border-slate-200 bg-white text-slate-700"
+                            >
+                              #{entry.id}
+                            </Badge>
+                          </div>
+                          <div className="mt-3 grid gap-3 md:grid-cols-2">
+                            <div className="rounded-xl border border-slate-200 bg-white p-3">
+                              <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                Previous
+                              </div>
+                              <p className="mt-2 break-words font-mono text-xs text-slate-700">
+                                {historyValuePreview(entry.old_value)}
+                              </p>
+                            </div>
+                            <div className="rounded-xl border border-slate-200 bg-white p-3">
+                              <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                New
+                              </div>
+                              <p className="mt-2 break-words font-mono text-xs text-slate-700">
+                                {historyValuePreview(entry.new_value)}
+                              </p>
+                            </div>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  ) : (
+                    <EmptyPanel
+                      title="No clinical revisions yet"
+                      text="The case has no persisted section history at the moment."
+                    />
+                  )}
                 </Panel>
               </>
             ) : (

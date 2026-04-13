@@ -121,6 +121,7 @@ export interface Lead {
   flow: string | null;
   qualification_status: string;
   compliance_status?: string;
+  failed_outcome?: FailedLeadOutcome;
   submitted_at: string | null;
   created_at: string;
   attachment_count?: number;
@@ -132,6 +133,48 @@ export interface LeadAttachment {
   content_type: string | null;
   size_bytes: number;
   uploaded_at: string;
+}
+
+export interface LeadReadinessCheck {
+  key: string;
+  label: string;
+  passed: boolean;
+  blocking_for: string;
+}
+
+export interface LifecycleEvent {
+  from_stage: string | null;
+  to_stage: string;
+  transition_kind: string;
+  note: string | null;
+  metadata: Record<string, unknown>;
+  changed_by: string | null;
+  created_at: string;
+}
+
+export interface FailedLeadOutcome {
+  status: string;
+  from_status?: string | null;
+  reason: string | null;
+  note?: string | null;
+  processed_at: string | null;
+  processed_by?: string | null;
+}
+
+export interface LeadLifecycle {
+  current_stage: string;
+  stage_entered_at: string | null;
+  can_convert: boolean;
+  can_resolve_failed: boolean;
+  history: LifecycleEvent[];
+}
+
+export interface LeadReadiness {
+  qualification_ready: boolean;
+  conversion_ready: boolean;
+  qualification_reasons: string[];
+  blocking_reasons: string[];
+  checks: LeadReadinessCheck[];
 }
 
 export interface LeadPhoneEntry {
@@ -193,6 +236,9 @@ export interface LeadDetail extends Lead {
   notes: string | null;
   user_agent: string | null;
   updated_at: string;
+  readiness: LeadReadiness;
+  failed_outcome: FailedLeadOutcome;
+  lifecycle: LeadLifecycle;
 
   attachments: LeadAttachment[];
 }
@@ -498,6 +544,8 @@ export interface PatientOption {
 // ---------------------------------------------------------------------------
 
 export interface CaseItem {
+  id?: string;
+  case_uuid?: string;
   case_id: string;
   patient_name: string;
   patient_pid: string;
@@ -533,6 +581,13 @@ export interface Appointment {
   interpreter_name: string | null;
   interpreter_response: string | null;
   checklist_phase: string;
+  recurrence_series_id: string | null;
+  recurrence_frequency: "daily" | "weekly" | "monthly" | null;
+  recurrence_interval: number | null;
+  recurrence_count: number | null;
+  recurrence_until: string | null;
+  recurrence_index: number;
+  recurrence_series_size: number;
   is_blocked: boolean;
 }
 
@@ -675,6 +730,12 @@ export interface CreateAppointmentBody {
   time_start?: string | null;
   time_end?: string | null;
   location?: string | null;
+  category?: string | null;
+  notes?: string | null;
+  recurrence_frequency?: "daily" | "weekly" | "monthly" | null;
+  recurrence_interval?: number | null;
+  recurrence_count?: number | null;
+  recurrence_until?: string | null;
 }
 
 export interface UpdateAppointmentBody {

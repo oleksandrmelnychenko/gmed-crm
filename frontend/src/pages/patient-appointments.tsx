@@ -9,12 +9,14 @@ import {
   appointmentStatusTone,
   appointmentTimeOfDayLabel,
   appointmentTypeLabel,
+  followupStatusTone,
   formatPortalDate,
   formatPortalDateTime,
 } from "@/pages/patient-portal.shared";
 import type {
   PortalAppointmentItem,
   PortalAppointmentRequestItem,
+  PortalFollowupMilestoneItem,
 } from "@/pages/patient-portal.shared";
 import { cn } from "@/lib/utils";
 
@@ -49,6 +51,7 @@ function blankRequestForm(): RequestFormState {
 export function PatientAppointmentsPage() {
   const [appointments, setAppointments] = useState<PortalAppointmentItem[]>([]);
   const [requests, setRequests] = useState<PortalAppointmentRequestItem[]>([]);
+  const [followupMilestones, setFollowupMilestones] = useState<PortalFollowupMilestoneItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
@@ -69,15 +72,17 @@ export function PatientAppointmentsPage() {
       }
 
       try {
-        const [appointmentRows, requestRows] = await Promise.all([
+        const [appointmentRows, requestRows, followupRows] = await Promise.all([
           apiFetch<PortalAppointmentItem[]>("/me/appointments"),
           apiFetch<PortalAppointmentRequestItem[]>("/me/appointment-requests"),
+          apiFetch<PortalFollowupMilestoneItem[]>("/me/followup-milestones").catch(() => []),
         ]);
 
         if (cancelled) return;
         startTransition(() => {
           setAppointments(appointmentRows);
           setRequests(requestRows);
+          setFollowupMilestones(followupRows);
           setError("");
         });
       } catch (err) {
@@ -242,6 +247,92 @@ export function PatientAppointmentsPage() {
               </article>
             ))
           )}
+
+          <section className={shellCard("p-5")}>
+            <div>
+              <h2 className="text-lg font-semibold text-slate-950">Follow-up milestones</h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Post-care milestones linked to your current orders, even when the team has not yet converted them into concrete visits.
+              </p>
+            </div>
+            <div className="mt-5 space-y-3">
+              {followupMilestones.length === 0 ? (
+                <div className="rounded-[1.35rem] border border-dashed border-slate-200 bg-slate-50/70 px-4 py-6 text-sm text-slate-500">
+                  No follow-up milestones are visible yet.
+                </div>
+              ) : (
+                followupMilestones.map((item) => (
+                  <article key={item.order_id} className="rounded-[1.35rem] border border-slate-200 bg-slate-50/80 px-4 py-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-950">
+                          {item.order_number} · {item.phase.replaceAll("_", " ")}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          Closure anchor {formatPortalDateTime(item.closure_anchor_at)}
+                        </p>
+                      </div>
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "rounded-full",
+                          item.followup_ready
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                            : "border-amber-200 bg-amber-50 text-amber-700",
+                        )}
+                      >
+                        {item.followup_ready ? "ready" : "in progress"}
+                      </Badge>
+                    </div>
+
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                      <MilestoneDetail
+                        label="Doctor-directed"
+                        value={item.doctor_followup_status}
+                        tone={followupStatusTone(item.doctor_followup_status)}
+                      />
+                      <MilestoneDetail
+                        label="1-week"
+                        value={item.followup_1w_status}
+                        tone={followupStatusTone(item.followup_1w_status)}
+                        hint={formatPortalDateTime(item.recommended_followup_1w_at)}
+                      />
+                      <MilestoneDetail
+                        label="1-month"
+                        value={item.followup_1m_status}
+                        tone={followupStatusTone(item.followup_1m_status)}
+                        hint={formatPortalDateTime(item.recommended_followup_1m_at)}
+                      />
+                      <MilestoneDetail
+                        label="6-month"
+                        value={item.followup_6m_status}
+                        tone={followupStatusTone(item.followup_6m_status)}
+                        hint={formatPortalDateTime(item.recommended_followup_6m_at)}
+                      />
+                      <MilestoneDetail
+                        label="Package end"
+                        value={item.package_end_status}
+                        tone={followupStatusTone(item.package_end_status)}
+                        hint={formatPortalDate(item.package_end_date ?? item.suggested_package_end_date)}
+                      />
+                      <MilestoneDetail
+                        label="Results handoff"
+                        value={item.results_handoff_status}
+                        tone={followupStatusTone(item.results_handoff_status)}
+                        hint={`${item.results_portal_shares} shared document(s)`}
+                      />
+                    </div>
+
+                    {item.followup_summary ? (
+                      <div className="mt-3 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+                        {item.followup_summary}
+                      </div>
+                    ) : null}
+                  </article>
+                ))
+              )}
+            </div>
+          </section>
 
           <section className={shellCard("p-5")}>
             <div>
@@ -417,6 +508,28 @@ function Detail({ label, value }: { label: string; value: string }) {
     <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
       <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500">{label}</p>
       <p className="mt-2 text-sm text-slate-900">{value}</p>
+    </div>
+  );
+}
+
+function MilestoneDetail({
+  label,
+  value,
+  tone,
+  hint,
+}: {
+  label: string;
+  value: string;
+  tone: string;
+  hint?: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+      <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500">{label}</p>
+      <Badge variant="outline" className={cn("mt-3 rounded-full", tone)}>
+        {value.replaceAll("_", " ")}
+      </Badge>
+      {hint ? <p className="mt-3 text-xs text-slate-500">{hint}</p> : null}
     </div>
   );
 }

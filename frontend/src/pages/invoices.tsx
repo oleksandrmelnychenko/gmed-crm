@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { CalendarClock, ChevronRight, LoaderCircle, Plus, RefreshCw, Search, Wallet } from "lucide-react";
+import { CalendarClock, ChevronRight, Download, LoaderCircle, Plus, RefreshCw, Search, Wallet } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,7 +16,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, getAccessToken } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { PatientInvoicesPage } from "@/pages/patient-invoices";
@@ -149,6 +149,47 @@ function formatCurrency(value: unknown) {
   const numeric = typeof value === "number" ? value : Number(value ?? 0);
   if (!Number.isFinite(numeric)) return "EUR 0.00";
   return new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(numeric);
+}
+
+async function fetchInvoicePdfBlob(path: string) {
+  const token = getAccessToken();
+  const response = await fetch(`/api/v1${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  });
+
+  if (!response.ok) {
+    throw new Error(`${response.status} ${response.statusText}`);
+  }
+
+  return response.blob();
+}
+
+function openPdfBlobPreview(blob: Blob) {
+  const url = URL.createObjectURL(blob);
+  const previewWindow = window.open(url, "_blank", "noopener,noreferrer");
+  if (!previewWindow) {
+    URL.revokeObjectURL(url);
+    throw new Error("Allow pop-ups to preview the invoice PDF.");
+  }
+
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+async function openInvoicePdfPreview(invoiceId: string) {
+  const blob = await fetchInvoicePdfBlob(`/invoices/${invoiceId}/pdf`);
+  openPdfBlobPreview(blob);
+}
+
+async function downloadInvoicePdf(invoiceId: string, filename: string) {
+  const blob = await fetchInvoicePdfBlob(`/invoices/${invoiceId}/pdf`);
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename || "invoice.pdf";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 function statusBadgeClass(status: string) {
@@ -590,7 +631,45 @@ function StaffInvoicesPage() {
           <div className="space-y-6 px-6 py-6">
             {detailBusy ? <LoadingState label={t.common_loading} /> : detailError ? <Banner tone="error">{detailError}</Banner> : !detail ? <EmptyState title="No invoice selected" description="Choose an invoice card to open the billing detail workspace." /> : (
               <>
-                <SectionCard title="Invoice overview" description="Commercial totals and linked quote/order context." action={<div className="flex flex-wrap gap-2"><Badge variant="outline" className={cn("rounded-full", statusBadgeClass(detail.status))}>{detail.status}</Badge><Badge variant="outline" className={cn("rounded-full", typeBadgeClass(detail.invoice_type))}>{detail.invoice_type}</Badge></div>}>
+                <SectionCard
+                  title="Invoice overview"
+                  description="Commercial totals and linked quote/order context."
+                  action={
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="rounded-2xl"
+                        onClick={() =>
+                          void openInvoicePdfPreview(detail.id).catch((error) =>
+                            setDetailError(error instanceof Error ? error.message : "Failed to open invoice PDF."),
+                          )
+                        }
+                      >
+                        Preview PDF
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="rounded-2xl"
+                        onClick={() =>
+                          void downloadInvoicePdf(detail.id, `${detail.invoice_number}.pdf`).catch((error) =>
+                            setDetailError(error instanceof Error ? error.message : "Failed to download invoice PDF."),
+                          )
+                        }
+                      >
+                        <Download className="size-4" />
+                        Download PDF
+                      </Button>
+                      <Badge variant="outline" className={cn("rounded-full", statusBadgeClass(detail.status))}>
+                        {detail.status}
+                      </Badge>
+                      <Badge variant="outline" className={cn("rounded-full", typeBadgeClass(detail.invoice_type))}>
+                        {detail.invoice_type}
+                      </Badge>
+                    </div>
+                  }
+                >
                   <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                     <DetailField label={t.invoices_patient} value={`${detail.patient_name} (${detail.patient_pid})`} />
                     <DetailField label={t.orders_title} value={detail.order_number} />

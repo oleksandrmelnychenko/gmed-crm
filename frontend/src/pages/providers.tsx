@@ -52,6 +52,8 @@ type ProviderSummary = {
   id: string;
   name: string;
   provider_type: ProviderType;
+  legal_name: string | null;
+  tax_id: string | null;
   address_city: string | null;
   address_country: string | null;
   fachbereich: string | null;
@@ -101,8 +103,12 @@ type DoctorSummary = {
   name: string;
   title: string | null;
   fachbereich: string | null;
+  languages: string[];
   phone: string | null;
   email: string | null;
+  license_number: string | null;
+  licensing_country: string | null;
+  licensing_valid_until: string | null;
   notes: string | null;
   patient_count: number;
   appointment_count: number;
@@ -125,6 +131,8 @@ type ProviderDetail = {
   id: string;
   name: string;
   provider_type: ProviderType;
+  legal_name: string | null;
+  tax_id: string | null;
   address_street: string | null;
   address_city: string | null;
   address_zip: string | null;
@@ -165,6 +173,8 @@ type ProviderFilters = {
 type ProviderFormState = {
   name: string;
   providerType: ProviderType;
+  legalName: string;
+  taxId: string;
   addressStreet: string;
   addressCity: string;
   addressZip: string;
@@ -182,8 +192,12 @@ type DoctorFormState = {
   name: string;
   title: string;
   fachbereich: string;
+  languages: string;
   phone: string;
   email: string;
+  licenseNumber: string;
+  licensingCountry: string;
+  licensingValidUntil: string;
   notes: string;
 };
 
@@ -238,6 +252,8 @@ function blankProviderForm(providerType: ProviderType = "medical"): ProviderForm
   return {
     name: "",
     providerType,
+    legalName: "",
+    taxId: "",
     addressStreet: "",
     addressCity: "",
     addressZip: "",
@@ -252,7 +268,19 @@ function blankProviderForm(providerType: ProviderType = "medical"): ProviderForm
 }
 
 function blankDoctorForm(): DoctorFormState {
-  return { id: "", name: "", title: "", fachbereich: "", phone: "", email: "", notes: "" };
+  return {
+    id: "",
+    name: "",
+    title: "",
+    fachbereich: "",
+    languages: "",
+    phone: "",
+    email: "",
+    licenseNumber: "",
+    licensingCountry: "",
+    licensingValidUntil: "",
+    notes: "",
+  };
 }
 
 function blankServiceForm(): ServiceFormState {
@@ -270,6 +298,13 @@ function blankServiceForm(): ServiceFormState {
 function toOptional(value: string) {
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
+}
+
+function parseCommaList(value: string) {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function providerTypeLabel(value: string, tr: Record<string, string>) {
@@ -362,6 +397,8 @@ function providerToForm(detail: ProviderDetail): ProviderFormState {
   return {
     name: detail.name,
     providerType: detail.provider_type,
+    legalName: detail.legal_name ?? "",
+    taxId: detail.tax_id ?? "",
     addressStreet: detail.address_street ?? "",
     addressCity: detail.address_city ?? "",
     addressZip: detail.address_zip ?? "",
@@ -381,8 +418,12 @@ function doctorToForm(doctor: DoctorSummary): DoctorFormState {
     name: doctor.name,
     title: doctor.title ?? "",
     fachbereich: doctor.fachbereich ?? "",
+    languages: doctor.languages?.join(", ") ?? "",
     phone: doctor.phone ?? "",
     email: doctor.email ?? "",
+    licenseNumber: doctor.license_number ?? "",
+    licensingCountry: doctor.licensing_country ?? "",
+    licensingValidUntil: doctor.licensing_valid_until ?? "",
     notes: doctor.notes ?? "",
   };
 }
@@ -403,6 +444,8 @@ function toProviderPayload(form: ProviderFormState, forceNonMedical: boolean) {
   return {
     name: form.name.trim(),
     provider_type: forceNonMedical ? "non_medical" : form.providerType,
+    legal_name: toOptional(form.legalName),
+    tax_id: toOptional(form.taxId),
     address_street: toOptional(form.addressStreet),
     address_city: toOptional(form.addressCity),
     address_zip: toOptional(form.addressZip),
@@ -421,8 +464,12 @@ function toDoctorPayload(form: DoctorFormState) {
     name: form.name.trim(),
     title: toOptional(form.title),
     fachbereich: toOptional(form.fachbereich),
+    languages: parseCommaList(form.languages),
     phone: toOptional(form.phone),
     email: toOptional(form.email),
+    license_number: toOptional(form.licenseNumber),
+    licensing_country: toOptional(form.licensingCountry),
+    licensing_valid_until: toOptional(form.licensingValidUntil),
     notes: toOptional(form.notes),
   };
 }
@@ -1250,8 +1297,13 @@ function ProvidersPage() {
                         <h3 className="mt-3 text-lg font-semibold text-slate-950">
                           {provider.name}
                         </h3>
+                        {provider.legal_name && provider.legal_name !== provider.name ? (
+                          <p className="mt-1 text-sm text-slate-700">{provider.legal_name}</p>
+                        ) : null}
                         <p className="mt-1 text-sm text-slate-600">
-                          {provider.fachbereich || t.common_not_set}
+                          {provider.tax_id
+                            ? `Tax ID ${provider.tax_id}`
+                            : provider.fachbereich || t.common_not_set}
                         </p>
                       </div>
                       <Button type="button" variant="ghost" size="sm" className="rounded-xl">
@@ -1551,8 +1603,11 @@ function ProviderOverviewSection({
         <div className="mt-4 flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <div>
             <h2 className="text-2xl font-semibold text-slate-950">{detail.name}</h2>
+            {detail.legal_name && detail.legal_name !== detail.name ? (
+              <p className="mt-1 text-sm font-medium text-slate-700">{detail.legal_name}</p>
+            ) : null}
             <p className="mt-2 text-sm text-slate-600">
-              {detail.fachbereich || t.common_not_set}
+              {detail.tax_id ? `Tax ID ${detail.tax_id}` : detail.fachbereich || t.common_not_set}
             </p>
           </div>
 
@@ -1764,6 +1819,42 @@ function DoctorSection({
               <div className="mt-3 space-y-2">
                 <InlineInfo icon={Phone}>{doctor.phone || t.common_not_set}</InlineInfo>
                 <InlineInfo icon={Mail}>{doctor.email || t.common_not_set}</InlineInfo>
+              </div>
+
+              {doctor.languages.length > 0 ? (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {doctor.languages.map((language) => (
+                    <Badge
+                      key={`${doctor.id}-${language}`}
+                      variant="outline"
+                      className="rounded-full border-slate-200 bg-white text-slate-700"
+                    >
+                      {language}
+                    </Badge>
+                  ))}
+                </div>
+              ) : null}
+
+              <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl bg-white px-3 py-3">
+                  <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">
+                    License
+                  </p>
+                  <p className="mt-2 text-sm font-medium text-slate-900">
+                    {doctor.license_number || t.common_not_set}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {doctor.licensing_country || t.common_not_set}
+                  </p>
+                </div>
+                <div className="rounded-2xl bg-white px-3 py-3">
+                  <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">
+                    License valid until
+                  </p>
+                  <p className="mt-2 text-sm font-medium text-slate-900">
+                    {compactDate(doctor.licensing_valid_until, t.common_not_set)}
+                  </p>
+                </div>
               </div>
 
               <div className="mt-4 grid grid-cols-2 gap-3">
@@ -2234,14 +2325,24 @@ function ProviderFormFields({
   const { t } = useLang();
   return (
     <div className="space-y-4">
-      <div className="grid gap-4 md:grid-cols-2">
-        <Field label={t.providers_title}>
+      <div className="grid gap-4 md:grid-cols-3">
+        <Field label="Display name">
           <Input
             value={form.name}
             onChange={(event) => onChange("name", event.target.value)}
             className="h-10 rounded-xl bg-slate-50"
             placeholder={t.providers_title}
             required
+            disabled={disabled}
+          />
+        </Field>
+
+        <Field label="Legal name">
+          <Input
+            value={form.legalName}
+            onChange={(event) => onChange("legalName", event.target.value)}
+            className="h-10 rounded-xl bg-slate-50"
+            placeholder="Legal entity / contract name"
             disabled={disabled}
           />
         </Field>
@@ -2259,7 +2360,17 @@ function ProviderFormFields({
         </Field>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-3">
+        <Field label="Tax ID">
+          <Input
+            value={form.taxId}
+            onChange={(event) => onChange("taxId", event.target.value)}
+            className="h-10 rounded-xl bg-slate-50"
+            placeholder="VAT / tax ID"
+            disabled={disabled}
+          />
+        </Field>
+
         <Field label={t.providers_fachbereich}>
           <Input
             value={form.fachbereich}
@@ -2391,12 +2502,20 @@ function DoctorFormFields({
         </Field>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-3">
         <Field label={t.providers_fachbereich}>
           <Input
             value={form.fachbereich}
             onChange={(event) => onChange("fachbereich", event.target.value)}
             className="h-10 rounded-xl bg-slate-50"
+          />
+        </Field>
+        <Field label="Languages">
+          <Input
+            value={form.languages}
+            onChange={(event) => onChange("languages", event.target.value)}
+            className="h-10 rounded-xl bg-slate-50"
+            placeholder="de, en, uk"
           />
         </Field>
         <Field label={t.field_phone}>
@@ -2408,12 +2527,37 @@ function DoctorFormFields({
         </Field>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-3">
         <Field label={t.field_email}>
           <Input
             type="email"
             value={form.email}
             onChange={(event) => onChange("email", event.target.value)}
+            className="h-10 rounded-xl bg-slate-50"
+          />
+        </Field>
+        <Field label="License number">
+          <Input
+            value={form.licenseNumber}
+            onChange={(event) => onChange("licenseNumber", event.target.value)}
+            className="h-10 rounded-xl bg-slate-50"
+          />
+        </Field>
+        <Field label="Licensing country">
+          <Input
+            value={form.licensingCountry}
+            onChange={(event) => onChange("licensingCountry", event.target.value)}
+            className="h-10 rounded-xl bg-slate-50"
+          />
+        </Field>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <Field label="License valid until">
+          <Input
+            type="date"
+            value={form.licensingValidUntil}
+            onChange={(event) => onChange("licensingValidUntil", event.target.value)}
             className="h-10 rounded-xl bg-slate-50"
           />
         </Field>

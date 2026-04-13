@@ -125,6 +125,15 @@ const DOCUMENT_REQUIREMENT_SETTING_FIELDS: SettingFieldMeta[] = [
   },
 ];
 
+const CLINICAL_SETTING_FIELDS: SettingFieldMeta[] = [
+  {
+    key: "clinical_case_retention_years",
+    labelKey: "settings_clinical_retention_years",
+    inputType: "number",
+    min: 1,
+  },
+];
+
 function compactDt(value: string): string {
   return value.split("T")[0] ?? value;
 }
@@ -319,6 +328,21 @@ export function AdminSettingsPage() {
             </div>
             <div className="grid gap-4">
               {DOCUMENT_REQUIREMENT_SETTING_FIELDS.map(renderSettingField)}
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl border p-6 space-y-4">
+            <div>
+              <h2 className="text-lg font-medium">
+                {tr.settings_clinical_data ?? "Clinical data retention"}
+              </h2>
+              <p className="text-muted-foreground mt-1 text-sm">
+                {tr.settings_clinical_data_hint ??
+                  "Controls the retention horizon for medical cases and append-only anamnesis history."}
+              </p>
+            </div>
+            <div className="grid gap-4 lg:grid-cols-2">
+              {CLINICAL_SETTING_FIELDS.map(renderSettingField)}
             </div>
           </div>
 

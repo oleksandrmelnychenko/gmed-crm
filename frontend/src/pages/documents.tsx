@@ -51,6 +51,14 @@ type DocumentVisibility =
   | "released_external"
   | "patient_visible";
 
+type DocumentClassificationSuggestion = {
+  art: string;
+  category: string;
+  is_medical: boolean;
+  confidence: string;
+  rationale: string;
+};
+
 type DocumentItem = {
   id: string;
   patient_id: string | null;
@@ -84,6 +92,8 @@ type DocumentItem = {
   share_count: number;
   shared_to_current: boolean;
   data_sensitivity: string;
+  needs_categorization: boolean;
+  classification_suggestion: DocumentClassificationSuggestion | null;
 };
 
 type DocumentShare = {
@@ -109,11 +119,35 @@ type TranslationRequest = {
   requested_language: string;
   status: string;
   note: string | null;
+  source_language: string | null;
+  source_text: string | null;
+  translated_text: string | null;
   requested_by: string;
   requested_by_name: string | null;
+  translated_by: string | null;
+  translated_by_name: string | null;
   requested_at: string;
   completed_at: string | null;
+  translated_at: string | null;
   updated_at: string;
+};
+
+type TranslationWorkspaceDraft = {
+  note: string;
+  sourceLanguage: string;
+  sourceText: string;
+  translatedText: string;
+};
+
+type DocumentTextExtraction = {
+  status: string;
+  method: string | null;
+  message: string | null;
+  extracted_text: string | null;
+  has_text: boolean;
+  extracted_at: string | null;
+  extracted_by: string | null;
+  extracted_by_name: string | null;
 };
 
 type StaffOption = { id: string; name: string; role: string };
@@ -240,6 +274,15 @@ type GenerateDocumentResponse = {
   preview_html?: string;
 };
 
+type UploadDocumentResponse = {
+  id: string;
+  art: string;
+  category: string | null;
+  is_medical: boolean;
+  needs_categorization: boolean;
+  classification_suggestion?: DocumentClassificationSuggestion | null;
+};
+
 const STATUS_OPTIONS: DocumentStatus[] = ["draft", "active", "archived"];
 const VISIBILITY_OPTIONS: DocumentVisibility[] = [
   "internal",
@@ -254,6 +297,21 @@ const textareaClassName =
 
 function canManageDocuments(role?: string) {
   return role === "ceo" || role === "patient_manager";
+}
+
+function canUploadDocuments(role?: string) {
+  return [
+    "ceo",
+    "patient_manager",
+    "teamlead_interpreter",
+    "interpreter",
+  ].includes(role ?? "");
+}
+
+function canManageDocumentIntake(role?: string) {
+  return ["ceo", "patient_manager", "teamlead_interpreter"].includes(
+    role ?? "",
+  );
 }
 
 function canViewDocuments(role?: string) {
@@ -352,6 +410,15 @@ function translationStatusBadge(status: string) {
   if (status === "cancelled")
     return "border-slate-200 bg-slate-100 text-slate-600";
   return "border-amber-200 bg-amber-50 text-amber-700";
+}
+
+function textExtractionStatusBadge(status: string) {
+  if (status === "completed")
+    return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  if (status === "failed") return "border-rose-200 bg-rose-50 text-rose-700";
+  if (status === "unsupported")
+    return "border-amber-200 bg-amber-50 text-amber-700";
+  return "border-slate-200 bg-slate-100 text-slate-600";
 }
 
 function visibilityBadge(visibility: string) {
@@ -555,6 +622,8 @@ function StaffDocumentsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const canView = canViewDocuments(user?.role);
   const canManage = canManageDocuments(user?.role);
+  const canUpload = canUploadDocuments(user?.role);
+  const canManageIntake = canManageDocumentIntake(user?.role);
   const canRequestTranslation = canRequestTranslations(user?.role);
   const canUpdateTranslation = canUpdateTranslations(user?.role);
 
@@ -571,10 +640,14 @@ function StaffDocumentsPage() {
   const deferredSearch = useDeferredValue(filters.search);
 
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
+  const [intakeQueue, setIntakeQueue] = useState<DocumentItem[]>([]);
   const [busy, setBusy] = useState(true);
+  const [intakeBusy, setIntakeBusy] = useState(false);
   const [error, setError] = useState("");
+  const [intakeError, setIntakeError] = useState("");
   const [notice, setNotice] = useState("");
   const [version, setVersion] = useState(0);
+  const [intakeActionId, setIntakeActionId] = useState("");
 
   const [patients, setPatients] = useState<PatientOption[]>([]);
   const [providers, setProviders] = useState<ProviderOption[]>([]);
@@ -617,10 +690,17 @@ function StaffDocumentsPage() {
   const [translationRequests, setTranslationRequests] = useState<
     TranslationRequest[]
   >([]);
+  const [translationDrafts, setTranslationDrafts] = useState<
+    Record<string, TranslationWorkspaceDraft>
+  >({});
+  const [textExtraction, setTextExtraction] =
+    useState<DocumentTextExtraction | null>(null);
   const [detailBusy, setDetailBusy] = useState(false);
   const [detailError, setDetailError] = useState("");
   const [translationBusy, setTranslationBusy] = useState(false);
   const [translationError, setTranslationError] = useState("");
+  const [textExtractionBusy, setTextExtractionBusy] = useState(false);
+  const [textExtractionError, setTextExtractionError] = useState("");
   const [translationForm, setTranslationForm] = useState({
     requestedLanguage: "en",
     note: "",
@@ -654,6 +734,13 @@ function StaffDocumentsPage() {
   const currentDetailTemplate = useMemo(
     () => templateForDocument(templates, detail),
     [detail, templates],
+  );
+  const canReviewSelectedDocument = Boolean(
+    !canManage &&
+      canManageIntake &&
+      detail &&
+      detail.ursprung === "interpreter_upload" &&
+      detail.status === "draft",
   );
   const availableTemplateBlocks = useMemo(() => {
     const allowed = new Set(selectedTemplate?.text_block_keys ?? []);
@@ -753,6 +840,40 @@ function StaffDocumentsPage() {
   }, [canView, documentsPath, version]);
 
   useEffect(() => {
+    if (!canManageIntake) {
+      setIntakeQueue([]);
+      setIntakeBusy(false);
+      setIntakeError("");
+      setIntakeActionId("");
+      return;
+    }
+    let active = true;
+    async function loadIntakeQueue() {
+      setIntakeBusy(true);
+      setIntakeError("");
+      try {
+        const rows = await apiFetch<DocumentItem[]>("/documents/intake-queue");
+        if (!active) return;
+        startTransition(() => setIntakeQueue(rows));
+      } catch (nextError) {
+        if (!active) return;
+        setIntakeQueue([]);
+        setIntakeError(
+          nextError instanceof Error
+            ? nextError.message
+            : "Failed to load document intake queue.",
+        );
+      } finally {
+        if (active) setIntakeBusy(false);
+      }
+    }
+    void loadIntakeQueue();
+    return () => {
+      active = false;
+    };
+  }, [canManageIntake, version]);
+
+  useEffect(() => {
     setSelectedDocumentIds((current) =>
       current.filter((id) => documents.some((item) => item.id === id)),
     );
@@ -763,6 +884,8 @@ function StaffDocumentsPage() {
       setDetail(null);
       setDetailVersions([]);
       setTranslationRequests([]);
+      setTranslationDrafts({});
+      setTextExtraction(null);
       setEditForm(null);
       setShares([]);
       return;
@@ -772,8 +895,15 @@ function StaffDocumentsPage() {
       setDetailBusy(true);
       setDetailError("");
       setTranslationError("");
+      setTextExtractionError("");
       try {
-        const [documentResponse, shareResponse, versionResponse, translationResponse] =
+        const [
+          documentResponse,
+          shareResponse,
+          versionResponse,
+          translationResponse,
+          extractionResponse,
+        ] =
           await Promise.all([
             apiFetch<DocumentItem>(`/documents/${selectedId}`),
             canManage
@@ -787,11 +917,15 @@ function StaffDocumentsPage() {
             apiFetch<TranslationRequest[]>(
               `/documents/${selectedId}/translation-requests`,
             ).catch(() => []),
+            apiFetch<DocumentTextExtraction>(
+              `/documents/${selectedId}/text-extraction`,
+            ).catch(() => null),
           ]);
         if (!active) return;
         setDetail(documentResponse);
         setDetailVersions(versionResponse);
         setTranslationRequests(translationResponse);
+        setTextExtraction(extractionResponse);
         setEditForm(detailToEditForm(documentResponse));
         setShares(shareResponse);
       } catch (nextError) {
@@ -799,6 +933,8 @@ function StaffDocumentsPage() {
         setDetail(null);
         setDetailVersions([]);
         setTranslationRequests([]);
+        setTranslationDrafts({});
+        setTextExtraction(null);
         setEditForm(null);
         setShares([]);
         setDetailError(
@@ -841,6 +977,19 @@ function StaffDocumentsPage() {
       active = false;
     };
   }, [uploadForm.patientId, uploadOpen]);
+
+  useEffect(() => {
+    const next: Record<string, TranslationWorkspaceDraft> = {};
+    for (const request of translationRequests) {
+      next[request.id] = {
+        note: request.note ?? "",
+        sourceLanguage: request.source_language ?? "",
+        sourceText: request.source_text ?? "",
+        translatedText: request.translated_text ?? "",
+      };
+    }
+    setTranslationDrafts(next);
+  }, [translationRequests]);
 
   useEffect(() => {
     if (templates.length === 0) return;
@@ -982,8 +1131,8 @@ function StaffDocumentsPage() {
 
   async function handleUpload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!uploadForm.file || !uploadForm.art.trim()) {
-      setUploadError("File and type are required.");
+    if (!uploadForm.file) {
+      setUploadError("File is required.");
       return;
     }
     if (
@@ -997,6 +1146,7 @@ function StaffDocumentsPage() {
     setUploadBusy(true);
     setUploadError("");
     try {
+      const constrainedUpload = !canManage;
       const formData = new FormData();
       formData.append("file", uploadForm.file);
       if (uploadForm.patientId)
@@ -1006,22 +1156,39 @@ function StaffDocumentsPage() {
         formData.append("appointment_id", uploadForm.appointmentId);
       if (uploadForm.autoName.trim())
         formData.append("auto_name", uploadForm.autoName.trim());
-      formData.append("art", uploadForm.art.trim());
+      if (uploadForm.art.trim()) formData.append("art", uploadForm.art.trim());
       if (uploadForm.category) formData.append("category", uploadForm.category);
-      formData.append("status", uploadForm.status);
-      formData.append("visibility", uploadForm.visibility);
+      formData.append(
+        "status",
+        constrainedUpload && user?.role === "interpreter"
+          ? "draft"
+          : uploadForm.status,
+      );
+      formData.append(
+        "visibility",
+        constrainedUpload ? "internal" : uploadForm.visibility,
+      );
       if (uploadForm.isMedical) formData.append("is_medical", "true");
       if (uploadForm.klinik.trim())
         formData.append("klinik", uploadForm.klinik.trim());
-      if (uploadForm.ursprung.trim())
+      if (!constrainedUpload && uploadForm.ursprung.trim())
         formData.append("ursprung", uploadForm.ursprung.trim());
       if (uploadForm.notes.trim())
         formData.append("notes", uploadForm.notes.trim());
-      const response = await apiFetch<{ id: string }>("/documents/upload", {
+      const response = await apiFetch<UploadDocumentResponse>(
+        "/documents/upload",
+        {
         method: "POST",
         body: formData,
-      });
-      setNotice("Document uploaded.");
+        },
+      );
+      setNotice(
+        constrainedUpload
+          ? "Document uploaded for internal review."
+          : response.needs_categorization
+            ? "Document uploaded and added to the intake queue."
+            : "Document uploaded.",
+      );
       setUploadOpen(false);
       refresh();
       if (response.id) openDocument(response.id);
@@ -1033,6 +1200,41 @@ function StaffDocumentsPage() {
       );
     } finally {
       setUploadBusy(false);
+    }
+  }
+
+  async function handleApplyClassificationSuggestion(item: DocumentItem) {
+    if (!item.classification_suggestion) return;
+    setIntakeActionId(item.id);
+    setNotice("");
+    setError("");
+    try {
+      await apiFetch<{ ok: boolean }>(`/documents/${item.id}/update`, {
+        method: "POST",
+        body: JSON.stringify({
+          art: item.classification_suggestion.art,
+          category: item.classification_suggestion.category,
+          is_medical: item.classification_suggestion.is_medical,
+          status:
+            item.ursprung === "interpreter_upload" && item.status === "draft"
+              ? "active"
+              : undefined,
+        }),
+      });
+      setNotice(
+        item.ursprung === "interpreter_upload" && item.status === "draft"
+          ? "Classification suggestion applied and interpreter upload released."
+          : "Classification suggestion applied.",
+      );
+      refresh();
+    } catch (nextError) {
+      setError(
+        nextError instanceof Error
+          ? nextError.message
+          : "Failed to apply document classification.",
+      );
+    } finally {
+      setIntakeActionId("");
     }
   }
 
@@ -1208,6 +1410,22 @@ function StaffDocumentsPage() {
     setTranslationRequests(rows);
   }
 
+  function updateTranslationDraft(
+    requestId: string,
+    patch: Partial<TranslationWorkspaceDraft>,
+  ) {
+    setTranslationDrafts((current) => ({
+      ...current,
+      [requestId]: {
+        note: current[requestId]?.note ?? "",
+        sourceLanguage: current[requestId]?.sourceLanguage ?? "",
+        sourceText: current[requestId]?.sourceText ?? "",
+        translatedText: current[requestId]?.translatedText ?? "",
+        ...patch,
+      },
+    }));
+  }
+
   async function handleCreateTranslationRequest(
     event: FormEvent<HTMLFormElement>,
   ) {
@@ -1237,20 +1455,66 @@ function StaffDocumentsPage() {
     }
   }
 
+  async function handleRunTextExtraction() {
+    if (!detail) return;
+    setTextExtractionBusy(true);
+    setTextExtractionError("");
+    try {
+      const response = await apiFetch<DocumentTextExtraction>(
+        `/documents/${detail.id}/text-extraction/run`,
+        {
+          method: "POST",
+          body: JSON.stringify({}),
+        },
+      );
+      setTextExtraction(response);
+      await reloadTranslationRequests(detail.id);
+      setNotice("Document text extraction updated.");
+    } catch (nextError) {
+      setTextExtractionError(
+        nextError instanceof Error
+          ? nextError.message
+          : "Failed to extract document text.",
+      );
+    } finally {
+      setTextExtractionBusy(false);
+    }
+  }
+
   async function handleUpdateTranslationRequest(
     requestId: string,
     status: string,
+    patch?: Partial<TranslationWorkspaceDraft>,
+    successMessage?: string,
   ) {
     if (!detail) return;
     setTranslationBusy(true);
     setTranslationError("");
     try {
+      const existingDraft = translationDrafts[requestId];
+      const draft: TranslationWorkspaceDraft = {
+        note: patch?.note ?? existingDraft?.note ?? "",
+        sourceLanguage:
+          patch?.sourceLanguage ?? existingDraft?.sourceLanguage ?? "",
+        sourceText: patch?.sourceText ?? existingDraft?.sourceText ?? "",
+        translatedText:
+          patch?.translatedText ?? existingDraft?.translatedText ?? "",
+      };
       await apiFetch(`/documents/translation-requests/${requestId}/update`, {
         method: "POST",
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({
+          status,
+          note: draft.note.trim() || null,
+          source_language: draft.sourceLanguage || null,
+          source_text: draft.sourceText.trim() || null,
+          translated_text: draft.translatedText.trim() || null,
+        }),
       });
       await reloadTranslationRequests(detail.id);
-      setNotice(`Translation request marked as ${status.replaceAll("_", " ")}.`);
+      setNotice(
+        successMessage ??
+          `Translation request marked as ${status.replaceAll("_", " ")}.`,
+      );
     } catch (nextError) {
       setTranslationError(
         nextError instanceof Error
@@ -1262,41 +1526,79 @@ function StaffDocumentsPage() {
     }
   }
 
+  async function handleSaveTranslationWorkspace(requestId: string) {
+    const request = translationRequests.find((item) => item.id === requestId);
+    if (!request) return;
+    await handleUpdateTranslationRequest(
+      requestId,
+      request.status,
+      undefined,
+      "Translation workspace saved.",
+    );
+  }
+
+  function handleUseExtractedTextForTranslation(requestId: string) {
+    if (!textExtraction?.extracted_text) return;
+    updateTranslationDraft(requestId, {
+      sourceText: textExtraction.extracted_text,
+    });
+  }
+
   async function handleSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (
-      !detail ||
-      !editForm ||
-      !editForm.autoName.trim() ||
-      !editForm.art.trim()
-    ) {
+    if (!detail || !editForm) {
+      setSaveError("Document data is not available.");
+      return;
+    }
+    if (canManage && (!editForm.autoName.trim() || !editForm.art.trim())) {
       setSaveError("Document name and type are required.");
+      return;
+    }
+    if (!canManage && !canReviewSelectedDocument) {
+      setSaveError("You cannot update this document.");
+      return;
+    }
+    if (!editForm.art.trim()) {
+      setSaveError("Document type is required.");
       return;
     }
     setSaveBusy(true);
     setSaveError("");
     try {
+      const payload = canManage
+        ? {
+            patient_id: editForm.patientId || null,
+            order_id: editForm.orderId || null,
+            appointment_id: editForm.appointmentId || null,
+            auto_name: editForm.autoName.trim(),
+            art: editForm.art.trim(),
+            category: editForm.category || null,
+            status: editForm.status,
+            visibility: editForm.visibility,
+            is_medical: editForm.isMedical,
+            klinik: editForm.klinik.trim() || null,
+            ursprung: editForm.ursprung.trim() || null,
+            notes: editForm.notes.trim() || null,
+          }
+        : {
+            art: editForm.art.trim(),
+            category: editForm.category || null,
+            is_medical: editForm.isMedical,
+            status: "active",
+            notes: editForm.notes.trim() || null,
+          };
       await apiFetch<{ ok: boolean }>(`/documents/${detail.id}/update`, {
         method: "POST",
-        body: JSON.stringify({
-          patient_id: editForm.patientId || null,
-          order_id: editForm.orderId || null,
-          appointment_id: editForm.appointmentId || null,
-          auto_name: editForm.autoName.trim(),
-          art: editForm.art.trim(),
-          category: editForm.category || null,
-          status: editForm.status,
-          visibility: editForm.visibility,
-          is_medical: editForm.isMedical,
-          klinik: editForm.klinik.trim() || null,
-          ursprung: editForm.ursprung.trim() || null,
-          notes: editForm.notes.trim() || null,
-        }),
+        body: JSON.stringify(payload),
       });
       const fresh = await apiFetch<DocumentItem>(`/documents/${detail.id}`);
       setDetail(fresh);
       setEditForm(detailToEditForm(fresh));
-      setNotice("Document metadata updated.");
+      setNotice(
+        canManage
+          ? "Document metadata updated."
+          : "Interpreter upload reviewed and released.",
+      );
       refresh();
     } catch (nextError) {
       setSaveError(
@@ -1525,7 +1827,7 @@ function StaffDocumentsPage() {
                 Generate from template
               </Button>
             ) : null}
-            {canManage ? (
+            {canUpload ? (
               <Button
                 className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
                 onClick={() => setUploadOpen(true)}
@@ -1540,6 +1842,114 @@ function StaffDocumentsPage() {
 
       {error ? <Banner tone="error">{error}</Banner> : null}
       {notice ? <Banner tone="success">{notice}</Banner> : null}
+
+      {canManageIntake &&
+      (intakeBusy || intakeError || intakeQueue.length > 0) ? (
+        <section className="rounded-[2rem] border border-amber-200 bg-amber-50/70 p-6 shadow-sm">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-950">
+                Document intake queue
+              </h2>
+              <p className="mt-1 text-sm text-slate-600">
+                {user?.role === "teamlead_interpreter"
+                  ? "Interpreter uploads and other intake files that still need taxonomy review."
+                  : "Unclassified uploads and portal files that still need taxonomy review."}
+              </p>
+            </div>
+            <Badge className="rounded-full border-amber-200 bg-white text-amber-700">
+              {intakeQueue.length} pending
+            </Badge>
+          </div>
+          {intakeError ? <Banner tone="error">{intakeError}</Banner> : null}
+          {intakeBusy ? (
+            <div className="mt-4 flex items-center text-sm text-slate-600">
+              <LoaderCircle className="mr-2 size-4 animate-spin" />
+              Loading intake queue…
+            </div>
+          ) : intakeQueue.length === 0 ? (
+            <div className="mt-4 rounded-2xl border border-dashed border-amber-200 bg-white/70 px-4 py-4 text-sm text-slate-600">
+              No documents are waiting for categorization.
+            </div>
+          ) : (
+            <div className="mt-4 grid gap-3 xl:grid-cols-2">
+              {intakeQueue.map((item) => (
+                <div
+                  key={item.id}
+                  className="rounded-[1.5rem] border border-amber-200 bg-white px-4 py-4"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-950">
+                        {item.auto_name}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {[item.original_filename, item.patient_pid, item.patient_name]
+                          .filter(Boolean)
+                          .join(" · ") || "Unlinked document"}
+                      </p>
+                    </div>
+                    <Badge
+                      variant="outline"
+                      className="rounded-full border-amber-200 bg-amber-50 text-amber-700"
+                    >
+                      Needs review
+                    </Badge>
+                  </div>
+                  {item.classification_suggestion ? (
+                    <div className="mt-3 rounded-2xl border border-sky-200 bg-sky-50 px-3 py-3 text-sm text-sky-900">
+                      <p className="font-medium">
+                        Suggested: {item.classification_suggestion.art} ·{" "}
+                        {item.classification_suggestion.category}
+                      </p>
+                      <p className="mt-1 text-xs uppercase tracking-[0.14em] text-sky-700">
+                        {item.classification_suggestion.confidence} confidence
+                      </p>
+                      <p className="mt-2 text-sm text-sky-800/90">
+                        {item.classification_suggestion.rationale}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="mt-3 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-600">
+                      No confident auto-classification. Open this document to
+                      classify and release it manually.
+                    </div>
+                  )}
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {item.classification_suggestion ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="rounded-xl"
+                        disabled={intakeActionId === item.id}
+                        onClick={() =>
+                          void handleApplyClassificationSuggestion(item)
+                        }
+                      >
+                        {intakeActionId === item.id ? (
+                          <LoaderCircle className="size-4 animate-spin" />
+                        ) : null}
+                        {item.ursprung === "interpreter_upload" &&
+                        item.status === "draft"
+                          ? "Apply and release"
+                          : "Apply suggestion"}
+                      </Button>
+                    ) : null}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="rounded-xl"
+                      onClick={() => openDocument(item.id)}
+                    >
+                      Open
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      ) : null}
 
       <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
@@ -1787,6 +2197,14 @@ function StaffDocumentsPage() {
                         v{item.version_number}
                         {item.is_latest_version ? " current" : ""}
                       </Badge>
+                      {item.needs_categorization ? (
+                        <Badge
+                          variant="outline"
+                          className="rounded-full border-amber-200 bg-amber-50 text-amber-700"
+                        >
+                          Needs categorization
+                        </Badge>
+                      ) : null}
                     </div>
                     <h3 className="mt-3 text-lg font-semibold text-slate-950">
                       {item.auto_name}
@@ -1796,6 +2214,12 @@ function StaffDocumentsPage() {
                         .filter(Boolean)
                         .join(" · ") || "Unclassified"}
                     </p>
+                    {item.classification_suggestion ? (
+                      <p className="mt-2 text-xs text-sky-700">
+                        Suggested {item.classification_suggestion.art} ·{" "}
+                        {item.classification_suggestion.category}
+                      </p>
+                    ) : null}
                   </div>
                   <Badge
                     variant="outline"
@@ -2184,11 +2608,19 @@ function StaffDocumentsPage() {
           <DialogHeader className="border-b border-border/70 px-6 pt-6 pb-4">
             <DialogTitle>{t.documents_upload}</DialogTitle>
             <DialogDescription>
-              Store the file and classify it before sharing it further.
+              Store the file and classify it now or let the intake queue finish
+              triage.
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleUpload} className="space-y-5 px-6 py-5">
             {uploadError ? <Banner tone="error">{uploadError}</Banner> : null}
+            {!canManage ? (
+              <Banner tone="warning">
+                {user?.role === "interpreter"
+                  ? "Interpreter uploads are stored as internal draft documents and routed to teamlead review."
+                  : "This upload is stored as an internal document. Teamlead uploads do not expose full document-management controls here."}
+              </Banner>
+            ) : null}
             <div className="grid gap-4 md:grid-cols-2">
               <Field label={t.documents_filename} required>
                 <Input
@@ -2273,7 +2705,7 @@ function StaffDocumentsPage() {
                   ))}
                 </select>
               </Field>
-              <Field label={t.documents_category} required>
+              <Field label={t.documents_category}>
                 <Input
                   value={uploadForm.art}
                   onChange={(event) =>
@@ -2284,6 +2716,7 @@ function StaffDocumentsPage() {
                   }
                   list="documents-art-options"
                   className="h-10 rounded-xl border-slate-200 bg-slate-50"
+                  placeholder="Optional. Leave empty for auto-classification."
                 />
               </Field>
               <Field label={t.documents_category}>
@@ -2305,42 +2738,46 @@ function StaffDocumentsPage() {
                   ))}
                 </select>
               </Field>
-              <Field label={t.users_status}>
-                <select
-                  value={uploadForm.status}
-                  onChange={(event) =>
-                    setUploadForm((current) => ({
-                      ...current,
-                      status: event.target.value as DocumentStatus,
-                    }))
-                  }
-                  className={selectClassName}
-                >
-                  {STATUS_OPTIONS.map((status) => (
-                    <option key={status} value={status}>
-                      {status}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label={t.users_status}>
-                <select
-                  value={uploadForm.visibility}
-                  onChange={(event) =>
-                    setUploadForm((current) => ({
-                      ...current,
-                      visibility: event.target.value as DocumentVisibility,
-                    }))
-                  }
-                  className={selectClassName}
-                >
-                  {VISIBILITY_OPTIONS.map((value) => (
-                    <option key={value} value={value}>
-                      {value.replaceAll("_", " ")}
-                    </option>
-                  ))}
-                </select>
-              </Field>
+              {canManage ? (
+                <Field label={t.users_status}>
+                  <select
+                    value={uploadForm.status}
+                    onChange={(event) =>
+                      setUploadForm((current) => ({
+                        ...current,
+                        status: event.target.value as DocumentStatus,
+                      }))
+                    }
+                    className={selectClassName}
+                  >
+                    {STATUS_OPTIONS.map((status) => (
+                      <option key={status} value={status}>
+                        {status}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              ) : null}
+              {canManage ? (
+                <Field label={t.users_status}>
+                  <select
+                    value={uploadForm.visibility}
+                    onChange={(event) =>
+                      setUploadForm((current) => ({
+                        ...current,
+                        visibility: event.target.value as DocumentVisibility,
+                      }))
+                    }
+                    className={selectClassName}
+                  >
+                    {VISIBILITY_OPTIONS.map((value) => (
+                      <option key={value} value={value}>
+                        {value.replaceAll("_", " ")}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              ) : null}
               <Field label={t.common_provider}>
                 <Input
                   value={uploadForm.klinik}
@@ -2353,18 +2790,20 @@ function StaffDocumentsPage() {
                   className="h-10 rounded-xl border-slate-200 bg-slate-50"
                 />
               </Field>
-              <Field label={t.documents_source}>
-                <Input
-                  value={uploadForm.ursprung}
-                  onChange={(event) =>
-                    setUploadForm((current) => ({
-                      ...current,
-                      ursprung: event.target.value,
-                    }))
-                  }
-                  className="h-10 rounded-xl border-slate-200 bg-slate-50"
-                />
-              </Field>
+              {canManage ? (
+                <Field label={t.documents_source}>
+                  <Input
+                    value={uploadForm.ursprung}
+                    onChange={(event) =>
+                      setUploadForm((current) => ({
+                        ...current,
+                        ursprung: event.target.value,
+                      }))
+                    }
+                    className="h-10 rounded-xl border-slate-200 bg-slate-50"
+                  />
+                </Field>
+              ) : null}
             </div>
             <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
               <input
@@ -2659,6 +3098,87 @@ function StaffDocumentsPage() {
                   </SectionCard>
                 ) : null}
 
+                <SectionCard title="Text extraction">
+                  {textExtractionError ? (
+                    <Banner tone="error">{textExtractionError}</Banner>
+                  ) : null}
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            "rounded-full",
+                            textExtractionStatusBadge(
+                              textExtraction?.status ?? "not_started",
+                            ),
+                          )}
+                        >
+                          {(textExtraction?.status ?? "not_started").replaceAll(
+                            "_",
+                            " ",
+                          )}
+                        </Badge>
+                        {textExtraction?.method ? (
+                          <Badge
+                            variant="outline"
+                            className="rounded-full border-slate-200 bg-white text-slate-700"
+                          >
+                            {textExtraction.method}
+                          </Badge>
+                        ) : null}
+                      </div>
+                      <p className="mt-2 text-sm text-slate-600">
+                        {textExtraction?.extracted_at
+                          ? `Last processed ${formatDateTime(textExtraction.extracted_at)}`
+                          : "No extraction has been run for this document yet."}
+                        {textExtraction?.extracted_by_name
+                          ? ` · ${textExtraction.extracted_by_name}`
+                          : ""}
+                      </p>
+                    </div>
+                    {canRequestTranslation ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="rounded-xl"
+                        disabled={textExtractionBusy}
+                        onClick={() => void handleRunTextExtraction()}
+                      >
+                        {textExtractionBusy ? (
+                          <LoaderCircle className="size-4 animate-spin" />
+                        ) : (
+                          <RefreshCw className="size-4" />
+                        )}
+                        Run extraction
+                      </Button>
+                    ) : null}
+                  </div>
+                  {textExtraction?.message ? (
+                    <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                      {textExtraction.message}
+                    </div>
+                  ) : null}
+                  {textExtraction?.extracted_text ? (
+                    <div className="mt-4 space-y-2">
+                      <Label className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">
+                        Extracted text
+                      </Label>
+                      <textarea
+                        readOnly
+                        value={textExtraction.extracted_text}
+                        className={textareaClassName}
+                      />
+                    </div>
+                  ) : (
+                    <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">
+                      No extracted text available yet. Use extraction for
+                      text-based files or add manual transcription in the
+                      translation workspace.
+                    </div>
+                  )}
+                </SectionCard>
+
                 {detail.patient_id ? (
                   <SectionCard title="Translation requests">
                     {translationError ? (
@@ -2722,45 +3242,73 @@ function StaffDocumentsPage() {
                       </div>
                     ) : (
                       <div className="space-y-3">
-                        {translationRequests.map((request) => (
-                          <div
-                            key={request.id}
-                            className="rounded-2xl border border-slate-200 bg-white px-4 py-4"
-                          >
-                            <div className="flex flex-wrap items-start justify-between gap-3">
-                              <div>
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <Badge
-                                    variant="outline"
-                                    className={cn(
-                                      "rounded-full",
-                                      translationStatusBadge(request.status),
-                                    )}
-                                  >
-                                    {request.status.replaceAll("_", " ")}
-                                  </Badge>
-                                  <Badge
-                                    variant="outline"
-                                    className="rounded-full border-slate-200 bg-white text-slate-700"
-                                  >
-                                    {request.requested_language.toUpperCase()}
-                                  </Badge>
+                        {translationRequests.map((request) => {
+                          const draft = translationDrafts[request.id] ?? {
+                            note: request.note ?? "",
+                            sourceLanguage: request.source_language ?? "",
+                            sourceText: request.source_text ?? "",
+                            translatedText: request.translated_text ?? "",
+                          };
+                          const canEditWorkspace =
+                            canUpdateTranslation && request.status !== "cancelled";
+
+                          return (
+                            <div
+                              key={request.id}
+                              className="rounded-2xl border border-slate-200 bg-white px-4 py-4"
+                            >
+                              <div className="flex flex-wrap items-start justify-between gap-3">
+                                <div>
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <Badge
+                                      variant="outline"
+                                      className={cn(
+                                        "rounded-full",
+                                        translationStatusBadge(request.status),
+                                      )}
+                                    >
+                                      {request.status.replaceAll("_", " ")}
+                                    </Badge>
+                                    <Badge
+                                      variant="outline"
+                                      className="rounded-full border-slate-200 bg-white text-slate-700"
+                                    >
+                                      {request.requested_language.toUpperCase()}
+                                    </Badge>
+                                  </div>
+                                  <p className="mt-2 text-sm font-semibold text-slate-950">
+                                    {request.requested_by_name || "Unknown requester"}
+                                  </p>
+                                  <p className="mt-1 text-xs text-slate-500">
+                                    {formatDateTime(request.requested_at)}
+                                    {request.completed_at
+                                      ? ` · completed ${formatDateTime(request.completed_at)}`
+                                      : ""}
+                                    {request.translated_by_name
+                                      ? ` · workspace ${request.translated_by_name}`
+                                      : ""}
+                                  </p>
                                 </div>
-                                <p className="mt-2 text-sm font-semibold text-slate-950">
-                                  {request.requested_by_name || "Unknown requester"}
-                                </p>
-                                <p className="mt-1 text-xs text-slate-500">
-                                  {formatDateTime(request.requested_at)}
-                                  {request.completed_at
-                                    ? ` · completed ${formatDateTime(request.completed_at)}`
-                                    : ""}
-                                </p>
-                              </div>
-                              {canUpdateTranslation &&
-                              request.status !== "completed" &&
-                              request.status !== "cancelled" ? (
-                                <div className="flex flex-wrap gap-2">
-                                  {request.status !== "in_progress" ? (
+                                {canUpdateTranslation &&
+                                request.status !== "completed" &&
+                                request.status !== "cancelled" ? (
+                                  <div className="flex flex-wrap gap-2">
+                                    {request.status !== "in_progress" ? (
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        className="rounded-xl"
+                                        disabled={translationBusy}
+                                        onClick={() =>
+                                          void handleUpdateTranslationRequest(
+                                            request.id,
+                                            "in_progress",
+                                          )
+                                        }
+                                      >
+                                        Start
+                                      </Button>
+                                    ) : null}
                                     <Button
                                       type="button"
                                       variant="outline"
@@ -2769,53 +3317,258 @@ function StaffDocumentsPage() {
                                       onClick={() =>
                                         void handleUpdateTranslationRequest(
                                           request.id,
-                                          "in_progress",
+                                          "completed",
                                         )
                                       }
                                     >
-                                      Start
+                                      Complete
                                     </Button>
-                                  ) : null}
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    className="rounded-xl"
-                                    disabled={translationBusy}
-                                    onClick={() =>
-                                      void handleUpdateTranslationRequest(
-                                        request.id,
-                                        "completed",
-                                      )
-                                    }
-                                  >
-                                    Complete
-                                  </Button>
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    className="rounded-xl"
-                                    disabled={translationBusy}
-                                    onClick={() =>
-                                      void handleUpdateTranslationRequest(
-                                        request.id,
-                                        "cancelled",
-                                      )
-                                    }
-                                  >
-                                    Cancel
-                                  </Button>
-                                </div>
-                              ) : null}
-                            </div>
-                            {request.note ? (
-                              <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-                                {request.note}
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      className="rounded-xl"
+                                      disabled={translationBusy}
+                                      onClick={() =>
+                                        void handleUpdateTranslationRequest(
+                                          request.id,
+                                          "cancelled",
+                                        )
+                                      }
+                                    >
+                                      Cancel
+                                    </Button>
+                                  </div>
+                                ) : null}
                               </div>
-                            ) : null}
-                          </div>
-                        ))}
+                              {canEditWorkspace ? (
+                                <div className="mt-4 space-y-4">
+                                  <div className="grid gap-4 md:grid-cols-2">
+                                    <Field label="Source language">
+                                      <select
+                                        value={draft.sourceLanguage}
+                                        onChange={(event) =>
+                                          updateTranslationDraft(request.id, {
+                                            sourceLanguage: event.target.value,
+                                          })
+                                        }
+                                        className={selectClassName}
+                                      >
+                                        <option value="">Not set</option>
+                                        <option value="de">DE</option>
+                                        <option value="en">EN</option>
+                                        <option value="uk">UK</option>
+                                      </select>
+                                    </Field>
+                                    <div className="flex flex-wrap items-end gap-2">
+                                      {textExtraction?.extracted_text ? (
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          className="rounded-xl"
+                                          disabled={translationBusy}
+                                          onClick={() =>
+                                            handleUseExtractedTextForTranslation(
+                                              request.id,
+                                            )
+                                          }
+                                        >
+                                          Use extracted text
+                                        </Button>
+                                      ) : null}
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        className="rounded-xl"
+                                        disabled={translationBusy}
+                                        onClick={() =>
+                                          void handleSaveTranslationWorkspace(
+                                            request.id,
+                                          )
+                                        }
+                                      >
+                                        Save workspace
+                                      </Button>
+                                    </div>
+                                  </div>
+                                  <Field label={t.patients_notes}>
+                                    <textarea
+                                      value={draft.note}
+                                      onChange={(event) =>
+                                        updateTranslationDraft(request.id, {
+                                          note: event.target.value,
+                                        })
+                                      }
+                                      className={textareaClassName}
+                                      placeholder="Scope, reviewer notes or delivery constraints"
+                                    />
+                                  </Field>
+                                  <Field label="Source text">
+                                    <textarea
+                                      value={draft.sourceText}
+                                      onChange={(event) =>
+                                        updateTranslationDraft(request.id, {
+                                          sourceText: event.target.value,
+                                        })
+                                      }
+                                      className={textareaClassName}
+                                      placeholder="Original extracted or manually transcribed text"
+                                    />
+                                  </Field>
+                                  <Field label="Translated text">
+                                    <textarea
+                                      value={draft.translatedText}
+                                      onChange={(event) =>
+                                        updateTranslationDraft(request.id, {
+                                          translatedText: event.target.value,
+                                        })
+                                      }
+                                      className={textareaClassName}
+                                      placeholder="Final translated text"
+                                    />
+                                  </Field>
+                                </div>
+                              ) : (
+                                <div className="mt-4 space-y-3">
+                                  {request.note ? (
+                                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                                      {request.note}
+                                    </div>
+                                  ) : null}
+                                  {request.source_text ? (
+                                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3">
+                                      <p className="text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
+                                        Source text
+                                      </p>
+                                      <p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">
+                                        {request.source_text}
+                                      </p>
+                                    </div>
+                                  ) : null}
+                                  {request.translated_text ? (
+                                    <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-3">
+                                      <p className="text-xs font-medium uppercase tracking-[0.16em] text-emerald-700">
+                                        Translated text
+                                      </p>
+                                      <p className="mt-2 whitespace-pre-wrap text-sm text-emerald-900">
+                                        {request.translated_text}
+                                      </p>
+                                    </div>
+                                  ) : null}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
+                  </SectionCard>
+                ) : null}
+
+                {canReviewSelectedDocument && editForm ? (
+                  <SectionCard title="Interpreter Review">
+                    {saveError ? (
+                      <Banner tone="error">{saveError}</Banner>
+                    ) : null}
+                    <form onSubmit={handleSave} className="space-y-4">
+                      <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                        Review the uploaded interpreter document, complete its
+                        classification and release it into active internal
+                        status.
+                      </div>
+                      {detail.classification_suggestion ? (
+                        <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+                          Suggested classification:{" "}
+                          <span className="font-medium">
+                            {detail.classification_suggestion.art} ·{" "}
+                            {detail.classification_suggestion.category}
+                          </span>
+                        </div>
+                      ) : null}
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <Field label={t.documents_category} required>
+                          <Input
+                            value={editForm.art}
+                            onChange={(event) =>
+                              setEditForm((current) =>
+                                current
+                                  ? { ...current, art: event.target.value }
+                                  : current,
+                              )
+                            }
+                            list="documents-art-options"
+                            className="h-10 rounded-xl border-slate-200 bg-slate-50"
+                          />
+                        </Field>
+                        <Field label="Taxonomy category">
+                          <select
+                            value={editForm.category}
+                            onChange={(event) =>
+                              setEditForm((current) =>
+                                current
+                                  ? { ...current, category: event.target.value }
+                                  : current,
+                              )
+                            }
+                            className={selectClassName}
+                          >
+                            <option value="">Choose category</option>
+                            {categories.map((category) => (
+                              <option key={category.key} value={category.key}>
+                                {category.label}
+                              </option>
+                            ))}
+                          </select>
+                        </Field>
+                      </div>
+                      <label className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={editForm.isMedical}
+                          onChange={(event) =>
+                            setEditForm((current) =>
+                              current
+                                ? {
+                                    ...current,
+                                    isMedical: event.target.checked,
+                                  }
+                                : current,
+                            )
+                          }
+                          className="size-4 rounded border-slate-300"
+                        />
+                        Mark as medical document
+                      </label>
+                      <Field label="Review notes">
+                        <textarea
+                          value={editForm.notes}
+                          onChange={(event) =>
+                            setEditForm((current) =>
+                              current
+                                ? { ...current, notes: event.target.value }
+                                : current,
+                            )
+                          }
+                          className="min-h-[120px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-sky-300 focus:bg-white"
+                          placeholder="Add review notes or release context."
+                        />
+                      </Field>
+                      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                        <span>
+                          Release keeps the document internal and sets status to
+                          `active`.
+                        </span>
+                        <Button
+                          type="submit"
+                          className="rounded-xl"
+                          disabled={saveBusy}
+                        >
+                          {saveBusy ? (
+                            <LoaderCircle className="mr-2 size-4 animate-spin" />
+                          ) : null}
+                          {saveBusy ? "Releasing..." : "Release reviewed document"}
+                        </Button>
+                      </div>
+                    </form>
                   </SectionCard>
                 ) : null}
 
@@ -3431,7 +4184,7 @@ function Banner({
   tone,
   children,
 }: {
-  tone: "error" | "success";
+  tone: "error" | "success" | "warning";
   children: ReactNode;
 }) {
   return (
@@ -3440,7 +4193,9 @@ function Banner({
         "rounded-2xl border px-4 py-3 text-sm",
         tone === "error"
           ? "border-rose-200 bg-rose-50 text-rose-700"
-          : "border-emerald-200 bg-emerald-50 text-emerald-700",
+          : tone === "warning"
+            ? "border-amber-200 bg-amber-50 text-amber-700"
+            : "border-emerald-200 bg-emerald-50 text-emerald-700",
       )}
     >
       {children}

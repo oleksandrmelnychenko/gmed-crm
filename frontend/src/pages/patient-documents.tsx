@@ -13,6 +13,7 @@ import {
   uploadedDocumentTone,
 } from "@/pages/patient-portal.shared";
 import type {
+  PortalDocumentAlertsSummary,
   PortalDocumentItem,
   PortalUploadedDocumentItem,
 } from "@/pages/patient-portal.shared";
@@ -20,6 +21,7 @@ import { cn } from "@/lib/utils";
 
 export function PatientDocumentsPage() {
   const [documents, setDocuments] = useState<PortalDocumentItem[]>([]);
+  const [documentAlerts, setDocumentAlerts] = useState<PortalDocumentAlertsSummary | null>(null);
   const [uploads, setUploads] = useState<PortalUploadedDocumentItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -45,13 +47,15 @@ export function PatientDocumentsPage() {
       }
 
       try {
-        const [releasedRows, uploadedRows] = await Promise.all([
+        const [releasedRows, uploadedRows, alertSummary] = await Promise.all([
           apiFetch<PortalDocumentItem[]>("/me/documents"),
           apiFetch<PortalUploadedDocumentItem[]>("/me/documents/uploads"),
+          apiFetch<PortalDocumentAlertsSummary>("/me/document-alerts").catch(() => null),
         ]);
         if (cancelled) return;
         startTransition(() => {
           setDocuments(releasedRows);
+          setDocumentAlerts(alertSummary);
           setUploads(uploadedRows);
           setError("");
         });
@@ -210,6 +214,55 @@ export function PatientDocumentsPage() {
       {error ? (
         <section className="rounded-[1.5rem] border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700 shadow-sm">
           {error}
+        </section>
+      ) : null}
+
+      {documentAlerts && documentAlerts.configured_rule_count > 0 ? (
+        <section
+          className={cn(
+            "rounded-[1.75rem] border px-5 py-4 shadow-sm",
+            documentAlerts.document_pack_complete
+              ? "border-emerald-200 bg-emerald-50"
+              : "border-amber-200 bg-amber-50",
+          )}
+        >
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                Required documents
+              </p>
+              <h2 className="mt-2 text-lg font-semibold text-slate-950">
+                {documentAlerts.document_pack_complete
+                  ? "Your minimum document pack is complete"
+                  : `${documentAlerts.missing_count} required document${documentAlerts.missing_count === 1 ? "" : "s"} still missing`}
+              </h2>
+              <p className="mt-2 text-sm text-slate-600">
+                {documentAlerts.document_pack_complete
+                  ? "You already uploaded or received all required base documents."
+                  : "Use the upload form below to send the missing items to your care team."}
+              </p>
+              {documentAlerts.missing_count > 0 ? (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {documentAlerts.missing_documents.map((item) => (
+                    <Badge
+                      key={item.key}
+                      variant="outline"
+                      className="rounded-full border-amber-300 bg-white text-amber-800"
+                    >
+                      {item.label}
+                    </Badge>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+            <div className="rounded-2xl border border-white/60 bg-white/70 px-4 py-2 text-sm text-slate-700">
+              Fulfilled:{" "}
+              <span className="font-semibold text-slate-950">
+                {documentAlerts.required_documents.filter((item) => item.fulfilled).length}/
+                {documentAlerts.configured_rule_count}
+              </span>
+            </div>
+          </div>
         </section>
       ) : null}
 

@@ -6,7 +6,16 @@ import { Topbar } from "./topbar";
 import { cn } from "@/lib/utils";
 
 function isPatientPortalPath(pathname: string) {
-  return pathname === "/" || pathname === "/documents" || pathname === "/privacy" || pathname === "/invoices" || pathname === "/appointments";
+  return (
+    pathname === "/" ||
+    pathname === "/chat" ||
+    pathname === "/documents" ||
+    pathname === "/privacy" ||
+    pathname === "/invoices" ||
+    pathname === "/appointments" ||
+    pathname === "/services" ||
+    pathname === "/feedback"
+  );
 }
 
 export function AppLayout() {

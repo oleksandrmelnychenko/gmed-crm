@@ -36,6 +36,8 @@ type ProviderDetail = {
   id: string;
   name: string;
   provider_type: string;
+  legal_name?: string | null;
+  tax_id?: string | null;
   address_street?: string | null;
   address_city?: string | null;
   address_zip?: string | null;
@@ -59,8 +61,12 @@ type DoctorItem = {
   name: string;
   title?: string | null;
   fachbereich?: string | null;
+  languages?: string[];
   phone?: string | null;
   email?: string | null;
+  license_number?: string | null;
+  licensing_country?: string | null;
+  licensing_valid_until?: string | null;
   notes?: string | null;
   patient_count: number;
   appointment_count: number;
@@ -221,6 +227,9 @@ export function ProviderDetailPage() {
             </div>
             <div>
               <h1 className="text-2xl font-semibold text-slate-950">{detail.name}</h1>
+              {detail.legal_name && detail.legal_name !== detail.name ? (
+                <p className="mt-1 text-sm font-medium text-slate-700">{detail.legal_name}</p>
+              ) : null}
               <div className="flex items-center gap-3 mt-1 text-sm text-slate-500">
                 <Badge variant="outline" className={cn("rounded-full", detail.provider_type === "non_medical" ? "border-teal-200 bg-teal-50 text-teal-700" : "border-sky-200 bg-sky-50 text-sky-700")}>
                   {detail.provider_type === "non_medical" ? t.providers_type_non_medical : t.providers_type_medical}
@@ -229,6 +238,7 @@ export function ProviderDetailPage() {
                   {detail.is_active ? t.common_active : t.common_inactive}
                 </Badge>
                 {detail.fachbereich && <span>{detail.fachbereich}</span>}
+                {detail.tax_id && <span>{`Tax ID ${detail.tax_id}`}</span>}
               </div>
             </div>
           </div>
@@ -293,6 +303,8 @@ export function ProviderDetailPage() {
               <InfoRow label={t.providers_country} value={fieldVal(detail.address_country, t.common_not_set)} />
               <InfoRow label={t.field_phone} value={fieldVal(detail.phone, t.common_not_set)} />
               <InfoRow label={t.field_email} value={fieldVal(detail.email, t.common_not_set)} />
+              <InfoRow label="Legal name" value={fieldVal(detail.legal_name, t.common_not_set)} />
+              <InfoRow label="Tax ID" value={fieldVal(detail.tax_id, t.common_not_set)} />
               <InfoRow label={t.providers_website} value={fieldVal(detail.website, t.common_not_set)} />
               <InfoRow label={t.providers_fachbereich} value={fieldVal(detail.fachbereich, t.common_not_set)} />
             </div>
@@ -325,6 +337,20 @@ export function ProviderDetailPage() {
                   <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-500">
                     <div className="flex items-center gap-1"><Phone className="size-3" />{doc.phone || t.common_not_set}</div>
                     <div className="flex items-center gap-1"><Mail className="size-3" />{doc.email || t.common_not_set}</div>
+                  </div>
+                  {doc.languages && doc.languages.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {doc.languages.map((language) => (
+                        <Badge key={`${doc.id}-${language}`} variant="outline" className="rounded-full border-slate-200 bg-white text-slate-700">
+                          {language}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                  <div className="mt-3 grid grid-cols-1 gap-2 text-xs text-slate-500">
+                    <div>{`License ${doc.license_number || t.common_not_set}`}</div>
+                    <div>{`Country ${doc.licensing_country || t.common_not_set}`}</div>
+                    <div>{`Valid until ${fmtDate(doc.licensing_valid_until, t.common_not_set)}`}</div>
                   </div>
                   <div className="mt-3 flex gap-3 text-xs text-slate-400">
                     <span>{doc.patient_count} {t.providers_linked_patients}</span>

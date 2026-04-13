@@ -59,6 +59,7 @@ type PatientSummary = {
   nationality?: string | null;
   residence_country?: string | null;
   languages?: string[];
+  functional_labels?: string[];
   phone_primary?: string | null;
   email?: string | null;
   insurance_provider?: string | null;
@@ -128,6 +129,7 @@ type PatientFormState = {
   nationality: string;
   residenceCountry: string;
   languages: string;
+  functionalLabels: string;
   phonePrimary: string;
   phoneSecondary: string;
   email: string;
@@ -194,6 +196,7 @@ function blankPatientForm(): PatientFormState {
     nationality: "",
     residenceCountry: "",
     languages: "",
+    functionalLabels: "",
     phonePrimary: "",
     phoneSecondary: "",
     email: "",
@@ -223,6 +226,17 @@ function parseLanguages(value: string) {
     .filter(Boolean);
 }
 
+function parseFunctionalLabels(value: string) {
+  return value
+    .split(",")
+    .map((item) => item.trim().toLowerCase().replaceAll("-", "_").replaceAll(" ", "_"))
+    .filter(Boolean);
+}
+
+function humanizeFunctionalLabel(value: string) {
+  return value.replaceAll("_", " ");
+}
+
 function patientToForm(detail: PatientDetail): PatientFormState {
   return {
     title: detail.title ?? "",
@@ -233,6 +247,7 @@ function patientToForm(detail: PatientDetail): PatientFormState {
     nationality: detail.nationality ?? "",
     residenceCountry: detail.residence_country ?? "",
     languages: detail.languages?.join(", ") ?? "",
+    functionalLabels: detail.functional_labels?.join(", ") ?? "",
     phonePrimary: detail.phone_primary ?? "",
     phoneSecondary: detail.phone_secondary ?? "",
     email: detail.email ?? "",
@@ -695,6 +710,7 @@ export function PatientsPage() {
           nationality: toOptional(createForm.nationality),
           residence_country: toOptional(createForm.residenceCountry),
           languages: parseLanguages(createForm.languages),
+          functional_labels: parseFunctionalLabels(createForm.functionalLabels),
           phone_primary: toOptional(createForm.phonePrimary),
           phone_secondary: toOptional(createForm.phoneSecondary),
           email: toOptional(createForm.email),
@@ -741,6 +757,7 @@ export function PatientsPage() {
           nationality: toOptional(editForm.nationality),
           residence_country: toOptional(editForm.residenceCountry),
           languages: parseLanguages(editForm.languages),
+          functional_labels: parseFunctionalLabels(editForm.functionalLabels),
           address_street: toOptional(editForm.addressStreet),
           address_city: toOptional(editForm.addressCity),
           address_zip: toOptional(editForm.addressZip),
@@ -1008,6 +1025,15 @@ export function PatientsPage() {
                           <Badge variant="outline" className="rounded-full border-slate-200 bg-white text-slate-700">
                             {insuranceLabel(patient.insurance_type, tr)}
                           </Badge>
+                          {patient.functional_labels?.map((label) => (
+                            <Badge
+                              key={`${patient.id}-${label}`}
+                              variant="outline"
+                              className="rounded-full border-amber-200 bg-amber-50 text-amber-700"
+                            >
+                              {humanizeFunctionalLabel(label)}
+                            </Badge>
+                          ))}
                         </div>
                         <h3 className="mt-3 text-lg font-semibold text-slate-950">
                           {patientName(patient)}
@@ -1224,6 +1250,15 @@ function PatientOverviewSection({
         <Badge variant="outline" className="rounded-full border-slate-200 bg-white text-slate-700">
           {insuranceLabel(detail.insurance_type, tr)}
         </Badge>
+        {detail.functional_labels?.map((label) => (
+          <Badge
+            key={`${detail.id}-${label}`}
+            variant="outline"
+            className="rounded-full border-amber-200 bg-amber-50 text-amber-700"
+          >
+            {humanizeFunctionalLabel(label)}
+          </Badge>
+        ))}
       </div>
 
       <div className="mt-4 flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
@@ -1550,6 +1585,15 @@ function PatientFormFields({
           onChange={(event) => onChange("languages", event.target.value)}
           className="h-10 rounded-xl bg-slate-50"
           placeholder={t.patients_languages}
+        />
+      </Field>
+
+      <Field label="Functional labels">
+        <Input
+          value={form.functionalLabels}
+          onChange={(event) => onChange("functionalLabels", event.target.value)}
+          className="h-10 rounded-xl bg-slate-50"
+          placeholder="vip, high_risk"
         />
       </Field>
 

@@ -1,6 +1,6 @@
 import { startTransition, useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { LoaderCircle, RefreshCw, Upload } from "lucide-react";
+import { Download, LoaderCircle, RefreshCw, Upload } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,8 @@ import {
   formatPortalDateTime,
   invoiceStatusTone,
   invoiceTypeTone,
+  downloadPortalInvoicePdf,
+  openPortalInvoicePdf,
 } from "@/pages/patient-portal.shared";
 import type { PortalInvoiceItem, PortalInvoiceLineItem } from "@/pages/patient-portal.shared";
 import { cn } from "@/lib/utils";
@@ -307,6 +309,31 @@ export function PatientInvoicesPage() {
                       <p className="mt-1 text-sm text-slate-500">Amounts, due date and linked quote/order context.</p>
                     </div>
                     <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="rounded-2xl"
+                        onClick={() =>
+                          void openPortalInvoicePdf(detail.id).catch((err) => {
+                            setDetailError(err instanceof Error ? err.message : "Failed to open invoice PDF.");
+                          })
+                        }
+                      >
+                        Preview PDF
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="rounded-2xl"
+                        onClick={() =>
+                          void downloadPortalInvoicePdf(detail.id, `${detail.invoice_number}.pdf`).catch((err) => {
+                            setDetailError(err instanceof Error ? err.message : "Failed to download invoice PDF.");
+                          })
+                        }
+                      >
+                        <Download className="size-4" />
+                        Download PDF
+                      </Button>
                       <Badge variant="outline" className={cn("rounded-full", invoiceStatusTone(detail.status))}>
                         {detail.status.replaceAll("_", " ")}
                       </Badge>

@@ -96,9 +96,32 @@ type QuoteItem = {
   paid_amount: unknown;
   paid_at: string | null;
   notes: string | null;
+  version_count?: number;
+  current_version_number?: number;
   created_at: string;
   updated_at: string;
   line_items?: QuoteLineItem[];
+};
+
+type QuoteVersionItem = {
+  id: string;
+  quote_id: string;
+  version_number: number;
+  order_id: string;
+  quote_number: string;
+  status: QuoteStatus | string;
+  total_net: unknown;
+  total_vat: unknown;
+  total_gross: unknown;
+  valid_until: string | null;
+  paid_amount: unknown;
+  paid_at: string | null;
+  notes: string | null;
+  change_reason: string | null;
+  line_item_count: number;
+  created_at: string;
+  created_by_name: string;
+  created_by_role: string;
 };
 
 type PatientOption = {
@@ -404,10 +427,13 @@ export function ContractsPage() {
   const [selectedQuoteId, setSelectedQuoteId] = useState(initialQuoteId);
   const [contractDetail, setContractDetail] = useState<ContractItem | null>(null);
   const [quoteDetail, setQuoteDetail] = useState<QuoteItem | null>(null);
+  const [quoteVersions, setQuoteVersions] = useState<QuoteVersionItem[]>([]);
   const [contractDetailLoading, setContractDetailLoading] = useState(false);
   const [quoteDetailLoading, setQuoteDetailLoading] = useState(false);
+  const [quoteVersionsLoading, setQuoteVersionsLoading] = useState(false);
   const [contractDetailError, setContractDetailError] = useState<string | null>(null);
   const [quoteDetailError, setQuoteDetailError] = useState<string | null>(null);
+  const [quoteVersionsError, setQuoteVersionsError] = useState<string | null>(null);
   const [contractsReloadToken, setContractsReloadToken] = useState(0);
   const [quotesReloadToken, setQuotesReloadToken] = useState(0);
   const [createContractOpen, setCreateContractOpen] = useState(false);
@@ -585,22 +611,37 @@ export function ContractsPage() {
   useEffect(() => {
     if (!selectedQuoteId) {
       setQuoteDetail(null);
+      setQuoteVersions([]);
       setQuoteDetailError(null);
+      setQuoteVersionsError(null);
       return;
     }
     let ignore = false;
     async function loadQuoteDetail() {
       setQuoteDetailLoading(true);
+      setQuoteVersionsLoading(true);
       setQuoteDetailError(null);
+      setQuoteVersionsError(null);
       try {
-        const data = await apiFetch<QuoteItem>(`/quotes/${selectedQuoteId}`);
+        const [data, versions] = await Promise.all([
+          apiFetch<QuoteItem>(`/quotes/${selectedQuoteId}`),
+          apiFetch<QuoteVersionItem[]>(`/quotes/${selectedQuoteId}/versions`),
+        ]);
         if (ignore) return;
         setQuoteDetail(data);
+        setQuoteVersions(versions);
         setQuoteStatusForm(quoteToStatusForm(data));
       } catch (error) {
-        if (!ignore) setQuoteDetailError(error instanceof Error ? error.message : t.common_error);
+        if (!ignore) {
+          const message = error instanceof Error ? error.message : t.common_error;
+          setQuoteDetailError(message);
+          setQuoteVersionsError(message);
+        }
       } finally {
-        if (!ignore) setQuoteDetailLoading(false);
+        if (!ignore) {
+          setQuoteDetailLoading(false);
+          setQuoteVersionsLoading(false);
+        }
       }
     }
     void loadQuoteDetail();
@@ -1454,6 +1495,14 @@ export function ContractsPage() {
                     <DetailField label="VAT total" value={formatCurrency(quoteDetail.total_vat)} />
                     <DetailField label="Gross total" value={formatCurrency(quoteDetail.total_gross)} />
                     <DetailField label={t.invoices_paid_at} value={formatCurrency(quoteDetail.paid_amount)} />
+                    <DetailField
+                      label="Snapshot version"
+                      value={
+                        quoteDetail.current_version_number
+                          ? `${quoteDetail.current_version_number} / ${quoteDetail.version_count ?? quoteDetail.current_version_number}`
+                          : "0"
+                      }
+                    />
                     <DetailField label={t.contracts_notes} value={quoteDetail.notes || t.common_not_set} />
                   </div>
                 </SectionCard>
@@ -1530,6 +1579,50 @@ export function ContractsPage() {
                           </div>
                           {line.notes ? (
                             <div className="mt-3 text-sm text-slate-600">{line.notes}</div>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </SectionCard>
+
+                <SectionCard title="Version history" description="Immutable quote snapshots for lifecycle and payment-state changes.">
+                  {quoteVersionsLoading ? (
+                    <LoadingState label={t.common_loading} />
+                  ) : quoteVersionsError ? (
+                    <Banner tone="error">{quoteVersionsError}</Banner>
+                  ) : quoteVersions.length === 0 ? (
+                    <EmptyState title="No versions" description="No stored quote snapshots are available yet." />
+                  ) : (
+                    <div className="space-y-3">
+                      {quoteVersions.map((version) => (
+                        <div key={version.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <h3 className="text-sm font-semibold text-slate-900">
+                                  Version {version.version_number}
+                                </h3>
+                                <Badge variant="outline" className={cn("rounded-full", quoteStatusClassName(version.status))}>
+                                  {version.status}
+                                </Badge>
+                              </div>
+                              <p className="mt-1 text-xs text-slate-500">
+                                {formatDateTime(version.created_at)} · {version.created_by_name} ({version.created_by_role})
+                              </p>
+                              <p className="mt-2 text-sm text-slate-600">
+                                {(version.change_reason || "snapshot").replaceAll("_", " ")} · {version.line_item_count} line items
+                              </p>
+                            </div>
+                            <div className="grid min-w-[220px] gap-3 md:grid-cols-2">
+                              <MiniMetric label="Gross" value={formatCurrency(version.total_gross)} />
+                              <MiniMetric label={t.invoices_paid} value={formatCurrency(version.paid_amount)} />
+                              <MiniMetric label={t.providers_service_valid_to} value={formatDate(version.valid_until)} />
+                              <MiniMetric label={t.invoices_paid_at} value={formatDateTime(version.paid_at)} />
+                            </div>
+                          </div>
+                          {version.notes ? (
+                            <div className="mt-3 text-sm text-slate-600">{version.notes}</div>
                           ) : null}
                         </div>
                       ))}

@@ -68,6 +68,7 @@ type AppointmentStatus =
   | "completed"
   | "cancelled";
 type InterpreterResponse = "pending" | "accepted" | "declined" | "discussion";
+type AppointmentRecurrenceFrequency = "daily" | "weekly" | "monthly";
 
 type AppointmentListItem = {
   id: string;
@@ -92,6 +93,13 @@ type AppointmentListItem = {
   owner_role: string | null;
   interpreter_id: string | null;
   interpreter_name: string | null;
+  recurrence_series_id: string | null;
+  recurrence_frequency: AppointmentRecurrenceFrequency | null;
+  recurrence_interval: number | null;
+  recurrence_count: number | null;
+  recurrence_until: string | null;
+  recurrence_index: number;
+  recurrence_series_size: number;
   is_blocked: boolean;
 };
 
@@ -363,6 +371,11 @@ type AppointmentFormState = {
   location: string;
   category: string;
   notes: string;
+  repeatEnabled: boolean;
+  repeatFrequency: AppointmentRecurrenceFrequency;
+  repeatInterval: string;
+  repeatCount: string;
+  repeatUntil: string;
 };
 
 type FollowUpVisitFormState = AppointmentFormState & {
@@ -566,6 +579,11 @@ const STATUS_OPTIONS: AppointmentStatus[] = [
   "cancelled",
 ];
 const TYPE_OPTIONS: AppointmentKind[] = ["medical", "non_medical", "internal"];
+const RECURRENCE_FREQUENCY_OPTIONS: AppointmentRecurrenceFrequency[] = [
+  "daily",
+  "weekly",
+  "monthly",
+];
 const INTERPRETER_RESPONSE_OPTIONS: InterpreterResponse[] = [
   "pending",
   "accepted",
@@ -804,6 +822,11 @@ function blankAppointmentForm(): AppointmentFormState {
     location: "",
     category: "",
     notes: "",
+    repeatEnabled: false,
+    repeatFrequency: "weekly",
+    repeatInterval: "1",
+    repeatCount: "4",
+    repeatUntil: "",
   };
 }
 
@@ -840,6 +863,11 @@ function buildFollowUpVisitForm(
     location: detail.location ?? "",
     category: detail.category ? `${detail.category} ${followUpLabel}` : followUpLabel,
     notes: detail.followup_notes ?? detail.notes ?? "",
+    repeatEnabled: false,
+    repeatFrequency: "weekly",
+    repeatInterval: "1",
+    repeatCount: "4",
+    repeatUntil: "",
     linkOrder: Boolean(detail.order_id),
     createReminder: true,
     reminderUserId: defaultReminderUserId,
@@ -1561,6 +1589,47 @@ function doctorLabel(doctor: DoctorOption) {
   return doctor.fachbereich
     ? `${doctor.name} (${doctor.fachbereich})`
     : doctor.name;
+}
+
+function recurrenceFrequencyLabel(value: AppointmentRecurrenceFrequency) {
+  switch (value) {
+    case "daily":
+      return "Daily";
+    case "weekly":
+      return "Weekly";
+    case "monthly":
+      return "Monthly";
+    default:
+      return value;
+  }
+}
+
+function recurrenceCadenceLabel(item: {
+  recurrence_frequency: AppointmentRecurrenceFrequency | null;
+  recurrence_interval: number | null;
+}) {
+  if (!item.recurrence_frequency) return "One-time appointment";
+  const interval = item.recurrence_interval ?? 1;
+  const unit =
+    item.recurrence_frequency === "daily"
+      ? interval === 1
+        ? "day"
+        : "days"
+      : item.recurrence_frequency === "weekly"
+        ? interval === 1
+          ? "week"
+          : "weeks"
+        : interval === 1
+          ? "month"
+          : "months";
+  return `Every ${interval} ${unit}`;
+}
+
+function parsePositiveIntegerInput(value: string) {
+  const normalized = value.trim();
+  if (!normalized) return null;
+  const parsed = Number.parseInt(normalized, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
 function findingsArtifactLabel(value: FindingsFollowUpArtifact) {
@@ -2766,6 +2835,11 @@ function StaffAppointmentsPage() {
           location: appointmentDetail.location ?? "",
           category: appointmentDetail.category ?? "",
           notes: appointmentDetail.notes ?? "",
+          repeatEnabled: false,
+          repeatFrequency: "weekly",
+          repeatInterval: "1",
+          repeatCount: "4",
+          repeatUntil: "",
         });
       } catch (error) {
         if (!active) return;
@@ -2981,9 +3055,24 @@ function StaffAppointmentsPage() {
     setCreateBusy(true);
     setCreateError("");
     try {
+      const repeatInterval = parsePositiveIntegerInput(createForm.repeatInterval);
+      const repeatCount = parsePositiveIntegerInput(createForm.repeatCount);
+      if (createForm.repeatEnabled) {
+        if (!repeatInterval) {
+          setCreateError("Repeat interval must be a positive number.");
+          return;
+        }
+        if (!repeatCount && !createForm.repeatUntil) {
+          setCreateError(
+            "Set either total occurrences or a repeat-until date for recurring appointments.",
+          );
+          return;
+        }
+      }
       const result = await apiFetch<{
         id: string;
         conflicts?: ConflictSummary;
+        series_created_count?: number;
       }>("/appointments", {
         method: "POST",
         body: JSON.stringify({
@@ -3000,6 +3089,15 @@ function StaffAppointmentsPage() {
           location: createForm.location.trim() || null,
           category: createForm.category.trim() || null,
           notes: createForm.notes.trim() || null,
+          recurrence_frequency: createForm.repeatEnabled
+            ? createForm.repeatFrequency
+            : null,
+          recurrence_interval: createForm.repeatEnabled ? repeatInterval : null,
+          recurrence_count: createForm.repeatEnabled ? repeatCount : null,
+          recurrence_until:
+            createForm.repeatEnabled && createForm.repeatUntil
+              ? createForm.repeatUntil
+              : null,
         }),
       });
       const notice = buildScheduleNotice(result.conflicts, createLocalWarnings);
@@ -4933,6 +5031,102 @@ function StaffAppointmentsPage() {
                   />
                 </Field>
               </div>
+              <div className="space-y-4 rounded-3xl border border-slate-200 bg-slate-50/80 p-4">
+                <label className="flex items-start gap-3 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={createForm.repeatEnabled}
+                    onChange={(event) =>
+                      setCreateForm((current) => ({
+                        ...current,
+                        repeatEnabled: event.target.checked,
+                        repeatInterval: current.repeatInterval || "1",
+                        repeatCount:
+                          event.target.checked && !current.repeatCount
+                            ? "4"
+                            : current.repeatCount,
+                      }))
+                    }
+                    className="mt-0.5 size-4 rounded border-slate-300 text-slate-950"
+                  />
+                  <span>
+                    <span className="block font-medium text-slate-900">
+                      Repeat this appointment
+                    </span>
+                    <span className="block text-xs text-slate-500">
+                      Create a recurring series from the current date and time
+                      slot.
+                    </span>
+                  </span>
+                </label>
+                {createForm.repeatEnabled ? (
+                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                    <Field label="Frequency">
+                      <select
+                        value={createForm.repeatFrequency}
+                        onChange={(event) =>
+                          setCreateForm((current) => ({
+                            ...current,
+                            repeatFrequency:
+                              event.target.value as AppointmentRecurrenceFrequency,
+                          }))
+                        }
+                        className={selectClassName}
+                      >
+                        {RECURRENCE_FREQUENCY_OPTIONS.map((value) => (
+                          <option key={value} value={value}>
+                            {recurrenceFrequencyLabel(value)}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                    <Field label="Every">
+                      <Input
+                        type="number"
+                        min="1"
+                        step="1"
+                        value={createForm.repeatInterval}
+                        onChange={(event) =>
+                          setCreateForm((current) => ({
+                            ...current,
+                            repeatInterval: event.target.value,
+                          }))
+                        }
+                        className="h-10 rounded-xl bg-white"
+                      />
+                    </Field>
+                    <Field label="Total occurrences">
+                      <Input
+                        type="number"
+                        min="2"
+                        step="1"
+                        value={createForm.repeatCount}
+                        onChange={(event) =>
+                          setCreateForm((current) => ({
+                            ...current,
+                            repeatCount: event.target.value,
+                          }))
+                        }
+                        placeholder="Optional if until date is set"
+                        className="h-10 rounded-xl bg-white"
+                      />
+                    </Field>
+                    <Field label="Repeat until">
+                      <Input
+                        type="date"
+                        value={createForm.repeatUntil}
+                        onChange={(event) =>
+                          setCreateForm((current) => ({
+                            ...current,
+                            repeatUntil: event.target.value,
+                          }))
+                        }
+                        className="h-10 rounded-xl bg-white"
+                      />
+                    </Field>
+                  </div>
+                ) : null}
+              </div>
               <div className="grid gap-4 md:grid-cols-2">
                 <Field label={t.common_provider}>
                   <select
@@ -5177,6 +5371,12 @@ function StaffAppointmentsPage() {
                     >
                       {statusLabel(detail.status)}
                     </span>
+                    {detail.recurrence_frequency ? (
+                      <span className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-sky-700">
+                        {recurrenceFrequencyLabel(detail.recurrence_frequency)}
+                        {" "}series
+                      </span>
+                    ) : null}
                     {detail.interpreter_response ? (
                       <span className="rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
                         Interpreter {responseLabel(detail.interpreter_response)}
@@ -5208,6 +5408,19 @@ function StaffAppointmentsPage() {
                     <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
                       Concierge view is intentionally limited for medical slots.
                       Clinical notes and provider specifics stay hidden here.
+                    </div>
+                  ) : null}
+                  {!detail.is_blocked && detail.recurrence_frequency ? (
+                    <div className="mt-4 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
+                      Recurring series: occurrence {detail.recurrence_index + 1} of{" "}
+                      {detail.recurrence_series_size}. {recurrenceCadenceLabel(detail)}
+                      {detail.recurrence_until
+                        ? ` until ${detail.recurrence_until}.`
+                        : detail.recurrence_count
+                          ? ` Total planned occurrences: ${detail.recurrence_count}.`
+                          : "."}{" "}
+                      Edit and reschedule actions on this page apply only to the
+                      current occurrence.
                     </div>
                   ) : null}
                 </section>

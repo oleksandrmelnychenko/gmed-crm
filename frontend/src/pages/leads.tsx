@@ -76,6 +76,25 @@ type LeadForm = {
   notes: string;
 };
 
+type LeadGateForm = {
+  email: string;
+  phone: string;
+  country: string;
+  primaryLanguage: string;
+  dateOfBirth: string;
+  legalSex: string;
+  complianceStatus: string;
+  consentHealthcare: boolean;
+  consentPrivacyPractices: boolean;
+  notes: string;
+};
+
+type FailedLeadResolutionForm = {
+  resolution: "archive" | "delete";
+  reason: string;
+  note: string;
+};
+
 type LeadPermissions = {
   canViewPage: boolean;
   canCreate: boolean;
@@ -108,6 +127,20 @@ const STATUS_VARIANTS: Record<string, string> = {
   archived: "border-slate-200 bg-slate-100 text-slate-600",
 };
 
+const COMPLIANCE_OPTIONS = [
+  "pending",
+  "documents_sent",
+  "signed",
+  "rejected",
+] as const;
+
+const LEGAL_SEX_OPTIONS = [
+  "female",
+  "male",
+  "diverse",
+  "no_entry",
+] as const;
+
 function leadPermissions(role?: string): LeadPermissions {
   return {
     canViewPage: role === "patient_manager" || role === "sales",
@@ -125,6 +158,29 @@ function blankLeadForm(): LeadForm {
     source: "",
     country: "",
     notes: "",
+  };
+}
+
+function blankFailedLeadResolutionForm(): FailedLeadResolutionForm {
+  return {
+    resolution: "archive",
+    reason: "",
+    note: "",
+  };
+}
+
+function leadToGateForm(detail: LeadDetail): LeadGateForm {
+  return {
+    email: detail.email ?? "",
+    phone: detail.phone ?? "",
+    country: detail.country ?? "",
+    primaryLanguage: detail.primary_language ?? "",
+    dateOfBirth: detail.date_of_birth ?? "",
+    legalSex: detail.legal_sex ?? "",
+    complianceStatus: detail.compliance_status ?? "pending",
+    consentHealthcare: detail.consent_healthcare,
+    consentPrivacyPractices: detail.consent_privacy_practices,
+    notes: detail.notes ?? "",
   };
 }
 
@@ -269,6 +325,12 @@ export function LeadsPage() {
   const [detail, setDetail] = useState<LeadDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState("");
+  const [gateForm, setGateForm] = useState<LeadGateForm | null>(null);
+  const [gateBusy, setGateBusy] = useState(false);
+  const [failedLeadForm, setFailedLeadForm] = useState<FailedLeadResolutionForm>(
+    blankFailedLeadResolutionForm()
+  );
+  const [failedLeadBusy, setFailedLeadBusy] = useState(false);
 
   const [actionBusy, setActionBusy] = useState<string | null>(null);
 
@@ -374,6 +436,25 @@ export function LeadsPage() {
     };
   }, [detailOpen, failedLoadMessage, selectedLeadId, version]);
 
+  useEffect(() => {
+    if (!detail) {
+      setGateForm(null);
+      setFailedLeadForm(blankFailedLeadResolutionForm());
+      return;
+    }
+    setGateForm(leadToGateForm(detail));
+    setFailedLeadForm((current) => ({
+      resolution:
+        current.resolution === "delete" &&
+        user?.role !== "patient_manager" &&
+        user?.role !== "ceo"
+          ? "archive"
+          : current.resolution,
+      reason: detail.failed_outcome?.reason ?? "",
+      note: detail.failed_outcome?.note ?? "",
+    }));
+  }, [detail, user?.role]);
+
   function syncLeadQuery(leadId?: string) {
     const params = new URLSearchParams(searchParams);
     if (leadId) {
@@ -428,6 +509,11 @@ export function LeadsPage() {
         body: JSON.stringify({ status }),
       });
       reload();
+    } catch (actionError) {
+      const message =
+        actionError instanceof Error ? actionError.message : t.common_failed_update;
+      setError(message);
+      setDetailError(message);
     } finally {
       setActionBusy(null);
     }
@@ -438,8 +524,71 @@ export function LeadsPage() {
     try {
       await apiFetch(`/leads/${leadId}/convert`, { method: "POST" });
       reload();
+    } catch (actionError) {
+      const message =
+        actionError instanceof Error ? actionError.message : t.common_failed_update;
+      setError(message);
+      setDetailError(message);
     } finally {
       setActionBusy(null);
+    }
+  }
+
+  async function handleSaveGateForm(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedLeadId || !gateForm) return;
+
+    setGateBusy(true);
+    setDetailError("");
+    try {
+      await apiFetch(`/leads/${selectedLeadId}/update`, {
+        method: "POST",
+        body: JSON.stringify({
+          email: nonempty(gateForm.email),
+          phone: nonempty(gateForm.phone),
+          country: nonempty(gateForm.country),
+          primary_language: nonempty(gateForm.primaryLanguage),
+          date_of_birth: nonempty(gateForm.dateOfBirth),
+          legal_sex: nonempty(gateForm.legalSex),
+          compliance_status: nonempty(gateForm.complianceStatus),
+          consent_healthcare: gateForm.consentHealthcare,
+          consent_privacy_practices: gateForm.consentPrivacyPractices,
+          notes: nonempty(gateForm.notes),
+        }),
+      });
+      reload();
+    } catch (saveError) {
+      setDetailError(
+        saveError instanceof Error ? saveError.message : t.common_failed_update
+      );
+    } finally {
+      setGateBusy(false);
+    }
+  }
+
+  async function handleResolveFailedLead(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedLeadId) return;
+
+    setFailedLeadBusy(true);
+    setDetailError("");
+
+    try {
+      await apiFetch(`/leads/${selectedLeadId}/failed-flow`, {
+        method: "POST",
+        body: JSON.stringify({
+          resolution: failedLeadForm.resolution,
+          reason: failedLeadForm.reason.trim(),
+          note: nonempty(failedLeadForm.note),
+        }),
+      });
+      reload();
+    } catch (resolveError) {
+      setDetailError(
+        resolveError instanceof Error ? resolveError.message : t.common_failed_update
+      );
+    } finally {
+      setFailedLeadBusy(false);
     }
   }
 
@@ -663,8 +812,9 @@ export function LeadsPage() {
                   const canQualify =
                     lead.qualification_status === "new" || lead.qualification_status === "in_progress";
                   const canConvert = permissions.canConvert && lead.qualification_status === "qualified";
-                  const canArchive =
-                    lead.qualification_status !== "archived" && lead.qualification_status !== "converted";
+                  const canResolveFailed =
+                    lead.qualification_status !== "converted" &&
+                    lead.failed_outcome?.status !== "delete_anonymized";
 
                   return (
                     <button
@@ -686,6 +836,22 @@ export function LeadsPage() {
                             {lead.compliance_status ? (
                               <Badge variant="outline" className="rounded-full border-slate-200 bg-white text-slate-700">
                                 Compliance {lead.compliance_status}
+                              </Badge>
+                            ) : null}
+                            {lead.failed_outcome?.status &&
+                            lead.failed_outcome.status !== "none" ? (
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "rounded-full",
+                                  lead.failed_outcome.status === "delete_anonymized"
+                                    ? "border-rose-200 bg-rose-50 text-rose-700"
+                                    : "border-slate-200 bg-slate-100 text-slate-700"
+                                )}
+                              >
+                                {lead.failed_outcome.status === "delete_anonymized"
+                                  ? "Deleted payload"
+                                  : "Failed lead archived"}
                               </Badge>
                             ) : null}
                           </div>
@@ -744,19 +910,21 @@ export function LeadsPage() {
                             Convert
                           </Button>
                         ) : null}
-                        {canArchive ? (
+                        {canResolveFailed ? (
                           <Button
                             type="button"
                             size="sm"
                             variant="ghost"
                             className="rounded-2xl text-rose-600 hover:text-rose-700"
-                            disabled={Boolean(actionBusy)}
+                            disabled={Boolean(actionBusy) || lead.failed_outcome?.status === "delete_anonymized"}
                             onClick={(event) => {
                               event.stopPropagation();
-                              void updateStatus(lead.id, "archived");
+                              setSelectedLeadId(lead.id);
+                              setDetailOpen(true);
+                              syncLeadQuery(lead.id);
                             }}
                           >
-                            Archive
+                            Resolve failed
                           </Button>
                         ) : null}
                       </div>
@@ -864,6 +1032,21 @@ export function LeadsPage() {
                     <Badge variant="outline" className="rounded-full border-slate-200 bg-white text-slate-700">
                       Compliance {detail.compliance_status}
                     </Badge>
+                    {detail.failed_outcome.status !== "none" ? (
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "rounded-full",
+                          detail.failed_outcome.status === "delete_anonymized"
+                            ? "border-rose-200 bg-rose-50 text-rose-700"
+                            : "border-slate-200 bg-slate-100 text-slate-700"
+                        )}
+                      >
+                        {detail.failed_outcome.status === "delete_anonymized"
+                          ? "Deleted payload"
+                          : "Failed lead archived"}
+                      </Badge>
+                    ) : null}
                     {detail.converted_patient_id ? (
                       <Badge variant="outline" className="rounded-full border-emerald-200 bg-emerald-50 text-emerald-700">
                         Converted
@@ -875,6 +1058,428 @@ export function LeadsPage() {
                   </h2>
                   <p className="mt-2 text-sm text-slate-600">Created {formatDate(detail.created_at)}</p>
                 </section>
+
+                <section className={cardClass("p-5")}>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-950">
+                        Process readiness
+                      </h3>
+                      <p className="mt-1 text-sm text-slate-600">
+                        Qualification and conversion are now blocked by explicit gate checks.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "rounded-full",
+                          detail.readiness.qualification_ready
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                            : "border-amber-200 bg-amber-50 text-amber-700"
+                        )}
+                      >
+                        Qualification {detail.readiness.qualification_ready ? "ready" : "blocked"}
+                      </Badge>
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "rounded-full",
+                          detail.readiness.conversion_ready
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                            : "border-rose-200 bg-rose-50 text-rose-700"
+                        )}
+                      >
+                        Conversion {detail.readiness.conversion_ready ? "ready" : "blocked"}
+                      </Badge>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    {detail.readiness.checks.map((check) => (
+                      <div
+                        key={check.key}
+                        className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-medium text-slate-900">{check.label}</p>
+                            <p className="mt-1 text-xs uppercase tracking-[0.12em] text-slate-500">
+                              Blocks {check.blocking_for}
+                            </p>
+                          </div>
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "rounded-full",
+                              check.passed
+                                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                : "border-rose-200 bg-rose-50 text-rose-700"
+                            )}
+                          >
+                            {check.passed ? "ok" : "missing"}
+                          </Badge>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {detail.readiness.blocking_reasons.length > 0 ? (
+                    <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3">
+                      <p className="text-sm font-semibold text-rose-700">
+                        Blocking reasons
+                      </p>
+                      <ul className="mt-2 space-y-1 text-sm text-rose-700">
+                        {detail.readiness.blocking_reasons.map((reason) => (
+                          <li key={reason}>• {reason}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                </section>
+
+                <section className={cardClass("p-5")}>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-950">Lead lifecycle</h3>
+                      <p className="mt-1 text-sm text-slate-600">
+                        Sequential lifecycle history for qualification, failed-lead handling and conversion.
+                      </p>
+                    </div>
+                    <Badge variant="outline" className="rounded-full border-slate-200 bg-white text-slate-700">
+                      Current stage {detail.lifecycle.current_stage}
+                    </Badge>
+                  </div>
+
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    <DetailCard
+                      label="Current stage"
+                      value={detail.lifecycle.current_stage}
+                    />
+                    <DetailCard
+                      label="Entered at"
+                      value={detail.lifecycle.stage_entered_at ? formatDate(detail.lifecycle.stage_entered_at) : "Not set"}
+                    />
+                  </div>
+
+                  <div className="mt-4 space-y-3">
+                    {detail.lifecycle.history.map((event, index) => (
+                      <div
+                        key={`${event.created_at}-${event.to_stage}-${index}`}
+                        className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-medium text-slate-900">
+                              {event.from_stage ? `${event.from_stage} -> ${event.to_stage}` : event.to_stage}
+                            </p>
+                            <p className="mt-1 text-xs uppercase tracking-[0.12em] text-slate-500">
+                              {event.transition_kind}
+                            </p>
+                          </div>
+                          <span className="text-xs text-slate-500">
+                            {formatDate(event.created_at)}
+                          </span>
+                        </div>
+                        {event.note ? (
+                          <p className="mt-2 text-sm text-slate-600">{event.note}</p>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                {gateForm && detail.failed_outcome.status === "none" ? (
+                  <section className={cardClass("p-5")}>
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <h3 className="text-sm font-semibold text-slate-950">
+                          Qualification gate data
+                        </h3>
+                        <p className="mt-1 text-sm text-slate-600">
+                          Fill missing compliance and identity fields directly from the lead workspace.
+                        </p>
+                      </div>
+                    </div>
+
+                    <form className="mt-4 space-y-4" onSubmit={handleSaveGateForm}>
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <LeadField label={t.patients_email}>
+                          <Input
+                            value={gateForm.email}
+                            onChange={(event) =>
+                              setGateForm((current) =>
+                                current
+                                  ? { ...current, email: event.target.value }
+                                  : current
+                              )
+                            }
+                          />
+                        </LeadField>
+                        <LeadField label={t.field_phone}>
+                          <Input
+                            value={gateForm.phone}
+                            onChange={(event) =>
+                              setGateForm((current) =>
+                                current
+                                  ? { ...current, phone: event.target.value }
+                                  : current
+                              )
+                            }
+                          />
+                        </LeadField>
+                        <LeadField label={t.providers_country}>
+                          <Input
+                            value={gateForm.country}
+                            onChange={(event) =>
+                              setGateForm((current) =>
+                                current
+                                  ? { ...current, country: event.target.value }
+                                  : current
+                              )
+                            }
+                          />
+                        </LeadField>
+                        <LeadField label="Primary language">
+                          <Input
+                            value={gateForm.primaryLanguage}
+                            onChange={(event) =>
+                              setGateForm((current) =>
+                                current
+                                  ? { ...current, primaryLanguage: event.target.value }
+                                  : current
+                              )
+                            }
+                          />
+                        </LeadField>
+                        <LeadField label="Date of birth">
+                          <Input
+                            type="date"
+                            value={gateForm.dateOfBirth}
+                            onChange={(event) =>
+                              setGateForm((current) =>
+                                current
+                                  ? { ...current, dateOfBirth: event.target.value }
+                                  : current
+                              )
+                            }
+                          />
+                        </LeadField>
+                        <LeadField label="Legal sex">
+                          <select
+                            value={gateForm.legalSex}
+                            onChange={(event) =>
+                              setGateForm((current) =>
+                                current
+                                  ? { ...current, legalSex: event.target.value }
+                                  : current
+                              )
+                            }
+                            className="h-10 w-full rounded-xl border border-input bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                          >
+                            <option value="">{t.common_not_set}</option>
+                            {LEGAL_SEX_OPTIONS.map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                        </LeadField>
+                        <LeadField label="Compliance status">
+                          <select
+                            value={gateForm.complianceStatus}
+                            onChange={(event) =>
+                              setGateForm((current) =>
+                                current
+                                  ? { ...current, complianceStatus: event.target.value }
+                                  : current
+                              )
+                            }
+                            className="h-10 w-full rounded-xl border border-input bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                          >
+                            {COMPLIANCE_OPTIONS.map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                        </LeadField>
+                        <LeadField label={t.patients_notes}>
+                          <Input
+                            value={gateForm.notes}
+                            onChange={(event) =>
+                              setGateForm((current) =>
+                                current
+                                  ? { ...current, notes: event.target.value }
+                                  : current
+                              )
+                            }
+                          />
+                        </LeadField>
+                      </div>
+
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                          <input
+                            type="checkbox"
+                            checked={gateForm.consentHealthcare}
+                            onChange={(event) =>
+                              setGateForm((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      consentHealthcare: event.target.checked,
+                                    }
+                                  : current
+                              )
+                            }
+                          />
+                          <span>Healthcare consent available</span>
+                        </label>
+                        <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                          <input
+                            type="checkbox"
+                            checked={gateForm.consentPrivacyPractices}
+                            onChange={(event) =>
+                              setGateForm((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      consentPrivacyPractices: event.target.checked,
+                                    }
+                                  : current
+                              )
+                            }
+                          />
+                          <span>Privacy practices accepted</span>
+                        </label>
+                      </div>
+
+                      <div className="flex justify-end">
+                        <Button type="submit" disabled={gateBusy}>
+                          {gateBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                          Save gate data
+                        </Button>
+                      </div>
+                    </form>
+                  </section>
+                ) : null}
+
+                {detail.converted_patient_id ? null : (
+                  <section className={cardClass("p-5")}>
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <h3 className="text-sm font-semibold text-slate-950">
+                          Failed-lead resolution
+                        </h3>
+                        <p className="mt-1 text-sm text-slate-600">
+                          Use the controlled archive or delete-anonymize flow instead of setting archived directly.
+                        </p>
+                      </div>
+                      {detail.failed_outcome.status !== "none" ? (
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            "rounded-full",
+                            detail.failed_outcome.status === "delete_anonymized"
+                              ? "border-rose-200 bg-rose-50 text-rose-700"
+                              : "border-slate-200 bg-slate-100 text-slate-700"
+                          )}
+                        >
+                          {detail.failed_outcome.status}
+                        </Badge>
+                      ) : null}
+                    </div>
+
+                    {detail.failed_outcome.status !== "none" ? (
+                      <div className="mt-4 grid gap-3 md:grid-cols-2">
+                        <DetailCard
+                          label="Resolution"
+                          value={detail.failed_outcome.status}
+                        />
+                        <DetailCard
+                          label="Processed at"
+                          value={
+                            detail.failed_outcome.processed_at
+                              ? formatDate(detail.failed_outcome.processed_at)
+                              : "Not set"
+                          }
+                        />
+                        <DetailCard
+                          label="Failed from"
+                          value={detail.failed_outcome.from_status || t.common_not_set}
+                        />
+                        <DetailCard
+                          label="Reason"
+                          value={detail.failed_outcome.reason || t.common_not_set}
+                        />
+                      </div>
+                    ) : null}
+
+                    {detail.failed_outcome.status === "none" ? (
+                      <form className="mt-4 space-y-4" onSubmit={handleResolveFailedLead}>
+                        <div className="grid gap-4 md:grid-cols-2">
+                          <LeadField label="Resolution">
+                            <select
+                              value={failedLeadForm.resolution}
+                              onChange={(event) =>
+                                setFailedLeadForm((current) => ({
+                                  ...current,
+                                  resolution: event.target.value as "archive" | "delete",
+                                }))
+                              }
+                              className="h-10 w-full rounded-xl border border-input bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                            >
+                              <option value="archive">Archive</option>
+                              {user?.role === "patient_manager" || user?.role === "ceo" ? (
+                                <option value="delete">Delete and anonymize</option>
+                              ) : null}
+                            </select>
+                          </LeadField>
+                          <LeadField label="Failure reason">
+                            <Input
+                              value={failedLeadForm.reason}
+                              onChange={(event) =>
+                                setFailedLeadForm((current) => ({
+                                  ...current,
+                                  reason: event.target.value,
+                                }))
+                              }
+                              required
+                            />
+                          </LeadField>
+                        </div>
+
+                        <LeadField label="Internal note">
+                          <textarea
+                            value={failedLeadForm.note}
+                            onChange={(event) =>
+                              setFailedLeadForm((current) => ({
+                                ...current,
+                                note: event.target.value,
+                              }))
+                            }
+                            className="min-h-[96px] w-full rounded-xl border border-input bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                            rows={4}
+                          />
+                        </LeadField>
+
+                        {failedLeadForm.resolution === "delete" ? (
+                          <Banner tone="warning">
+                            Delete keeps the lead row for audit trail, but removes personal payload and attachments.
+                          </Banner>
+                        ) : null}
+
+                        <div className="flex justify-end">
+                          <Button type="submit" disabled={failedLeadBusy}>
+                            {failedLeadBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                            Save failed-lead resolution
+                          </Button>
+                        </div>
+                      </form>
+                    ) : null}
+                  </section>
+                )}
 
                 <section className={cardClass("p-5")}>
                   <h3 className="text-sm font-semibold text-slate-950">Contact and origin</h3>

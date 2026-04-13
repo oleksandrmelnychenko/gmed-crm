@@ -11,6 +11,17 @@ import {
   MessageSquare,
 } from "lucide-react";
 import { apiFetch, getAccessToken } from "@/lib/api";
+import {
+  CHAT_E2E_PREVIEW,
+  CHAT_E2E_UNAVAILABLE,
+  decryptMessageFromPeer,
+  encryptMessageForPeer,
+  ensureServerMessageKey,
+  fetchPeerMessageKey,
+  getLocalMessageKey,
+  type MessageKeyEnvelope,
+  type MessageKeyRecord,
+} from "@/lib/chat-e2e";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { Input } from "@/components/ui/input";
@@ -26,8 +37,10 @@ interface Conversation {
   last_message: string;
   last_at: string;
   is_read: boolean;
+  last_read_at?: string | null;
   is_mine: boolean;
   unread: number;
+  is_e2e?: boolean;
 }
 
 interface Message {
@@ -35,7 +48,15 @@ interface Message {
   from_user: string;
   to_user: string;
   message: string | null;
+  is_e2e?: boolean;
+  e2e_algorithm?: string | null;
+  e2e_ciphertext?: string | null;
+  e2e_nonce?: string | null;
+  e2e_salt?: string | null;
+  sender_key_fingerprint?: string | null;
+  recipient_key_fingerprint?: string | null;
   is_read: boolean;
+  read_at: string | null;
   created_at: string;
   attachment_filename: string | null;
   attachment_mime: string | null;
@@ -49,6 +70,13 @@ interface UserItem {
   email: string;
   role: string;
   is_active: boolean;
+}
+
+interface ChatStreamEvent {
+  type: "message_created" | "conversation_read";
+  user_id: string;
+  peer_id: string;
+  message_id?: string | null;
 }
 
 // ── Helpers ──
@@ -111,10 +139,16 @@ export function ChatPage() {
   const [allUsers, setAllUsers] = useState<UserItem[]>([]);
   const [userSearch, setUserSearch] = useState("");
   const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [myMessageKey, setMyMessageKey] = useState<MessageKeyRecord | null>(null);
+  const [activePeerMessageKey, setActivePeerMessageKey] =
+    useState<MessageKeyEnvelope | null>(null);
+  const [secureStatus, setSecureStatus] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const hydratedDraftRef = useRef("");
+  const activePeerRef = useRef<string | null>(null);
+  const peerMessageKeyCacheRef = useRef<Record<string, MessageKeyEnvelope>>({});
 
   // Scroll to bottom on new messages
   useEffect(() => {
@@ -133,9 +167,142 @@ export function ChatPage() {
     }
   }, []);
 
+  const loadPeerMessageKey = useCallback(
+    async (peerId: string, fingerprint?: string | null) => {
+      const cacheKey = `${peerId}:${fingerprint ?? "active"}`;
+      const cached = peerMessageKeyCacheRef.current[cacheKey];
+      if (cached) return cached;
+
+      const key = await fetchPeerMessageKey(peerId, fingerprint);
+      if (key) {
+        peerMessageKeyCacheRef.current[cacheKey] = key;
+        peerMessageKeyCacheRef.current[`${peerId}:${key.fingerprint}`] = key;
+      }
+      return key;
+    },
+    [],
+  );
+
+  const hydrateMessages = useCallback(
+    async (peerId: string, rawMessages: Message[]) => {
+      return Promise.all(
+        rawMessages.map(async (message) => {
+          if (!message.is_e2e) return message;
+
+          const myFingerprint =
+            message.from_user === myId
+              ? message.sender_key_fingerprint
+              : message.recipient_key_fingerprint;
+          const peerFingerprint =
+            message.from_user === myId
+              ? message.recipient_key_fingerprint
+              : message.sender_key_fingerprint;
+          const localKey = getLocalMessageKey(myFingerprint);
+          if (!localKey || !peerFingerprint) {
+            return {
+              ...message,
+              message: CHAT_E2E_UNAVAILABLE,
+            };
+          }
+
+          const peerKey = await loadPeerMessageKey(peerId, peerFingerprint);
+          if (!peerKey) {
+            return {
+              ...message,
+              message: CHAT_E2E_PREVIEW,
+            };
+          }
+
+          try {
+            const decrypted = await decryptMessageFromPeer(message, localKey, peerKey);
+            return {
+              ...message,
+              message: decrypted,
+            };
+          } catch {
+            return {
+              ...message,
+              message: CHAT_E2E_UNAVAILABLE,
+            };
+          }
+        }),
+      );
+    },
+    [loadPeerMessageKey, myId],
+  );
+
+  const loadMessagesForPeer = useCallback(
+    async (peerId: string, markRead = false) => {
+      const msgs = await apiFetch<Message[]>(`/messages/${peerId}?limit=100`);
+      const hydrated = await hydrateMessages(peerId, msgs);
+      setMessages(hydrated);
+      if (markRead) {
+        await apiFetch(`/messages/${peerId}/read`, { method: "POST" });
+      }
+    },
+    [hydrateMessages],
+  );
+
   useEffect(() => {
     void loadConversations();
   }, [loadConversations]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const key = await ensureServerMessageKey();
+        if (!cancelled) {
+          setMyMessageKey(key);
+        }
+      } catch {
+        if (!cancelled) {
+          setSecureStatus("Secure chat setup failed on this device.");
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    activePeerRef.current = activePeer;
+  }, [activePeer]);
+
+  useEffect(() => {
+    if (!activePeer) {
+      setActivePeerMessageKey(null);
+      setSecureStatus(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const key = await loadPeerMessageKey(activePeer);
+        if (cancelled) return;
+        setActivePeerMessageKey(key);
+        setSecureStatus(
+          key
+            ? null
+            : "Secure setup is still pending for this conversation. Text messages stay paused until the other side opens chat once.",
+        );
+      } catch {
+        if (!cancelled) {
+          setActivePeerMessageKey(null);
+          setSecureStatus("Failed to load secure chat key.");
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activePeer, loadPeerMessageKey]);
 
   useEffect(() => {
     const peer = searchParams.get("peer");
@@ -185,22 +352,53 @@ export function ChatPage() {
     setSearchParams,
   ]);
 
-  // Poll conversations every 10s
+  // Keep chat live via WebSocket push.
   useEffect(() => {
-    const interval = setInterval(async () => {
-      try {
-        const data = await apiFetch<Conversation[]>("/messages/conversations");
-        setConversations(data);
-        if (activePeer) {
-          const msgs = await apiFetch<Message[]>(`/messages/${activePeer}?limit=100`);
-          setMessages(msgs);
+    const token = getAccessToken();
+    if (!token) return;
+
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const url = `${protocol}//${window.location.host}/api/v1/messages/ws?token=${encodeURIComponent(token)}`;
+    let socket: WebSocket | null = null;
+    let reconnectTimer: number | null = null;
+    let disposed = false;
+
+    const connect = () => {
+      socket = new WebSocket(url);
+      socket.onmessage = (event) => {
+        let payload: ChatStreamEvent | null = null;
+        try {
+          payload = JSON.parse(event.data) as ChatStreamEvent;
+        } catch {
+          return;
         }
-      } catch {
-        /* ignore */
-      }
-    }, 10_000);
-    return () => clearInterval(interval);
-  }, [activePeer]);
+
+        void loadConversations();
+        const currentPeer = activePeerRef.current;
+        if (!currentPeer || payload.peer_id !== currentPeer) return;
+
+        void loadMessagesForPeer(
+          currentPeer,
+          payload.type === "message_created" && payload.user_id !== myId,
+        ).catch(() => undefined);
+      };
+      socket.onerror = () => {
+        socket?.close();
+      };
+      socket.onclose = () => {
+        if (disposed) return;
+        reconnectTimer = window.setTimeout(connect, 3000);
+      };
+    };
+
+    connect();
+
+    return () => {
+      disposed = true;
+      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+      socket?.close();
+    };
+  }, [loadConversations, loadMessagesForPeer, myId]);
 
   // Load messages when peer changes
   useEffect(() => {
@@ -210,15 +408,13 @@ export function ChatPage() {
     }
     void (async () => {
       try {
-        const msgs = await apiFetch<Message[]>(`/messages/${activePeer}?limit=100`);
-        setMessages(msgs);
-        await apiFetch(`/messages/${activePeer}/read`, { method: "POST" });
+        await loadMessagesForPeer(activePeer, true);
         void loadConversations();
       } catch {
         /* ignore */
       }
     })();
-  }, [activePeer, loadConversations]);
+  }, [activePeer, loadConversations, loadMessagesForPeer]);
 
   const openConversation = (userId: string, name: string, role: string) => {
     setActivePeer(userId);
@@ -239,14 +435,22 @@ export function ChatPage() {
     );
   };
 
-  const loadUsers = async () => {
+  const loadUsers = useCallback(async () => {
     try {
-      const data = await apiFetch<UserItem[]>("/users");
+      const query = userSearch.trim()
+        ? `/messages/allowed-peers?search=${encodeURIComponent(userSearch.trim())}`
+        : "/messages/allowed-peers";
+      const data = await apiFetch<UserItem[]>(query);
       setAllUsers(data);
     } catch {
       /* ignore */
     }
-  };
+  }, [userSearch]);
+
+  useEffect(() => {
+    if (!showNewChat) return;
+    void loadUsers();
+  }, [loadUsers, showNewChat]);
 
   // Send message
   const handleSend = async (e: FormEvent) => {
@@ -266,8 +470,7 @@ export function ChatPage() {
           headers: token ? { Authorization: `Bearer ${token}` } : {},
           body: formData,
         });
-        const msgs = await apiFetch<Message[]>(`/messages/${activePeer}?limit=100`);
-        setMessages(msgs);
+        await loadMessagesForPeer(activePeer);
         void loadConversations();
       } catch {
         /* ignore */
@@ -281,19 +484,33 @@ export function ChatPage() {
 
     // Text message
     if (!input.trim()) return;
+    if (!activePeerMessageKey) {
+      setSecureStatus(
+        "Secure setup is still pending for this conversation. Text messages stay paused until the other side opens chat once.",
+      );
+      return;
+    }
     setSending(true);
     const msg = input.trim();
     setInput("");
     try {
+      const senderKey = myMessageKey ?? (await ensureServerMessageKey());
+      setMyMessageKey(senderKey);
+      const payload = await encryptMessageForPeer(
+        msg,
+        senderKey,
+        activePeerMessageKey,
+      );
       await apiFetch(`/messages/${activePeer}`, {
         method: "POST",
-        body: JSON.stringify({ message: msg }),
+        body: JSON.stringify(payload),
       });
-      const msgs = await apiFetch<Message[]>(`/messages/${activePeer}?limit=100`);
-      setMessages(msgs);
+      await loadMessagesForPeer(activePeer);
       void loadConversations();
+      setSecureStatus(null);
     } catch {
-      /* ignore */
+      setInput(msg);
+      setSecureStatus("Failed to send encrypted message.");
     } finally {
       setSending(false);
     }
@@ -326,7 +543,6 @@ export function ChatPage() {
           <button
             onClick={() => {
               setShowNewChat(!showNewChat);
-              if (!showNewChat) void loadUsers();
             }}
             className="flex items-center justify-center size-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
           >
@@ -434,7 +650,10 @@ export function ChatPage() {
               </div>
               <div>
                 <p className="text-sm font-semibold">{activeName}</p>
-                <p className="text-[10px] text-muted-foreground">{roleDisplay(activeRole)}</p>
+                <p className="text-[10px] text-muted-foreground">
+                  {roleDisplay(activeRole)}
+                  {activePeerMessageKey ? " · End-to-end encrypted text chat" : ""}
+                </p>
               </div>
             </div>
 
@@ -446,6 +665,8 @@ export function ChatPage() {
                 const hasAttachment = !!m.attachment_key;
                 const downloadUrl = `${FILE_BASE}${m.attachment_key ?? ""}`;
                 const isImage = m.attachment_mime?.startsWith("image/") ?? false;
+                const readReceipt =
+                  mine && m.read_at ? `Seen ${timeAgo(m.read_at)}` : null;
 
                 return (
                   <div key={m.id} className={cn("flex flex-col", mine ? "items-end" : "items-start")}>
@@ -493,12 +714,19 @@ export function ChatPage() {
                     )}
                     <span className="text-[10px] text-muted-foreground mt-0.5 px-1">
                       {timeAgo(m.created_at)}
+                      {readReceipt ? ` · ${readReceipt}` : ""}
                     </span>
                   </div>
                 );
               })}
               <div ref={messagesEndRef} />
             </div>
+
+            {secureStatus && (
+              <div className="px-5 py-2 border-t bg-muted/30 text-[11px] text-muted-foreground">
+                {secureStatus}
+              </div>
+            )}
 
             {/* Pending file preview */}
             {pendingFile && (

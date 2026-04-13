@@ -19,6 +19,9 @@ import {
   Megaphone,
   LogOut,
   PanelLeft,
+  Star,
+  BarChart3,
+  BookOpen,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
@@ -29,18 +32,30 @@ interface NavItem {
   to: string;
   labelKey: string;
   icon: React.ElementType;
+  roles?: string[];
 }
 
 const mainNav: NavItem[] = [
   { to: "/", labelKey: "nav_dashboard", icon: Home },
   { to: "/chat", labelKey: "nav_chat", icon: MessageSquare },
+  { to: "/feedback", labelKey: "nav_feedback", icon: Star },
+  {
+    to: "/reports",
+    labelKey: "nav_reports",
+    icon: BarChart3,
+    roles: ["ceo", "ceo_assistant", "patient_manager", "billing", "sales"],
+  },
+  { to: "/sops", labelKey: "nav_learning", icon: BookOpen },
 ];
 
 const patientPortalNav: NavItem[] = [
   { to: "/", labelKey: "nav_dashboard", icon: Home },
+  { to: "/chat", labelKey: "nav_chat", icon: MessageSquare },
   { to: "/appointments", labelKey: "nav_my_appointments", icon: Calendar },
   { to: "/documents", labelKey: "nav_my_documents", icon: Files },
+  { to: "/services", labelKey: "nav_my_services", icon: Building2 },
   { to: "/invoices", labelKey: "nav_my_invoices", icon: Wallet },
+  { to: "/feedback", labelKey: "nav_my_feedback", icon: Star },
   { to: "/privacy", labelKey: "nav_my_privacy", icon: Shield },
 ];
 
@@ -110,15 +125,15 @@ export function NavPanel() {
         <NavGroup items={patientPortalNav} tr={tr} collapsed={collapsed} />
       ) : (
         <>
-          <NavGroup items={mainNav} tr={tr} collapsed={collapsed} />
+          <NavGroup items={mainNav} tr={tr} collapsed={collapsed} currentRole={user?.role} />
           <Divider collapsed={collapsed} />
-          <NavGroup items={crmNav} tr={tr} collapsed={collapsed} />
+          <NavGroup items={crmNav} tr={tr} collapsed={collapsed} currentRole={user?.role} />
           <Divider collapsed={collapsed} />
-          <NavGroup items={medicineNav} tr={tr} collapsed={collapsed} />
+          <NavGroup items={medicineNav} tr={tr} collapsed={collapsed} currentRole={user?.role} />
           {isAdmin && (
             <>
               <Divider collapsed={collapsed} />
-              <NavGroup items={adminNav} tr={tr} collapsed={collapsed} />
+              <NavGroup items={adminNav} tr={tr} collapsed={collapsed} currentRole={user?.role} />
             </>
           )}
         </>
@@ -144,10 +159,24 @@ export function NavPanel() {
   );
 }
 
-function NavGroup({ items, tr, collapsed }: { items: NavItem[]; tr: Record<string, string>; collapsed: boolean }) {
+function NavGroup({
+  items,
+  tr,
+  collapsed,
+  currentRole,
+}: {
+  items: NavItem[];
+  tr: Record<string, string>;
+  collapsed: boolean;
+  currentRole?: string;
+}) {
+  const visibleItems = items.filter(
+    (item) => !item.roles || (currentRole ? item.roles.includes(currentRole) : false),
+  );
+
   return (
     <div className="flex flex-col gap-0.5">
-      {items.map((item) => (
+      {visibleItems.map((item) => (
         <NavLink
           key={item.to}
           to={item.to}

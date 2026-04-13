@@ -8,7 +8,7 @@ import {
   type ChangeEvent,
   type FormEvent,
 } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
   LoaderCircle,
@@ -43,7 +43,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, downloadApiFile } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -81,6 +81,7 @@ type PatientDetail = {
   nationality?: string | null;
   residence_country?: string | null;
   languages?: string[];
+  functional_labels?: string[];
   phone_primary?: string | null;
   phone_secondary?: string | null;
   email?: string | null;
@@ -300,6 +301,7 @@ type PatientEditFormState = {
   nationality: string;
   residenceCountry: string;
   languages: string;
+  functionalLabels: string;
   addressStreet: string;
   addressCity: string;
   addressZip: string;
@@ -312,6 +314,40 @@ type PatientEditFormState = {
   emergencyContactRelation: string;
   legalStatus: PatientLegalStatus;
   notes: string;
+};
+
+type WorkflowChecklistItem = {
+  id: string;
+  checklist_key: string;
+  item_key: string;
+  item_text: string;
+  owner_role: string;
+  owner_user_id?: string | null;
+  owner_name?: string | null;
+  owner_user_role?: string | null;
+  priority: string;
+  due_date?: string | null;
+  linked_task_id?: string | null;
+  linked_task_status?: string | null;
+  is_completed: boolean;
+  completed_at?: string | null;
+  sort_order: number;
+  created_at: string;
+};
+
+type WorkflowChecklistResponse = {
+  scope_type: string;
+  scope_id: string;
+  open_count: number;
+  completed_count: number;
+  items: WorkflowChecklistItem[];
+};
+
+type WorkflowChecklistFormState = {
+  itemText: string;
+  ownerUserId: string;
+  priority: string;
+  dueDate: string;
 };
 
 function patientName(p: PatientDetail) {
@@ -357,6 +393,17 @@ function fmtMoney(v?: string | null, currency = "EUR") {
 function toOptional(value: string) {
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
+}
+
+function parseFunctionalLabels(value: string) {
+  return value
+    .split(",")
+    .map((item) => item.trim().toLowerCase().replaceAll("-", "_").replaceAll(" ", "_"))
+    .filter(Boolean);
+}
+
+function humanizeFunctionalLabel(value: string) {
+  return value.replaceAll("_", " ");
 }
 
 function toDateTimeLocal(value?: string | null) {
@@ -503,6 +550,39 @@ function invoiceToStatusForm(invoice: InvoiceItem): InvoiceStatusFormState {
   };
 }
 
+function blankWorkflowChecklistForm(): WorkflowChecklistFormState {
+  return {
+    itemText: "",
+    ownerUserId: "",
+    priority: "normal",
+    dueDate: "",
+  };
+}
+
+function workflowChecklistLabel(key: string) {
+  switch (key) {
+    case "patient_intake":
+      return "Patient intake";
+    case "patient_custom":
+      return "Custom";
+    default:
+      return key.replaceAll("_", " ");
+  }
+}
+
+function priorityBadgeClass(priority: string) {
+  switch (priority) {
+    case "urgent":
+      return "border-rose-200 bg-rose-50 text-rose-700";
+    case "high":
+      return "border-amber-200 bg-amber-50 text-amber-700";
+    case "low":
+      return "border-slate-200 bg-slate-50 text-slate-600";
+    default:
+      return "border-sky-200 bg-sky-50 text-sky-700";
+  }
+}
+
 function nextDunningLevel(events: DunningEvent[]): DunningLevel | null {
   const levels = new Set(events.map((event) => event.level));
   if (!levels.has("first")) return "first";
@@ -522,6 +602,7 @@ function patientToEditForm(detail: PatientDetail): PatientEditFormState {
     nationality: detail.nationality ?? "",
     residenceCountry: detail.residence_country ?? "",
     languages: detail.languages?.join(", ") ?? "",
+    functionalLabels: detail.functional_labels?.join(", ") ?? "",
     addressStreet: detail.address_street ?? "",
     addressCity: detail.address_city ?? "",
     addressZip: detail.address_zip ?? "",
@@ -589,6 +670,7 @@ const ROLE_COLORS: Record<string, string> = {
 
 export function PatientDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const { user } = useAuth();
   const { t } = useLang();
@@ -612,8 +694,10 @@ export function PatientDetailPage() {
   const [documentAlerts, setDocumentAlerts] = useState<DocumentAlerts | null>(null);
   const [contracts, setContracts] = useState<ContractItem[]>([]);
   const [invoices, setInvoices] = useState<InvoiceItem[]>([]);
+  const [workflowChecklist, setWorkflowChecklist] =
+    useState<WorkflowChecklistResponse | null>(null);
   const [tabLoading, setTabLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState("profile");
+  const [activeTab, setActiveTab] = useState(searchParams.get("tab") || "profile");
   const [version, setVersion] = useState(0);
   const [tabVersion, setTabVersion] = useState(0);
   const [notice, setNotice] = useState("");
@@ -655,11 +739,18 @@ export function PatientDetailPage() {
   const [patientLabelBusy, setPatientLabelBusy] = useState(false);
   const [patientLabelFormat, setPatientLabelFormat] =
     useState<PatientLabelFormatId>(DEFAULT_PATIENT_LABEL_FORMAT_ID);
+  const [workflowBusy, setWorkflowBusy] = useState(false);
+  const [workflowForm, setWorkflowForm] = useState<WorkflowChecklistFormState>(
+    blankWorkflowChecklistForm
+  );
   const [timelineEntityFilter, setTimelineEntityFilter] = useState("all");
   const [timelineCategoryFilter, setTimelineCategoryFilter] = useState("all");
   const [timelineSourceFilter, setTimelineSourceFilter] = useState("all");
   const [timelineRangeFilter, setTimelineRangeFilter] = useState<PatientTimelineRangeFilter>("all");
   const [timelineSearch, setTimelineSearch] = useState("");
+  const [timelineTotal, setTimelineTotal] = useState(0);
+  const [timelineOffset, setTimelineOffset] = useState(0);
+  const timelineLimit = 50;
 
   const canManage = user?.role === "ceo" || user?.role === "patient_manager" || user?.role === "teamlead_interpreter";
   const assignableStaff = useMemo(() => staff.filter((s) => canAssignTarget(user?.role, s.role)), [staff, user?.role]);
@@ -673,6 +764,10 @@ export function PatientDetailPage() {
   const canPrintPatientLabel = user?.role === "ceo" || user?.role === "patient_manager";
   const canCreateCase = user?.role === "ceo" || user?.role === "patient_manager";
   const canCreateOrder = user?.role === "ceo" || user?.role === "patient_manager";
+  const canManageWorkflowChecklist =
+    user?.role === "ceo" ||
+    user?.role === "patient_manager" ||
+    user?.role === "concierge";
   const canCreateAppointment =
     user?.role === "ceo" ||
     user?.role === "patient_manager" ||
@@ -680,6 +775,13 @@ export function PatientDetailPage() {
     user?.role === "concierge";
   const deferredRelationPatientSearch = useDeferredValue(relationPatientSearch);
   const deferredTimelineSearch = useDeferredValue(timelineSearch);
+  const activeWorkflowAssignees = useMemo(
+    () =>
+      assignments.filter(
+        (item) => !item.revoked_at && item.user_active
+      ),
+    [assignments]
+  );
 
   const relationPatientOptionsFiltered = useMemo(() => {
     const normalizedSearch = deferredRelationPatientSearch.trim().toLowerCase();
@@ -735,6 +837,21 @@ export function PatientDetailPage() {
   );
 
   const timelineSummary = useMemo(() => buildPatientTimelineSummary(timeline), [timeline]);
+  const timelineHasNextPage = timelineOffset + timeline.length < timelineTotal;
+  const workflowChecklistGroups = useMemo(() => {
+    const items = workflowChecklist?.items ?? [];
+    const grouped = new Map<string, WorkflowChecklistItem[]>();
+    for (const item of items) {
+      const current = grouped.get(item.checklist_key) ?? [];
+      current.push(item);
+      grouped.set(item.checklist_key, current);
+    }
+    return Array.from(grouped.entries()).map(([key, groupItems]) => ({
+      key,
+      label: workflowChecklistLabel(key),
+      items: groupItems,
+    }));
+  }, [workflowChecklist]);
   const legalStatus = useMemo(
     () => normalizePatientLegalStatus(detail?.legal_status),
     [detail?.legal_status]
@@ -754,8 +871,52 @@ export function PatientDetailPage() {
     timelineRangeFilter !== "all" ||
     deferredTimelineSearch.trim().length > 0;
 
+  useEffect(() => {
+    setTimelineOffset(0);
+  }, [
+    timelineEntityFilter,
+    timelineCategoryFilter,
+    timelineSourceFilter,
+    timelineRangeFilter,
+    deferredTimelineSearch,
+  ]);
+
   const reload = useCallback(() => setVersion((v) => v + 1), []);
   const reloadTab = useCallback(() => setTabVersion((v) => v + 1), []);
+
+  const handleTabChange = useCallback(
+    (nextTab: string) => {
+      setActiveTab(nextTab);
+      const nextParams = new URLSearchParams(searchParams);
+      if (nextTab === "profile") {
+        nextParams.delete("tab");
+      } else {
+        nextParams.set("tab", nextTab);
+      }
+      setSearchParams(nextParams, { replace: true });
+    },
+    [searchParams, setSearchParams]
+  );
+
+  useEffect(() => {
+    if (workflowForm.ownerUserId) return;
+    const preferredAssignee =
+      activeWorkflowAssignees.find((item) => item.user_id === user?.id)?.user_id ??
+      activeWorkflowAssignees[0]?.user_id ??
+      "";
+    if (!preferredAssignee) return;
+    setWorkflowForm((current) => ({
+      ...current,
+      ownerUserId: preferredAssignee,
+    }));
+  }, [activeWorkflowAssignees, user?.id, workflowForm.ownerUserId]);
+
+  useEffect(() => {
+    const requestedTab = searchParams.get("tab") || "profile";
+    if (requestedTab !== activeTab) {
+      setActiveTab(requestedTab);
+    }
+  }, [activeTab, searchParams]);
 
   useEffect(() => {
     if (!id) return;
@@ -840,9 +1001,33 @@ export function PatientDetailPage() {
             if (!cancelled) setInvoices(result);
             break;
           }
+          case "workflow": {
+            const result = await apiFetch<WorkflowChecklistResponse>(
+              `/patients/${id}/workflow-checklist`
+            );
+            if (!cancelled) setWorkflowChecklist(result);
+            break;
+          }
           case "timeline": {
-            const result = await apiFetch<TimelineItem[]>(`/patients/${id}/timeline`);
-            if (!cancelled) setTimeline(result);
+            const params = new URLSearchParams();
+            if (timelineEntityFilter !== "all") params.set("entity_type", timelineEntityFilter);
+            if (timelineCategoryFilter !== "all") params.set("category", timelineCategoryFilter);
+            if (timelineSourceFilter !== "all") params.set("source", timelineSourceFilter);
+            if (timelineRangeFilter !== "all") params.set("range", timelineRangeFilter);
+            if (deferredTimelineSearch.trim()) params.set("search", deferredTimelineSearch.trim());
+            params.set("limit", String(timelineLimit));
+            params.set("offset", String(timelineOffset));
+            const result = await apiFetch<{
+              items: TimelineItem[];
+              total: number;
+              limit: number;
+              offset: number;
+              has_more: boolean;
+            }>(`/patients/${id}/timeline?${params.toString()}`);
+            if (!cancelled) {
+              setTimeline(result.items ?? []);
+              setTimelineTotal(result.total ?? 0);
+            }
             break;
           }
           default:
@@ -860,7 +1045,11 @@ export function PatientDetailPage() {
         }
         if (activeTab === "contracts") setContracts([]);
         if (activeTab === "invoices") setInvoices([]);
-        if (activeTab === "timeline") setTimeline([]);
+        if (activeTab === "workflow") setWorkflowChecklist(null);
+        if (activeTab === "timeline") {
+          setTimeline([]);
+          setTimelineTotal(0);
+        }
       } finally {
         if (!cancelled) setTabLoading(false);
       }
@@ -869,7 +1058,18 @@ export function PatientDetailPage() {
     void loadTabData();
 
     return () => { cancelled = true; };
-  }, [id, activeTab, tabVersion]);
+  }, [
+    id,
+    activeTab,
+    tabVersion,
+    deferredTimelineSearch,
+    timelineCategoryFilter,
+    timelineEntityFilter,
+    timelineLimit,
+    timelineOffset,
+    timelineRangeFilter,
+    timelineSourceFilter,
+  ]);
 
   useEffect(() => {
     if (!invoiceManageId) {
@@ -932,6 +1132,57 @@ export function PatientDetailPage() {
       setError(error instanceof Error ? error.message : String(error));
     } finally { setAssignBusy(false); }
   };
+
+  async function handleAddWorkflowItem(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!id || !workflowForm.itemText.trim()) {
+      setTabActionError(t.common_failed_create);
+      return;
+    }
+
+    setWorkflowBusy(true);
+    setTabActionError("");
+    try {
+      await apiFetch(`/patients/${id}/workflow-checklist`, {
+        method: "POST",
+        body: JSON.stringify({
+          item_text: workflowForm.itemText.trim(),
+          owner_user_id: toOptional(workflowForm.ownerUserId),
+          priority: workflowForm.priority,
+          due_date: workflowForm.dueDate
+            ? new Date(workflowForm.dueDate).toISOString()
+            : null,
+        }),
+      });
+      setNotice(t.common_active);
+      setWorkflowForm((current) => ({
+        ...blankWorkflowChecklistForm(),
+        ownerUserId: current.ownerUserId,
+      }));
+      reloadTab();
+    } catch (error) {
+      setTabActionError(error instanceof Error ? error.message : t.common_failed_create);
+    } finally {
+      setWorkflowBusy(false);
+    }
+  }
+
+  async function handleCompleteWorkflowItem(itemId: string) {
+    if (!id) return;
+    setWorkflowBusy(true);
+    setTabActionError("");
+    try {
+      await apiFetch(`/patients/${id}/workflow-checklist/${itemId}/complete`, {
+        method: "POST",
+      });
+      setNotice(t.common_active);
+      reloadTab();
+    } catch (error) {
+      setTabActionError(error instanceof Error ? error.message : t.common_failed_update);
+    } finally {
+      setWorkflowBusy(false);
+    }
+  }
 
   function openCreateRelation() {
     setEditingRelation(null);
@@ -1173,19 +1424,11 @@ export function PatientDetailPage() {
     setTabActionError("");
 
     try {
-      const payload = await apiFetch<unknown>(`/admin/compliance/patient/${id}/export`);
-      const blob = new Blob([JSON.stringify(payload, null, 2)], {
-        type: "application/json",
-      });
-      const objectUrl = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = objectUrl;
-      anchor.download = `${detail?.patient_id ?? "patient"}-dsgvo-export.json`;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      URL.revokeObjectURL(objectUrl);
-      setNotice(t.common_active);
+      await downloadApiFile(
+        `/admin/compliance/patient/${id}/export?format=zip`,
+        `${detail?.patient_id ?? "patient"}-dsgvo-export.zip`,
+      );
+      setNotice("DSGVO export downloaded.");
     } catch (error) {
       setTabActionError(
         error instanceof Error ? error.message : t.common_failed_create
@@ -1252,6 +1495,7 @@ export function PatientDetailPage() {
             .split(",")
             .map((value) => value.trim())
             .filter(Boolean),
+          functional_labels: parseFunctionalLabels(profileEditForm.functionalLabels),
           address_street: profileEditForm.addressStreet,
           address_city: profileEditForm.addressCity,
           address_zip: profileEditForm.addressZip,
@@ -1316,6 +1560,15 @@ export function PatientDetailPage() {
                 <Badge variant="outline" className={cn("rounded-full", detail.is_active ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-slate-50 text-slate-600")}>
                   {detail.is_active ? t.common_active : t.common_inactive}
                 </Badge>
+                {detail.functional_labels?.map((label) => (
+                  <Badge
+                    key={`${detail.id}-${label}`}
+                    variant="outline"
+                    className="rounded-full border-amber-200 bg-amber-50 text-amber-700"
+                  >
+                    {humanizeFunctionalLabel(label)}
+                  </Badge>
+                ))}
               </div>
             </div>
           </div>
@@ -1426,7 +1679,7 @@ export function PatientDetailPage() {
       </div>
 
       {/* Tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
+      <Tabs value={activeTab} onValueChange={handleTabChange}>
         <div className="border-b border-slate-200 flex justify-center">
           <TabsList variant="line" className="w-auto">
             <TabsTrigger value="profile" className="px-4 py-2">{t.patients_profile}</TabsTrigger>
@@ -1437,6 +1690,7 @@ export function PatientDetailPage() {
             <TabsTrigger value="documents" className="px-4 py-2">Documents</TabsTrigger>
             <TabsTrigger value="contracts" className="px-4 py-2">Contracts</TabsTrigger>
             <TabsTrigger value="invoices" className="px-4 py-2">Invoices</TabsTrigger>
+            <TabsTrigger value="workflow" className="px-4 py-2">Workflow</TabsTrigger>
             <TabsTrigger value="timeline" className="px-4 py-2">Timeline</TabsTrigger>
           </TabsList>
         </div>
@@ -1463,6 +1717,7 @@ export function PatientDetailPage() {
               <InfoRow label={t.patients_phone_secondary} value={fieldVal(detail.phone_secondary, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
               <InfoRow label={t.patients_email} value={fieldVal(detail.email, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
               <InfoRow label={t.patients_languages} value={fieldVal(detail.languages, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
+              <InfoRow label="Functional labels" value={fieldVal(detail.functional_labels, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
               <InfoRow label={t.patients_residence_country} value={fieldVal(detail.residence_country, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
               <InfoRow label={t.patients_insurance_provider} value={fieldVal(detail.insurance_provider, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
               <InfoRow label={t.patients_insurance_number} value={fieldVal(detail.insurance_number, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
@@ -2059,6 +2314,254 @@ export function PatientDetailPage() {
           )}
         </TabsContent>
 
+        <TabsContent value="workflow" className="mt-4 min-h-[400px]">
+          {tabLoading ? (
+            <div className="flex items-center justify-center py-16">
+              <LoaderCircle className="size-5 animate-spin text-slate-400" />
+            </div>
+          ) : !workflowChecklist || workflowChecklist.items.length === 0 ? (
+            <div className={card("p-8 text-center")}>
+              <p className="text-sm text-slate-500">
+                No patient workflow checklist yet.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className={card("p-4")}>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+                    Open items
+                  </p>
+                  <p className="mt-3 text-2xl font-semibold text-slate-950">
+                    {workflowChecklist.open_count}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Live patient-bound workflow tasks.
+                  </p>
+                </div>
+                <div className={card("p-4")}>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+                    Completed
+                  </p>
+                  <p className="mt-3 text-2xl font-semibold text-slate-950">
+                    {workflowChecklist.completed_count}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Checklist steps already closed.
+                  </p>
+                </div>
+                <div className={card("p-4")}>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+                    Groups
+                  </p>
+                  <p className="mt-3 text-2xl font-semibold text-slate-950">
+                    {workflowChecklistGroups.length}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Patient intake plus custom workstreams.
+                  </p>
+                </div>
+              </div>
+
+              {workflowChecklistGroups.map((group) => (
+                <div key={group.key} className={card("p-5")}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                        {group.label}
+                      </p>
+                      <h3 className="mt-1 text-sm font-semibold text-slate-950">
+                        {group.items.filter((item) => !item.is_completed).length} open /{" "}
+                        {group.items.length} total
+                      </h3>
+                    </div>
+                    <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
+                      {group.items.length} items
+                    </Badge>
+                  </div>
+                  <div className="mt-4 space-y-3">
+                    {group.items.map((item) => (
+                      <div
+                        key={item.id}
+                        className={cn(
+                          "rounded-2xl border px-4 py-4",
+                          item.is_completed
+                            ? "border-emerald-200 bg-emerald-50/60"
+                            : "border-slate-200 bg-white"
+                        )}
+                      >
+                        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="text-sm font-medium text-slate-950">
+                                {item.item_text}
+                              </p>
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "rounded-full text-[10px]",
+                                  priorityBadgeClass(item.priority)
+                                )}
+                              >
+                                {item.priority}
+                              </Badge>
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "rounded-full text-[10px]",
+                                  item.is_completed
+                                    ? "border-emerald-200 bg-emerald-100 text-emerald-800"
+                                    : STATUS_COLORS[item.linked_task_status ?? "open"] ??
+                                        "border-slate-200 bg-slate-50 text-slate-600"
+                                )}
+                              >
+                                {item.is_completed
+                                  ? "completed"
+                                  : item.linked_task_status ?? "open"}
+                              </Badge>
+                            </div>
+                            <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-500">
+                              <span>
+                                Owner:{" "}
+                                {item.owner_name
+                                  ? `${item.owner_name} · ${roleLbl(
+                                      item.owner_user_role ?? item.owner_role,
+                                      tr
+                                    )}`
+                                  : roleLbl(item.owner_role, tr)}
+                              </span>
+                              <span>
+                                Due: {fmtDateTime(item.due_date, t.common_not_set)}
+                              </span>
+                              <span>
+                                Created: {fmtDateTime(item.created_at, t.common_not_set)}
+                              </span>
+                              {item.completed_at ? (
+                                <span>
+                                  Completed: {fmtDateTime(item.completed_at, t.common_not_set)}
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
+                          {!item.is_completed ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="rounded-xl"
+                              disabled={workflowBusy}
+                              onClick={() => void handleCompleteWorkflowItem(item.id)}
+                            >
+                              Complete
+                            </Button>
+                          ) : null}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {canManageWorkflowChecklist ? (
+            <form onSubmit={handleAddWorkflowItem} className={cn(card("mt-4 p-5"), "space-y-4")}>
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                  Add workflow item
+                </p>
+                <h3 className="mt-1 text-sm font-semibold text-slate-950">
+                  Extend the patient checklist without leaving the profile.
+                </h3>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2 md:col-span-2">
+                  <Label htmlFor="patient-workflow-item-text">Checklist item</Label>
+                  <Input
+                    id="patient-workflow-item-text"
+                    value={workflowForm.itemText}
+                    onChange={(event) =>
+                      setWorkflowForm((current) => ({
+                        ...current,
+                        itemText: event.target.value,
+                      }))
+                    }
+                    className="h-10 rounded-xl bg-slate-50"
+                    placeholder="Document follow-up, PM call, concierge handoff..."
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="patient-workflow-owner">Owner</Label>
+                  <select
+                    id="patient-workflow-owner"
+                    className={selectClassName}
+                    value={workflowForm.ownerUserId}
+                    onChange={(event) =>
+                      setWorkflowForm((current) => ({
+                        ...current,
+                        ownerUserId: event.target.value,
+                      }))
+                    }
+                  >
+                    <option value="">Current user</option>
+                    {activeWorkflowAssignees.map((item) => (
+                      <option key={item.user_id} value={item.user_id}>
+                        {item.user_name} · {roleLbl(item.user_role, tr)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="patient-workflow-priority">Priority</Label>
+                  <select
+                    id="patient-workflow-priority"
+                    className={selectClassName}
+                    value={workflowForm.priority}
+                    onChange={(event) =>
+                      setWorkflowForm((current) => ({
+                        ...current,
+                        priority: event.target.value,
+                      }))
+                    }
+                  >
+                    {["low", "normal", "high", "urgent"].map((priority) => (
+                      <option key={priority} value={priority}>
+                        {priority}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="patient-workflow-due">Due at</Label>
+                  <Input
+                    id="patient-workflow-due"
+                    type="datetime-local"
+                    value={workflowForm.dueDate}
+                    onChange={(event) =>
+                      setWorkflowForm((current) => ({
+                        ...current,
+                        dueDate: event.target.value,
+                      }))
+                    }
+                    className="h-10 rounded-xl bg-slate-50"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end">
+                <Button
+                  type="submit"
+                  className="rounded-xl bg-slate-950 text-white hover:bg-slate-800"
+                  disabled={workflowBusy || !workflowForm.itemText.trim()}
+                >
+                  {workflowBusy ? (
+                    <LoaderCircle className="mr-2 size-4 animate-spin" />
+                  ) : null}
+                  Add workflow item
+                </Button>
+              </div>
+            </form>
+          ) : null}
+        </TabsContent>
+
         <TabsContent value="timeline" className="mt-4 min-h-[400px]">
           {tabLoading ? (
             <div className="flex items-center justify-center py-16"><LoaderCircle className="size-5 animate-spin text-slate-400" /></div>
@@ -2102,7 +2605,7 @@ export function PatientDetailPage() {
                     )}
                     onClick={() => setTimelineEntityFilter("all")}
                   >
-                    All · {timelineSummary.total}
+                    All · {timelineTotal}
                   </Button>
                   {timelineSummary.entityCounts.map((entry) => (
                     <Button
@@ -2177,6 +2680,7 @@ export function PatientDetailPage() {
                         setTimelineSourceFilter("all");
                         setTimelineRangeFilter("all");
                         setTimelineSearch("");
+                        setTimelineOffset(0);
                       }}
                     >
                       Reset filters
@@ -2191,6 +2695,35 @@ export function PatientDetailPage() {
                 </div>
               ) : (
                 <div className="space-y-3">
+              <div className={card("flex items-center justify-between gap-3 p-4")}>
+                <p className="text-sm text-slate-500">
+                  Showing {timelineTotal === 0 ? 0 : timelineOffset + 1}-
+                  {timelineTotal === 0
+                    ? 0
+                    : Math.min(timelineOffset + timeline.length, timelineTotal)}{" "}
+                  of {timelineTotal}
+                </p>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="rounded-xl"
+                    disabled={timelineOffset === 0}
+                    onClick={() => setTimelineOffset((current) => Math.max(0, current - timelineLimit))}
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="rounded-xl"
+                    disabled={!timelineHasNextPage}
+                    onClick={() => setTimelineOffset((current) => current + timelineLimit)}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
               {filteredTimeline.map((item) => (
                 <button
                   key={`${item.entity_type}-${item.entity_id}`}
@@ -2272,6 +2805,10 @@ export function PatientDetailPage() {
                 <div className="space-y-2">
                   <Label htmlFor="patient-languages-edit">Languages</Label>
                   <Input id="patient-languages-edit" value={profileEditForm.languages} onChange={(event) => setProfileEditForm((current) => current ? { ...current, languages: event.target.value } : current)} placeholder="de, uk, en" />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="patient-functional-labels-edit">Functional labels</Label>
+                  <Input id="patient-functional-labels-edit" value={profileEditForm.functionalLabels} onChange={(event) => setProfileEditForm((current) => current ? { ...current, functionalLabels: event.target.value } : current)} placeholder="vip, high_risk" />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="patient-nationality-edit">Nationality</Label>

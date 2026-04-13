@@ -20,7 +20,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, downloadApiFile } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 
 interface ConsentTypeSummary {
@@ -37,6 +37,7 @@ interface ConsentChange {
   consent_type: string;
   granted: boolean;
   granted_at: string | null;
+  expires_at: string | null;
   revoked_at: string | null;
 }
 
@@ -55,6 +56,7 @@ interface ExpiredConsent {
   user_name: string;
   consent_type: string;
   granted_at: string | null;
+  expires_at: string | null;
 }
 
 interface PatientConsentRecord {
@@ -66,6 +68,7 @@ interface PatientConsentRecord {
   consent_type: string;
   granted: boolean;
   granted_at: string | null;
+  expires_at: string | null;
   revoked_at: string | null;
   note?: string | null;
   created_at: string;
@@ -123,6 +126,13 @@ const PRIVACY_REQUEST_TYPE_OPTIONS = [
 function compactDt(dt: string | null | undefined): string {
   if (!dt) return "\u2014";
   return dt.split("T")[0] ?? dt;
+}
+
+function isPastDate(dt: string | null | undefined): boolean {
+  if (!dt) return false;
+  const timestamp = Date.parse(dt);
+  if (Number.isNaN(timestamp)) return false;
+  return timestamp < Date.now();
 }
 
 function consentTypeLabel(consentType: string) {
@@ -230,6 +240,7 @@ export function AdminCompliancePage() {
     CONSENT_TYPE_OPTIONS[0].value,
   );
   const [consentNote, setConsentNote] = useState("");
+  const [consentExpiresAt, setConsentExpiresAt] = useState("");
   const [consentBusy, setConsentBusy] = useState<"grant" | "revoke" | null>(
     null,
   );
@@ -419,11 +430,14 @@ export function AdminCompliancePage() {
           consent_type: consentType,
           action,
           note: consentNote.trim() || undefined,
+          expires_at:
+            action === "grant" ? consentExpiresAt.trim() || undefined : undefined,
         }),
       });
 
       setActivePatientId(targetPatientId);
       setConsentNote("");
+      setConsentExpiresAt("");
       syncPatientQuery(targetPatientId);
       await Promise.all([
         loadConsentDashboard(),
@@ -549,10 +563,11 @@ export function AdminCompliancePage() {
     setExportResult(null);
 
     try {
-      const data = await apiFetch<unknown>(
-        `/admin/compliance/patient/${targetPatientId}/export`,
+      const filename = await downloadApiFile(
+        `/admin/compliance/patient/${targetPatientId}/export?format=zip`,
+        `${targetPatientId}-dsgvo-export.zip`,
       );
-      setExportResult(JSON.stringify(data, null, 2));
+      setExportResult(`Downloaded ${filename}`);
     } catch (error) {
       setExportResult(
         `Error: ${error instanceof Error ? error.message : String(error)}`,
@@ -641,7 +656,7 @@ export function AdminCompliancePage() {
               </div>
             ) : null}
 
-            <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,220px)_minmax(0,1fr)_auto]">
+            <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,220px)_minmax(0,1fr)_220px_auto]">
               <div className="space-y-1">
                 <Label htmlFor="consent-type">Consent type</Label>
                 <select
@@ -667,6 +682,18 @@ export function AdminCompliancePage() {
                   rows={3}
                   className="min-h-[92px] w-full rounded-xl border border-input bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
                 />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="consent-expires-at">Expiry date</Label>
+                <Input
+                  id="consent-expires-at"
+                  type="date"
+                  value={consentExpiresAt}
+                  onChange={(event) => setConsentExpiresAt(event.target.value)}
+                />
+                <p className="text-muted-foreground text-xs">
+                  Leave empty to default to 365 days from grant.
+                </p>
               </div>
               <div className="flex flex-col justify-end gap-2">
                 <Button
@@ -713,15 +740,19 @@ export function AdminCompliancePage() {
                       <TableHead>Status</TableHead>
                       <TableHead>Managed by</TableHead>
                       <TableHead>Effective at</TableHead>
+                      <TableHead>Expires</TableHead>
                       <TableHead>Note</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {patientConsents.map((record) => {
-                      const isRevoked =
-                        Boolean(record.revoked_at) && !record.granted;
+                      const isRevoked = Boolean(record.revoked_at) && !record.granted;
+                      const isExpired =
+                        !isRevoked && record.granted && isPastDate(record.expires_at);
                       const badgeClass = isRevoked
                         ? "bg-red-500/15 text-red-700"
+                        : isExpired
+                          ? "bg-amber-500/15 text-amber-700"
                         : record.granted
                           ? "bg-green-500/15 text-green-700"
                           : "bg-slate-500/15 text-slate-700";
@@ -738,12 +769,17 @@ export function AdminCompliancePage() {
                             <Badge className={badgeClass}>
                               {isRevoked
                                 ? t.compliance_revoked
+                                : isExpired
+                                  ? t.compliance_expired
                                 : t.compliance_granted}
                             </Badge>
                           </TableCell>
                           <TableCell>{record.managed_by_name}</TableCell>
                           <TableCell className="font-mono text-sm text-slate-500">
                             {effectiveAt}
+                          </TableCell>
+                          <TableCell className="font-mono text-sm text-slate-500">
+                            {compactDt(record.expires_at)}
                           </TableCell>
                           <TableCell className="text-sm text-slate-600">
                             {typeof record.note === "string" &&
@@ -1145,13 +1181,13 @@ export function AdminCompliancePage() {
                     <TableHead>Patient</TableHead>
                     <TableHead>{t.activity_user}</TableHead>
                     <TableHead>Type</TableHead>
-                    <TableHead>{t.activity_time}</TableHead>
+                    <TableHead>Expired at</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {expired.map((item) => (
                     <TableRow
-                      key={`${item.patient_id}-${item.consent_type}-${item.granted_at}`}
+                      key={`${item.patient_id}-${item.consent_type}-${item.expires_at ?? item.granted_at}`}
                     >
                       <TableCell className="font-medium">
                         {patientLabel(item.patient_pid, item.patient_name)}
@@ -1161,7 +1197,7 @@ export function AdminCompliancePage() {
                         {consentTypeLabel(item.consent_type)}
                       </TableCell>
                       <TableCell className="font-mono text-sm text-slate-500">
-                        {compactDt(item.granted_at)}
+                        {compactDt(item.expires_at)}
                       </TableCell>
                     </TableRow>
                   ))}

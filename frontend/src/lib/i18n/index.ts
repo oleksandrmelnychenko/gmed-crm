@@ -13,8 +13,13 @@ export interface Translations {
   nav_logout: string;
   nav_my_documents: string;
   nav_my_appointments: string;
+  nav_my_services: string;
   nav_my_invoices: string;
   nav_my_privacy: string;
+  nav_my_feedback: string;
+  nav_feedback: string;
+  nav_reports: string;
+  nav_learning: string;
 
   login_title: string;
   login_email: string;
@@ -229,6 +234,9 @@ export interface Translations {
   settings_document_requirements: string;
   settings_document_requirements_hint: string;
   settings_required_patient_documents: string;
+  settings_clinical_data: string;
+  settings_clinical_data_hint: string;
+  settings_clinical_retention_years: string;
   settings_sessions: string;
   settings_active_sessions: string;
   settings_logout_user: string;
