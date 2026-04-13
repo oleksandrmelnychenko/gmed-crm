@@ -350,8 +350,8 @@ async function installStaffApiMocks(page: Page) {
 
     if (path === "/documents/meta/categories") {
       return json(route, {
-        categories: [{ value: "report", label: "Report" }],
-        arts: [{ value: "medical_report", label: "Medical report" }],
+        categories: [{ key: "report", label: "Report" }],
+        arts: ["medical_report"],
       });
     }
 
@@ -363,49 +363,52 @@ async function installStaffApiMocks(page: Page) {
     }
 
     if (path === "/documents" || path.startsWith("/documents?")) {
-      return json(route, [
-        {
-          id: "00000000-0000-0000-0000-000000000501",
-          patient_id: "00000000-0000-0000-0000-000000000301",
-          order_id: null,
-          appointment_id: "00000000-0000-0000-0000-000000000401",
-          patient_pid: "PT-001",
-          patient_name: "Anna Muster",
-          order_number: null,
-          appointment_title: "Follow-up slot",
-          auto_name: "MRI report",
-          original_filename: "mri-report.pdf",
-          art: "medical_report",
-          category: "report",
-          status: "active",
-          visibility: "internal",
-          is_medical: true,
-          mime_type: "application/pdf",
-          file_size: 2048,
-          has_stored_file: true,
-          klinik: "Clinic Cologne",
-          ursprung: "provider",
-          notes: null,
-          uploaded_by_name: "Admin GMED",
-          version_root_document_id: "00000000-0000-0000-0000-000000000501",
-          replaces_document_id: null,
-          superseded_by_document_id: null,
-          version_number: 1,
-          version_count: 1,
-          is_latest_version: true,
-          file_deleted_at: null,
-          file_deleted_by: null,
-          file_deleted_by_name: null,
-          file_delete_reason: null,
-          created_at: "2026-04-01T09:00:00Z",
-          updated_at: "2026-04-01T09:00:00Z",
-          share_count: 0,
-          shared_to_current: false,
-          data_sensitivity: "medical",
-          needs_categorization: false,
-          classification_suggestion: null,
-        },
-      ]);
+      return json(route, [buildDocument()]);
+    }
+
+    if (path === `/documents/${documentId}`) {
+      return json(route, buildDocument());
+    }
+
+    if (path === `/documents/${documentId}/shares`) {
+      return json(route, portalShareActive ? buildPortalShares() : []);
+    }
+
+    if (path === `/documents/${documentId}/versions`) {
+      return json(route, [buildDocument()]);
+    }
+
+    if (path === `/documents/${documentId}/translation-requests`) {
+      return json(route, []);
+    }
+
+    if (path === `/documents/${documentId}/text-extraction`) {
+      return json(route, {
+        status: "available",
+        method: "pdf_text",
+        message: null,
+        extracted_text: "MRI report text",
+        has_text: true,
+        extracted_at: "2026-04-05T09:00:00Z",
+        extracted_by: "00000000-0000-0000-0000-000000000001",
+        extracted_by_name: "Admin GMED",
+      });
+    }
+
+    if (
+      path === `/documents/${documentId}/portal-release` &&
+      route.request().method() === "POST"
+    ) {
+      portalShareActive = true;
+      return json(route, { ok: true });
+    }
+
+    if (
+      path === `/documents/${documentId}/portal-release/revoke` &&
+      route.request().method() === "POST"
+    ) {
+      portalShareActive = false;
+      return json(route, { ok: true });
     }
 
     if (path === "/documents/intake-queue") {
@@ -457,6 +460,9 @@ async function installStaffApiMocks(page: Page) {
 
 test.describe("staff smoke flows", () => {
   test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      window.localStorage.setItem("gmed_lang", "de");
+    });
     await installStaffApiMocks(page);
     await page.goto("/login");
     await page.locator("#email").fill("admin@gmed.de");
@@ -487,5 +493,45 @@ test.describe("staff smoke flows", () => {
     await page.goto("/invoices");
     await expect(page).toHaveURL(/\/invoices$/);
     await expect(page.getByText("INV-001")).toBeVisible();
+  });
+
+  test("staff can release and revoke a document from patient portal scope", async ({
+    page,
+  }) => {
+    await page.goto("/documents");
+    await expect(page.getByText("MRI report")).toBeVisible();
+
+    await page.getByText("MRI report").click();
+    await expect(
+      page.getByRole("button", {
+        name: /Ins Patientenportal freigeben|Выпустить в портал пациента/i,
+      }),
+    ).toBeVisible();
+
+    await page
+      .getByRole("button", {
+        name: /Ins Patientenportal freigeben|Выпустить в портал пациента/i,
+      })
+      .click();
+    await expect(
+      page.getByText(
+        /Dokument ins Patientenportal freigegeben|Документ выпущен в портал пациента/i,
+      ),
+    ).toBeVisible();
+
+    await expect(
+      page.getByRole("button", {
+        name: /Portalfreigabe widerrufen|Отозвать релиз портала/i,
+      }),
+    ).toBeEnabled();
+
+    await page
+      .getByRole("button", {
+        name: /Portalfreigabe widerrufen|Отозвать релиз портала/i,
+      })
+      .click();
+    await expect(
+      page.getByText(/Portalfreigabe widerrufen|Релиз портала отозван/i),
+    ).toBeVisible();
   });
 });
