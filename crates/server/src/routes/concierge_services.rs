@@ -10,6 +10,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use crate::access;
+use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::routes::me::resolve_self_patient_id;
 use crate::state::AppState;
@@ -414,21 +415,19 @@ async fn create_my_concierge_service(
         }
     };
 
-    let _ = sqlx::query(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context)
-         VALUES ($1, 'create_patient_portal_concierge_service', 'concierge_service', $2, $3)",
-    )
-    .bind(auth.user_id)
-    .bind(service_id)
-    .bind(serde_json::json!({
-        "patient_id": patient_id,
-        "service_kind": service_kind.clone(),
-        "assigned_concierge_id": assigned_concierge_id,
-        "request_source": "patient_portal",
-        "created_via": "patient_self_service",
-    }))
-    .execute(&state.db)
-    .await;
+    state.audit_sender.try_send(audit::domain_event(
+        "create_patient_portal_concierge_service",
+        Some(auth.user_id),
+        "concierge_service",
+        Some(service_id),
+        serde_json::json!({
+            "patient_id": patient_id,
+            "service_kind": service_kind.clone(),
+            "assigned_concierge_id": assigned_concierge_id,
+            "request_source": "patient_portal",
+            "created_via": "patient_self_service",
+        }),
+    ));
 
     let patient_label = load_patient_label(&state, patient_id)
         .await
@@ -535,18 +534,16 @@ async fn cancel_my_concierge_service(
     .await
     {
         Ok(_) => {
-            let _ = sqlx::query(
-                "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context)
-                 VALUES ($1, 'cancel_patient_portal_concierge_service', 'concierge_service', $2, $3)",
-            )
-            .bind(auth.user_id)
-            .bind(service_id)
-            .bind(serde_json::json!({
-                "patient_id": patient_id,
-                "request_source": "patient_portal",
-            }))
-            .execute(&state.db)
-            .await;
+            state.audit_sender.try_send(audit::domain_event(
+                "cancel_patient_portal_concierge_service",
+                Some(auth.user_id),
+                "concierge_service",
+                Some(service_id),
+                serde_json::json!({
+                    "patient_id": patient_id,
+                    "request_source": "patient_portal",
+                }),
+            ));
 
             match load_service_row(&state, service_id).await {
                 Ok(Some(service)) => Json(build_portal_service_json(&service)).into_response(),
@@ -862,20 +859,18 @@ async fn create_concierge_service(
                 Ok(value) => value,
                 Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"),
             };
-            let _ = sqlx::query(
-                "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context)
-                 VALUES ($1, 'create_concierge_service', 'concierge_service', $2, $3)",
-            )
-            .bind(auth.user_id)
-            .bind(service_id)
-            .bind(serde_json::json!({
-                "appointment_id": body.appointment_id,
-                "patient_id": body.patient_id,
-                "provider_id": provider_id,
-                "assigned_concierge_id": assigned_concierge_id,
-            }))
-            .execute(&state.db)
-            .await;
+            state.audit_sender.try_send(audit::domain_event(
+                "create_concierge_service",
+                Some(auth.user_id),
+                "concierge_service",
+                Some(service_id),
+                serde_json::json!({
+                    "appointment_id": body.appointment_id,
+                    "patient_id": body.patient_id,
+                    "provider_id": provider_id,
+                    "assigned_concierge_id": assigned_concierge_id,
+                }),
+            ));
 
             match load_service_row(&state, service_id).await {
                 Ok(Some(service)) => {
@@ -1065,19 +1060,17 @@ async fn update_concierge_service(
     .await
     {
         Ok(result) if result.rows_affected() > 0 => {
-            let _ = sqlx::query(
-                "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context)
-                 VALUES ($1, 'update_concierge_service', 'concierge_service', $2, $3)",
-            )
-            .bind(auth.user_id)
-            .bind(service_id)
-            .bind(serde_json::json!({
-                "status": audit_status,
-                "billing_status": audit_billing_status,
-                "assigned_concierge_id": audit_assigned_concierge_id,
-            }))
-            .execute(&state.db)
-            .await;
+            state.audit_sender.try_send(audit::domain_event(
+                "update_concierge_service",
+                Some(auth.user_id),
+                "concierge_service",
+                Some(service_id),
+                serde_json::json!({
+                    "status": audit_status,
+                    "billing_status": audit_billing_status,
+                    "assigned_concierge_id": audit_assigned_concierge_id,
+                }),
+            ));
 
             match load_service_row(&state, service_id).await {
                 Ok(Some(service)) => Json(build_service_json(&service)).into_response(),
