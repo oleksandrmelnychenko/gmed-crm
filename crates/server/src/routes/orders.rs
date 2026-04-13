@@ -9,6 +9,7 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::access;
+use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::state::AppState;
 use gmed_domain::role::Role;
@@ -1823,17 +1824,16 @@ async fn create_order(
     };
 
     if !patient_recheck.can_create_order {
-        let _ = sqlx::query!(
-            "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'create_order_blocked_recheck', 'patient', $2, $3)",
-            auth.user_id,
-            body.patient_id,
+        state.audit_sender.try_send(audit::domain_event(
+            "create_order_blocked_recheck",
+            Some(auth.user_id),
+            "patient",
+            Some(body.patient_id),
             serde_json::json!({
                 "blocking_reasons": patient_recheck.blocking_reasons.clone(),
                 "recheck": patient_recheck.payload.clone(),
-            })
-        )
-        .execute(&state.db)
-        .await;
+            }),
+        ));
         return patient_recheck_err(&patient_recheck);
     }
 
@@ -1888,9 +1888,16 @@ async fn create_order(
             {
                 return resp;
             }
-            let _ = sqlx::query!("INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'create_order', 'order', $2, $3)",
-                auth.user_id, r.id, serde_json::json!({"order_number": order_number.clone(), "patient_id": body.patient_id})
-            ).execute(&state.db).await;
+            state.audit_sender.try_send(audit::domain_event(
+                "create_order",
+                Some(auth.user_id),
+                "order",
+                Some(r.id),
+                serde_json::json!({
+                    "order_number": order_number.clone(),
+                    "patient_id": body.patient_id,
+                }),
+            ));
             if let Err(resp) = crate::routes::workflow_lifecycle::record_event(
                 &state,
                 crate::routes::workflow_lifecycle::RecordEvent {
@@ -2145,9 +2152,17 @@ async fn update_phase(
             {
                 return resp;
             }
-            let _ = sqlx::query!("INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'update_phase', 'order', $2, $3)",
-                auth.user_id, order_id, serde_json::json!({"phase": body.phase.clone(), "from_phase": current_phase.clone(), "note": phase_note.clone()})
-            ).execute(&state.db).await;
+            state.audit_sender.try_send(audit::domain_event(
+                "update_phase",
+                Some(auth.user_id),
+                "order",
+                Some(order_id),
+                serde_json::json!({
+                    "phase": body.phase.clone(),
+                    "from_phase": current_phase.clone(),
+                    "note": phase_note.clone(),
+                }),
+            ));
             if let Err(resp) = crate::routes::workflow_lifecycle::record_event(
                 &state,
                 crate::routes::workflow_lifecycle::RecordEvent {
@@ -2277,20 +2292,18 @@ async fn update_process_gates(
     .await
     {
         Ok(result) if result.rows_affected() > 0 => {
-            let _ = sqlx::query(
-                "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context)
-                 VALUES ($1, 'update_order_process_gates', 'order', $2, $3)",
-            )
-            .bind(auth.user_id)
-            .bind(order_id)
-            .bind(serde_json::json!({
-                "billing_release_status": billing_release_status,
-                "billing_release_note": body.billing_release_note,
-                "package_coverage_status": package_coverage_status,
-                "package_coverage_note": body.package_coverage_note,
-            }))
-            .execute(&state.db)
-            .await;
+            state.audit_sender.try_send(audit::domain_event(
+                "update_order_process_gates",
+                Some(auth.user_id),
+                "order",
+                Some(order_id),
+                serde_json::json!({
+                    "billing_release_status": billing_release_status,
+                    "billing_release_note": body.billing_release_note,
+                    "package_coverage_status": package_coverage_status,
+                    "package_coverage_note": body.package_coverage_note,
+                }),
+            ));
 
             match load_order_process_readiness(&state, order_id, patient_id).await {
                 Ok(readiness) => Json(readiness.payload).into_response(),
@@ -2456,22 +2469,20 @@ async fn update_debt_management(
     .await
     {
         Ok(result) if result.rows_affected() > 0 => {
-            let _ = sqlx::query(
-                "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context)
-                 VALUES ($1, 'update_order_debt_management', 'order', $2, $3)",
-            )
-            .bind(auth.user_id)
-            .bind(order_id)
-            .bind(serde_json::json!({
-                "status": status,
-                "note": note,
-                "owner_user_id": body.owner_user_id,
-                "next_review_at": next_review_at.map(|value| value.to_rfc3339()),
-                "last_contact_at": last_contact_at.map(|value| value.to_rfc3339()),
-                "resolution_note": resolution_note,
-            }))
-            .execute(&state.db)
-            .await;
+            state.audit_sender.try_send(audit::domain_event(
+                "update_order_debt_management",
+                Some(auth.user_id),
+                "order",
+                Some(order_id),
+                serde_json::json!({
+                    "status": status,
+                    "note": note,
+                    "owner_user_id": body.owner_user_id,
+                    "next_review_at": next_review_at.map(|value| value.to_rfc3339()),
+                    "last_contact_at": last_contact_at.map(|value| value.to_rfc3339()),
+                    "resolution_note": resolution_note,
+                }),
+            ));
 
             match load_order_process_readiness(&state, order_id, patient_id).await {
                 Ok(readiness) => Json(readiness.payload).into_response(),
@@ -2640,22 +2651,20 @@ async fn update_planning_preparation(
     .await
     {
         Ok(result) if result.rows_affected() > 0 => {
-            let _ = sqlx::query(
-                "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context)
-                 VALUES ($1, 'update_order_planning_preparation', 'order', $2, $3)",
-            )
-            .bind(auth.user_id)
-            .bind(order_id)
-            .bind(serde_json::json!({
-                "treatment_plan_status": treatment_plan_status,
-                "treatment_plan_note": body.treatment_plan_note,
-                "non_medical_required": body.non_medical_required,
-                "interpreter_required": body.interpreter_required,
-                "preparation_documents_status": preparation_documents_status,
-                "interpreter_briefing_status": effective_interpreter_briefing_status,
-            }))
-            .execute(&state.db)
-            .await;
+            state.audit_sender.try_send(audit::domain_event(
+                "update_order_planning_preparation",
+                Some(auth.user_id),
+                "order",
+                Some(order_id),
+                serde_json::json!({
+                    "treatment_plan_status": treatment_plan_status,
+                    "treatment_plan_note": body.treatment_plan_note,
+                    "non_medical_required": body.non_medical_required,
+                    "interpreter_required": body.interpreter_required,
+                    "preparation_documents_status": preparation_documents_status,
+                    "interpreter_briefing_status": effective_interpreter_briefing_status,
+                }),
+            ));
 
             match load_order_planning_readiness(&state, order_id).await {
                 Ok(readiness) => Json(readiness.payload).into_response(),
@@ -2833,23 +2842,21 @@ async fn update_execution_flow(
     .await
     {
         Ok(result) if result.rows_affected() > 0 => {
-            let _ = sqlx::query(
-                "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context)
-                 VALUES ($1, 'update_order_execution_flow', 'order', $2, $3)",
-            )
-            .bind(auth.user_id)
-            .bind(order_id)
-            .bind(serde_json::json!({
-                "arrival_status": arrival_status,
-                "medical_execution_status": medical_execution_status,
-                "non_medical_execution_status": non_medical_execution_status,
-                "interpreter_service_status": interpreter_service_status,
-                "issue_status": issue_status,
-                "deviation_note": deviation_note,
-                "execution_summary": execution_summary,
-            }))
-            .execute(&state.db)
-            .await;
+            state.audit_sender.try_send(audit::domain_event(
+                "update_order_execution_flow",
+                Some(auth.user_id),
+                "order",
+                Some(order_id),
+                serde_json::json!({
+                    "arrival_status": arrival_status,
+                    "medical_execution_status": medical_execution_status,
+                    "non_medical_execution_status": non_medical_execution_status,
+                    "interpreter_service_status": interpreter_service_status,
+                    "issue_status": issue_status,
+                    "deviation_note": deviation_note,
+                    "execution_summary": execution_summary,
+                }),
+            ));
 
             match load_order_execution_readiness(&state, order_id).await {
                 Ok(readiness) => Json(readiness.payload).into_response(),
@@ -3005,24 +3012,22 @@ async fn update_followup_flow(
     .await
     {
         Ok(result) if result.rows_affected() > 0 => {
-            let _ = sqlx::query(
-                "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context)
-                 VALUES ($1, 'update_order_followup_flow', 'order', $2, $3)",
-            )
-            .bind(auth.user_id)
-            .bind(order_id)
-            .bind(serde_json::json!({
-                "doctor_followup_status": doctor_followup_status,
-                "followup_1w_status": followup_1w_status,
-                "followup_1m_status": followup_1m_status,
-                "followup_6m_status": followup_6m_status,
-                "package_end_date": package_end_date.map(|value| value.to_string()),
-                "package_end_status": package_end_status,
-                "results_handoff_status": results_handoff_status,
-                "followup_summary": followup_summary,
-            }))
-            .execute(&state.db)
-            .await;
+            state.audit_sender.try_send(audit::domain_event(
+                "update_order_followup_flow",
+                Some(auth.user_id),
+                "order",
+                Some(order_id),
+                serde_json::json!({
+                    "doctor_followup_status": doctor_followup_status,
+                    "followup_1w_status": followup_1w_status,
+                    "followup_1m_status": followup_1m_status,
+                    "followup_6m_status": followup_6m_status,
+                    "package_end_date": package_end_date.map(|value| value.to_string()),
+                    "package_end_status": package_end_status,
+                    "results_handoff_status": results_handoff_status,
+                    "followup_summary": followup_summary,
+                }),
+            ));
 
             match load_order_followup_readiness(&state, order_id).await {
                 Ok(readiness) => Json(readiness.payload).into_response(),
