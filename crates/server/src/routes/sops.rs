@@ -13,6 +13,7 @@ use serde_json::{Value, json};
 use sqlx::{Row, postgres::PgRow};
 use uuid::Uuid;
 
+use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::state::AppState;
 use gmed_domain::role::Role;
@@ -352,6 +353,10 @@ async fn create_sop(
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create SOP");
     }
 
+    // TODO(audit-migrate): transactional — coupled to create_sop rollback via
+    // `.execute(&mut *tx)`. AuditContext fires after the response outside the
+    // handler's transaction, so migrating here would drop rollback coupling
+    // and claim the SOP was created on an aborted transaction. Leave as-is.
     if let Err(e) = sqlx::query(
         r#"INSERT INTO audit_log (user_id, action, entity_type, entity_id, context)
            VALUES ($1, 'create_sop', 'sop', $2, $3)"#,
@@ -528,6 +533,8 @@ async fn update_sop(
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update SOP");
     }
 
+    // TODO(audit-migrate): transactional — `.execute(&mut *tx)` keeps this
+    // row rolled back with update_sop on failure. Do not migrate.
     if let Err(e) = sqlx::query(
         r#"INSERT INTO audit_log (user_id, action, entity_type, entity_id, context)
            VALUES ($1, 'update_sop', 'sop', $2, $3)"#,
@@ -649,6 +656,8 @@ async fn review_sop(
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to review SOP");
     }
 
+    // TODO(audit-migrate): transactional — `.execute(&mut *tx)` keeps this
+    // row rolled back with review_sop on failure. Do not migrate.
     if let Err(e) = sqlx::query(
         r#"INSERT INTO audit_log (user_id, action, entity_type, entity_id, context)
            VALUES ($1, 'review_sop', 'sop', $2, $3)"#,
@@ -825,6 +834,9 @@ async fn request_acknowledgement(
         }
     }
 
+    // TODO(audit-migrate): transactional — `.execute(&mut *tx)` keeps this
+    // row rolled back with the acknowledgement request on failure. Do not
+    // migrate.
     if let Err(e) = sqlx::query(
         r#"INSERT INTO audit_log (user_id, action, entity_type, entity_id, context)
            VALUES ($1, 'request_sop_acknowledgement', 'sop', $2, $3)"#,
@@ -918,15 +930,13 @@ async fn acknowledge_sop(
     .await
     {
         Ok(outcome) if outcome.rows_affected() > 0 => {
-            let _ = sqlx::query(
-                r#"INSERT INTO audit_log (user_id, action, entity_type, entity_id, context)
-                   VALUES ($1, 'acknowledge_sop', 'sop', $2, $3)"#,
-            )
-            .bind(auth.user_id)
-            .bind(id)
-            .bind(json!({ "revision_no": current.revision_no }))
-            .execute(&state.db)
-            .await;
+            state.audit_sender.try_send(audit::domain_event(
+                "acknowledge_sop",
+                Some(auth.user_id),
+                "sop",
+                Some(id),
+                json!({ "revision_no": current.revision_no }),
+            ));
 
             Json(json!({
                 "ok": true,
