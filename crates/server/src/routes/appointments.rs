@@ -12,6 +12,7 @@ use std::collections::HashSet;
 use uuid::Uuid;
 
 use crate::access;
+use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::routes::me::resolve_self_patient_id;
 use crate::state::AppState;
@@ -118,6 +119,11 @@ struct UpdateAppointment {
     time_start: Option<String>,
     time_end: Option<String>,
     location: Option<String>,
+    recurrence_frequency: Option<String>,
+    recurrence_interval: Option<i32>,
+    recurrence_count: Option<i32>,
+    recurrence_until: Option<String>,
+    recurrence_scope: Option<String>,
 }
 
 struct AppointmentRecurrence {
@@ -130,6 +136,27 @@ struct AppointmentRecurrence {
 #[derive(Deserialize)]
 struct StatusUpdate {
     status: String,
+    recurrence_scope: Option<String>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AppointmentRecurrenceScope {
+    Single,
+    Following,
+    Series,
+}
+
+struct AppointmentUpdateTarget {
+    id: Uuid,
+    patient_id: Uuid,
+    provider_id: Option<Uuid>,
+    doctor_id: Option<Uuid>,
+    interpreter_id: Option<Uuid>,
+    interpreter_response: Option<String>,
+    date: chrono::NaiveDate,
+    time_start: Option<chrono::NaiveTime>,
+    time_end: Option<chrono::NaiveTime>,
+    location: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -650,23 +677,22 @@ async fn create_my_appointment_request(
         }
     };
 
-    let _ = sqlx::query(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'create_appointment_request', 'appointment_request', $2, $3)",
-    )
-    .bind(auth.user_id)
-    .bind(request_id)
-    .bind(serde_json::json!({
-        "patient_id": patient_id,
-        "appointment_type": body.appointment_type,
-        "preferred_date_from": preferred_date_from.map(|value| value.to_string()),
-        "preferred_date_to": preferred_date_to.map(|value| value.to_string()),
-        "preferred_time_of_day": preferred_time_of_day,
-        "requested_provider_id": body.requested_provider_id,
-        "requested_doctor_id": body.requested_doctor_id,
-        "order_id": body.order_id,
-    }))
-    .execute(&state.db)
-    .await;
+    state.audit_sender.try_send(audit::domain_event(
+        "create_appointment_request",
+        Some(auth.user_id),
+        "appointment_request",
+        Some(request_id),
+        serde_json::json!({
+            "patient_id": patient_id,
+            "appointment_type": body.appointment_type,
+            "preferred_date_from": preferred_date_from.map(|value| value.to_string()),
+            "preferred_date_to": preferred_date_to.map(|value| value.to_string()),
+            "preferred_time_of_day": preferred_time_of_day,
+            "requested_provider_id": body.requested_provider_id,
+            "requested_doctor_id": body.requested_doctor_id,
+            "order_id": body.order_id,
+        }),
+    ));
 
     let patient_label = sqlx::query(
         r#"SELECT patient_id, trim(concat_ws(' ', first_name, last_name)) AS patient_name
@@ -867,18 +893,17 @@ async fn review_appointment_request(
         );
     }
 
-    let _ = sqlx::query(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'review_appointment_request', 'appointment_request', $2, $3)",
-    )
-    .bind(auth.user_id)
-    .bind(id)
-    .bind(serde_json::json!({
-        "patient_id": patient_id,
-        "status": body.status,
-        "review_note": review_note,
-    }))
-    .execute(&state.db)
-    .await;
+    state.audit_sender.try_send(audit::domain_event(
+        "review_appointment_request",
+        Some(auth.user_id),
+        "appointment_request",
+        Some(id),
+        serde_json::json!({
+            "patient_id": patient_id,
+            "status": body.status,
+            "review_note": review_note,
+        }),
+    ));
 
     let _ = sqlx::query(
         "INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id) VALUES ($1, 'appointment_request_update', $2, $3, 'appointment_request', $4)",
@@ -1138,23 +1163,22 @@ async fn convert_appointment_request(
         );
     }
 
-    let _ = sqlx::query(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'convert_appointment_request', 'appointment_request', $2, $3)",
-    )
-    .bind(auth.user_id)
-    .bind(id)
-    .bind(serde_json::json!({
-        "patient_id": patient_id,
-        "appointment_id": appointment_id,
-        "appointment_type": request_type,
-        "provider_id": body.provider_id,
-        "doctor_id": body.doctor_id,
-        "owner_user_id": owner_user_id,
-        "interpreter_id": body.interpreter_id,
-        "order_id": order_id,
-    }))
-    .execute(&state.db)
-    .await;
+    state.audit_sender.try_send(audit::domain_event(
+        "convert_appointment_request",
+        Some(auth.user_id),
+        "appointment_request",
+        Some(id),
+        serde_json::json!({
+            "patient_id": patient_id,
+            "appointment_id": appointment_id,
+            "appointment_type": request_type,
+            "provider_id": body.provider_id,
+            "doctor_id": body.doctor_id,
+            "owner_user_id": owner_user_id,
+            "interpreter_id": body.interpreter_id,
+            "order_id": order_id,
+        }),
+    ));
 
     let _ = sqlx::query(
         "INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id) VALUES ($1, 'appointment_request_update', $2, $3, 'appointment_request', $4)",
@@ -1955,6 +1979,9 @@ async fn create_appointment(
         let row = match insert_result {
             Ok(value) => value,
             Err(e) => {
+                if let Some(resp) = appointment_schedule_conflict_from_db_error(&e) {
+                    return resp;
+                }
                 tracing::error!(error = %e, appointment_id = %appointment_id, "create appointment: insert");
                 return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
             }
@@ -2048,7 +2075,23 @@ async fn create_appointment(
     }
     let conflicts = merge_conflicts_payload(&conflict_payloads);
 
-    let _ = sqlx::query!("INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'create_appointment', 'appointment', $2, $3)", auth.user_id, root_appointment_id, serde_json::json!({"provider_id": provider_id, "doctor_id": doctor_id, "owner_user_id": owner_user_id, "interpreter_id": interpreter_id, "series_created_count": created_appointments.len(), "recurrence_frequency": recurrence.as_ref().map(|value| value.frequency.as_str()), "recurrence_interval": recurrence.as_ref().map(|value| value.interval), "recurrence_count": recurrence.as_ref().and_then(|value| value.count), "recurrence_until": recurrence.as_ref().and_then(|value| value.until.map(|date| date.to_string()))})).execute(&state.db).await;
+    state.audit_sender.try_send(audit::domain_event(
+        "create_appointment",
+        Some(auth.user_id),
+        "appointment",
+        Some(root_appointment_id),
+        serde_json::json!({
+            "provider_id": provider_id,
+            "doctor_id": doctor_id,
+            "owner_user_id": owner_user_id,
+            "interpreter_id": interpreter_id,
+            "series_created_count": created_appointments.len(),
+            "recurrence_frequency": recurrence.as_ref().map(|value| value.frequency.as_str()),
+            "recurrence_interval": recurrence.as_ref().map(|value| value.interval),
+            "recurrence_count": recurrence.as_ref().and_then(|value| value.count),
+            "recurrence_until": recurrence.as_ref().and_then(|value| value.until.map(|date| date.to_string())),
+        }),
+    ));
     tracing::info!(by = %auth.user_id, apt = %root_appointment_id, series_created_count = created_appointments.len(), "Appointment created");
     (
         StatusCode::CREATED,
@@ -2077,21 +2120,392 @@ fn is_valid_recurrence_frequency(value: &str) -> bool {
     matches!(value, "daily" | "weekly" | "monthly")
 }
 
+fn parse_appointment_recurrence_scope(
+    value: Option<&str>,
+    recurrence_series_id: Option<Uuid>,
+) -> Result<AppointmentRecurrenceScope, &'static str> {
+    match value.map(str::trim).filter(|value| !value.is_empty()) {
+        None | Some("single") => Ok(AppointmentRecurrenceScope::Single),
+        Some("following") => {
+            if recurrence_series_id.is_some() {
+                Ok(AppointmentRecurrenceScope::Following)
+            } else {
+                Err("Following scope is only available for recurring appointments")
+            }
+        }
+        Some("series") => {
+            if recurrence_series_id.is_some() {
+                Ok(AppointmentRecurrenceScope::Series)
+            } else {
+                Err("Series scope is only available for recurring appointments")
+            }
+        }
+        _ => Err("recurrence_scope must be single, following or series"),
+    }
+}
+
+async fn recompute_appointment_series_metadata(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    series_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    let rows = sqlx::query(
+        r#"SELECT id, date
+           FROM appointments
+           WHERE recurrence_series_id = $1
+           ORDER BY date, recurrence_index, created_at, id"#,
+    )
+    .bind(series_id)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, series_id = %series_id, "recompute appointment series metadata: load rows");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+    })?;
+
+    if rows.is_empty() {
+        return Ok(());
+    }
+
+    let recurrence_count = rows.len() as i32;
+    let recurrence_until = rows
+        .last()
+        .and_then(|row| row.try_get::<chrono::NaiveDate, _>("date").ok())
+        .ok_or_else(|| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"))?;
+
+    for (index, row) in rows.iter().enumerate() {
+        let appointment_id: Uuid = row
+            .try_get("id")
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"))?;
+
+        sqlx::query(
+            r#"UPDATE appointments
+               SET recurrence_index = $2,
+                   recurrence_count = $3,
+                   recurrence_until = $4
+               WHERE id = $1"#,
+        )
+        .bind(appointment_id)
+        .bind(index as i32)
+        .bind(recurrence_count)
+        .bind(recurrence_until)
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, appointment_id = %appointment_id, series_id = %series_id, "recompute appointment series metadata: update row");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+        })?;
+    }
+
+    Ok(())
+}
+
+async fn load_active_recurring_scope_preview(
+    state: &AppState,
+    series_id: Uuid,
+) -> Result<Vec<serde_json::Value>, axum::response::Response> {
+    match sqlx::query(
+        r#"SELECT a.id,
+                  a.date,
+                  a.status,
+                  a.recurrence_index,
+                  COALESCE(checklists.open_count, 0) AS open_checklist_count
+           FROM appointments a
+           LEFT JOIN LATERAL (
+             SELECT COUNT(*) FILTER (WHERE NOT c.is_completed) AS open_count
+             FROM appointment_checklists c
+             WHERE c.appointment_id = a.id
+           ) checklists ON true
+           WHERE a.recurrence_series_id = $1
+             AND a.status NOT IN ('completed', 'cancelled')
+           ORDER BY a.date, a.recurrence_index, a.created_at, a.id"#,
+    )
+    .bind(series_id)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => Ok(rows
+            .into_iter()
+            .map(|row| {
+                serde_json::json!({
+                    "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                    "date": row
+                        .try_get::<chrono::NaiveDate, _>("date")
+                        .map(|value| value.to_string())
+                        .unwrap_or_default(),
+                    "status": row.try_get::<String, _>("status").unwrap_or_default(),
+                    "recurrence_index": row.try_get::<i32, _>("recurrence_index").unwrap_or(0),
+                    "open_checklist_count": row.try_get::<i64, _>("open_checklist_count").unwrap_or_default() as i32,
+                })
+            })
+            .collect()),
+        Err(e) => {
+            tracing::error!(error = %e, series_id = %series_id, "load recurring scope preview");
+            Err(err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load recurring scope preview",
+            ))
+        }
+    }
+}
+
+async fn load_recurring_series_lineage_history(
+    state: &AppState,
+    series_id: Uuid,
+) -> Result<Vec<serde_json::Value>, axum::response::Response> {
+    match sqlx::query(
+        r#"WITH series_stats AS (
+               SELECT recurrence_series_id AS series_id,
+                      MIN(recurrence_parent_series_id) AS parent_series_id,
+                      MIN(recurrence_split_from_appointment_id) AS split_from_appointment_id,
+                      MIN(recurrence_split_from_index) AS split_from_index,
+                      MIN(date) AS first_date,
+                      MAX(date) AS last_date,
+                      COUNT(*)::int AS total_occurrences,
+                      COUNT(*) FILTER (WHERE status NOT IN ('completed', 'cancelled'))::int AS active_occurrences,
+                      COUNT(*) FILTER (WHERE status = 'completed')::int AS completed_occurrences,
+                      COUNT(*) FILTER (WHERE status = 'cancelled')::int AS cancelled_occurrences
+               FROM appointments
+               WHERE recurrence_series_id IS NOT NULL
+               GROUP BY recurrence_series_id
+           ),
+           ancestors AS (
+               SELECT series_id, parent_series_id, 0 AS depth
+               FROM series_stats
+               WHERE series_id = $1
+               UNION ALL
+               SELECT parent.series_id, parent.parent_series_id, ancestors.depth - 1
+               FROM ancestors
+               JOIN series_stats parent ON parent.series_id = ancestors.parent_series_id
+           ),
+           descendants AS (
+               SELECT series_id, parent_series_id, 0 AS depth
+               FROM series_stats
+               WHERE series_id = $1
+               UNION ALL
+               SELECT child.series_id, child.parent_series_id, descendants.depth + 1
+               FROM descendants
+               JOIN series_stats child ON child.parent_series_id = descendants.series_id
+           ),
+           related AS (
+               SELECT series_id, MIN(depth) AS depth
+               FROM (
+                   SELECT series_id, depth FROM ancestors
+                   UNION ALL
+                   SELECT series_id, depth FROM descendants
+               ) combined
+               GROUP BY series_id
+           )
+           SELECT related.series_id,
+                  stats.parent_series_id,
+                  stats.split_from_appointment_id,
+                  stats.split_from_index,
+                  stats.first_date,
+                  stats.last_date,
+                  stats.total_occurrences,
+                  stats.active_occurrences,
+                  stats.completed_occurrences,
+                  stats.cancelled_occurrences,
+                  CASE
+                      WHEN related.depth < 0 THEN 'ancestor'
+                      WHEN related.depth = 0 THEN 'current'
+                      ELSE 'descendant'
+                  END AS relation,
+                  ABS(related.depth)::int AS depth
+           FROM related
+           JOIN series_stats stats ON stats.series_id = related.series_id
+           ORDER BY related.depth, stats.first_date, stats.series_id"#,
+    )
+    .bind(series_id)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => Ok(rows
+            .into_iter()
+            .map(|row| {
+                serde_json::json!({
+                    "series_id": row.try_get::<Uuid, _>("series_id").unwrap_or_default(),
+                    "parent_series_id": row.try_get::<Option<Uuid>, _>("parent_series_id").unwrap_or_default(),
+                    "split_from_appointment_id": row.try_get::<Option<Uuid>, _>("split_from_appointment_id").unwrap_or_default(),
+                    "split_from_index": row.try_get::<Option<i32>, _>("split_from_index").unwrap_or_default(),
+                    "first_date": row.try_get::<chrono::NaiveDate, _>("first_date").map(|value| value.to_string()).unwrap_or_default(),
+                    "last_date": row.try_get::<chrono::NaiveDate, _>("last_date").map(|value| value.to_string()).unwrap_or_default(),
+                    "total_occurrences": row.try_get::<i32, _>("total_occurrences").unwrap_or_default(),
+                    "active_occurrences": row.try_get::<i32, _>("active_occurrences").unwrap_or_default(),
+                    "completed_occurrences": row.try_get::<i32, _>("completed_occurrences").unwrap_or_default(),
+                    "cancelled_occurrences": row.try_get::<i32, _>("cancelled_occurrences").unwrap_or_default(),
+                    "relation": row.try_get::<String, _>("relation").unwrap_or_else(|_| "current".to_string()),
+                    "depth": row.try_get::<i32, _>("depth").unwrap_or_default(),
+                })
+            })
+            .collect()),
+        Err(e) => {
+            tracing::error!(error = %e, series_id = %series_id, "load recurring lineage history");
+            Err(err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load recurring lineage history",
+            ))
+        }
+    }
+}
+
+fn appointment_schedule_conflict_message_from_constraint(constraint: Option<&str>) -> &'static str {
+    match constraint {
+        Some(name) if name.contains("_interpreter_") => {
+            "Appointment conflicts with an existing interpreter booking"
+        }
+        Some(name) if name.contains("_doctor_") => {
+            "Appointment conflicts with an existing doctor booking"
+        }
+        Some(name) if name.contains("_patient_") => {
+            "Appointment conflicts with an existing patient booking"
+        }
+        _ => "Appointment conflicts with an existing booking",
+    }
+}
+
+fn appointment_schedule_conflict_from_db_error(
+    error: &sqlx::Error,
+) -> Option<axum::response::Response> {
+    match error {
+        sqlx::Error::Database(db_error) if db_error.code().as_deref() == Some("23P01") => {
+            Some(err(
+                StatusCode::CONFLICT,
+                appointment_schedule_conflict_message_from_constraint(db_error.constraint()),
+            ))
+        }
+        _ => None,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn insert_appointment_occurrence(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    appointment_id: Uuid,
+    patient_id: Uuid,
+    provider_id: Option<Uuid>,
+    doctor_id: Option<Uuid>,
+    owner_user_id: Option<Uuid>,
+    interpreter_id: Option<Uuid>,
+    order_id: Option<Uuid>,
+    appointment_type: &str,
+    title: &str,
+    date: chrono::NaiveDate,
+    time_start: Option<chrono::NaiveTime>,
+    time_end: Option<chrono::NaiveTime>,
+    location: Option<&str>,
+    category: Option<&str>,
+    notes: Option<&str>,
+    recurrence_series_id: Option<Uuid>,
+    recurrence_frequency: Option<&str>,
+    recurrence_interval: Option<i32>,
+    recurrence_count: Option<i32>,
+    recurrence_until: Option<chrono::NaiveDate>,
+    recurrence_index: i32,
+    created_by: Uuid,
+    interpreter_response: Option<&str>,
+) -> Result<(), axum::response::Response> {
+    sqlx::query(
+        "INSERT INTO appointments (id, patient_id, provider_id, doctor_id, owner_user_id, interpreter_id, order_id, appointment_type, title, date, time_start, time_end, location, category, notes, recurrence_series_id, recurrence_frequency, recurrence_interval, recurrence_count, recurrence_until, recurrence_index, created_by, interpreter_response)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)",
+    )
+    .bind(appointment_id)
+    .bind(patient_id)
+    .bind(provider_id)
+    .bind(doctor_id)
+    .bind(owner_user_id)
+    .bind(interpreter_id)
+    .bind(order_id)
+    .bind(appointment_type)
+    .bind(title)
+    .bind(date)
+    .bind(time_start)
+    .bind(time_end)
+    .bind(location)
+    .bind(category)
+    .bind(notes)
+    .bind(recurrence_series_id)
+    .bind(recurrence_frequency)
+    .bind(recurrence_interval)
+    .bind(recurrence_count)
+    .bind(recurrence_until)
+    .bind(recurrence_index)
+    .bind(created_by)
+    .bind(interpreter_response)
+    .execute(&mut **tx)
+    .await
+    .map(|_| ())
+    .map_err(|e| {
+        if let Some(resp) = appointment_schedule_conflict_from_db_error(&e) {
+            return resp;
+        }
+        tracing::error!(error = %e, appointment_id = %appointment_id, "insert appointment occurrence");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+    })
+}
+
+async fn split_appointment_series_from_occurrence(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    source_series_id: Uuid,
+    new_series_id: Uuid,
+    split_from_index: i32,
+) -> Result<Option<Uuid>, axum::response::Response> {
+    if split_from_index <= 0 || source_series_id == new_series_id {
+        return Ok(None);
+    }
+
+    let rows_affected = sqlx::query(
+        r#"UPDATE appointments
+           SET recurrence_series_id = $2,
+               recurrence_parent_series_id = $1,
+               recurrence_split_from_appointment_id = $2,
+               recurrence_split_from_index = $3
+           WHERE recurrence_series_id = $1
+             AND recurrence_index >= $3"#,
+    )
+    .bind(source_series_id)
+    .bind(new_series_id)
+    .bind(split_from_index)
+    .execute(&mut **tx)
+    .await
+    .map_err(|e| {
+        tracing::error!(
+            error = %e,
+            source_series_id = %source_series_id,
+            new_series_id = %new_series_id,
+            split_from_index,
+            "split appointment series"
+        );
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+    })?
+    .rows_affected();
+
+    if rows_affected == 0 {
+        return Err(err(
+            StatusCode::CONFLICT,
+            "No appointments remain to split from this occurrence",
+        ));
+    }
+
+    recompute_appointment_series_metadata(tx, source_series_id).await?;
+    recompute_appointment_series_metadata(tx, new_series_id).await?;
+
+    Ok(Some(new_series_id))
+}
+
 #[allow(clippy::result_large_err)]
-fn parse_appointment_recurrence(
-    body: &CreateAppointment,
+fn parse_recurrence_from_fields(
+    recurrence_frequency: Option<&str>,
+    recurrence_interval: Option<i32>,
+    recurrence_count: Option<i32>,
+    recurrence_until: Option<&str>,
     start_date: chrono::NaiveDate,
 ) -> Result<Option<AppointmentRecurrence>, axum::response::Response> {
-    let has_frequency = body
-        .recurrence_frequency
-        .as_ref()
+    let has_frequency = recurrence_frequency
         .map(|value| !value.trim().is_empty())
         .unwrap_or(false);
-    let has_other_fields = body.recurrence_interval.is_some()
-        || body.recurrence_count.is_some()
-        || body
-            .recurrence_until
-            .as_ref()
+    let has_other_fields = recurrence_interval.is_some()
+        || recurrence_count.is_some()
+        || recurrence_until
             .map(|value| !value.trim().is_empty())
             .unwrap_or(false);
 
@@ -2105,9 +2519,7 @@ fn parse_appointment_recurrence(
         return Ok(None);
     }
 
-    let frequency = body
-        .recurrence_frequency
-        .as_deref()
+    let frequency = recurrence_frequency
         .unwrap_or_default()
         .trim()
         .to_lowercase();
@@ -2118,7 +2530,7 @@ fn parse_appointment_recurrence(
         ));
     }
 
-    let interval = body.recurrence_interval.unwrap_or(1);
+    let interval = recurrence_interval.unwrap_or(1);
     if interval <= 0 {
         return Err(err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -2126,7 +2538,7 @@ fn parse_appointment_recurrence(
         ));
     }
 
-    let count = match body.recurrence_count {
+    let count = match recurrence_count {
         Some(value) if value < 2 => {
             return Err(err(
                 StatusCode::UNPROCESSABLE_ENTITY,
@@ -2142,7 +2554,7 @@ fn parse_appointment_recurrence(
         value => value,
     };
 
-    let until = match body.recurrence_until.as_deref() {
+    let until = match recurrence_until {
         Some(raw) if !raw.trim().is_empty() => {
             match chrono::NaiveDate::parse_from_str(raw, "%Y-%m-%d") {
                 Ok(value) => {
@@ -2184,6 +2596,20 @@ fn parse_appointment_recurrence(
         count,
         until,
     }))
+}
+
+#[allow(clippy::result_large_err)]
+fn parse_appointment_recurrence(
+    body: &CreateAppointment,
+    start_date: chrono::NaiveDate,
+) -> Result<Option<AppointmentRecurrence>, axum::response::Response> {
+    parse_recurrence_from_fields(
+        body.recurrence_frequency.as_deref(),
+        body.recurrence_interval,
+        body.recurrence_count,
+        body.recurrence_until.as_deref(),
+        start_date,
+    )
 }
 
 fn advance_recurrence_date(
@@ -2408,6 +2834,8 @@ async fn get_appointment(
                   a.preparation_notes, a.followup_notes, a.notes, a.created_at,
                   a.recurrence_series_id, a.recurrence_frequency, a.recurrence_interval,
                   a.recurrence_count, a.recurrence_until, a.recurrence_index,
+                  a.recurrence_parent_series_id, a.recurrence_split_from_appointment_id,
+                  a.recurrence_split_from_index,
                   CASE
                       WHEN a.recurrence_series_id IS NULL THEN 1
                       ELSE (
@@ -2467,12 +2895,37 @@ async fn get_appointment(
                 Err(resp) => return resp,
             }
 
+            let recurrence_series_id: Option<Uuid> = match a.try_get("recurrence_series_id") {
+                Ok(value) => value,
+                Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"),
+            };
+            let recurring_scope_preview = match recurrence_series_id {
+                Some(series_id) => {
+                    match load_active_recurring_scope_preview(&state, series_id).await {
+                        Ok(value) => value,
+                        Err(resp) => return resp,
+                    }
+                }
+                None => Vec::new(),
+            };
+            let recurring_lineage_history = match recurrence_series_id {
+                Some(series_id) => {
+                    match load_recurring_series_lineage_history(&state, series_id).await {
+                        Ok(value) => value,
+                        Err(resp) => return resp,
+                    }
+                }
+                None => Vec::new(),
+            };
+
             Json(build_appointment_detail_json(
                 &auth,
                 &a,
                 appointment_id,
                 patient_id,
                 interpreter_id,
+                recurring_scope_preview,
+                recurring_lineage_history,
             ))
             .into_response()
         }
@@ -2502,7 +2955,8 @@ async fn update_appointment(
     let current = match sqlx::query(
         r#"SELECT patient_id, appointment_type, status, provider_id, doctor_id, owner_user_id,
                   interpreter_id, interpreter_response, title, date, time_start, time_end,
-                  location
+                  location, order_id, category, notes, recurrence_series_id, recurrence_index,
+                  recurrence_frequency, recurrence_interval, recurrence_count, recurrence_until
            FROM appointments
            WHERE id = $1"#,
     )
@@ -2543,6 +2997,43 @@ async fn update_appointment(
     let current_time_end: Option<chrono::NaiveTime> =
         current.try_get("time_end").unwrap_or_default();
     let current_location: Option<String> = current.try_get("location").unwrap_or_default();
+    let current_order_id: Option<Uuid> = current.try_get("order_id").unwrap_or_default();
+    let current_category: Option<String> = current.try_get("category").unwrap_or_default();
+    let current_notes: Option<String> = current.try_get("notes").unwrap_or_default();
+    let current_recurrence_series_id: Option<Uuid> =
+        current.try_get("recurrence_series_id").unwrap_or_default();
+    let current_recurrence_index: i32 = current.try_get("recurrence_index").unwrap_or(0);
+    let current_recurrence_frequency: Option<String> =
+        current.try_get("recurrence_frequency").unwrap_or_default();
+    let current_recurrence_interval: Option<i32> =
+        current.try_get("recurrence_interval").unwrap_or_default();
+    let current_recurrence_count: Option<i32> =
+        current.try_get("recurrence_count").unwrap_or_default();
+    let current_recurrence_until: Option<chrono::NaiveDate> =
+        current.try_get("recurrence_until").unwrap_or_default();
+    let recurrence_fields_supplied = body.recurrence_frequency.is_some()
+        || body.recurrence_interval.is_some()
+        || body.recurrence_count.is_some()
+        || body.recurrence_until.is_some();
+    let recurrence_scope = match parse_appointment_recurrence_scope(
+        body.recurrence_scope.as_deref(),
+        current_recurrence_series_id,
+    ) {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    if recurrence_fields_supplied && current_recurrence_series_id.is_none() {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "recurrence fields can only be updated for recurring appointments",
+        );
+    }
+    if recurrence_fields_supplied && recurrence_scope == AppointmentRecurrenceScope::Single {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "recurrence rule updates require following or series scope",
+        );
+    }
 
     match can_access_appointment(
         &state,
@@ -2650,19 +3141,6 @@ async fn update_appointment(
         );
     }
 
-    let location = normalize_optional_text(body.location);
-    let schedule_changed = current_provider_id != body.provider_id
-        || current_doctor_id != body.doctor_id
-        || current_date != date
-        || current_time_start != time_start
-        || current_time_end != time_end
-        || current_location != location;
-    let interpreter_changed = current_interpreter_id != body.interpreter_id;
-    let interpreter_response = match body.interpreter_id {
-        Some(_) if interpreter_changed || schedule_changed => Some("pending"),
-        Some(_) => current_interpreter_response.as_deref(),
-        None => None,
-    };
     let mut tx = match state.db.begin().await {
         Ok(value) => value,
         Err(e) => {
@@ -2670,65 +3148,438 @@ async fn update_appointment(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
-    if let Err(resp) = acquire_appointment_schedule_locks(
-        &mut tx,
-        patient_id,
-        body.interpreter_id,
-        body.doctor_id,
-        date,
-    )
-    .await
-    {
-        return resp;
-    }
-    if let Err(resp) = ensure_no_overlapping_appointments_in_tx(
-        &mut tx,
-        patient_id,
-        body.interpreter_id,
-        body.doctor_id,
-        date,
-        time_start,
-        time_end,
-        Some(apt_id),
-    )
-    .await
-    {
-        return resp;
-    }
+    let location = normalize_optional_text(body.location);
+    let shift_days = date.signed_duration_since(current_date).num_days();
+    let mut effective_series_id = current_recurrence_series_id;
+    let split_performed = if recurrence_scope == AppointmentRecurrenceScope::Following {
+        match current_recurrence_series_id {
+            Some(series_id) => match split_appointment_series_from_occurrence(
+                &mut tx,
+                series_id,
+                apt_id,
+                current_recurrence_index,
+            )
+            .await
+            {
+                Ok(Some(new_series_id)) => {
+                    effective_series_id = Some(new_series_id);
+                    true
+                }
+                Ok(None) => false,
+                Err(resp) => return resp,
+            },
+            None => false,
+        }
+    } else {
+        false
+    };
+    let targets = if recurrence_scope != AppointmentRecurrenceScope::Single {
+        let series_id = match effective_series_id {
+            Some(value) => value,
+            None => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Series scope is only available for recurring appointments",
+                );
+            }
+        };
+        let rows = match sqlx::query(
+            r#"SELECT id, patient_id, recurrence_index, provider_id, doctor_id,
+                      interpreter_id, interpreter_response, title, date, time_start, time_end,
+                      location
+               FROM appointments
+               WHERE recurrence_series_id = $1
+                 AND status NOT IN ('completed', 'cancelled')
+               ORDER BY date, recurrence_index, created_at"#,
+        )
+        .bind(series_id)
+        .fetch_all(&mut *tx)
+        .await
+        {
+            Ok(value) => value,
+            Err(e) => {
+                tracing::error!(error = %e, series_id = %series_id, "load appointment series for update");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        };
+        if rows.is_empty() {
+            return err(
+                StatusCode::CONFLICT,
+                "No active appointments remain in this series",
+            );
+        }
+        let mut parsed = Vec::with_capacity(rows.len());
+        for row in rows {
+            let id: Uuid = match row.try_get("id") {
+                Ok(value) => value,
+                Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"),
+            };
+            let target_patient_id: Uuid = match row.try_get("patient_id") {
+                Ok(value) => value,
+                Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"),
+            };
+            let row_date: chrono::NaiveDate = match row.try_get("date") {
+                Ok(value) => value,
+                Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"),
+            };
+            parsed.push(AppointmentUpdateTarget {
+                id,
+                patient_id: target_patient_id,
+                provider_id: row.try_get("provider_id").unwrap_or_default(),
+                doctor_id: row.try_get("doctor_id").unwrap_or_default(),
+                interpreter_id: row.try_get("interpreter_id").unwrap_or_default(),
+                interpreter_response: row.try_get("interpreter_response").unwrap_or_default(),
+                date: row_date,
+                time_start: row.try_get("time_start").unwrap_or_default(),
+                time_end: row.try_get("time_end").unwrap_or_default(),
+                location: row.try_get("location").unwrap_or_default(),
+            });
+        }
+        parsed
+    } else {
+        vec![AppointmentUpdateTarget {
+            id: apt_id,
+            patient_id,
+            provider_id: current_provider_id,
+            doctor_id: current_doctor_id,
+            interpreter_id: current_interpreter_id,
+            interpreter_response: current_interpreter_response.clone(),
+            date: current_date,
+            time_start: current_time_start,
+            time_end: current_time_end,
+            location: current_location.clone(),
+        }]
+    };
+    let recurrence_anchor_date = if recurrence_scope == AppointmentRecurrenceScope::Series {
+        match targets.first().and_then(|target| {
+            target
+                .date
+                .checked_add_signed(chrono::Duration::days(shift_days))
+        }) {
+            Some(value) => value,
+            None => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Failed to calculate recurring appointment dates",
+                );
+            }
+        }
+    } else {
+        date
+    };
+    let resolved_recurrence_until = if body.recurrence_until.is_some() {
+        body.recurrence_until.clone()
+    } else {
+        current_recurrence_until.map(|value| value.to_string())
+    };
+    let recurrence_rule =
+        if recurrence_scope != AppointmentRecurrenceScope::Single && recurrence_fields_supplied {
+            match parse_recurrence_from_fields(
+                body.recurrence_frequency
+                    .as_deref()
+                    .or(current_recurrence_frequency.as_deref()),
+                body.recurrence_interval.or(current_recurrence_interval),
+                if body.recurrence_count.is_some() {
+                    body.recurrence_count
+                } else {
+                    current_recurrence_count
+                },
+                resolved_recurrence_until.as_deref(),
+                recurrence_anchor_date,
+            ) {
+                Ok(Some(value)) => Some(value),
+                Ok(None) => {
+                    return err(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        "recurrence rule updates require recurring settings",
+                    );
+                }
+                Err(resp) => return resp,
+            }
+        } else {
+            None
+        };
+    let recurrence_dates = if let Some(ref recurrence) = recurrence_rule {
+        match build_recurrence_dates(recurrence_anchor_date, Some(recurrence)) {
+            Ok(value) => value,
+            Err(resp) => return resp,
+        }
+    } else {
+        Vec::new()
+    };
+    let resolved_recurrence_frequency = recurrence_rule
+        .as_ref()
+        .map(|value| value.frequency.as_str())
+        .or(current_recurrence_frequency.as_deref());
+    let resolved_recurrence_interval = recurrence_rule
+        .as_ref()
+        .map(|value| value.interval)
+        .or(current_recurrence_interval);
+    let resolved_recurrence_count = recurrence_rule
+        .as_ref()
+        .and_then(|value| value.count)
+        .or(current_recurrence_count);
+    let resolved_recurrence_until_date = recurrence_rule
+        .as_ref()
+        .and_then(|value| value.until)
+        .or(current_recurrence_until);
 
-    match sqlx::query(
-        r#"UPDATE appointments
-           SET provider_id = $2,
-               doctor_id = $3,
-               owner_user_id = $4,
-               interpreter_id = $5,
-               title = $6,
-               date = $7,
-               time_start = $8,
-               time_end = $9,
-               location = $10,
-               interpreter_response = $11
-           WHERE id = $1"#,
-    )
-    .bind(apt_id)
-    .bind(body.provider_id)
-    .bind(body.doctor_id)
-    .bind(owner_user_id)
-    .bind(body.interpreter_id)
-    .bind(&title)
-    .bind(date)
-    .bind(time_start)
-    .bind(time_end)
-    .bind(&location)
-    .bind(interpreter_response)
-    .execute(&mut *tx)
-    .await
+    let keep_count = if recurrence_dates.is_empty() {
+        targets.len()
+    } else {
+        recurrence_dates.len().min(targets.len())
+    };
+    let mut reminder_targets = Vec::new();
+    let mut updated_targets = Vec::new();
+    let mut created_targets = Vec::new();
+    let mut archived_series_id = None;
+    for (index, target) in targets.iter().take(keep_count).enumerate() {
+        let target_date = if let Some(value) = recurrence_dates.get(index).copied() {
+            value
+        } else if recurrence_scope != AppointmentRecurrenceScope::Single {
+            match target
+                .date
+                .checked_add_signed(chrono::Duration::days(shift_days))
+            {
+                Some(value) => value,
+                None => {
+                    return err(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        "Failed to calculate recurring appointment dates",
+                    );
+                }
+            }
+        } else {
+            date
+        };
+        let schedule_changed = target.provider_id != body.provider_id
+            || target.doctor_id != body.doctor_id
+            || target.date != target_date
+            || target.time_start != time_start
+            || target.time_end != time_end
+            || target.location != location
+            || recurrence_rule.is_some();
+        let interpreter_changed = target.interpreter_id != body.interpreter_id;
+        let interpreter_response = match body.interpreter_id {
+            Some(_) if interpreter_changed || schedule_changed => Some("pending"),
+            Some(_) => target.interpreter_response.as_deref(),
+            None => None,
+        };
+
+        if let Err(resp) = acquire_appointment_schedule_locks(
+            &mut tx,
+            target.patient_id,
+            body.interpreter_id,
+            body.doctor_id,
+            target_date,
+        )
+        .await
+        {
+            return resp;
+        }
+        if let Err(resp) = ensure_no_overlapping_appointments_in_tx(
+            &mut tx,
+            target.patient_id,
+            body.interpreter_id,
+            body.doctor_id,
+            target_date,
+            time_start,
+            time_end,
+            Some(target.id),
+        )
+        .await
+        {
+            return resp;
+        }
+
+        match sqlx::query(
+            r#"UPDATE appointments
+               SET provider_id = $2,
+                   doctor_id = $3,
+                   owner_user_id = $4,
+                   interpreter_id = $5,
+                   title = $6,
+                   date = $7,
+                   time_start = $8,
+                   time_end = $9,
+                   location = $10,
+                   interpreter_response = $11,
+                   recurrence_frequency = $12,
+                   recurrence_interval = $13,
+                   recurrence_count = $14,
+                   recurrence_until = $15
+               WHERE id = $1"#,
+        )
+        .bind(target.id)
+        .bind(body.provider_id)
+        .bind(body.doctor_id)
+        .bind(owner_user_id)
+        .bind(body.interpreter_id)
+        .bind(&title)
+        .bind(target_date)
+        .bind(time_start)
+        .bind(time_end)
+        .bind(&location)
+        .bind(interpreter_response)
+        .bind(resolved_recurrence_frequency)
+        .bind(resolved_recurrence_interval)
+        .bind(resolved_recurrence_count)
+        .bind(resolved_recurrence_until_date)
+        .execute(&mut *tx)
+        .await
+        {
+            Ok(result) if result.rows_affected() > 0 => {}
+            Ok(_) => return err(StatusCode::NOT_FOUND, "Appointment not found"),
+            Err(e) => {
+                if let Some(resp) = appointment_schedule_conflict_from_db_error(&e) {
+                    return resp;
+                }
+                tracing::error!(error = %e, appointment_id = %target.id, "update appointment");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        }
+
+        if let Some(interpreter_id) = body.interpreter_id
+            && (interpreter_changed || schedule_changed)
+        {
+            reminder_targets.push((target.id, target.patient_id, interpreter_id, target_date));
+        }
+        updated_targets.push((target.id, target.patient_id, target_date));
+    }
+    if !recurrence_dates.is_empty() && recurrence_dates.len() > targets.len() {
+        let recurrence_series_id = match effective_series_id {
+            Some(value) => value,
+            None => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Series scope is only available for recurring appointments",
+                );
+            }
+        };
+        for target_date in recurrence_dates.iter().skip(targets.len()).copied() {
+            if let Err(resp) = acquire_appointment_schedule_locks(
+                &mut tx,
+                patient_id,
+                body.interpreter_id,
+                body.doctor_id,
+                target_date,
+            )
+            .await
+            {
+                return resp;
+            }
+            if let Err(resp) = ensure_no_overlapping_appointments_in_tx(
+                &mut tx,
+                patient_id,
+                body.interpreter_id,
+                body.doctor_id,
+                target_date,
+                time_start,
+                time_end,
+                None,
+            )
+            .await
+            {
+                return resp;
+            }
+
+            let appointment_id = Uuid::new_v4();
+            if let Err(resp) = insert_appointment_occurrence(
+                &mut tx,
+                appointment_id,
+                patient_id,
+                body.provider_id,
+                body.doctor_id,
+                owner_user_id,
+                body.interpreter_id,
+                current_order_id,
+                &current_type,
+                &title,
+                target_date,
+                time_start,
+                time_end,
+                location.as_deref(),
+                current_category.as_deref(),
+                current_notes.as_deref(),
+                Some(recurrence_series_id),
+                resolved_recurrence_frequency,
+                resolved_recurrence_interval,
+                resolved_recurrence_count,
+                resolved_recurrence_until_date,
+                0,
+                auth.user_id,
+                body.interpreter_id.map(|_| "pending"),
+            )
+            .await
+            {
+                return resp;
+            }
+            if let Some(interpreter_id) = body.interpreter_id {
+                reminder_targets.push((appointment_id, patient_id, interpreter_id, target_date));
+            }
+            updated_targets.push((appointment_id, patient_id, target_date));
+            created_targets.push((appointment_id, patient_id, target_date));
+        }
+    }
+    if !recurrence_dates.is_empty() && recurrence_dates.len() < targets.len() {
+        let trimmed_targets = &targets[recurrence_dates.len()..];
+        if let Some(root) = trimmed_targets.first() {
+            let archive_root_id = root.id;
+            archived_series_id = Some(archive_root_id);
+            for target in trimmed_targets {
+                match sqlx::query(
+                    r#"UPDATE appointments
+                       SET status = 'cancelled',
+                           recurrence_series_id = $2,
+                           recurrence_parent_series_id = $3,
+                           recurrence_split_from_appointment_id = $4,
+                           recurrence_split_from_index = $5,
+                           recurrence_frequency = $6,
+                           recurrence_interval = $7,
+                           recurrence_count = $8,
+                           recurrence_until = $9
+                       WHERE id = $1"#,
+                )
+                .bind(target.id)
+                .bind(archive_root_id)
+                .bind(effective_series_id)
+                .bind(archive_root_id)
+                .bind(recurrence_dates.len() as i32)
+                .bind(resolved_recurrence_frequency)
+                .bind(resolved_recurrence_interval)
+                .bind(resolved_recurrence_count)
+                .bind(resolved_recurrence_until_date)
+                .execute(&mut *tx)
+                .await
+                {
+                    Ok(result) if result.rows_affected() > 0 => {}
+                    Ok(_) => return err(StatusCode::NOT_FOUND, "Appointment not found"),
+                    Err(e) => {
+                        tracing::error!(error = %e, appointment_id = %target.id, "archive trimmed recurring appointment tail");
+                        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+                    }
+                }
+            }
+        }
+    }
+    let mut impacted_series_ids = Vec::new();
+    if let Some(series_id) = effective_series_id {
+        impacted_series_ids.push(series_id);
+    }
+    if let Some(series_id) = archived_series_id
+        && !impacted_series_ids.contains(&series_id)
     {
-        Ok(result) if result.rows_affected() > 0 => {}
-        Ok(_) => return err(StatusCode::NOT_FOUND, "Appointment not found"),
-        Err(e) => {
-            tracing::error!(error = %e, appointment_id = %apt_id, "update appointment");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        impacted_series_ids.push(series_id);
+    }
+    if split_performed
+        && let Some(series_id) = current_recurrence_series_id
+        && !impacted_series_ids.contains(&series_id)
+    {
+        impacted_series_ids.push(series_id);
+    }
+    for series_id in impacted_series_ids {
+        if let Err(resp) = recompute_appointment_series_metadata(&mut tx, series_id).await {
+            return resp;
         }
     }
     if let Err(e) = tx.commit().await {
@@ -2736,29 +3587,23 @@ async fn update_appointment(
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
 
-    if let Some(interpreter_id) = body.interpreter_id
-        && (interpreter_changed || schedule_changed)
-    {
+    for (target_id, target_patient_id, interpreter_id, target_date) in reminder_targets {
         let _ = sqlx::query!(
             "INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
              VALUES ($1, $2, $3)
              ON CONFLICT (patient_id, user_id) DO UPDATE SET revoked_at = NULL, assigned_by = $3, assigned_at = now()",
-            patient_id,
+            target_patient_id,
             interpreter_id,
             auth.user_id
         )
         .execute(&state.db)
         .await;
 
-        let reminder_title = if interpreter_changed {
-            format!("Assignment updated: {title}")
-        } else {
-            format!("Appointment updated: {title}")
-        };
-        let reminder_description = Some(build_schedule_summary(date, time_start, time_end));
+        let reminder_title = format!("Appointment updated: {title}");
+        let reminder_description = Some(build_schedule_summary(target_date, time_start, time_end));
         let _ = create_reminder_record(
             &state,
-            apt_id,
+            target_id,
             interpreter_id,
             chrono::Utc::now(),
             reminder_title,
@@ -2766,29 +3611,72 @@ async fn update_appointment(
         )
         .await;
     }
+    if current_type == "non_medical" {
+        for (appointment_id, target_patient_id, target_date) in &created_targets {
+            if let Err(resp) = bootstrap_concierge_workflow(
+                &state,
+                auth.user_id,
+                *appointment_id,
+                *target_patient_id,
+                &title,
+                *target_date,
+                time_start,
+            )
+            .await
+            {
+                return resp;
+            }
+            if let Err(resp) = crate::routes::concierge_services::bootstrap_default_service(
+                &state,
+                auth.user_id,
+                *appointment_id,
+            )
+            .await
+            {
+                return resp;
+            }
+        }
+    }
+    let mut conflict_payloads = Vec::with_capacity(updated_targets.len());
+    for (target_id, target_patient_id, target_date) in &updated_targets {
+        let conflicts = match build_conflicts_payload(
+            &state,
+            &auth,
+            *target_patient_id,
+            body.interpreter_id,
+            *target_date,
+            time_start,
+            time_end,
+            Some(*target_id),
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(resp) => return resp,
+        };
+        conflict_payloads.push(conflicts);
+    }
+    let conflicts = merge_conflicts_payload(&conflict_payloads);
 
-    let conflicts = match build_conflicts_payload(
-        &state,
-        &auth,
-        patient_id,
-        body.interpreter_id,
-        date,
-        time_start,
-        time_end,
+    state.audit_sender.try_send(audit::domain_event(
+        "update_appointment",
+        Some(auth.user_id),
+        "appointment",
         Some(apt_id),
-    )
-    .await
-    {
-        Ok(value) => value,
-        Err(resp) => return resp,
-    };
-
-    let _ = sqlx::query!(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context)
-         VALUES ($1, 'update_appointment', 'appointment', $2, $3)",
-        auth.user_id,
-        apt_id,
         serde_json::json!({
+            "recurrence_scope": match recurrence_scope {
+                AppointmentRecurrenceScope::Single => "single",
+                AppointmentRecurrenceScope::Following => "following",
+                AppointmentRecurrenceScope::Series => "series",
+            },
+            "split_performed": split_performed,
+            "previous_series_id": current_recurrence_series_id,
+            "effective_series_id": effective_series_id,
+            "affected_count": updated_targets.len(),
+            "created_occurrence_count": created_targets.len(),
+            "archived_tail_series_id": archived_series_id,
+            "starting_recurrence_index": if recurrence_scope == AppointmentRecurrenceScope::Single { None::<i32> } else { Some(current_recurrence_index) },
+            "series_shift_days": if recurrence_scope == AppointmentRecurrenceScope::Single { None::<i64> } else { Some(shift_days) },
             "previous_provider_id": current_provider_id,
             "previous_doctor_id": current_doctor_id,
             "previous_owner_user_id": current_owner_user_id,
@@ -2807,14 +3695,25 @@ async fn update_appointment(
             "time_end": time_end,
             "location": location,
             "title": title,
-        })
-    )
-    .execute(&state.db)
-    .await;
+            "recurrence_frequency": resolved_recurrence_frequency,
+            "recurrence_interval": resolved_recurrence_interval,
+            "recurrence_count": resolved_recurrence_count,
+            "recurrence_until": resolved_recurrence_until_date,
+        }),
+    ));
 
     Json(serde_json::json!({
         "ok": true,
         "conflicts": conflicts,
+        "recurrence_scope": match recurrence_scope {
+            AppointmentRecurrenceScope::Single => "single",
+            AppointmentRecurrenceScope::Following => "following",
+            AppointmentRecurrenceScope::Series => "series",
+        },
+        "split_performed": split_performed,
+        "affected_count": updated_targets.len(),
+        "created_occurrence_count": created_targets.len(),
+        "archived_tail_series_id": archived_series_id,
     }))
     .into_response()
 }
@@ -2833,6 +3732,31 @@ async fn update_status(
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
     }
+    let appointment_ctx = match sqlx::query(
+        "SELECT recurrence_series_id, recurrence_index FROM appointments WHERE id = $1",
+    )
+    .bind(apt_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Not found"),
+        Err(e) => {
+            tracing::error!(error = %e, appointment_id = %apt_id, "load appointment for status update");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let recurrence_series_id: Option<Uuid> = appointment_ctx
+        .try_get("recurrence_series_id")
+        .unwrap_or_default();
+    let current_recurrence_index: i32 = appointment_ctx.try_get("recurrence_index").unwrap_or(0);
+    let recurrence_scope = match parse_appointment_recurrence_scope(
+        body.recurrence_scope.as_deref(),
+        recurrence_series_id,
+    ) {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
     match body.status.as_str() {
         "planned" => {}
         "confirmed" => {}
@@ -2841,54 +3765,202 @@ async fn update_status(
         "cancelled" => {}
         _ => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid status"),
     }
-    if body.status == "completed" {
-        let open_checklist_count: i64 = match sqlx::query_scalar(
-            "SELECT COUNT(*) FROM appointment_checklists WHERE appointment_id = $1 AND NOT is_completed",
+    let mut tx = match state.db.begin().await {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, appointment_id = %apt_id, "update appointment status: begin tx");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let mut effective_series_id = recurrence_series_id;
+    let split_performed = if recurrence_scope == AppointmentRecurrenceScope::Following {
+        match recurrence_series_id {
+            Some(series_id) => match split_appointment_series_from_occurrence(
+                &mut tx,
+                series_id,
+                apt_id,
+                current_recurrence_index,
+            )
+            .await
+            {
+                Ok(Some(new_series_id)) => {
+                    effective_series_id = Some(new_series_id);
+                    true
+                }
+                Ok(None) => false,
+                Err(resp) => return resp,
+            },
+            None => false,
+        }
+    } else {
+        false
+    };
+
+    let target_ids = if recurrence_scope == AppointmentRecurrenceScope::Single {
+        vec![apt_id]
+    } else {
+        let series_id = match effective_series_id {
+            Some(value) => value,
+            None => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Appointment is not recurring",
+                );
+            }
+        };
+        let rows = match sqlx::query(
+            r#"SELECT id
+               FROM appointments
+               WHERE recurrence_series_id = $1
+                 AND status NOT IN ('completed', 'cancelled')
+               ORDER BY date, recurrence_index, created_at"#,
         )
-        .bind(apt_id)
-        .fetch_one(&state.db)
+        .bind(series_id)
+        .fetch_all(&mut *tx)
         .await
         {
             Ok(value) => value,
             Err(e) => {
-            tracing::error!(error = %e, appointment_id = %apt_id, "check open appointment checklist items");
+                tracing::error!(error = %e, series_id = %series_id, "load recurring appointment status targets");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        };
+        if rows.is_empty() {
+            return err(
+                StatusCode::CONFLICT,
+                "No active appointments remain in this series",
+            );
+        }
+        let mut ids = Vec::with_capacity(rows.len());
+        for row in rows {
+            let target_id: Uuid = match row.try_get("id") {
+                Ok(value) => value,
+                Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"),
+            };
+            ids.push(target_id);
+        }
+        ids
+    };
+
+    if body.status == "completed" {
+        let blocked = match sqlx::query(
+            r#"SELECT appointment_id
+               FROM appointment_checklists
+               WHERE appointment_id = ANY($1)
+                 AND NOT is_completed
+               LIMIT 1"#,
+        )
+        .bind(&target_ids)
+        .fetch_optional(&mut *tx)
+        .await
+        {
+            Ok(value) => value,
+            Err(e) => {
+                tracing::error!(error = %e, appointment_id = %apt_id, "check open appointment checklist items");
                 return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
             }
         };
 
-        if open_checklist_count > 0 {
+        if blocked.is_some() {
             return err(
                 StatusCode::UNPROCESSABLE_ENTITY,
-                "Appointment has open checklist items and cannot be completed",
+                "At least one targeted appointment has open checklist items and cannot be completed",
             );
         }
     }
-    match sqlx::query!(
-        "UPDATE appointments SET status = $2 WHERE id = $1",
-        apt_id,
-        body.status
-    )
-    .execute(&state.db)
-    .await
-    {
-        Ok(r) if r.rows_affected() > 0 => {
-            if body.status == "completed" {
-                let _ = crate::routes::concierge_services::mark_services_ready_for_billing(
-                    &state,
-                    auth.user_id,
-                    apt_id,
-                )
-                .await;
-                let _ = bootstrap_billing_handoff(&state, auth.user_id, apt_id).await;
+
+    let rows_affected = if recurrence_scope == AppointmentRecurrenceScope::Single {
+        match sqlx::query!(
+            "UPDATE appointments SET status = $2 WHERE id = $1",
+            apt_id,
+            body.status
+        )
+        .execute(&mut *tx)
+        .await
+        {
+            Ok(result) => result.rows_affected(),
+            Err(e) => {
+                tracing::error!(error = %e, appointment_id = %apt_id, "update appointment status");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
             }
-            Json(serde_json::json!({"ok": true})).into_response()
         }
-        Ok(_) => err(StatusCode::NOT_FOUND, "Not found"),
-        Err(e) => {
-            tracing::error!(error = %e, "update status");
-            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+    } else {
+        let series_id =
+            effective_series_id.expect("effective series id is set for recurring scope");
+        match sqlx::query(
+            r#"UPDATE appointments
+               SET status = $2
+               WHERE recurrence_series_id = $1
+                 AND status NOT IN ('completed', 'cancelled')"#,
+        )
+        .bind(series_id)
+        .bind(&body.status)
+        .execute(&mut *tx)
+        .await
+        {
+            Ok(result) => result.rows_affected(),
+            Err(e) => {
+                tracing::error!(error = %e, series_id = %series_id, status = %body.status, "update recurring appointment status");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        }
+    };
+
+    if rows_affected == 0 {
+        return err(StatusCode::NOT_FOUND, "Not found");
+    }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, appointment_id = %apt_id, "update appointment status: commit");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+
+    if body.status == "completed" {
+        for appointment_id in &target_ids {
+            let _ = crate::routes::concierge_services::mark_services_ready_for_billing(
+                &state,
+                auth.user_id,
+                *appointment_id,
+            )
+            .await;
+            let _ = bootstrap_billing_handoff(&state, auth.user_id, *appointment_id).await;
         }
     }
+
+    if recurrence_scope != AppointmentRecurrenceScope::Single {
+        state.audit_sender.try_send(audit::domain_event(
+            "update_appointment_series_status",
+            Some(auth.user_id),
+            "appointment",
+            Some(apt_id),
+            serde_json::json!({
+                "status": body.status,
+                "recurrence_scope": match recurrence_scope {
+                    AppointmentRecurrenceScope::Single => "single",
+                    AppointmentRecurrenceScope::Following => "following",
+                    AppointmentRecurrenceScope::Series => "series",
+                },
+                "split_performed": split_performed,
+                "previous_series_id": recurrence_series_id,
+                "effective_series_id": effective_series_id,
+                "starting_recurrence_index": if recurrence_scope == AppointmentRecurrenceScope::Following { Some(current_recurrence_index) } else { None::<i32> },
+                "affected_count": rows_affected,
+            }),
+        ));
+    }
+
+    Json(serde_json::json!({
+        "ok": true,
+        "status": body.status,
+        "recurrence_scope": match recurrence_scope {
+            AppointmentRecurrenceScope::Single => "single",
+            AppointmentRecurrenceScope::Following => "following",
+            AppointmentRecurrenceScope::Series => "series",
+        },
+        "split_performed": split_performed,
+        "affected_count": rows_affected,
+    }))
+    .into_response()
 }
 
 async fn assign_interpreter(
@@ -2985,8 +4057,13 @@ async fn assign_interpreter(
             )
             .await;
 
-            let _ = sqlx::query!("INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'assign_interpreter', 'appointment', $2, $3)",
-                auth.user_id, apt_id, serde_json::json!({"interpreter_id": body.interpreter_id})).execute(&state.db).await;
+            state.audit_sender.try_send(audit::domain_event(
+                "assign_interpreter",
+                Some(auth.user_id),
+                "appointment",
+                Some(apt_id),
+                serde_json::json!({ "interpreter_id": body.interpreter_id }),
+            ));
             Json(serde_json::json!({"ok": true})).into_response()
         }
         Ok(_) => err(StatusCode::NOT_FOUND, "Not found"),
@@ -3487,23 +4564,21 @@ async fn create_communication(
     {
         Ok(row) => {
             let communication_id = row.try_get::<Uuid, _>("id").unwrap_or_default();
-            let _ = sqlx::query(
-                "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context)
-                 VALUES ($1, 'create_appointment_communication', 'appointment', $2, $3)",
-            )
-            .bind(auth.user_id)
-            .bind(apt_id)
-            .bind(serde_json::json!({
-                "communication_id": communication_id,
-                "target_type": body.target_type,
-                "direction": body.direction,
-                "channel": body.channel,
-                "status": body.status,
-                "provider_id": provider_id,
-                "doctor_id": doctor_id,
-            }))
-            .execute(&state.db)
-            .await;
+            state.audit_sender.try_send(audit::domain_event(
+                "create_appointment_communication",
+                Some(auth.user_id),
+                "appointment",
+                Some(apt_id),
+                serde_json::json!({
+                    "communication_id": communication_id,
+                    "target_type": body.target_type,
+                    "direction": body.direction,
+                    "channel": body.channel,
+                    "status": body.status,
+                    "provider_id": provider_id,
+                    "doctor_id": doctor_id,
+                }),
+            ));
 
             (
                 StatusCode::CREATED,
@@ -3584,18 +4659,16 @@ async fn update_communication_status(
     .await
     {
         Ok(result) if result.rows_affected() > 0 => {
-            let _ = sqlx::query(
-                "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context)
-                 VALUES ($1, 'update_appointment_communication_status', 'appointment', $2, $3)",
-            )
-            .bind(auth.user_id)
-            .bind(apt_id)
-            .bind(serde_json::json!({
-                "communication_id": communication_id,
-                "status": body.status,
-            }))
-            .execute(&state.db)
-            .await;
+            state.audit_sender.try_send(audit::domain_event(
+                "update_appointment_communication_status",
+                Some(auth.user_id),
+                "appointment",
+                Some(apt_id),
+                serde_json::json!({
+                    "communication_id": communication_id,
+                    "status": body.status,
+                }),
+            ));
 
             Json(serde_json::json!({ "ok": true })).into_response()
         }
@@ -4266,6 +5339,8 @@ fn build_appointment_detail_json(
     appointment_id: Uuid,
     patient_id: Uuid,
     interpreter_id: Option<Uuid>,
+    recurring_scope_preview: Vec<serde_json::Value>,
+    recurring_lineage_history: Vec<serde_json::Value>,
 ) -> serde_json::Value {
     let appointment_type = row
         .try_get::<String, _>("appointment_type")
@@ -4312,6 +5387,11 @@ fn build_appointment_detail_json(
         "recurrence_until": if blocked { None::<String> } else { row.try_get::<Option<chrono::NaiveDate>, _>("recurrence_until").unwrap_or_default().map(|v| v.to_string()) },
         "recurrence_index": if blocked { 0 } else { row.try_get::<i32, _>("recurrence_index").unwrap_or(0) },
         "recurrence_series_size": if blocked { 1 } else { row.try_get::<i64, _>("recurrence_series_size").map(|value| value as i32).unwrap_or(1) },
+        "recurrence_parent_series_id": if blocked { None::<Uuid> } else { row.try_get::<Option<Uuid>, _>("recurrence_parent_series_id").unwrap_or_default() },
+        "recurrence_split_from_appointment_id": if blocked { None::<Uuid> } else { row.try_get::<Option<Uuid>, _>("recurrence_split_from_appointment_id").unwrap_or_default() },
+        "recurrence_split_from_index": if blocked { None::<i32> } else { row.try_get::<Option<i32>, _>("recurrence_split_from_index").unwrap_or_default() },
+        "recurring_scope_preview": if blocked { Vec::<serde_json::Value>::new() } else { recurring_scope_preview },
+        "recurring_lineage_history": if blocked { Vec::<serde_json::Value>::new() } else { recurring_lineage_history },
         "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
         "is_blocked": blocked,
         "visibility_mode": if blocked { "blocked" } else { "full" },
