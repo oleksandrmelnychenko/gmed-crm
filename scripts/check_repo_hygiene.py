@@ -30,7 +30,7 @@ FORBIDDEN_TRACKED_PATHS = (
 # When you migrate N handler-side inserts, count the remaining occurrences
 # with `git grep -c "INSERT INTO audit_log" -- crates/server/src/routes/` and
 # update this constant in the same commit.
-AUDIT_INSERT_BUDGET = 83
+AUDIT_INSERT_BUDGET = 70
 AUDIT_SEARCH_PATH = "crates/server/src/routes/"
 AUDIT_PATTERN = "INSERT INTO audit_log"
 

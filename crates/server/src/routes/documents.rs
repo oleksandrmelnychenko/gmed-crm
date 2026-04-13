@@ -22,7 +22,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use crate::{
-    access,
+    access, audit,
     auth::middleware::AuthUser,
     file_scan::{FileScanOutcome, scan_upload_bytes},
     file_sniff::validate_upload_magic_bytes,
@@ -6493,22 +6493,21 @@ async fn generate_document(
         }
     }
 
-    let _ = sqlx::query(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'generate_document_from_template', 'document', $2, $3)",
-    )
-    .bind(auth.user_id)
-    .bind(document_id)
-    .bind(json!({
-        "template_id": template.id,
-        "patient_id": patient_uuid,
-        "order_id": order_id,
-        "appointment_id": appointment_id,
-        "language": language,
-        "replace_document_id": replacement.as_ref().map(|value| value.document_id),
-        "version_number": persist_input.version_number,
-    }))
-    .execute(&state.db)
-    .await;
+    state.audit_sender.try_send(audit::domain_event(
+        "generate_document_from_template",
+        Some(auth.user_id),
+        "document",
+        Some(document_id),
+        json!({
+            "template_id": template.id,
+            "patient_id": patient_uuid,
+            "order_id": order_id,
+            "appointment_id": appointment_id,
+            "language": language,
+            "replace_document_id": replacement.as_ref().map(|value| value.document_id),
+            "version_number": persist_input.version_number,
+        }),
+    ));
 
     Json(json!({
         "ok": true,
@@ -6838,20 +6837,19 @@ async fn run_document_text_extraction(
         Err(resp) => return resp,
     };
 
-    let _ = sqlx::query(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'run_document_text_extraction', 'document', $2, $3)",
-    )
-    .bind(auth.user_id)
-    .bind(id)
-    .bind(json!({
-        "result": match result {
-            DocumentTextExtractionResult::Completed { method, .. } => json!({ "status": "completed", "method": method }),
-            DocumentTextExtractionResult::Unsupported { method, message } => json!({ "status": "unsupported", "method": method, "message": message }),
-            DocumentTextExtractionResult::Failed { method, message } => json!({ "status": "failed", "method": method, "message": message }),
-        }
-    }))
-    .execute(&state.db)
-    .await;
+    state.audit_sender.try_send(audit::domain_event(
+        "run_document_text_extraction",
+        Some(auth.user_id),
+        "document",
+        Some(id),
+        json!({
+            "result": match result {
+                DocumentTextExtractionResult::Completed { method, .. } => json!({ "status": "completed", "method": method }),
+                DocumentTextExtractionResult::Unsupported { method, message } => json!({ "status": "unsupported", "method": method, "message": message }),
+                DocumentTextExtractionResult::Failed { method, message } => json!({ "status": "failed", "method": method, "message": message }),
+            }
+        }),
+    ));
 
     let fresh_row = match fetch_document_row(&state, id, auth.user_id).await {
         Ok(Some(row)) => row,
@@ -7109,18 +7107,17 @@ async fn create_document_translation_request(
         }
     };
 
-    let _ = sqlx::query(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'create_document_translation_request', 'document', $2, $3)",
-    )
-    .bind(auth.user_id)
-    .bind(id)
-    .bind(json!({
-        "request_id": request_id,
-        "requested_language": requested_language,
-        "patient_id": patient_id,
-    }))
-    .execute(&state.db)
-    .await;
+    state.audit_sender.try_send(audit::domain_event(
+        "create_document_translation_request",
+        Some(auth.user_id),
+        "document",
+        Some(id),
+        json!({
+            "request_id": request_id,
+            "requested_language": requested_language,
+            "patient_id": patient_id,
+        }),
+    ));
 
     let response_row = match sqlx::query(
         r#"SELECT dtr.id, dtr.document_id, dtr.patient_id, dtr.requested_language,
@@ -7295,17 +7292,16 @@ async fn update_document_translation_request(
         );
     }
 
-    let _ = sqlx::query(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'update_document_translation_request', 'document', $2, $3)",
-    )
-    .bind(auth.user_id)
-    .bind(document_id)
-    .bind(json!({
-        "request_id": request_id,
-        "status": next_status,
-    }))
-    .execute(&state.db)
-    .await;
+    state.audit_sender.try_send(audit::domain_event(
+        "update_document_translation_request",
+        Some(auth.user_id),
+        "document",
+        Some(document_id),
+        json!({
+            "request_id": request_id,
+            "status": next_status,
+        }),
+    ));
 
     let response_row = match sqlx::query(
         r#"SELECT dtr.id, dtr.document_id, dtr.patient_id, dtr.requested_language,
@@ -7689,22 +7685,21 @@ async fn upload_my_document(
     )
     .await;
 
-    let _ = sqlx::query(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'patient_portal_upload_document', 'document', $2, $3)",
-    )
-    .bind(auth.user_id)
-    .bind(document_id)
-    .bind(json!({
-        "patient_id": patient_id,
-        "order_id": order_id,
-        "appointment_id": appointment_id,
-        "upload_kind": preset.kind,
-        "art": preset.art,
-        "category": preset.category,
-        "visibility": "internal",
-    }))
-    .execute(&state.db)
-    .await;
+    state.audit_sender.try_send(audit::domain_event(
+        "patient_portal_upload_document",
+        Some(auth.user_id),
+        "document",
+        Some(document_id),
+        json!({
+            "patient_id": patient_id,
+            "order_id": order_id,
+            "appointment_id": appointment_id,
+            "upload_kind": preset.kind,
+            "art": preset.art,
+            "category": preset.category,
+            "visibility": "internal",
+        }),
+    ));
 
     let patient_label = sqlx::query(
         r#"SELECT patient_id, trim(concat_ws(' ', first_name, last_name)) AS patient_name
@@ -8045,25 +8040,24 @@ async fn upload_document(
     )
     .await;
 
-    let _ = sqlx::query(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'upload_document', 'document', $2, $3)",
-    )
-    .bind(auth.user_id)
-    .bind(document_id)
-    .bind(json!({
-        "patient_id": patient_id,
-        "order_id": order_id,
-        "appointment_id": appointment_id,
-        "art": persist_input.art,
-        "category": resolved_category.as_deref(),
-        "visibility": visibility,
-        "status": status,
-        "is_medical": resolved_is_medical,
-        "ursprung": ursprung.as_deref(),
-        "classification_suggestion": classification_suggestion.clone(),
-    }))
-    .execute(&state.db)
-    .await;
+    state.audit_sender.try_send(audit::domain_event(
+        "upload_document",
+        Some(auth.user_id),
+        "document",
+        Some(document_id),
+        json!({
+            "patient_id": patient_id,
+            "order_id": order_id,
+            "appointment_id": appointment_id,
+            "art": persist_input.art,
+            "category": resolved_category.as_deref(),
+            "visibility": visibility,
+            "status": status,
+            "is_medical": resolved_is_medical,
+            "ursprung": ursprung.as_deref(),
+            "classification_suggestion": classification_suggestion.clone(),
+        }),
+    ));
 
     if auth.role == Role::Interpreter
         && let Some(document_patient_id) = patient_id
@@ -8286,21 +8280,20 @@ async fn update_document(
     .await
     {
         Ok(_) => {
-            let _ = sqlx::query(
-                "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'update_document', 'document', $2, $3)",
-            )
-            .bind(auth.user_id)
-            .bind(id)
-            .bind(json!({
-                "patient_id": patient_id,
-                "order_id": order_id,
-                "appointment_id": appointment_id,
-                "status": body.status,
-                "visibility": body.visibility,
-                "is_medical": body.is_medical,
-            }))
-            .execute(&state.db)
-            .await;
+            state.audit_sender.try_send(audit::domain_event(
+                "update_document",
+                Some(auth.user_id),
+                "document",
+                Some(id),
+                json!({
+                    "patient_id": patient_id,
+                    "order_id": order_id,
+                    "appointment_id": appointment_id,
+                    "status": body.status,
+                    "visibility": body.visibility,
+                    "is_medical": body.is_medical,
+                }),
+            ));
             Json(json!({ "ok": true })).into_response()
         }
         Err(e) => {
@@ -8489,22 +8482,21 @@ async fn release_document_to_patient_portal(
         .await;
     }
 
-    let _ = sqlx::query(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'release_document_to_patient_portal', 'document', $2, $3)",
-    )
-    .bind(auth.user_id)
-    .bind(id)
-    .bind(json!({
-        "patient_id": patient_id,
-        "previous_visibility": current_visibility,
-        "new_visibility": "patient_visible",
-        "channel": channel,
-        "requires_confirmation": requires_confirmation,
-        "recipient_count": recipients.len(),
-        "created_share_ids": created_share_ids,
-    }))
-    .execute(&state.db)
-    .await;
+    state.audit_sender.try_send(audit::domain_event(
+        "release_document_to_patient_portal",
+        Some(auth.user_id),
+        "document",
+        Some(id),
+        json!({
+            "patient_id": patient_id,
+            "previous_visibility": current_visibility,
+            "new_visibility": "patient_visible",
+            "channel": channel,
+            "requires_confirmation": requires_confirmation,
+            "recipient_count": recipients.len(),
+            "created_share_ids": created_share_ids,
+        }),
+    ));
 
     Json(json!({
         "ok": true,
@@ -8580,17 +8572,16 @@ async fn revoke_document_from_patient_portal(
         .filter_map(|row| row.try_get::<Uuid, _>("id").ok())
         .collect();
 
-    let _ = sqlx::query(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'revoke_document_from_patient_portal', 'document', $2, $3)",
-    )
-    .bind(auth.user_id)
-    .bind(id)
-    .bind(json!({
-        "patient_id": patient_id,
-        "revoked_share_ids": revoked_share_ids,
-    }))
-    .execute(&state.db)
-    .await;
+    state.audit_sender.try_send(audit::domain_event(
+        "revoke_document_from_patient_portal",
+        Some(auth.user_id),
+        "document",
+        Some(id),
+        json!({
+            "patient_id": patient_id,
+            "revoked_share_ids": revoked_share_ids,
+        }),
+    ));
 
     Json(json!({
         "ok": true,
@@ -8731,21 +8722,25 @@ async fn create_bulk_document_shares(
         share_ids.push(share_id);
     }
 
-    let _ = sqlx::query(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'bulk_share_documents', 'document', $2, $3)",
-    )
-    .bind(auth.user_id)
-    .bind(contexts.first().map(|context| context.document_id).unwrap_or_else(Uuid::nil))
-    .bind(json!({
-        "document_ids": contexts.iter().map(|context| context.document_id).collect::<Vec<_>>(),
-        "share_ids": share_ids,
-        "shared_with_provider_id": body.shared_with_provider_id,
-        "shared_with_user_id": body.shared_with_user_id,
-        "channel": channel,
-        "requires_confirmation": requires_confirmation,
-    }))
-    .execute(&state.db)
-    .await;
+    state.audit_sender.try_send(audit::domain_event(
+        "bulk_share_documents",
+        Some(auth.user_id),
+        "document",
+        Some(
+            contexts
+                .first()
+                .map(|context| context.document_id)
+                .unwrap_or_else(Uuid::nil),
+        ),
+        json!({
+            "document_ids": contexts.iter().map(|context| context.document_id).collect::<Vec<_>>(),
+            "share_ids": share_ids,
+            "shared_with_provider_id": body.shared_with_provider_id,
+            "shared_with_user_id": body.shared_with_user_id,
+            "channel": channel,
+            "requires_confirmation": requires_confirmation,
+        }),
+    ));
 
     Json(json!({
         "ok": true,
@@ -8815,20 +8810,19 @@ async fn create_document_share(
         Ok(value) => value,
         Err(resp) => return resp,
     };
-    let _ = sqlx::query(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'share_document', 'document', $2, $3)",
-    )
-    .bind(auth.user_id)
-    .bind(id)
-    .bind(json!({
-        "share_id": share_id,
-        "shared_with_provider_id": body.shared_with_provider_id,
-        "shared_with_user_id": body.shared_with_user_id,
-        "channel": channel,
-        "requires_confirmation": requires_confirmation,
-    }))
-    .execute(&state.db)
-    .await;
+    state.audit_sender.try_send(audit::domain_event(
+        "share_document",
+        Some(auth.user_id),
+        "document",
+        Some(id),
+        json!({
+            "share_id": share_id,
+            "shared_with_provider_id": body.shared_with_provider_id,
+            "shared_with_user_id": body.shared_with_user_id,
+            "channel": channel,
+            "requires_confirmation": requires_confirmation,
+        }),
+    ));
 
     Json(json!({ "ok": true, "id": share_id })).into_response()
 }
@@ -8862,14 +8856,13 @@ async fn revoke_document_share(
         return err(StatusCode::NOT_FOUND, "Share not found");
     }
 
-    let _ = sqlx::query(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'revoke_document_share', 'document', $2, $3)",
-    )
-    .bind(auth.user_id)
-    .bind(id)
-    .bind(json!({ "share_id": share_id }))
-    .execute(&state.db)
-    .await;
+    state.audit_sender.try_send(audit::domain_event(
+        "revoke_document_share",
+        Some(auth.user_id),
+        "document",
+        Some(id),
+        json!({ "share_id": share_id }),
+    ));
 
     Json(json!({ "ok": true })).into_response()
 }
@@ -8916,14 +8909,13 @@ async fn confirm_document_share(
     .await
     {
         Ok(_) => {
-            let _ = sqlx::query(
-                "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'confirm_document_share', 'document', $2, $3)",
-            )
-            .bind(auth.user_id)
-            .bind(id)
-            .bind(json!({ "share_id": share_id }))
-            .execute(&state.db)
-            .await;
+            state.audit_sender.try_send(audit::domain_event(
+                "confirm_document_share",
+                Some(auth.user_id),
+                "document",
+                Some(id),
+                json!({ "share_id": share_id }),
+            ));
             Json(json!({ "ok": true })).into_response()
         }
         Err(e) => {
