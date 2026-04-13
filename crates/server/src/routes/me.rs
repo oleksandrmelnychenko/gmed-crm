@@ -443,7 +443,7 @@ async fn download_my_document(
     };
 
     let row = match sqlx::query(
-        r#"SELECT d.id, d.auto_name, d.original_filename, d.mime_type, d.storage_key
+        r#"SELECT d.id, d.auto_name, d.original_filename, d.mime_type, d.storage_key, d.file_deleted_at
            FROM documents d
            JOIN document_shares ds
              ON ds.document_id = d.id
@@ -473,6 +473,13 @@ async fn download_my_document(
         .try_get::<Option<String>, _>("storage_key")
         .unwrap_or_default()
     else {
+        if row
+            .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("file_deleted_at")
+            .unwrap_or_default()
+            .is_some()
+        {
+            return err(StatusCode::GONE, "Document file was deleted");
+        }
         return err(StatusCode::NOT_FOUND, "Document file is not stored");
     };
 

@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, HashSet},
-    path::Path as FsPath,
+    path::{Path as FsPath, PathBuf},
 };
 
 use axum::{
@@ -223,6 +223,11 @@ struct GeneratedPatientStickerContext {
     auto_name: String,
     language: String,
     generated_at: chrono::DateTime<chrono::Utc>,
+}
+
+struct StagedDocumentDelete {
+    original_path: PathBuf,
+    staged_path: PathBuf,
 }
 
 struct ReplacementDocumentVersion {
@@ -499,6 +504,7 @@ pub fn router() -> Router<AppState> {
         )
         .route("/documents/{id}/versions", get(list_document_versions))
         .route("/documents/{id}/update", post(update_document))
+        .route("/documents/{id}/delete", post(delete_document_file))
         .route("/documents/{id}/download", get(download_document))
         .route(
             "/documents/{id}/translation-requests",
@@ -555,11 +561,17 @@ struct UpdateDocumentRequest {
 }
 
 #[derive(Deserialize)]
+struct DeleteDocumentFileRequest {
+    reason: String,
+}
+
+#[derive(Deserialize)]
 struct CreateShareRequest {
     shared_with_provider_id: Option<Uuid>,
     shared_with_user_id: Option<Uuid>,
     channel: Option<String>,
     requires_confirmation: Option<bool>,
+    message: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -569,6 +581,7 @@ struct BulkCreateShareRequest {
     shared_with_user_id: Option<Uuid>,
     channel: Option<String>,
     requires_confirmation: Option<bool>,
+    message: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -4367,6 +4380,36 @@ fn patient_share_consent_type(channel: &str) -> Option<&'static str> {
 }
 
 #[allow(clippy::result_large_err)]
+fn normalize_document_share_message(
+    shared_with_provider_id: Option<Uuid>,
+    value: Option<&str>,
+) -> Result<Option<String>, axum::response::Response> {
+    let normalized = value
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(ToOwned::to_owned);
+
+    if shared_with_provider_id.is_some() && normalized.is_none() {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Provider shares require a cover message",
+        ));
+    }
+
+    if normalized
+        .as_ref()
+        .is_some_and(|text| text.chars().count() > 4000)
+    {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Share message is too long",
+        ));
+    }
+
+    Ok(normalized)
+}
+
+#[allow(clippy::result_large_err)]
 fn validate_share_target_count(
     shared_with_provider_id: Option<Uuid>,
     shared_with_user_id: Option<Uuid>,
@@ -4654,12 +4697,13 @@ async fn insert_document_share(
     shared_with_user_id: Option<Uuid>,
     channel: &str,
     requires_confirmation: bool,
+    message: Option<&str>,
 ) -> Result<Uuid, axum::response::Response> {
     sqlx::query(
         r#"INSERT INTO document_shares (
                 document_id, shared_with_provider_id, shared_with_user_id, shared_by,
-                channel, requires_confirmation
-           ) VALUES ($1, $2, $3, $4, $5, $6)
+                channel, requires_confirmation, message
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7)
            RETURNING id"#,
     )
     .bind(document_id)
@@ -4668,6 +4712,7 @@ async fn insert_document_share(
     .bind(auth_user_id)
     .bind(channel)
     .bind(requires_confirmation)
+    .bind(message)
     .fetch_one(&state.db)
     .await
     .map(|row| row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()))
@@ -4854,6 +4899,11 @@ fn document_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "is_medical": row.try_get::<bool, _>("is_medical").unwrap_or(false),
         "mime_type": row.try_get::<Option<String>, _>("mime_type").unwrap_or_default(),
         "file_size": row.try_get::<Option<i64>, _>("file_size").unwrap_or_default(),
+        "has_stored_file": row
+            .try_get::<Option<String>, _>("storage_key")
+            .unwrap_or_default()
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false),
         "klinik": row.try_get::<Option<String>, _>("klinik").unwrap_or_default(),
         "ursprung": ursprung,
         "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
@@ -4865,6 +4915,10 @@ fn document_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "version_number": row.try_get::<i32, _>("version_number").unwrap_or(1),
         "version_count": row.try_get::<i64, _>("version_count").unwrap_or(1),
         "is_latest_version": row.try_get::<bool, _>("is_latest_version").unwrap_or(true),
+        "file_deleted_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("file_deleted_at").unwrap_or_default(),
+        "file_deleted_by": row.try_get::<Option<Uuid>, _>("file_deleted_by").unwrap_or_default(),
+        "file_deleted_by_name": row.try_get::<Option<String>, _>("file_deleted_by_name").unwrap_or_default(),
+        "file_delete_reason": row.try_get::<Option<String>, _>("file_delete_reason").unwrap_or_default(),
         "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").unwrap_or_else(|_| chrono::Utc::now()),
         "updated_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").unwrap_or_else(|_| chrono::Utc::now()),
         "share_count": row.try_get::<i64, _>("share_count").unwrap_or(0),
@@ -4886,6 +4940,7 @@ fn document_share_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "target_user_role": row.try_get::<Option<String>, _>("target_user_role").unwrap_or_default(),
         "shared_by_name": row.try_get::<Option<String>, _>("shared_by_name").unwrap_or_default(),
         "channel": row.try_get::<Option<String>, _>("channel").unwrap_or_default(),
+        "message": row.try_get::<Option<String>, _>("message").unwrap_or_default(),
         "requires_confirmation": row.try_get::<bool, _>("requires_confirmation").unwrap_or(false),
         "confirmed": row.try_get::<bool, _>("confirmed").unwrap_or(false),
         "confirmed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("confirmed_at").unwrap_or_default(),
@@ -4968,6 +5023,7 @@ async fn fetch_document_row(
                   d.notes, d.extracted_text, d.text_extraction_status, d.text_extraction_method,
                   d.text_extracted_at, d.text_extracted_by, d.version_root_document_id, d.replaces_document_id,
                   d.version_number, d.uploaded_by, d.created_at, d.updated_at,
+                  d.file_deleted_at, d.file_deleted_by, d.file_delete_reason,
                   p.patient_id AS patient_pid,
                   trim(concat_ws(' ', p.first_name, p.last_name)) AS patient_name,
                   o.order_number,
@@ -4975,6 +5031,7 @@ async fn fetch_document_row(
                   u.name AS uploaded_by_name,
                   u.role AS uploaded_by_role,
                   extractor.name AS text_extracted_by_name,
+                  deleter.name AS file_deleted_by_name,
                   COALESCE((SELECT count(*)::bigint FROM document_shares ds WHERE ds.document_id = d.id AND ds.revoked_at IS NULL), 0) AS share_count,
                   COALESCE((SELECT count(*)::bigint FROM documents dv WHERE dv.version_root_document_id = d.version_root_document_id), 1) AS version_count,
                   (SELECT dv.id FROM documents dv WHERE dv.replaces_document_id = d.id ORDER BY dv.created_at DESC LIMIT 1) AS superseded_by_document_id,
@@ -4994,6 +5051,7 @@ async fn fetch_document_row(
            LEFT JOIN appointments a ON a.id = d.appointment_id
            LEFT JOIN users u ON u.id = d.uploaded_by
            LEFT JOIN users extractor ON extractor.id = d.text_extracted_by
+           LEFT JOIN users deleter ON deleter.id = d.file_deleted_by
            WHERE d.id = $1"#,
     )
     .bind(document_id)
@@ -5632,6 +5690,60 @@ async fn persist_document_file(
 
     let document_id: Uuid = inserted.try_get("id").unwrap_or_else(|_| Uuid::nil());
     Ok((document_id, file_size, original_filename, storage_key))
+}
+
+async fn stage_document_file_delete(
+    storage_key: Option<&str>,
+) -> Result<Option<StagedDocumentDelete>, axum::response::Response> {
+    let Some(storage_key) = storage_key.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+
+    let original_path = FsPath::new(UPLOAD_DIR).join(storage_key);
+    let staged_path = FsPath::new(UPLOAD_DIR).join(format!(
+        ".pending-delete-{}-{storage_key}",
+        Uuid::new_v4().simple()
+    ));
+
+    match tokio::fs::rename(&original_path, &staged_path).await {
+        Ok(_) => Ok(Some(StagedDocumentDelete {
+            original_path,
+            staged_path,
+        })),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => {
+            tracing::error!(
+                error = %error,
+                path = %original_path.display(),
+                "stage document file delete"
+            );
+            Err(err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to prepare document file deletion",
+            ))
+        }
+    }
+}
+
+async fn rollback_staged_document_delete(staged: &StagedDocumentDelete) {
+    if let Err(error) = tokio::fs::rename(&staged.staged_path, &staged.original_path).await {
+        tracing::error!(
+            error = %error,
+            staged_path = %staged.staged_path.display(),
+            original_path = %staged.original_path.display(),
+            "rollback staged document delete"
+        );
+    }
+}
+
+async fn finalize_staged_document_delete(staged: &StagedDocumentDelete) {
+    if let Err(error) = tokio::fs::remove_file(&staged.staged_path).await {
+        tracing::warn!(
+            error = %error,
+            staged_path = %staged.staged_path.display(),
+            "finalize staged document delete"
+        );
+    }
 }
 
 async fn list_document_templates(Extension(auth): Extension<AuthUser>) -> axum::response::Response {
@@ -6561,11 +6673,13 @@ async fn list_documents(
                   d.is_medical, d.mime_type, d.file_size, d.storage_key, d.klinik, d.ursprung,
                   d.notes, d.version_root_document_id, d.replaces_document_id,
                   d.version_number, d.uploaded_by, d.created_at, d.updated_at,
+                  d.file_deleted_at, d.file_deleted_by, d.file_delete_reason,
                   p.patient_id AS patient_pid,
                   trim(concat_ws(' ', p.first_name, p.last_name)) AS patient_name,
                   o.order_number,
                   a.title AS appointment_title,
                   u.name AS uploaded_by_name,
+                  deleter.name AS file_deleted_by_name,
                   COALESCE((SELECT count(*)::bigint FROM document_shares ds WHERE ds.document_id = d.id AND ds.revoked_at IS NULL), 0) AS share_count,
                   COALESCE((SELECT count(*)::bigint FROM documents dv WHERE dv.version_root_document_id = d.version_root_document_id), 1) AS version_count,
                   (SELECT dv.id FROM documents dv WHERE dv.replaces_document_id = d.id ORDER BY dv.created_at DESC LIMIT 1) AS superseded_by_document_id,
@@ -6583,6 +6697,7 @@ async fn list_documents(
            LEFT JOIN orders o ON o.id = d.order_id
            LEFT JOIN appointments a ON a.id = d.appointment_id
            LEFT JOIN users u ON u.id = d.uploaded_by
+           LEFT JOIN users deleter ON deleter.id = d.file_deleted_by
            WHERE ($1::text IS NULL
                   OR d.auto_name ILIKE '%' || $1 || '%'
                   OR COALESCE(d.original_filename, '') ILIKE '%' || $1 || '%'
@@ -6648,12 +6763,14 @@ async fn list_document_intake_queue(
                   d.is_medical, d.mime_type, d.file_size, d.storage_key, d.klinik, d.ursprung,
                   d.notes, d.version_root_document_id, d.replaces_document_id,
                   d.version_number, d.uploaded_by, d.created_at, d.updated_at,
+                  d.file_deleted_at, d.file_deleted_by, d.file_delete_reason,
                   p.patient_id AS patient_pid,
                   trim(concat_ws(' ', p.first_name, p.last_name)) AS patient_name,
                   o.order_number,
                   a.title AS appointment_title,
                   u.name AS uploaded_by_name,
                   u.role AS uploaded_by_role,
+                  deleter.name AS file_deleted_by_name,
                   COALESCE((SELECT count(*)::bigint FROM document_shares ds WHERE ds.document_id = d.id AND ds.revoked_at IS NULL), 0) AS share_count,
                   COALESCE((SELECT count(*)::bigint FROM documents dv WHERE dv.version_root_document_id = d.version_root_document_id), 1) AS version_count,
                   (SELECT dv.id FROM documents dv WHERE dv.replaces_document_id = d.id ORDER BY dv.created_at DESC LIMIT 1) AS superseded_by_document_id,
@@ -6671,6 +6788,7 @@ async fn list_document_intake_queue(
            LEFT JOIN orders o ON o.id = d.order_id
            LEFT JOIN appointments a ON a.id = d.appointment_id
            LEFT JOIN users u ON u.id = d.uploaded_by
+           LEFT JOIN users deleter ON deleter.id = d.file_deleted_by
            WHERE d.status <> 'archived'
              AND (
                 COALESCE(d.category, '') = ''
@@ -6901,11 +7019,13 @@ async fn list_document_versions(
                   d.is_medical, d.mime_type, d.file_size, d.storage_key, d.klinik, d.ursprung,
                   d.notes, d.version_root_document_id, d.replaces_document_id,
                   d.version_number, d.uploaded_by, d.created_at, d.updated_at,
+                  d.file_deleted_at, d.file_deleted_by, d.file_delete_reason,
                   p.patient_id AS patient_pid,
                   trim(concat_ws(' ', p.first_name, p.last_name)) AS patient_name,
                   o.order_number,
                   a.title AS appointment_title,
                   u.name AS uploaded_by_name,
+                  deleter.name AS file_deleted_by_name,
                   COALESCE((SELECT count(*)::bigint FROM document_shares ds WHERE ds.document_id = d.id AND ds.revoked_at IS NULL), 0) AS share_count,
                   COALESCE((SELECT count(*)::bigint FROM documents dv WHERE dv.version_root_document_id = d.version_root_document_id), 1) AS version_count,
                   (SELECT dv.id FROM documents dv WHERE dv.replaces_document_id = d.id ORDER BY dv.created_at DESC LIMIT 1) AS superseded_by_document_id,
@@ -6923,6 +7043,7 @@ async fn list_document_versions(
            LEFT JOIN orders o ON o.id = d.order_id
            LEFT JOIN appointments a ON a.id = d.appointment_id
            LEFT JOIN users u ON u.id = d.uploaded_by
+           LEFT JOIN users deleter ON deleter.id = d.file_deleted_by
            WHERE d.version_root_document_id = $1
            ORDER BY d.version_number DESC, d.created_at DESC"#,
     )
@@ -7367,6 +7488,13 @@ async fn download_document(
         .try_get::<Option<String>, _>("storage_key")
         .unwrap_or_default()
     else {
+        if row
+            .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("file_deleted_at")
+            .unwrap_or_default()
+            .is_some()
+        {
+            return err(StatusCode::GONE, "Document file was deleted");
+        }
         return err(StatusCode::NOT_FOUND, "Document file is not stored");
     };
     let mime_type = row
@@ -7483,7 +7611,7 @@ async fn download_my_uploaded_document(
     };
 
     let row = match sqlx::query(
-        r#"SELECT auto_name, original_filename, mime_type, storage_key
+        r#"SELECT auto_name, original_filename, mime_type, storage_key, file_deleted_at
            FROM documents
            WHERE id = $1
              AND patient_id = $2
@@ -7511,6 +7639,13 @@ async fn download_my_uploaded_document(
         .try_get::<Option<String>, _>("storage_key")
         .unwrap_or_default()
     else {
+        if row
+            .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("file_deleted_at")
+            .unwrap_or_default()
+            .is_some()
+        {
+            return err(StatusCode::GONE, "Document file was deleted");
+        }
         return err(StatusCode::NOT_FOUND, "Document file is not stored");
     };
 
@@ -8306,6 +8441,170 @@ async fn update_document(
     }
 }
 
+async fn delete_document_file(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<DeleteDocumentFileRequest>,
+) -> axum::response::Response {
+    if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+        return resp;
+    }
+
+    let reason = body.reason.trim();
+    if reason.is_empty() {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Document deletion reason is required",
+        );
+    }
+
+    let current = match fetch_document_row(&state, id, auth.user_id).await {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Document not found"),
+        Err(resp) => return resp,
+    };
+
+    let previous_status = current
+        .try_get::<String, _>("status")
+        .unwrap_or_else(|_| "active".to_string());
+    let previous_visibility = current
+        .try_get::<String, _>("visibility")
+        .unwrap_or_else(|_| "internal".to_string());
+    let patient_id = current
+        .try_get::<Option<Uuid>, _>("patient_id")
+        .unwrap_or_default();
+    let had_storage_key = current
+        .try_get::<Option<String>, _>("storage_key")
+        .unwrap_or_default();
+    let already_deleted_at = current
+        .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("file_deleted_at")
+        .unwrap_or_default();
+
+    if already_deleted_at.is_some() {
+        return err(StatusCode::CONFLICT, "Document file was already deleted");
+    }
+
+    let staged_delete = match stage_document_file_delete(had_storage_key.as_deref()).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => {
+            if let Some(staged) = staged_delete.as_ref() {
+                rollback_staged_document_delete(staged).await;
+            }
+            tracing::error!(error = %error, document_id = %id, "begin document delete transaction");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete document file",
+            );
+        }
+    };
+
+    let revoked_rows = match sqlx::query(
+        r#"UPDATE document_shares
+           SET revoked_at = now()
+           WHERE document_id = $1
+             AND revoked_at IS NULL
+           RETURNING id"#,
+    )
+    .bind(id)
+    .fetch_all(&mut *tx)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(error) => {
+            if let Some(staged) = staged_delete.as_ref() {
+                rollback_staged_document_delete(staged).await;
+            }
+            tracing::error!(error = %error, document_id = %id, "revoke document shares for delete");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete document file",
+            );
+        }
+    };
+
+    if let Err(error) = sqlx::query(
+        r#"UPDATE documents
+           SET status = 'archived',
+               visibility = 'internal',
+               storage_key = NULL,
+               file_deleted_at = now(),
+               file_deleted_by = $2,
+               file_delete_reason = $3
+           WHERE id = $1"#,
+    )
+    .bind(id)
+    .bind(auth.user_id)
+    .bind(reason)
+    .execute(&mut *tx)
+    .await
+    {
+        if let Some(staged) = staged_delete.as_ref() {
+            rollback_staged_document_delete(staged).await;
+        }
+        tracing::error!(error = %error, document_id = %id, "mark document file deleted");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to delete document file",
+        );
+    }
+
+    if let Err(error) = tx.commit().await {
+        if let Some(staged) = staged_delete.as_ref() {
+            rollback_staged_document_delete(staged).await;
+        }
+        tracing::error!(error = %error, document_id = %id, "commit document delete transaction");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to delete document file",
+        );
+    }
+
+    if let Some(staged) = staged_delete.as_ref() {
+        finalize_staged_document_delete(staged).await;
+    }
+
+    let revoked_share_ids: Vec<_> = revoked_rows
+        .iter()
+        .filter_map(|row| row.try_get::<Uuid, _>("id").ok())
+        .collect();
+
+    state.audit_sender.try_send(audit::domain_event(
+        "delete_document_file",
+        Some(auth.user_id),
+        "document",
+        Some(id),
+        json!({
+            "patient_id": patient_id,
+            "reason": reason,
+            "previous_status": previous_status,
+            "previous_visibility": previous_visibility,
+            "had_stored_file": had_storage_key.is_some(),
+            "file_removed_from_disk": staged_delete.is_some(),
+            "revoked_share_ids": revoked_share_ids,
+        }),
+    ));
+
+    let fresh_row = match fetch_document_row(&state, id, auth.user_id).await {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Document not found"),
+        Err(resp) => return resp,
+    };
+
+    Json(json!({
+        "ok": true,
+        "document": document_json(&fresh_row),
+        "revoked_share_count": revoked_share_ids.len(),
+        "file_removed_from_disk": staged_delete.is_some(),
+    }))
+    .into_response()
+}
+
 async fn release_document_to_patient_portal(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -8609,7 +8908,7 @@ async fn list_document_shares(
 
     match sqlx::query(
         r#"SELECT ds.id, ds.document_id, ds.shared_with_provider_id, ds.shared_with_user_id,
-                  ds.shared_by, ds.channel, ds.requires_confirmation, ds.confirmed,
+                  ds.shared_by, ds.channel, ds.message, ds.requires_confirmation, ds.confirmed,
                   ds.confirmed_at, ds.shared_at, ds.revoked_at,
                   provider.name AS provider_name,
                   target_user.name AS target_user_name,
@@ -8669,6 +8968,13 @@ async fn create_bulk_document_shares(
         Err(resp) => return resp,
     };
     let requires_confirmation = body.requires_confirmation.unwrap_or(false);
+    let share_message = match normalize_document_share_message(
+        body.shared_with_provider_id,
+        body.message.as_deref(),
+    ) {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
 
     let mut unique_document_ids = Vec::new();
     let mut seen = HashSet::new();
@@ -8713,6 +9019,7 @@ async fn create_bulk_document_shares(
             body.shared_with_user_id,
             &channel,
             requires_confirmation,
+            share_message.as_deref(),
         )
         .await
         {
@@ -8738,6 +9045,7 @@ async fn create_bulk_document_shares(
             "shared_with_provider_id": body.shared_with_provider_id,
             "shared_with_user_id": body.shared_with_user_id,
             "channel": channel,
+            "message": share_message,
             "requires_confirmation": requires_confirmation,
         }),
     ));
@@ -8773,6 +9081,13 @@ async fn create_document_share(
         Err(resp) => return resp,
     };
     let requires_confirmation = body.requires_confirmation.unwrap_or(false);
+    let share_message = match normalize_document_share_message(
+        body.shared_with_provider_id,
+        body.message.as_deref(),
+    ) {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
 
     let row = match fetch_document_row(&state, id, auth.user_id).await {
         Ok(Some(row)) => row,
@@ -8804,6 +9119,7 @@ async fn create_document_share(
         body.shared_with_user_id,
         &channel,
         requires_confirmation,
+        share_message.as_deref(),
     )
     .await
     {
@@ -8820,6 +9136,7 @@ async fn create_document_share(
             "shared_with_provider_id": body.shared_with_provider_id,
             "shared_with_user_id": body.shared_with_user_id,
             "channel": channel,
+            "message": share_message,
             "requires_confirmation": requires_confirmation,
         }),
     ));

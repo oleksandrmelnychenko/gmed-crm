@@ -2138,10 +2138,59 @@ async fn revoke_third_party_consents(
     }
 
     let revoked_count = revoked_rows.len() as u64;
+    let revoked_document_share_rows = sqlx::query(
+        r#"UPDATE document_shares ds
+           SET revoked_at = $2
+           FROM documents d
+           WHERE ds.document_id = d.id
+             AND d.patient_id = $1
+             AND ds.revoked_at IS NULL
+             AND ds.shared_with_provider_id IS NOT NULL
+           RETURNING ds.id, ds.document_id, ds.shared_with_provider_id"#,
+    )
+    .bind(patient_id)
+    .bind(revoked_at)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, patient_id = %patient_id, "revoke third-party document shares");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to revoke third-party document shares",
+        )
+    })?;
+
+    let revoked_document_share_count = revoked_document_share_rows.len() as u64;
+    let mut revoked_document_ids = Vec::new();
+    let mut revoked_provider_ids = Vec::new();
+    let mut revoked_share_ids = Vec::new();
+    for row in &revoked_document_share_rows {
+        let share_id = row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil());
+        if share_id != Uuid::nil() && !revoked_share_ids.contains(&share_id) {
+            revoked_share_ids.push(share_id);
+        }
+
+        let document_id = row
+            .try_get::<Uuid, _>("document_id")
+            .unwrap_or_else(|_| Uuid::nil());
+        if document_id != Uuid::nil() && !revoked_document_ids.contains(&document_id) {
+            revoked_document_ids.push(document_id);
+        }
+
+        let provider_id = row
+            .try_get::<Option<Uuid>, _>("shared_with_provider_id")
+            .unwrap_or_default()
+            .unwrap_or_else(Uuid::nil);
+        if provider_id != Uuid::nil() && !revoked_provider_ids.contains(&provider_id) {
+            revoked_provider_ids.push(provider_id);
+        }
+    }
+
     let legal_status_payload = json!({
         "third_party_sharing_revoked_at": revoked_at.to_rfc3339(),
         "third_party_sharing_request_id": request_id.to_string(),
         "third_party_sharing_revoked_by": actor_id.to_string(),
+        "third_party_document_shares_revoked_count": revoked_document_share_count,
     });
 
     sqlx::query(
@@ -2177,10 +2226,31 @@ async fn revoke_third_party_consents(
         }),
     ));
 
+    if revoked_document_share_count > 0 {
+        state.audit_sender.try_send(audit::domain_event(
+            "revoke_document_share_bundle",
+            Some(actor_id),
+            "patient",
+            Some(patient_id),
+            json!({
+                "request_id": request_id,
+                "mode": "third_party_revoke",
+                "revoked_share_count": revoked_document_share_count,
+                "revoked_share_ids": revoked_share_ids,
+                "revoked_document_ids": revoked_document_ids,
+                "revoked_provider_ids": revoked_provider_ids,
+                "revoked_at": revoked_at.to_rfc3339(),
+            }),
+        ));
+    }
+
     Ok(json!({
         "mode": "third_party_revoke",
         "revoked_count": revoked_count,
         "revoked_types": revoked_types,
+        "revoked_document_share_count": revoked_document_share_count,
+        "revoked_document_ids": revoked_document_ids,
+        "revoked_provider_ids": revoked_provider_ids,
         "revoked_at": revoked_at.to_rfc3339(),
     }))
 }

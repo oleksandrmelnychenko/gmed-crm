@@ -232,19 +232,31 @@ async fn seed_invoice(
     created_by: Uuid,
     tag: &str,
 ) -> Uuid {
+    seed_invoice_with_status(pool, order_id, patient_id, created_by, tag, "sent").await
+}
+
+async fn seed_invoice_with_status(
+    pool: &PgPool,
+    order_id: Uuid,
+    patient_id: Uuid,
+    created_by: Uuid,
+    tag: &str,
+    status: &str,
+) -> Uuid {
     sqlx::query_scalar(
         r#"INSERT INTO invoices (
                 order_id, patient_id, invoice_number, invoice_type, status, due_date,
                 total_net, total_vat, total_gross, paid_amount, line_items, notes, created_by
            ) VALUES (
-                $1, $2, $3, 'final', 'sent', '2026-05-10',
+                $1, $2, $3, 'final', $4, '2026-05-10',
                 100.00, 19.00, 119.00, 0,
-                $4, 'Portal-visible invoice', $5
+                $5, 'Portal-visible invoice', $6
            ) RETURNING id"#,
     )
     .bind(order_id)
     .bind(patient_id)
     .bind(format!("INV-{tag}"))
+    .bind(status)
     .bind(json!([
         {
             "description": "Treatment package",
@@ -734,6 +746,85 @@ async fn patient_can_list_own_invoices_and_payment_proof_status() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["payment_proof_count"], 1);
     assert!(body["line_items"].as_array().unwrap().len() == 1);
+}
+
+#[tokio::test]
+async fn patient_cannot_see_draft_invoices_in_portal_scope() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("me-invoices-draft-hidden");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let patient_user_id = seed_user(&pool, &tag, "patient").await;
+
+    seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
+
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    let visible_invoice_id = seed_invoice_with_status(
+        &pool,
+        order_id,
+        patient_id,
+        admin_id,
+        &format!("{tag}-sent"),
+        "sent",
+    )
+    .await;
+    let draft_invoice_id = seed_invoice_with_status(
+        &pool,
+        order_id,
+        patient_id,
+        admin_id,
+        &format!("{tag}-draft"),
+        "draft",
+    )
+    .await;
+    let patient_bearer = auth_header_for(patient_user_id, "patient");
+
+    let (status, body) =
+        json_request(&app, "GET", "/api/v1/me/invoices", &patient_bearer, None).await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body.as_array().expect("invoice list");
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["id"], visible_invoice_id.to_string());
+    assert_ne!(items[0]["id"], draft_invoice_id.to_string());
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/me/invoices/{draft_invoice_id}"),
+        &patient_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(body["message"], "Invoice not found");
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/me/invoices/{visible_invoice_id}"),
+        &patient_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["id"], visible_invoice_id.to_string());
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(format!("/api/v1/me/invoices/{draft_invoice_id}/pdf"))
+        .header("Authorization", &patient_bearer)
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    let status = resp.status();
+    let bytes = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let body: Value = serde_json::from_slice(&bytes).unwrap_or(json!(null));
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(body["message"], "Invoice not found");
 }
 
 #[tokio::test]

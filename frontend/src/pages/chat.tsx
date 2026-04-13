@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   MessageSquarePlus,
@@ -9,22 +9,37 @@ import {
   FileText,
   Download,
   MessageSquare,
+  Shield,
 } from "lucide-react";
 import { apiFetch, getAccessToken } from "@/lib/api";
 import {
   CHAT_E2E_PREVIEW,
   CHAT_E2E_UNAVAILABLE,
+  decryptAttachmentFromPeer,
   decryptMessageFromPeer,
+  encryptAttachmentForPeer,
   encryptMessageForPeer,
   ensureServerMessageKey,
+  exportKeyRingBackup,
   fetchPeerMessageKey,
   getLocalMessageKey,
+  importKeyRingBackup,
   type MessageKeyEnvelope,
   type MessageKeyRecord,
 } from "@/lib/chat-e2e";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 
 // ── Types ──
@@ -62,6 +77,10 @@ interface Message {
   attachment_mime: string | null;
   attachment_size: number | null;
   attachment_key: string | null;
+  attachment_is_e2e?: boolean;
+  attachment_e2e_algorithm?: string | null;
+  attachment_e2e_nonce?: string | null;
+  attachment_e2e_salt?: string | null;
 }
 
 interface UserItem {
@@ -143,9 +162,19 @@ export function ChatPage() {
   const [activePeerMessageKey, setActivePeerMessageKey] =
     useState<MessageKeyEnvelope | null>(null);
   const [secureStatus, setSecureStatus] = useState<string | null>(null);
+  const [attachmentBusyId, setAttachmentBusyId] = useState<string | null>(null);
+  const [keyDialogMode, setKeyDialogMode] = useState<"export" | "import" | null>(null);
+  const [keyPassphrase, setKeyPassphrase] = useState("");
+  const [keyDialogBusy, setKeyDialogBusy] = useState(false);
+  const [keyDialogStatus, setKeyDialogStatus] = useState<string | null>(null);
+  const [importedKeyBackup, setImportedKeyBackup] = useState<{
+    name: string;
+    content: string;
+  } | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const keyBackupInputRef = useRef<HTMLInputElement>(null);
   const hydratedDraftRef = useRef("");
   const activePeerRef = useRef<string | null>(null);
   const peerMessageKeyCacheRef = useRef<Record<string, MessageKeyEnvelope>>({});
@@ -452,6 +481,126 @@ export function ChatPage() {
     void loadUsers();
   }, [loadUsers, showNewChat]);
 
+  const resetKeyDialog = useCallback(() => {
+    setKeyDialogMode(null);
+    setKeyPassphrase("");
+    setKeyDialogBusy(false);
+    setKeyDialogStatus(null);
+    setImportedKeyBackup(null);
+    if (keyBackupInputRef.current) {
+      keyBackupInputRef.current.value = "";
+    }
+  }, []);
+
+  const downloadBlob = useCallback((blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.rel = "noopener noreferrer";
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  }, []);
+
+  const handleSecureAttachmentDownload = useCallback(
+    async (message: Message) => {
+      if (!message.attachment_key) return;
+
+      const myFingerprint =
+        message.from_user === myId
+          ? message.sender_key_fingerprint
+          : message.recipient_key_fingerprint;
+      const peerFingerprint =
+        message.from_user === myId
+          ? message.recipient_key_fingerprint
+          : message.sender_key_fingerprint;
+      const localKey = getLocalMessageKey(myFingerprint);
+      if (!localKey || !peerFingerprint) {
+        setSecureStatus("This secure attachment is unavailable on this device.");
+        return;
+      }
+
+      const peerId = message.from_user === myId ? message.to_user : message.from_user;
+      const peerKey = await loadPeerMessageKey(peerId, peerFingerprint);
+      if (!peerKey) {
+        setSecureStatus("Failed to load the peer key for this secure attachment.");
+        return;
+      }
+
+      setAttachmentBusyId(message.id);
+      try {
+        const token = getAccessToken();
+        const response = await fetch(`${FILE_BASE}${message.attachment_key}`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (!response.ok) {
+          throw new Error("download");
+        }
+        const ciphertext = new Uint8Array(await response.arrayBuffer());
+        const decrypted = await decryptAttachmentFromPeer(
+          message,
+          ciphertext,
+          localKey,
+          peerKey,
+        );
+        downloadBlob(
+          new Blob([decrypted], {
+            type: message.attachment_mime ?? "application/octet-stream",
+          }),
+          message.attachment_filename ?? "secure-attachment",
+        );
+        setSecureStatus(null);
+      } catch {
+        setSecureStatus("Failed to decrypt the secure attachment.");
+      } finally {
+        setAttachmentBusyId(null);
+      }
+    },
+    [downloadBlob, loadPeerMessageKey, myId],
+  );
+
+  const handleKeyBackupFileChange = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      const content = await file.text();
+      setImportedKeyBackup({ name: file.name, content });
+      setKeyDialogMode("import");
+      setKeyDialogStatus(null);
+    },
+    [],
+  );
+
+  const handleKeyDialogSubmit = useCallback(async () => {
+    if (!keyPassphrase.trim()) {
+      setKeyDialogStatus("Passphrase is required.");
+      return;
+    }
+
+    setKeyDialogBusy(true);
+    try {
+      if (keyDialogMode === "export") {
+        const payload = await exportKeyRingBackup(keyPassphrase);
+        downloadBlob(
+          new Blob([payload], { type: "application/json" }),
+          `gmed-secure-chat-keys-${new Date().toISOString().slice(0, 10)}.json`,
+        );
+        setKeyDialogStatus("Secure key backup downloaded.");
+      } else if (keyDialogMode === "import" && importedKeyBackup) {
+        const result = await importKeyRingBackup(importedKeyBackup.content, keyPassphrase);
+        setKeyDialogStatus(`Imported ${result.importedKeys} secure chat keys.`);
+      }
+    } catch (error) {
+      setKeyDialogStatus(
+        error instanceof Error ? error.message : "Secure key operation failed.",
+      );
+    } finally {
+      setKeyDialogBusy(false);
+    }
+  }, [downloadBlob, importedKeyBackup, keyDialogMode, keyPassphrase]);
+
   // Send message
   const handleSend = async (e: FormEvent) => {
     e.preventDefault();
@@ -461,19 +610,80 @@ export function ChatPage() {
     if (pendingFile) {
       setSending(true);
       const formData = new FormData();
-      formData.append("file", pendingFile);
-      if (input.trim()) formData.append("message", input.trim());
+      const caption = input.trim();
       try {
+        if (activePeerMessageKey) {
+          const senderKey = myMessageKey ?? (await ensureServerMessageKey());
+          setMyMessageKey(senderKey);
+          const encryptedAttachment = await encryptAttachmentForPeer(
+            new Uint8Array(await pendingFile.arrayBuffer()),
+            senderKey,
+            activePeerMessageKey,
+          );
+          formData.append(
+            "file",
+            new Blob([encryptedAttachment.ciphertext], {
+              type: "application/octet-stream",
+            }),
+            pendingFile.name,
+          );
+          formData.append("attachment_plaintext_size", String(pendingFile.size));
+          formData.append(
+            "attachment_e2e_algorithm",
+            encryptedAttachment.attachment_e2e_algorithm,
+          );
+          formData.append(
+            "attachment_e2e_nonce",
+            encryptedAttachment.attachment_e2e_nonce,
+          );
+          formData.append(
+            "attachment_e2e_salt",
+            encryptedAttachment.attachment_e2e_salt,
+          );
+          formData.append(
+            "sender_key_fingerprint",
+            encryptedAttachment.sender_key_fingerprint,
+          );
+          formData.append(
+            "recipient_key_fingerprint",
+            encryptedAttachment.recipient_key_fingerprint,
+          );
+          if (caption) {
+            const payload = await encryptMessageForPeer(
+              caption,
+              senderKey,
+              activePeerMessageKey,
+            );
+            formData.append("e2e_algorithm", payload.e2e_algorithm);
+            formData.append("e2e_ciphertext", payload.e2e_ciphertext);
+            formData.append("e2e_nonce", payload.e2e_nonce);
+            formData.append("e2e_salt", payload.e2e_salt);
+          }
+        } else {
+          formData.append("file", pendingFile);
+          if (caption) formData.append("message", caption);
+        }
+
         const token = getAccessToken();
-        await fetch(`/api/v1/messages/${activePeer}/upload`, {
+        const response = await fetch(`/api/v1/messages/${activePeer}/upload`, {
           method: "POST",
           headers: token ? { Authorization: `Bearer ${token}` } : {},
           body: formData,
         });
+        if (!response.ok) {
+          throw new Error("upload");
+        }
         await loadMessagesForPeer(activePeer);
         void loadConversations();
+        if (activePeerMessageKey) {
+          setSecureStatus(null);
+        }
       } catch {
-        /* ignore */
+        setSecureStatus(
+          activePeerMessageKey
+            ? "Failed to send secure attachment."
+            : "Failed to upload attachment.",
+        );
       } finally {
         setInput("");
         setPendingFile(null);
@@ -644,16 +854,48 @@ export function ChatPage() {
         ) : (
           <>
             {/* Chat header */}
-            <div className="flex items-center gap-3 px-5 py-3.5 border-b">
-              <div className="flex items-center justify-center size-9 rounded-full bg-primary/10 text-primary text-xs font-semibold">
-                {initials(activeName)}
+            <div className="flex items-center justify-between gap-3 px-5 py-3.5 border-b">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="flex items-center justify-center size-9 rounded-full bg-primary/10 text-primary text-xs font-semibold">
+                  {initials(activeName)}
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold truncate">{activeName}</p>
+                  <p className="text-[10px] text-muted-foreground">
+                    {roleDisplay(activeRole)}
+                    {activePeerMessageKey ? " · End-to-end encrypted chat" : ""}
+                  </p>
+                </div>
               </div>
-              <div>
-                <p className="text-sm font-semibold">{activeName}</p>
-                <p className="text-[10px] text-muted-foreground">
-                  {roleDisplay(activeRole)}
-                  {activePeerMessageKey ? " · End-to-end encrypted text chat" : ""}
-                </p>
+              <div className="flex items-center gap-2 shrink-0">
+                <input
+                  ref={keyBackupInputRef}
+                  type="file"
+                  accept="application/json"
+                  className="hidden"
+                  onChange={(event) => void handleKeyBackupFileChange(event)}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="rounded-xl"
+                  onClick={() => {
+                    setKeyDialogMode("export");
+                    setKeyDialogStatus(null);
+                  }}
+                >
+                  Export keys
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="rounded-xl"
+                  onClick={() => keyBackupInputRef.current?.click()}
+                >
+                  Import keys
+                </Button>
               </div>
             </div>
 
@@ -663,16 +905,39 @@ export function ChatPage() {
                 const mine = m.from_user === myId;
                 const hasText = !!m.message?.trim();
                 const hasAttachment = !!m.attachment_key;
+                const isSecureAttachment = m.attachment_is_e2e ?? false;
                 const downloadUrl = `${FILE_BASE}${m.attachment_key ?? ""}`;
-                const isImage = m.attachment_mime?.startsWith("image/") ?? false;
+                const isImage =
+                  !isSecureAttachment && (m.attachment_mime?.startsWith("image/") ?? false);
                 const readReceipt =
                   mine && m.read_at ? `Seen ${timeAgo(m.read_at)}` : null;
 
                 return (
                   <div key={m.id} className={cn("flex flex-col", mine ? "items-end" : "items-start")}>
                     {/* Attachment */}
-                    {hasAttachment && (
-                      isImage ? (
+                    {hasAttachment &&
+                      (isSecureAttachment ? (
+                        <button
+                          type="button"
+                          onClick={() => void handleSecureAttachmentDownload(m)}
+                          disabled={attachmentBusyId === m.id}
+                          className={cn(
+                            "flex items-center gap-2.5 px-3 py-2 rounded-xl mb-1 max-w-[320px] transition-colors text-left disabled:opacity-60",
+                            mine ? "bg-foreground/90 text-background" : "bg-muted",
+                          )}
+                        >
+                          <Shield className="size-4 shrink-0" />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-medium truncate">
+                              {m.attachment_filename}
+                            </p>
+                            <p className="text-[10px] opacity-70">
+                              Secure attachment · {formatSize(m.attachment_size ?? 0)}
+                            </p>
+                          </div>
+                          <Download className="size-3.5 shrink-0 opacity-60" />
+                        </button>
+                      ) : isImage ? (
                         <a href={downloadUrl} target="_blank" rel="noopener noreferrer" className="mb-1">
                           <img
                             src={downloadUrl}
@@ -697,8 +962,7 @@ export function ChatPage() {
                           </div>
                           <Download className="size-3.5 shrink-0 opacity-60" />
                         </a>
-                      )
-                    )}
+                      ))}
                     {/* Text bubble */}
                     {hasText && (
                       <div
@@ -774,6 +1038,67 @@ export function ChatPage() {
                 <Send className="size-4" />
               </button>
             </form>
+
+            <Dialog open={keyDialogMode !== null} onOpenChange={(open) => !open && resetKeyDialog()}>
+              <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle>
+                    {keyDialogMode === "export" ? "Export secure chat keys" : "Import secure chat keys"}
+                  </DialogTitle>
+                  <DialogDescription>
+                    {keyDialogMode === "export"
+                      ? "Create an encrypted backup so you can restore secure chat on another device."
+                      : "Restore an encrypted key backup to unlock older secure chats on this device."}
+                  </DialogDescription>
+                </DialogHeader>
+
+                <div className="space-y-3">
+                  {keyDialogMode === "import" && (
+                    <div className="rounded-xl border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                      {importedKeyBackup
+                        ? `Selected backup: ${importedKeyBackup.name}`
+                        : "Choose a secure chat backup file first."}
+                    </div>
+                  )}
+                  <div className="space-y-2">
+                    <Label htmlFor="chat-key-passphrase">Passphrase</Label>
+                    <Input
+                      id="chat-key-passphrase"
+                      type="password"
+                      value={keyPassphrase}
+                      onChange={(event) => setKeyPassphrase(event.target.value)}
+                      placeholder="Enter passphrase"
+                    />
+                  </div>
+                  {keyDialogStatus && (
+                    <div className="rounded-xl border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                      {keyDialogStatus}
+                    </div>
+                  )}
+                </div>
+
+                <DialogFooter>
+                  <Button type="button" variant="outline" onClick={resetKeyDialog}>
+                    Close
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={() => void handleKeyDialogSubmit()}
+                    disabled={
+                      keyDialogBusy ||
+                      !keyPassphrase.trim() ||
+                      (keyDialogMode === "import" && !importedKeyBackup)
+                    }
+                  >
+                    {keyDialogBusy
+                      ? "Working..."
+                      : keyDialogMode === "export"
+                        ? "Export backup"
+                        : "Import backup"}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </>
         )}
       </div>

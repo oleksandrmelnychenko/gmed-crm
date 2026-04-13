@@ -126,6 +126,57 @@ async fn seed_patient_assignment(
     .unwrap();
 }
 
+async fn seed_provider(pool: &PgPool, tag: &str) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO providers (
+                name, provider_type, address_street, address_city, address_zip, address_country,
+                phone, email, fachbereich
+           ) VALUES (
+                $1, 'medical', $2, $3, $4, $5, $6, $7, $8
+           )
+           RETURNING id"#,
+    )
+    .bind(format!("Clinic {tag}"))
+    .bind(format!("{tag} Street 1"))
+    .bind("Cologne")
+    .bind("50667")
+    .bind("Germany")
+    .bind("+49 221 555000")
+    .bind(format!("{tag}@clinic.example"))
+    .bind(format!("Fach {tag}"))
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+async fn seed_document(
+    pool: &PgPool,
+    patient_id: Uuid,
+    uploaded_by: Uuid,
+    tag: &str,
+    visibility: &str,
+) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO documents (
+                patient_id, auto_name, original_filename, art, category, status, visibility,
+                is_medical, mime_type, file_size, uploaded_by, notes
+           ) VALUES (
+                $1, $2, $3, 'medical_report', 'report', 'active', $4,
+                true, 'application/pdf', 1024, $5, $6
+           )
+           RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(format!("Document {tag}"))
+    .bind(format!("{tag}.pdf"))
+    .bind(visibility)
+    .bind(uploaded_by)
+    .bind(format!("Notes {tag}"))
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
 #[tokio::test]
 async fn patient_manager_can_manage_patient_consents_and_export_contains_history() {
     let Some((app, pool, admin_id)) = test_context().await else {
@@ -698,7 +749,7 @@ async fn restriction_request_updates_legal_status_and_queue_is_assignment_scoped
 }
 
 #[tokio::test]
-async fn third_party_revoke_request_can_be_executed_by_patient_manager_and_revokes_only_external_consents()
+async fn third_party_revoke_request_can_be_executed_by_patient_manager_and_revokes_only_external_consents_and_provider_document_shares()
  {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;
@@ -710,6 +761,54 @@ async fn third_party_revoke_request_can_be_executed_by_patient_manager_and_revok
     let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
     seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
     seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+
+    let provider_id = seed_provider(&pool, &format!("{tag}-provider")).await;
+    let external_document_id = seed_document(
+        &pool,
+        patient_id,
+        pm_id,
+        &format!("{tag}-external"),
+        "released_external",
+    )
+    .await;
+    let portal_document_id = seed_document(
+        &pool,
+        patient_id,
+        pm_id,
+        &format!("{tag}-portal"),
+        "patient_visible",
+    )
+    .await;
+
+    sqlx::query(
+        r#"INSERT INTO document_shares (
+                document_id, shared_with_provider_id, shared_by, channel, requires_confirmation,
+                confirmed, confirmed_at
+           ) VALUES (
+                $1, $2, $3, 'secure_email', true, true, now()
+           )"#,
+    )
+    .bind(external_document_id)
+    .bind(provider_id)
+    .bind(pm_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        r#"INSERT INTO document_shares (
+                document_id, shared_with_user_id, shared_by, channel, requires_confirmation,
+                confirmed, confirmed_at
+           ) VALUES (
+                $1, $2, $3, 'patient_portal', true, true, now()
+           )"#,
+    )
+    .bind(portal_document_id)
+    .bind(patient_user_id)
+    .bind(pm_id)
+    .execute(&pool)
+    .await
+    .unwrap();
 
     for consent_type in [
         "dsgvo_data_transfer",
@@ -769,6 +868,7 @@ async fn third_party_revoke_request_can_be_executed_by_patient_manager_and_revok
     assert_eq!(body["request_type"], "third_party_revoke");
     assert_eq!(body["execution"]["mode"], "third_party_revoke");
     assert_eq!(body["execution"]["revoked_count"], 3);
+    assert_eq!(body["execution"]["revoked_document_share_count"], 1);
 
     let still_active: Vec<String> = sqlx::query_scalar(
         r#"SELECT consent_type
@@ -790,6 +890,36 @@ async fn third_party_revoke_request_can_be_executed_by_patient_manager_and_revok
         .await
         .unwrap();
     assert_eq!(legal_status["third_party_sharing_request_id"], request_id);
+    assert_eq!(legal_status["third_party_document_shares_revoked_count"], 1);
+
+    let active_provider_share_count: i64 = sqlx::query_scalar(
+        r#"SELECT count(*)
+           FROM document_shares
+           WHERE document_id = $1
+             AND shared_with_provider_id = $2
+             AND revoked_at IS NULL"#,
+    )
+    .bind(external_document_id)
+    .bind(provider_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(active_provider_share_count, 0);
+
+    let active_patient_portal_share_count: i64 = sqlx::query_scalar(
+        r#"SELECT count(*)
+           FROM document_shares
+           WHERE document_id = $1
+             AND shared_with_user_id = $2
+             AND channel = 'patient_portal'
+             AND revoked_at IS NULL"#,
+    )
+    .bind(portal_document_id)
+    .bind(patient_user_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(active_patient_portal_share_count, 1);
 
     let consent_revoke_audits: i64 = sqlx::query_scalar(
         r#"SELECT count(*)
@@ -804,6 +934,20 @@ async fn third_party_revoke_request_can_be_executed_by_patient_manager_and_revok
     .await
     .unwrap();
     assert_eq!(consent_revoke_audits, 1);
+
+    let document_share_revoke_audits: i64 = sqlx::query_scalar(
+        r#"SELECT count(*)
+           FROM audit_log
+           WHERE entity_type = 'patient'
+             AND entity_id = $1
+             AND action = 'revoke_document_share_bundle'
+             AND context->>'mode' = 'third_party_revoke'"#,
+    )
+    .bind(patient_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(document_share_revoke_audits, 1);
 }
 
 #[tokio::test]

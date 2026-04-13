@@ -11,3 +11,5 @@ node_modules/
 /target-patient-slice/
 /crates/server/uploads/
 /uploads/
+/frontend/test-results/
+/frontend/playwright-report/

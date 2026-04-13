@@ -640,7 +640,8 @@ async fn get_conversation(
                   e2e_algorithm, e2e_ciphertext, e2e_nonce, e2e_salt,
                   sender_key_fingerprint, recipient_key_fingerprint,
                   is_read, read_at, created_at,
-                  attachment_filename, attachment_mime, attachment_size, attachment_key
+                  attachment_filename, attachment_mime, attachment_size, attachment_key,
+                  attachment_e2e_algorithm, attachment_e2e_nonce, attachment_e2e_salt
            FROM direct_messages
            WHERE (from_user = $1 AND to_user = $2) OR (from_user = $2 AND to_user = $1)
            ORDER BY created_at DESC LIMIT $3"#,
@@ -667,6 +668,14 @@ async fn get_conversation(
                         r.try_get::<Option<Vec<u8>>, _>("e2e_ciphertext").ok().flatten();
                     let e2e_nonce = r.try_get::<Option<Vec<u8>>, _>("e2e_nonce").ok().flatten();
                     let e2e_salt = r.try_get::<Option<Vec<u8>>, _>("e2e_salt").ok().flatten();
+                    let attachment_e2e_nonce = r
+                        .try_get::<Option<Vec<u8>>, _>("attachment_e2e_nonce")
+                        .ok()
+                        .flatten();
+                    let attachment_e2e_salt = r
+                        .try_get::<Option<Vec<u8>>, _>("attachment_e2e_salt")
+                        .ok()
+                        .flatten();
                     let ciphertext = r.try_get::<Option<Vec<u8>>, _>("message_ciphertext").ok().flatten();
                     let nonce = r.try_get::<Option<Vec<u8>>, _>("message_nonce").ok().flatten();
                     let key_id = r.try_get::<Option<String>, _>("encryption_key_id").ok().flatten()
@@ -703,6 +712,10 @@ async fn get_conversation(
                         "attachment_mime": r.try_get::<Option<String>, _>("attachment_mime").unwrap_or_default(),
                         "attachment_size": r.try_get::<Option<i64>, _>("attachment_size").unwrap_or_default(),
                         "attachment_key": r.try_get::<Option<String>, _>("attachment_key").unwrap_or_default(),
+                        "attachment_is_e2e": r.try_get::<Option<String>, _>("attachment_e2e_algorithm").unwrap_or_default().is_some(),
+                        "attachment_e2e_algorithm": r.try_get::<Option<String>, _>("attachment_e2e_algorithm").unwrap_or_default(),
+                        "attachment_e2e_nonce": attachment_e2e_nonce.map(|value| BASE64.encode(value)),
+                        "attachment_e2e_salt": attachment_e2e_salt.map(|value| BASE64.encode(value)),
                     })
                 })
                 .collect();
@@ -1035,6 +1048,16 @@ async fn upload_file(
     let mut file_name = String::new();
     let mut mime_type = String::from("application/octet-stream");
     let mut message_text: Option<String> = None;
+    let mut e2e_algorithm: Option<String> = None;
+    let mut e2e_ciphertext: Option<String> = None;
+    let mut e2e_nonce: Option<String> = None;
+    let mut e2e_salt: Option<String> = None;
+    let mut attachment_e2e_algorithm: Option<String> = None;
+    let mut attachment_e2e_nonce: Option<String> = None;
+    let mut attachment_e2e_salt: Option<String> = None;
+    let mut sender_key_fingerprint: Option<String> = None;
+    let mut recipient_key_fingerprint: Option<String> = None;
+    let mut attachment_plaintext_size: Option<i64> = None;
 
     while let Ok(Some(field)) = multipart.next_field().await {
         let name = field.name().unwrap_or("").to_string();
@@ -1065,6 +1088,77 @@ async fn upload_file(
                     }
                 }
             }
+            "e2e_algorithm" => {
+                e2e_algorithm = field
+                    .text()
+                    .await
+                    .ok()
+                    .map(|value| value.trim().to_string())
+            }
+            "e2e_ciphertext" => {
+                e2e_ciphertext = field
+                    .text()
+                    .await
+                    .ok()
+                    .map(|value| value.trim().to_string())
+            }
+            "e2e_nonce" => {
+                e2e_nonce = field
+                    .text()
+                    .await
+                    .ok()
+                    .map(|value| value.trim().to_string())
+            }
+            "e2e_salt" => {
+                e2e_salt = field
+                    .text()
+                    .await
+                    .ok()
+                    .map(|value| value.trim().to_string())
+            }
+            "attachment_e2e_algorithm" => {
+                attachment_e2e_algorithm = field
+                    .text()
+                    .await
+                    .ok()
+                    .map(|value| value.trim().to_string())
+            }
+            "attachment_e2e_nonce" => {
+                attachment_e2e_nonce = field
+                    .text()
+                    .await
+                    .ok()
+                    .map(|value| value.trim().to_string())
+            }
+            "attachment_e2e_salt" => {
+                attachment_e2e_salt = field
+                    .text()
+                    .await
+                    .ok()
+                    .map(|value| value.trim().to_string())
+            }
+            "sender_key_fingerprint" => {
+                sender_key_fingerprint = field
+                    .text()
+                    .await
+                    .ok()
+                    .map(|value| value.trim().to_string())
+            }
+            "recipient_key_fingerprint" => {
+                recipient_key_fingerprint = field
+                    .text()
+                    .await
+                    .ok()
+                    .map(|value| value.trim().to_string())
+            }
+            "attachment_plaintext_size" => {
+                attachment_plaintext_size = field
+                    .text()
+                    .await
+                    .ok()
+                    .and_then(|value| value.trim().parse::<i64>().ok())
+                    .filter(|value| *value > 0);
+            }
             _ => {}
         }
     }
@@ -1073,35 +1167,258 @@ async fn upload_file(
         Some(d) if !d.is_empty() => d,
         _ => return err(StatusCode::BAD_REQUEST, "No file uploaded"),
     };
+    let has_attachment_e2e = attachment_e2e_algorithm
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|value| !value.is_empty())
+        || attachment_e2e_nonce
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|value| !value.is_empty())
+        || attachment_e2e_salt
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|value| !value.is_empty());
+    let has_caption_e2e = e2e_algorithm
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|value| !value.is_empty())
+        || e2e_ciphertext
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|value| !value.is_empty())
+        || e2e_nonce
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|value| !value.is_empty())
+        || e2e_salt
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|value| !value.is_empty());
+    let mut stored_file_bytes = data.clone();
+    let mut stored_attachment_nonce: Option<Vec<u8>> = None;
+    let mut stored_attachment_e2e_algorithm: Option<String> = None;
+    let mut stored_attachment_e2e_nonce: Option<Vec<u8>> = None;
+    let mut stored_attachment_e2e_salt: Option<Vec<u8>> = None;
+    let mut stored_encryption_key_id: Option<String> = None;
+    let mut msg_ciphertext: Option<Vec<u8>> = None;
+    let mut msg_nonce: Option<Vec<u8>> = None;
+    let mut msg_e2e_algorithm: Option<String> = None;
+    let mut msg_e2e_ciphertext: Option<Vec<u8>> = None;
+    let mut msg_e2e_nonce: Option<Vec<u8>> = None;
+    let mut msg_e2e_salt: Option<Vec<u8>> = None;
+    let mut stored_sender_key_fingerprint: Option<String> = None;
+    let mut stored_recipient_key_fingerprint: Option<String> = None;
 
-    match validate_upload_magic_bytes(Some(&file_name), Some(mime_type.as_str()), &data) {
-        Ok(Some(validated_mime)) => mime_type = validated_mime,
-        Ok(None) => {}
-        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
-    }
-    match scan_upload_bytes(Some(&file_name), &data).await {
-        Ok(FileScanOutcome::Clean) => {}
-        Ok(FileScanOutcome::Skipped) => {
-            tracing::warn!(file_name = %file_name, "virus scanner unavailable; chat attachment scan skipped");
-        }
-        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
-    }
-
-    let file_size = data.len() as i64;
-    let file_key = format!("{}_{}", Uuid::new_v4(), sanitize_filename(&file_name));
-
-    // Encrypt file body before writing to disk. The same active key id is
-    // reused for the optional caption below.
-    let (file_ciphertext, file_nonce, encryption_key_id) = match state.message_keys.encrypt(&data) {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::error!(error = %e, "encrypt attachment");
+    if has_attachment_e2e {
+        if message_text.is_some() {
             return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to encrypt attachment",
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Mixed plaintext and E2E payloads are not allowed",
             );
         }
-    };
+
+        let Some(attachment_algorithm) = attachment_e2e_algorithm
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Invalid attachment_e2e_algorithm",
+            );
+        };
+        if !is_valid_message_key_algorithm(attachment_algorithm) {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Invalid attachment_e2e_algorithm",
+            );
+        }
+        let Some(sender_fingerprint) = sender_key_fingerprint
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Invalid sender_key_fingerprint",
+            );
+        };
+        let Some(recipient_fingerprint) = recipient_key_fingerprint
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Invalid recipient_key_fingerprint",
+            );
+        };
+        let attachment_nonce_bytes = match attachment_e2e_nonce.as_deref() {
+            Some(value) => match decode_base64_message_field(value, "Invalid attachment_e2e_nonce")
+            {
+                Ok(bytes) if bytes.len() == 12 => bytes,
+                Ok(_) => {
+                    return err(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        "Invalid attachment_e2e_nonce",
+                    );
+                }
+                Err(resp) => return resp,
+            },
+            None => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Invalid attachment_e2e_nonce",
+                );
+            }
+        };
+        let attachment_salt_bytes = match attachment_e2e_salt.as_deref() {
+            Some(value) => {
+                match decode_base64_message_field(value, "Invalid attachment_e2e_salt") {
+                    Ok(bytes) if !bytes.is_empty() => bytes,
+                    Ok(_) => {
+                        return err(
+                            StatusCode::UNPROCESSABLE_ENTITY,
+                            "Invalid attachment_e2e_salt",
+                        );
+                    }
+                    Err(resp) => return resp,
+                }
+            }
+            None => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Invalid attachment_e2e_salt",
+                );
+            }
+        };
+
+        match load_active_message_key_row(&state, auth.user_id, sender_fingerprint).await {
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Sender message key is not active",
+                );
+            }
+            Err(resp) => return resp,
+        }
+        match load_message_key_row(&state, user_id, Some(recipient_fingerprint)).await {
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Recipient message key not found",
+                );
+            }
+            Err(resp) => return resp,
+        }
+
+        if has_caption_e2e {
+            let Some(caption_algorithm) = e2e_algorithm
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            else {
+                return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid e2e_algorithm");
+            };
+            if !is_valid_message_key_algorithm(caption_algorithm) {
+                return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid e2e_algorithm");
+            }
+            let caption_ciphertext = match e2e_ciphertext.as_deref() {
+                Some(value) => match decode_base64_message_field(value, "Invalid e2e_ciphertext") {
+                    Ok(bytes) if !bytes.is_empty() => bytes,
+                    Ok(_) => {
+                        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid e2e_ciphertext");
+                    }
+                    Err(resp) => return resp,
+                },
+                None => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid e2e_ciphertext"),
+            };
+            let caption_nonce = match e2e_nonce.as_deref() {
+                Some(value) => match decode_base64_message_field(value, "Invalid e2e_nonce") {
+                    Ok(bytes) if bytes.len() == 12 => bytes,
+                    Ok(_) => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid e2e_nonce"),
+                    Err(resp) => return resp,
+                },
+                None => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid e2e_nonce"),
+            };
+            let caption_salt = match e2e_salt.as_deref() {
+                Some(value) => match decode_base64_message_field(value, "Invalid e2e_salt") {
+                    Ok(bytes) if !bytes.is_empty() => bytes,
+                    Ok(_) => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid e2e_salt"),
+                    Err(resp) => return resp,
+                },
+                None => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid e2e_salt"),
+            };
+            msg_e2e_algorithm = Some(E2E_ALGORITHM.to_string());
+            msg_e2e_ciphertext = Some(caption_ciphertext);
+            msg_e2e_nonce = Some(caption_nonce);
+            msg_e2e_salt = Some(caption_salt);
+        }
+
+        stored_attachment_e2e_algorithm = Some(E2E_ALGORITHM.to_string());
+        stored_attachment_e2e_nonce = Some(attachment_nonce_bytes);
+        stored_attachment_e2e_salt = Some(attachment_salt_bytes);
+        stored_sender_key_fingerprint = Some(sender_fingerprint.to_string());
+        stored_recipient_key_fingerprint = Some(recipient_fingerprint.to_string());
+    } else {
+        if has_caption_e2e {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "E2E caption requires an E2E attachment envelope",
+            );
+        }
+
+        match validate_upload_magic_bytes(Some(&file_name), Some(mime_type.as_str()), &data) {
+            Ok(Some(validated_mime)) => mime_type = validated_mime,
+            Ok(None) => {}
+            Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+        }
+        match scan_upload_bytes(Some(&file_name), &data).await {
+            Ok(FileScanOutcome::Clean) => {}
+            Ok(FileScanOutcome::Skipped) => {
+                tracing::warn!(file_name = %file_name, "virus scanner unavailable; chat attachment scan skipped");
+            }
+            Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
+        }
+
+        let (file_ciphertext, file_nonce, encryption_key_id) =
+            match state.message_keys.encrypt(&data) {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::error!(error = %e, "encrypt attachment");
+                    return err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to encrypt attachment",
+                    );
+                }
+            };
+        stored_file_bytes = file_ciphertext;
+        stored_attachment_nonce = Some(file_nonce);
+        stored_encryption_key_id = Some(encryption_key_id);
+
+        if let Some(text) = message_text.as_deref().filter(|text| !text.is_empty()) {
+            let (caption_ciphertext, caption_nonce, key_id) =
+                match state.message_keys.encrypt_str(text) {
+                    Ok(value) => value,
+                    Err(e) => {
+                        tracing::error!(error = %e, "encrypt message caption");
+                        return err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to encrypt caption",
+                        );
+                    }
+                };
+            msg_ciphertext = Some(caption_ciphertext);
+            msg_nonce = Some(caption_nonce);
+            stored_encryption_key_id.get_or_insert(key_id);
+        }
+    }
+
+    let file_size = attachment_plaintext_size.unwrap_or(data.len() as i64);
+    let file_key = format!("{}_{}", Uuid::new_v4(), sanitize_filename(&file_name));
 
     // Ensure upload directory exists
     let dir = std::path::Path::new(UPLOAD_DIR);
@@ -1112,7 +1429,7 @@ async fn upload_file(
 
     // Write encrypted file
     let path = dir.join(&file_key);
-    if let Err(e) = tokio::fs::write(&path, &file_ciphertext).await {
+    if let Err(e) = tokio::fs::write(&path, &stored_file_bytes).await {
         tracing::error!(error = %e, "write file");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Storage error");
     }
@@ -1129,45 +1446,43 @@ async fn upload_file(
         }
     }
 
-    // Encrypt optional message text. Note the caption uses whatever the
-    // active key is at that instant — that is always equal to the file's key
-    // because both run under the same registry inside one request.
-    let (msg_ciphertext, msg_nonce) = match message_text.as_deref() {
-        Some(text) if !text.is_empty() => match state.message_keys.encrypt_str(text) {
-            Ok((ct, n, _)) => (Some(ct), Some(n)),
-            Err(e) => {
-                tracing::error!(error = %e, "encrypt message caption");
-                let _ = tokio::fs::remove_file(&path).await;
-                return err(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Failed to encrypt caption",
-                );
-            }
-        },
-        _ => (None, None),
-    };
-
-    // Insert message row with encrypted attachment metadata.
-    // `attachment_nonce` stores the nonce for file body decryption.
+    // Insert message row with encrypted attachment metadata. Legacy
+    // attachments use `attachment_nonce`; E2E attachments keep the encrypted
+    // payload opaque and store only the client envelope metadata.
     match sqlx::query(
         r#"INSERT INTO direct_messages (
                from_user, to_user,
                message_ciphertext, message_nonce,
-               attachment_filename, attachment_mime, attachment_size, attachment_key, attachment_nonce,
+               e2e_algorithm, e2e_ciphertext, e2e_nonce, e2e_salt,
+               sender_key_fingerprint, recipient_key_fingerprint,
+               attachment_filename, attachment_mime, attachment_size, attachment_key,
+               attachment_nonce, attachment_e2e_algorithm, attachment_e2e_nonce, attachment_e2e_salt,
                encryption_key_id
            )
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id, created_at"#,
+           VALUES (
+               $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+               $11, $12, $13, $14, $15, $16, $17, $18
+           ) RETURNING id, created_at"#,
     )
     .bind(auth.user_id)
     .bind(user_id)
     .bind(msg_ciphertext.as_deref())
     .bind(msg_nonce.as_deref())
+    .bind(msg_e2e_algorithm.as_deref())
+    .bind(msg_e2e_ciphertext.as_deref())
+    .bind(msg_e2e_nonce.as_deref())
+    .bind(msg_e2e_salt.as_deref())
+    .bind(stored_sender_key_fingerprint.as_deref())
+    .bind(stored_recipient_key_fingerprint.as_deref())
     .bind(file_name.as_str())
     .bind(mime_type.as_str())
     .bind(file_size)
     .bind(&file_key)
-    .bind(&file_nonce)
-    .bind(&encryption_key_id)
+    .bind(stored_attachment_nonce.as_deref())
+    .bind(stored_attachment_e2e_algorithm.as_deref())
+    .bind(stored_attachment_e2e_nonce.as_deref())
+    .bind(stored_attachment_e2e_salt.as_deref())
+    .bind(stored_encryption_key_id.as_deref())
     .fetch_one(&state.db)
     .await
     {
@@ -1185,7 +1500,9 @@ async fn upload_file(
                     "attachment_filename": file_name.as_str(),
                     "attachment_mime": mime_type.as_str(),
                     "attachment_size": file_size,
-                    "has_message_text": message_text.is_some(),
+                    "has_message_text": message_text.is_some() || msg_e2e_ciphertext.is_some(),
+                    "is_e2e_attachment": has_attachment_e2e,
+                    "has_e2e_caption": msg_e2e_ciphertext.is_some(),
                     "is_ceo_access": matches!(auth.role, Role::Ceo | Role::CeoAssistant),
                 }),
             )
@@ -1194,7 +1511,7 @@ async fn upload_file(
                 &state,
                 auth.user_id,
                 user_id,
-                message_text.as_deref(),
+                if has_attachment_e2e { None } else { message_text.as_deref() },
                 Some(&file_name),
             )
             .await;
@@ -1204,6 +1521,7 @@ async fn upload_file(
                 "ok": true, "id": id, "created_at": created_at.to_rfc3339(),
                 "attachment_key": file_key, "attachment_filename": file_name,
                 "attachment_mime": mime_type, "attachment_size": file_size,
+                "attachment_is_e2e": has_attachment_e2e,
             }))
             .into_response()
         }
@@ -1224,7 +1542,8 @@ async fn download_file(
 ) -> axum::response::Response {
     // Verify the user is a participant of this conversation.
     let row = sqlx::query(
-        r#"SELECT id, from_user, to_user, attachment_filename, attachment_mime, attachment_size, attachment_nonce, encryption_key_id
+        r#"SELECT id, from_user, to_user, attachment_filename, attachment_mime, attachment_size,
+                  attachment_nonce, attachment_e2e_algorithm, encryption_key_id
            FROM direct_messages
            WHERE attachment_key = $1 AND (from_user = $2 OR to_user = $2)
            LIMIT 1"#,
@@ -1234,8 +1553,16 @@ async fn download_file(
     .fetch_optional(&state.db)
     .await;
 
-    let (message_id, peer_id, filename, mime, attachment_size, attachment_nonce, key_id) = match row
-    {
+    let (
+        message_id,
+        peer_id,
+        filename,
+        mime,
+        attachment_size,
+        attachment_nonce,
+        attachment_e2e_algorithm,
+        key_id,
+    ) = match row {
         Ok(Some(r)) => (
             r.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
             if r.try_get::<Uuid, _>("from_user")
@@ -1260,6 +1587,9 @@ async fn download_file(
             r.try_get::<Option<Vec<u8>>, _>("attachment_nonce")
                 .ok()
                 .flatten(),
+            r.try_get::<Option<String>, _>("attachment_e2e_algorithm")
+                .ok()
+                .flatten(),
             r.try_get::<Option<String>, _>("encryption_key_id")
                 .ok()
                 .flatten()
@@ -1278,20 +1608,25 @@ async fn download_file(
         Err(_) => return err(StatusCode::NOT_FOUND, "File not found on disk"),
     };
 
-    // Decrypt if the file was stored with a nonce (new attachments).
-    // Legacy plaintext attachments fall through unchanged.
-    let decrypted = match attachment_nonce.as_deref() {
-        Some(nonce) => match state.message_keys.decrypt(&key_id, &raw_bytes, nonce) {
-            Ok(bytes) => bytes,
-            Err(e) => {
-                tracing::error!(error = %e, file_key = %file_key, key_id = %key_id, "decrypt attachment");
-                return err(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Failed to decrypt attachment",
-                );
-            }
-        },
-        None => raw_bytes,
+    // Attachment E2E payloads stay opaque to the backend and are returned as
+    // stored. Legacy attachments are decrypted server-side with the at-rest
+    // key registry before download.
+    let decrypted = if attachment_e2e_algorithm.is_some() {
+        raw_bytes
+    } else {
+        match attachment_nonce.as_deref() {
+            Some(nonce) => match state.message_keys.decrypt(&key_id, &raw_bytes, nonce) {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    tracing::error!(error = %e, file_key = %file_key, key_id = %key_id, "decrypt attachment");
+                    return err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to decrypt attachment",
+                    );
+                }
+            },
+            None => raw_bytes,
+        }
     };
 
     let body = Body::from(decrypted);

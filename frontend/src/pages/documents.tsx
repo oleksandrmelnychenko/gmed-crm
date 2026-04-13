@@ -1,11 +1,15 @@
 import {
+  cloneElement,
+  isValidElement,
   startTransition,
   useDeferredValue,
   useEffect,
+  useId,
   useMemo,
   useState,
   type ChangeEvent,
   type FormEvent,
+  type ReactElement,
   type ReactNode,
 } from "react";
 import { Link, useSearchParams } from "react-router-dom";
@@ -17,6 +21,7 @@ import {
   RefreshCw,
   Search,
   Share2,
+  Trash2,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -40,7 +45,7 @@ import {
 } from "@/components/ui/sheet";
 import { apiFetch, getAccessToken } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { useLang } from "@/lib/i18n";
+import { getLang, t as translateCatalog, useLang } from "@/lib/i18n";
 import { PatientDocumentsPage } from "@/pages/patient-documents";
 import { cn } from "@/lib/utils";
 
@@ -77,6 +82,7 @@ type DocumentItem = {
   is_medical: boolean;
   mime_type: string | null;
   file_size: number | null;
+  has_stored_file: boolean;
   klinik: string | null;
   ursprung: string | null;
   notes: string | null;
@@ -87,6 +93,10 @@ type DocumentItem = {
   version_number: number;
   version_count: number;
   is_latest_version: boolean;
+  file_deleted_at: string | null;
+  file_deleted_by: string | null;
+  file_deleted_by_name: string | null;
+  file_delete_reason: string | null;
   created_at: string;
   updated_at: string;
   share_count: number;
@@ -105,6 +115,7 @@ type DocumentShare = {
   target_user_role: string | null;
   shared_by_name: string | null;
   channel: string | null;
+  message: string | null;
   requires_confirmation: boolean;
   confirmed: boolean;
   confirmed_at: string | null;
@@ -216,6 +227,7 @@ type ShareFormState = {
   userId: string;
   providerId: string;
   channel: string;
+  message: string;
   requiresConfirmation: boolean;
 };
 
@@ -359,8 +371,13 @@ function buildDocumentsPath(filters: FiltersState) {
   return params.size ? `/documents?${params.toString()}` : "/documents";
 }
 
+function runtimeTranslations() {
+  return translateCatalog(getLang());
+}
+
 function formatDateTime(value?: string | null) {
-  if (!value) return "Not set";
+  const tr = runtimeTranslations();
+  if (!value) return tr.common_not_set;
   try {
     return new Intl.DateTimeFormat("en-GB", {
       day: "2-digit",
@@ -375,7 +392,8 @@ function formatDateTime(value?: string | null) {
 }
 
 function formatDate(value?: string | null) {
-  if (!value) return "Not set";
+  const tr = runtimeTranslations();
+  if (!value) return tr.common_not_set;
   try {
     return new Intl.DateTimeFormat("en-GB", {
       day: "2-digit",
@@ -388,10 +406,81 @@ function formatDate(value?: string | null) {
 }
 
 function formatFileSize(value?: number | null) {
-  if (!value || value <= 0) return "Not set";
+  const tr = runtimeTranslations();
+  if (!value || value <= 0) return tr.common_not_set;
   if (value < 1024) return `${value} B`;
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatDocumentStatusLabel(
+  status: string,
+  tr: ReturnType<typeof runtimeTranslations>,
+) {
+  switch (status) {
+    case "draft":
+      return tr.documents_status_draft;
+    case "active":
+      return tr.documents_status_active;
+    case "archived":
+      return tr.documents_status_archived;
+    default:
+      return status.replaceAll("_", " ");
+  }
+}
+
+function formatVisibilityLabel(
+  visibility: string,
+  tr: ReturnType<typeof runtimeTranslations>,
+) {
+  switch (visibility) {
+    case "internal":
+      return tr.documents_visibility_internal;
+    case "released_internal":
+      return tr.documents_visibility_released_internal;
+    case "released_external":
+      return tr.documents_visibility_released_external;
+    case "patient_visible":
+      return tr.documents_visibility_patient_visible;
+    default:
+      return visibility.replaceAll("_", " ");
+  }
+}
+
+function formatTranslationStatusLabel(
+  status: string,
+  tr: ReturnType<typeof runtimeTranslations>,
+) {
+  switch (status) {
+    case "requested":
+      return tr.documents_translation_requested;
+    case "in_progress":
+      return tr.documents_translation_in_progress;
+    case "completed":
+      return tr.documents_translation_completed;
+    case "cancelled":
+      return tr.documents_translation_cancelled;
+    default:
+      return status.replaceAll("_", " ");
+  }
+}
+
+function formatExtractionStatusLabel(
+  status: string,
+  tr: ReturnType<typeof runtimeTranslations>,
+) {
+  switch (status) {
+    case "completed":
+      return tr.documents_extraction_completed;
+    case "failed":
+      return tr.documents_extraction_failed;
+    case "unsupported":
+      return tr.documents_extraction_unsupported;
+    case "not_started":
+      return tr.documents_extraction_not_started;
+    default:
+      return status.replaceAll("_", " ");
+  }
 }
 
 function statusBadge(status: string) {
@@ -578,6 +667,7 @@ function openBlobPreviewWindow(previewWindow: Window | null, blob: Blob) {
 }
 
 async function openDocumentPreview(id: string, previewWindow?: Window | null) {
+  const tr = runtimeTranslations();
   const token = getAccessToken();
   const response = await fetch(`/api/v1/documents/${id}/download`, {
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
@@ -593,7 +683,7 @@ async function openDocumentPreview(id: string, previewWindow?: Window | null) {
     );
     if (!opened) {
       if (previewWindow) previewWindow.close();
-      throw new Error("Allow pop-ups to preview the generated document.");
+      throw new Error(tr.documents_popup_blocked);
     }
     return;
   }
@@ -602,7 +692,7 @@ async function openDocumentPreview(id: string, previewWindow?: Window | null) {
   const opened = openBlobPreviewWindow(previewWindow ?? null, blob);
   if (!opened) {
     if (previewWindow) previewWindow.close();
-    throw new Error("Allow pop-ups to preview the generated document.");
+    throw new Error(tr.documents_popup_blocked);
   }
 }
 
@@ -712,6 +802,10 @@ function StaffDocumentsPage() {
   >([]);
   const [saveBusy, setSaveBusy] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+  const [deleteReason, setDeleteReason] = useState("");
 
   const [shares, setShares] = useState<DocumentShare[]>([]);
   const [shareForm, setShareForm] = useState<ShareFormState>({
@@ -719,6 +813,7 @@ function StaffDocumentsPage() {
     userId: "",
     providerId: "",
     channel: "email",
+    message: "",
     requiresConfirmation: true,
   });
   const [shareBusy, setShareBusy] = useState(false);
@@ -827,7 +922,7 @@ function StaffDocumentsPage() {
         setError(
           nextError instanceof Error
             ? nextError.message
-            : "Failed to load documents.",
+            : t.documents_failed_load_documents,
         );
       } finally {
         if (active) setBusy(false);
@@ -861,7 +956,7 @@ function StaffDocumentsPage() {
         setIntakeError(
           nextError instanceof Error
             ? nextError.message
-            : "Failed to load document intake queue.",
+            : t.documents_failed_load_intake_queue,
         );
       } finally {
         if (active) setIntakeBusy(false);
@@ -940,7 +1035,7 @@ function StaffDocumentsPage() {
         setDetailError(
           nextError instanceof Error
             ? nextError.message
-            : "Failed to load document.",
+            : t.documents_failed_load_document,
         );
       } finally {
         if (active) setDetailBusy(false);
@@ -1132,7 +1227,7 @@ function StaffDocumentsPage() {
   async function handleUpload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!uploadForm.file) {
-      setUploadError("File is required.");
+      setUploadError(t.documents_file_required);
       return;
     }
     if (
@@ -1140,7 +1235,7 @@ function StaffDocumentsPage() {
       !uploadForm.orderId &&
       !uploadForm.appointmentId
     ) {
-      setUploadError("Link the document to a patient, order or appointment.");
+      setUploadError(t.documents_link_context_required);
       return;
     }
     setUploadBusy(true);
@@ -1184,10 +1279,10 @@ function StaffDocumentsPage() {
       );
       setNotice(
         constrainedUpload
-          ? "Document uploaded for internal review."
+          ? t.documents_uploaded_internal_review
           : response.needs_categorization
-            ? "Document uploaded and added to the intake queue."
-            : "Document uploaded.",
+            ? t.documents_uploaded_to_intake
+            : t.documents_uploaded,
       );
       setUploadOpen(false);
       refresh();
@@ -1196,7 +1291,7 @@ function StaffDocumentsPage() {
       setUploadError(
         nextError instanceof Error
           ? nextError.message
-          : "Failed to upload document.",
+          : t.documents_failed_upload,
       );
     } finally {
       setUploadBusy(false);
@@ -1223,15 +1318,15 @@ function StaffDocumentsPage() {
       });
       setNotice(
         item.ursprung === "interpreter_upload" && item.status === "draft"
-          ? "Classification suggestion applied and interpreter upload released."
-          : "Classification suggestion applied.",
+          ? t.documents_classification_applied_released
+          : t.documents_classification_applied,
       );
       refresh();
     } catch (nextError) {
       setError(
         nextError instanceof Error
           ? nextError.message
-          : "Failed to apply document classification.",
+          : t.documents_failed_apply_classification,
       );
     } finally {
       setIntakeActionId("");
@@ -1288,7 +1383,7 @@ function StaffDocumentsPage() {
   function openReplacementTemplate(document: DocumentItem) {
     const template = templateForDocument(templates, document);
     if (!template || !document.patient_id) {
-      setNotice("This document type is not linked to a generated template.");
+      setNotice(t.documents_not_linked_template);
       return;
     }
     setGenerateForm({
@@ -1319,11 +1414,11 @@ function StaffDocumentsPage() {
   async function handleGenerateDocument(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedTemplate) {
-      setGenerateError("Choose a template.");
+      setGenerateError(t.documents_choose_template);
       return;
     }
     if (!generateForm.patientId) {
-      setGenerateError("Patient context is required.");
+      setGenerateError(t.documents_patient_context_required);
       return;
     }
 
@@ -1372,8 +1467,14 @@ function StaffDocumentsPage() {
       setTemplateOpen(false);
       setNotice(
         previewOpened
-          ? `Version ${response.version_number ?? 1} generated and preview opened.`
-          : `Version ${response.version_number ?? 1} generated.`,
+          ? t.documents_generated_version_preview.replace(
+              "{version}",
+              String(response.version_number ?? 1),
+            )
+          : t.documents_generated_version.replace(
+              "{version}",
+              String(response.version_number ?? 1),
+            ),
       );
       refresh();
       if (response.id) openDocument(response.id);
@@ -1382,7 +1483,7 @@ function StaffDocumentsPage() {
       setGenerateError(
         nextError instanceof Error
           ? nextError.message
-          : "Failed to generate document.",
+          : t.documents_failed_generate,
       );
     } finally {
       setGenerateBusy(false);
@@ -1393,12 +1494,12 @@ function StaffDocumentsPage() {
     if (!detail) return;
     try {
       await openDocumentPreview(detail.id);
-      setNotice("Generated document preview opened.");
+      setNotice(t.documents_preview_opened);
     } catch (nextError) {
       setDetailError(
         nextError instanceof Error
           ? nextError.message
-          : "Failed to open generated document preview.",
+          : t.documents_failed_open_preview,
       );
     }
   }
@@ -1443,12 +1544,12 @@ function StaffDocumentsPage() {
       });
       await reloadTranslationRequests(detail.id);
       setTranslationForm({ requestedLanguage: "en", note: "" });
-      setNotice("Translation request created.");
+      setNotice(t.documents_translation_created);
     } catch (nextError) {
       setTranslationError(
         nextError instanceof Error
           ? nextError.message
-          : "Failed to create translation request.",
+          : t.documents_failed_create_translation,
       );
     } finally {
       setTranslationBusy(false);
@@ -1469,12 +1570,12 @@ function StaffDocumentsPage() {
       );
       setTextExtraction(response);
       await reloadTranslationRequests(detail.id);
-      setNotice("Document text extraction updated.");
+      setNotice(t.documents_extraction_updated);
     } catch (nextError) {
       setTextExtractionError(
         nextError instanceof Error
           ? nextError.message
-          : "Failed to extract document text.",
+          : t.documents_failed_extract,
       );
     } finally {
       setTextExtractionBusy(false);
@@ -1513,13 +1614,16 @@ function StaffDocumentsPage() {
       await reloadTranslationRequests(detail.id);
       setNotice(
         successMessage ??
-          `Translation request marked as ${status.replaceAll("_", " ")}.`,
+          t.documents_translation_marked.replace(
+            "{status}",
+            formatTranslationStatusLabel(status, t),
+          ),
       );
     } catch (nextError) {
       setTranslationError(
         nextError instanceof Error
           ? nextError.message
-          : "Failed to update translation request.",
+          : t.documents_failed_update_translation,
       );
     } finally {
       setTranslationBusy(false);
@@ -1533,7 +1637,7 @@ function StaffDocumentsPage() {
       requestId,
       request.status,
       undefined,
-      "Translation workspace saved.",
+      t.documents_translation_workspace_saved,
     );
   }
 
@@ -1547,19 +1651,19 @@ function StaffDocumentsPage() {
   async function handleSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!detail || !editForm) {
-      setSaveError("Document data is not available.");
+      setSaveError(t.documents_save_data_unavailable);
       return;
     }
     if (canManage && (!editForm.autoName.trim() || !editForm.art.trim())) {
-      setSaveError("Document name and type are required.");
+      setSaveError(t.documents_save_name_type_required);
       return;
     }
     if (!canManage && !canReviewSelectedDocument) {
-      setSaveError("You cannot update this document.");
+      setSaveError(t.documents_save_forbidden);
       return;
     }
     if (!editForm.art.trim()) {
-      setSaveError("Document type is required.");
+      setSaveError(t.documents_save_type_required);
       return;
     }
     setSaveBusy(true);
@@ -1596,13 +1700,13 @@ function StaffDocumentsPage() {
       setEditForm(detailToEditForm(fresh));
       setNotice(
         canManage
-          ? "Document metadata updated."
-          : "Interpreter upload reviewed and released.",
+          ? t.documents_metadata_updated_notice
+          : t.documents_review_released_notice,
       );
       refresh();
     } catch (nextError) {
       setSaveError(
-        nextError instanceof Error ? nextError.message : "Failed to save.",
+        nextError instanceof Error ? nextError.message : t.documents_failed_save,
       );
     } finally {
       setSaveBusy(false);
@@ -1619,11 +1723,15 @@ function StaffDocumentsPage() {
           : [];
     if (targetDocumentIds.length === 0) return;
     if (shareForm.targetType === "user" && !shareForm.userId) {
-      setShareError("Choose a user target.");
+      setShareError(t.documents_choose_user_target);
       return;
     }
     if (shareForm.targetType === "provider" && !shareForm.providerId) {
-      setShareError("Choose a provider target.");
+      setShareError(t.documents_choose_provider_target);
+      return;
+    }
+    if (shareForm.targetType === "provider" && !shareForm.message.trim()) {
+      setShareError(t.documents_share_message_required);
       return;
     }
     setShareBusy(true);
@@ -1634,11 +1742,13 @@ function StaffDocumentsPage() {
           ? {
               shared_with_user_id: shareForm.userId,
               channel: shareForm.channel || null,
+              message: shareForm.message.trim() || null,
               requires_confirmation: shareForm.requiresConfirmation,
             }
           : {
               shared_with_provider_id: shareForm.providerId,
               channel: shareForm.channel || null,
+              message: shareForm.message.trim() || null,
               requires_confirmation: shareForm.requiresConfirmation,
             };
       if (targetDocumentIds.length > 1) {
@@ -1666,19 +1776,23 @@ function StaffDocumentsPage() {
         userId: "",
         providerId: "",
         channel: "email",
+        message: "",
         requiresConfirmation: true,
       });
       setNotice(
         targetDocumentIds.length > 1
-          ? `${targetDocumentIds.length} documents shared.`
-          : "Share created.",
+          ? t.documents_shared_count.replace(
+              "{count}",
+              String(targetDocumentIds.length),
+            )
+          : t.documents_share_created_notice,
       );
       refresh();
     } catch (nextError) {
       setShareError(
         nextError instanceof Error
           ? nextError.message
-          : "Failed to create share.",
+          : t.documents_failed_create_share,
       );
     } finally {
       setShareBusy(false);
@@ -1696,7 +1810,7 @@ function StaffDocumentsPage() {
     setShares(
       await apiFetch<DocumentShare[]>(`/documents/${detail.id}/shares`),
     );
-    setNotice("Share revoked.");
+    setNotice(t.documents_share_revoked_notice);
     refresh();
   }
 
@@ -1713,7 +1827,7 @@ function StaffDocumentsPage() {
         await apiFetch<DocumentShare[]>(`/documents/${detail.id}/shares`),
       );
     }
-    setNotice("Share confirmed.");
+    setNotice(t.documents_share_confirmed_notice);
     refresh();
   }
 
@@ -1736,13 +1850,13 @@ function StaffDocumentsPage() {
       setDetail(fresh);
       setEditForm(detailToEditForm(fresh));
       setShares(freshShares);
-      setNotice("Document released to patient portal.");
+      setNotice(t.documents_portal_released_notice);
       refresh();
     } catch (nextError) {
       setShareError(
         nextError instanceof Error
           ? nextError.message
-          : "Failed to release document to patient portal.",
+          : t.documents_failed_release_portal,
       );
     } finally {
       setPortalBusy(false);
@@ -1764,16 +1878,66 @@ function StaffDocumentsPage() {
       setDetail(fresh);
       setEditForm(detailToEditForm(fresh));
       setShares(freshShares);
-      setNotice("Patient portal release revoked.");
+      setNotice(t.documents_portal_release_revoked_notice);
       refresh();
     } catch (nextError) {
       setShareError(
         nextError instanceof Error
           ? nextError.message
-          : "Failed to revoke patient portal release.",
+          : t.documents_failed_revoke_portal,
       );
     } finally {
       setPortalBusy(false);
+    }
+  }
+
+  async function handleDeleteStoredFile() {
+    if (!detail) return;
+    if (!deleteReason.trim()) {
+      setDeleteError(t.documents_delete_file_reason_required);
+      return;
+    }
+
+    setDeleteBusy(true);
+    setDeleteError("");
+    try {
+      const response = await apiFetch<{
+        ok: boolean;
+        document: DocumentItem;
+      }>(`/documents/${detail.id}/delete`, {
+        method: "POST",
+        body: JSON.stringify({
+          reason: deleteReason.trim(),
+        }),
+      });
+
+      const [freshShares, freshVersions] = await Promise.all([
+        canManage
+          ? apiFetch<DocumentShare[]>(`/documents/${detail.id}/shares`).catch(
+              () => [],
+            )
+          : Promise.resolve([]),
+        apiFetch<DocumentItem[]>(`/documents/${detail.id}/versions`).catch(
+          () => [],
+        ),
+      ]);
+
+      setDetail(response.document);
+      setEditForm(detailToEditForm(response.document));
+      setShares(freshShares);
+      setDetailVersions(freshVersions);
+      setDeleteOpen(false);
+      setDeleteReason("");
+      setNotice(t.documents_file_deleted_notice);
+      refresh();
+    } catch (nextError) {
+      setDeleteError(
+        nextError instanceof Error
+          ? nextError.message
+          : t.documents_failed_delete_file,
+      );
+    } finally {
+      setDeleteBusy(false);
     }
   }
 
@@ -1799,17 +1963,16 @@ function StaffDocumentsPage() {
               {t.documents_title}
             </p>
             <h1 className="mt-3 text-3xl font-semibold tracking-tight text-slate-950">
-              Document workspace
+              {t.documents_workspace_heading}
             </h1>
             <p className="mt-3 max-w-3xl text-sm text-slate-500">
-              Upload, classify, share and track files against patients, orders
-              and appointments.
+              {t.documents_workspace_intro}
             </p>
           </div>
           <div className="flex flex-wrap gap-3">
             <Button variant="outline" className="rounded-2xl" onClick={refresh}>
               <RefreshCw className="size-4" />
-              Refresh
+              {t.documents_refresh}
             </Button>
             {canManage ? (
               <Button
@@ -1824,7 +1987,7 @@ function StaffDocumentsPage() {
                 }}
               >
                 <FileText className="size-4" />
-                Generate from template
+                {t.documents_generate_from_template}
               </Button>
             ) : null}
             {canUpload ? (
@@ -1849,27 +2012,27 @@ function StaffDocumentsPage() {
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold text-slate-950">
-                Document intake queue
+                {t.documents_intake_queue}
               </h2>
               <p className="mt-1 text-sm text-slate-600">
                 {user?.role === "teamlead_interpreter"
-                  ? "Interpreter uploads and other intake files that still need taxonomy review."
-                  : "Unclassified uploads and portal files that still need taxonomy review."}
+                  ? t.documents_intake_interpreter_hint
+                  : t.documents_intake_general_hint}
               </p>
             </div>
             <Badge className="rounded-full border-amber-200 bg-white text-amber-700">
-              {intakeQueue.length} pending
+              {intakeQueue.length} {t.documents_pending}
             </Badge>
           </div>
           {intakeError ? <Banner tone="error">{intakeError}</Banner> : null}
           {intakeBusy ? (
             <div className="mt-4 flex items-center text-sm text-slate-600">
               <LoaderCircle className="mr-2 size-4 animate-spin" />
-              Loading intake queue…
+              {t.documents_loading_intake_queue}
             </div>
           ) : intakeQueue.length === 0 ? (
             <div className="mt-4 rounded-2xl border border-dashed border-amber-200 bg-white/70 px-4 py-4 text-sm text-slate-600">
-              No documents are waiting for categorization.
+              {t.documents_no_intake_pending}
             </div>
           ) : (
             <div className="mt-4 grid gap-3 xl:grid-cols-2">
@@ -1886,14 +2049,14 @@ function StaffDocumentsPage() {
                       <p className="mt-1 text-xs text-slate-500">
                         {[item.original_filename, item.patient_pid, item.patient_name]
                           .filter(Boolean)
-                          .join(" · ") || "Unlinked document"}
+                          .join(" · ") || t.documents_unlinked_document}
                       </p>
                     </div>
                     <Badge
                       variant="outline"
                       className="rounded-full border-amber-200 bg-amber-50 text-amber-700"
                     >
-                      Needs review
+                      {t.documents_needs_review}
                     </Badge>
                   </div>
                   {item.classification_suggestion ? (
@@ -1903,7 +2066,8 @@ function StaffDocumentsPage() {
                         {item.classification_suggestion.category}
                       </p>
                       <p className="mt-1 text-xs uppercase tracking-[0.14em] text-sky-700">
-                        {item.classification_suggestion.confidence} confidence
+                        {item.classification_suggestion.confidence}{" "}
+                        {t.documents_confidence}
                       </p>
                       <p className="mt-2 text-sm text-sky-800/90">
                         {item.classification_suggestion.rationale}
@@ -1911,8 +2075,7 @@ function StaffDocumentsPage() {
                     </div>
                   ) : (
                     <div className="mt-3 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-600">
-                      No confident auto-classification. Open this document to
-                      classify and release it manually.
+                      {t.documents_no_auto_classification}
                     </div>
                   )}
                   <div className="mt-4 flex flex-wrap gap-2">
@@ -1931,8 +2094,8 @@ function StaffDocumentsPage() {
                         ) : null}
                         {item.ursprung === "interpreter_upload" &&
                         item.status === "draft"
-                          ? "Apply and release"
-                          : "Apply suggestion"}
+                          ? t.documents_apply_and_release
+                          : t.documents_apply_suggestion}
                       </Button>
                     ) : null}
                     <Button
@@ -1941,7 +2104,7 @@ function StaffDocumentsPage() {
                       className="rounded-xl"
                       onClick={() => openDocument(item.id)}
                     >
-                      Open
+                      {t.documents_open_document}
                     </Button>
                   </div>
                 </div>
@@ -1999,7 +2162,7 @@ function StaffDocumentsPage() {
             <option value="">All statuses</option>
             {STATUS_OPTIONS.map((status) => (
               <option key={status} value={status}>
-                {status}
+                {formatDocumentStatusLabel(status, t)}
               </option>
             ))}
           </select>
@@ -2016,7 +2179,7 @@ function StaffDocumentsPage() {
             <option value="">All visibility</option>
             {VISIBILITY_OPTIONS.map((value) => (
               <option key={value} value={value}>
-                {value.replaceAll("_", " ")}
+                {formatVisibilityLabel(value, t)}
               </option>
             ))}
           </select>
@@ -2111,7 +2274,7 @@ function StaffDocumentsPage() {
                   setSelectedDocumentIds(documents.map((item) => item.id))
                 }
               >
-                Select all shown
+                {t.documents_select_all_shown}
               </Button>
               <Button
                 type="button"
@@ -2119,7 +2282,7 @@ function StaffDocumentsPage() {
                 className="rounded-xl"
                 onClick={() => setSelectedDocumentIds([])}
               >
-                Clear selection
+                {t.documents_clear_selection}
               </Button>
             </div>
           </div>
@@ -2128,11 +2291,11 @@ function StaffDocumentsPage() {
         {busy ? (
           <div className="flex min-h-[260px] items-center justify-center text-sm text-slate-500">
             <LoaderCircle className="mr-2 size-4 animate-spin" />
-            Loading documents…
+            {t.documents_loading_documents}
           </div>
         ) : documents.length === 0 ? (
           <div className="mt-6 rounded-[1.6rem] border border-dashed border-slate-200 bg-slate-50 px-5 py-8 text-center text-sm text-slate-500">
-            No documents match the current filters.
+            {t.documents_no_documents_match}
           </div>
         ) : (
           <div className="mt-6 grid gap-4 xl:grid-cols-2">
@@ -2162,7 +2325,7 @@ function StaffDocumentsPage() {
                         }
                         className="size-4 rounded border-slate-300"
                       />
-                      Select for bulk share
+                      {t.documents_select_bulk_share}
                     </label>
                     <div className="flex flex-wrap items-center gap-2">
                       <span
@@ -2171,7 +2334,7 @@ function StaffDocumentsPage() {
                           statusBadge(item.status),
                         )}
                       >
-                        {item.status}
+                        {formatDocumentStatusLabel(item.status, t)}
                       </span>
                       <span
                         className={cn(
@@ -2179,7 +2342,7 @@ function StaffDocumentsPage() {
                           visibilityBadge(item.visibility),
                         )}
                       >
-                        {item.visibility.replaceAll("_", " ")}
+                        {formatVisibilityLabel(item.visibility, t)}
                       </span>
                       <Badge
                         variant="outline"
@@ -2209,11 +2372,11 @@ function StaffDocumentsPage() {
                     <h3 className="mt-3 text-lg font-semibold text-slate-950">
                       {item.auto_name}
                     </h3>
-                    <p className="mt-1 text-sm text-slate-600">
-                      {[item.original_filename, item.art, item.category]
-                        .filter(Boolean)
-                        .join(" · ") || "Unclassified"}
-                    </p>
+                      <p className="mt-1 text-sm text-slate-600">
+                        {[item.original_filename, item.art, item.category]
+                          .filter(Boolean)
+                          .join(" · ") || t.documents_unclassified}
+                      </p>
                     {item.classification_suggestion ? (
                       <p className="mt-2 text-xs text-sky-700">
                         Suggested {item.classification_suggestion.art} ·{" "}
@@ -2240,12 +2403,17 @@ function StaffDocumentsPage() {
                       t.common_not_set}
                   </div>
                   <div>
-                    {item.uploaded_by_name || "Unknown uploader"} ·{" "}
+                    {item.uploaded_by_name || t.documents_unknown_uploader} ·{" "}
                     {formatDateTime(item.updated_at)}
                   </div>
                 </div>
                 <div className="mt-4 flex items-center justify-between text-xs text-slate-500">
-                  <span>{item.share_count} shares</span>
+                  <span>
+                    {t.documents_shares_count.replace(
+                      "{count}",
+                      String(item.share_count),
+                    )}
+                  </span>
                   <span>
                     {item.shared_to_current
                       ? t.documents_share
@@ -2261,11 +2429,8 @@ function StaffDocumentsPage() {
       <Dialog open={templateOpen} onOpenChange={setTemplateOpen}>
         <DialogContent className="max-w-4xl rounded-[1.75rem] p-0">
           <DialogHeader className="border-b border-border/70 px-6 pt-6 pb-4">
-            <DialogTitle>Generate document from template</DialogTitle>
-            <DialogDescription>
-              Create a structured, patient-facing document, save it into the
-              registry and open a print-ready preview.
-            </DialogDescription>
+            <DialogTitle>{t.documents_generate_title}</DialogTitle>
+            <DialogDescription>{t.documents_generate_description}</DialogDescription>
           </DialogHeader>
           <form
             onSubmit={handleGenerateDocument}
@@ -2284,9 +2449,8 @@ function StaffDocumentsPage() {
             ) : null}
             {generateForm.replaceDocumentId && detail?.id === generateForm.replaceDocumentId ? (
               <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900">
-                This run will archive the current document as version{" "}
-                {detail.version_number} and store the new file as the next
-                revision.
+                {t.documents_generate_replace_warning}{" "}
+                {detail.version_number}.
               </div>
             ) : null}
             <div className="grid gap-4 md:grid-cols-2">
@@ -2298,7 +2462,7 @@ function StaffDocumentsPage() {
                   }
                   className={selectClassName}
                 >
-                  <option value="">Select template</option>
+                  <option value="">{t.documents_select_template}</option>
                   {templates.map((template) => (
                     <option key={template.id} value={template.id}>
                       {template.label}
@@ -2359,7 +2523,7 @@ function StaffDocumentsPage() {
                   }}
                   className={selectClassName}
                 >
-                  <option value="">Select patient</option>
+                  <option value="">{t.documents_select_patient}</option>
                   {patients.map((patient) => (
                     <option key={patient.id} value={patient.id}>
                       {patientOptionLabel(patient)}
@@ -2379,7 +2543,7 @@ function StaffDocumentsPage() {
                   className={selectClassName}
                   disabled={!generateForm.patientId}
                 >
-                  <option value="">Use patient-wide context</option>
+                  <option value="">{t.documents_patient_wide_context}</option>
                   {generateOrders.map((order) => (
                     <option key={order.id} value={order.id}>
                       {order.order_number} · {order.patient_pid}
@@ -2399,7 +2563,7 @@ function StaffDocumentsPage() {
                   className={selectClassName}
                   disabled={!generateForm.patientId}
                 >
-                  <option value="">All appointments in scope</option>
+                  <option value="">{t.documents_all_appointments_scope}</option>
                   {generateAppointments.map((appointment) => (
                     <option key={appointment.id} value={appointment.id}>
                       {appointment.title} · {formatDate(appointment.date)}
@@ -2423,7 +2587,7 @@ function StaffDocumentsPage() {
                 >
                   {STATUS_OPTIONS.map((status) => (
                     <option key={status} value={status}>
-                      {status}
+                      {formatDocumentStatusLabel(status, t)}
                     </option>
                   ))}
                 </select>
@@ -2441,7 +2605,7 @@ function StaffDocumentsPage() {
                 >
                   {VISIBILITY_OPTIONS.map((value) => (
                     <option key={value} value={value}>
-                      {value.replaceAll("_", " ")}
+                      {formatVisibilityLabel(value, t)}
                     </option>
                   ))}
                 </select>
@@ -2482,7 +2646,10 @@ function StaffDocumentsPage() {
                     }))
                   }
                   className="h-10 rounded-xl border-slate-200 bg-slate-50"
-                  placeholder="Defaults to template:{id}"
+                  placeholder={t.documents_default_template_source.replace(
+                    "{id}",
+                    selectedTemplate?.id ?? "{id}",
+                  )}
                 />
               </Field>
             </div>
@@ -2490,11 +2657,10 @@ function StaffDocumentsPage() {
               <div className="space-y-3 rounded-[1.6rem] border border-slate-200 bg-slate-50/80 p-4">
                 <div>
                   <p className="text-sm font-semibold text-slate-950">
-                    Reusable text blocks
+                    {t.documents_text_blocks}
                   </p>
                   <p className="mt-1 text-xs text-slate-500">
-                    These become standardized hint or instruction sections in
-                    the generated document.
+                    {t.documents_text_blocks_hint}
                   </p>
                 </div>
                 <div className="grid gap-3 md:grid-cols-2">
@@ -2596,7 +2762,9 @@ function StaffDocumentsPage() {
                 ) : (
                   <FileText className="size-4" />
                 )}
-                {generateBusy ? "Generating…" : "Generate document"}
+                {generateBusy
+                  ? t.documents_generating
+                  : t.documents_generate_document}
               </Button>
             </DialogFooter>
           </form>
@@ -2617,8 +2785,8 @@ function StaffDocumentsPage() {
             {!canManage ? (
               <Banner tone="warning">
                 {user?.role === "interpreter"
-                  ? "Interpreter uploads are stored as internal draft documents and routed to teamlead review."
-                  : "This upload is stored as an internal document. Teamlead uploads do not expose full document-management controls here."}
+                  ? t.documents_upload_interpreter_hint
+                  : t.documents_upload_teamlead_hint}
               </Banner>
             ) : null}
             <div className="grid gap-4 md:grid-cols-2">
@@ -2654,7 +2822,7 @@ function StaffDocumentsPage() {
                   }
                   className={selectClassName}
                 >
-                  <option value="">Select patient</option>
+                  <option value="">{t.documents_select_patient}</option>
                   {patients.map((patient) => (
                     <option key={patient.id} value={patient.id}>
                       {patientOptionLabel(patient)}
@@ -2674,7 +2842,7 @@ function StaffDocumentsPage() {
                   className={selectClassName}
                   disabled={!uploadForm.patientId}
                 >
-                  <option value="">Optional order link</option>
+                  <option value="">{t.documents_optional_order_link}</option>
                   {uploadOrders.map((order) => (
                     <option key={order.id} value={order.id}>
                       {order.order_number} · {order.patient_pid}
@@ -2694,7 +2862,7 @@ function StaffDocumentsPage() {
                   className={selectClassName}
                   disabled={!uploadForm.patientId}
                 >
-                  <option value="">Optional appointment link</option>
+                  <option value="">{t.documents_optional_appointment_link}</option>
                   {uploadAppointments.map((appointment) => (
                     <option key={appointment.id} value={appointment.id}>
                       {appointment.title} · {formatDate(appointment.date)}
@@ -2716,7 +2884,7 @@ function StaffDocumentsPage() {
                   }
                   list="documents-art-options"
                   className="h-10 rounded-xl border-slate-200 bg-slate-50"
-                  placeholder="Optional. Leave empty for auto-classification."
+                  placeholder={t.documents_auto_classification_optional}
                 />
               </Field>
               <Field label={t.documents_category}>
@@ -2730,7 +2898,7 @@ function StaffDocumentsPage() {
                   }
                   className={selectClassName}
                 >
-                  <option value="">No category</option>
+                  <option value="">{t.documents_no_category}</option>
                   {categories.map((category) => (
                     <option key={category.key} value={category.key}>
                       {category.label}
@@ -2752,7 +2920,7 @@ function StaffDocumentsPage() {
                   >
                     {STATUS_OPTIONS.map((status) => (
                       <option key={status} value={status}>
-                        {status}
+                        {formatDocumentStatusLabel(status, t)}
                       </option>
                     ))}
                   </select>
@@ -2772,7 +2940,7 @@ function StaffDocumentsPage() {
                   >
                     {VISIBILITY_OPTIONS.map((value) => (
                       <option key={value} value={value}>
-                        {value.replaceAll("_", " ")}
+                        {formatVisibilityLabel(value, t)}
                       </option>
                     ))}
                   </select>
@@ -2817,7 +2985,7 @@ function StaffDocumentsPage() {
                 }
                 className="size-4 rounded border-slate-300"
               />
-              Mark as medical data
+              {t.documents_mark_medical_data}
             </label>
             <Field label={t.patients_notes}>
               <textarea
@@ -2850,7 +3018,72 @@ function StaffDocumentsPage() {
                 ) : (
                   <FolderPlus className="size-4" />
                 )}
-                {uploadBusy ? "Uploading…" : t.documents_upload}
+                {uploadBusy ? t.documents_uploading : t.documents_upload}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={deleteOpen}
+        onOpenChange={(open) => {
+          setDeleteOpen(open);
+          if (!open) {
+            setDeleteError("");
+            setDeleteReason("");
+          }
+        }}
+      >
+        <DialogContent className="max-w-2xl rounded-[1.75rem] p-0">
+          <DialogHeader className="border-b border-border/70 px-6 pt-6 pb-4">
+            <DialogTitle>{t.documents_delete_file}</DialogTitle>
+            <DialogDescription>
+              {t.documents_delete_file_description}
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleDeleteStoredFile();
+            }}
+            className="space-y-5 px-6 py-5"
+          >
+            {deleteError ? <Banner tone="error">{deleteError}</Banner> : null}
+            <Banner tone="warning">{t.documents_delete_file_hint}</Banner>
+            <Field label={t.documents_delete_file_reason} required>
+              <textarea
+                value={deleteReason}
+                onChange={(event) => setDeleteReason(event.target.value)}
+                placeholder={t.documents_delete_file_reason_placeholder}
+                className={textareaClassName}
+              />
+            </Field>
+            <DialogFooter className="rounded-b-[1.75rem] border-slate-200 bg-slate-50/80 px-0">
+              <Button
+                type="button"
+                variant="outline"
+                className="rounded-2xl"
+                onClick={() => {
+                  setDeleteOpen(false);
+                  setDeleteError("");
+                  setDeleteReason("");
+                }}
+              >
+                {t.common_cancel}
+              </Button>
+              <Button
+                type="submit"
+                variant="destructive"
+                className="rounded-2xl"
+                disabled={deleteBusy}
+              >
+                {deleteBusy ? (
+                  <LoaderCircle className="size-4 animate-spin" />
+                ) : (
+                  <Trash2 className="size-4" />
+                )}
+                {deleteBusy ? t.documents_deleting : t.documents_delete_file_confirm}
               </Button>
             </DialogFooter>
           </form>
@@ -2864,15 +3097,13 @@ function StaffDocumentsPage() {
         <SheetContent side="right" className="w-full sm:max-w-[820px]">
           <SheetHeader className="border-b border-border/70 pb-4">
             <SheetTitle>{detail?.auto_name || t.documents_title}</SheetTitle>
-            <SheetDescription>
-              Metadata, context and share trail for the selected file.
-            </SheetDescription>
+            <SheetDescription>{t.documents_detail_description}</SheetDescription>
           </SheetHeader>
           <div className="flex-1 overflow-y-auto px-4 pb-6">
             {detailBusy ? (
               <div className="flex min-h-[280px] items-center justify-center text-sm text-slate-500">
                 <LoaderCircle className="mr-2 size-4 animate-spin" />
-                Loading document…
+                {t.documents_loading_document}
               </div>
             ) : detailError ? (
               <div className="pt-5">
@@ -2890,7 +3121,7 @@ function StaffDocumentsPage() {
                             statusBadge(detail.status),
                           )}
                         >
-                          {detail.status}
+                          {formatDocumentStatusLabel(detail.status, t)}
                         </span>
                         <span
                           className={cn(
@@ -2898,7 +3129,7 @@ function StaffDocumentsPage() {
                             visibilityBadge(detail.visibility),
                           )}
                         >
-                          {detail.visibility.replaceAll("_", " ")}
+                          {formatVisibilityLabel(detail.visibility, t)}
                         </span>
                         <Badge
                           variant="outline"
@@ -2938,20 +3169,22 @@ function StaffDocumentsPage() {
                           New version
                         </Button>
                       ) : null}
-                      {detail.mime_type?.startsWith("text/html") ||
-                      detail.mime_type?.startsWith("application/pdf") ? (
+                      {detail.has_stored_file &&
+                      (detail.mime_type?.startsWith("text/html") ||
+                        detail.mime_type?.startsWith("application/pdf")) ? (
                         <Button
                           variant="outline"
                           className="rounded-2xl"
                           onClick={() => void handleOpenPreview()}
                         >
                           <FileText className="size-4" />
-                          Preview
+                          {t.documents_preview}
                         </Button>
                       ) : null}
                       <Button
                         variant="outline"
                         className="rounded-2xl"
+                        disabled={!detail.has_stored_file}
                         onClick={() =>
                           void downloadDocument(
                             detail.id,
@@ -2962,12 +3195,26 @@ function StaffDocumentsPage() {
                         <Download className="size-4" />
                         {t.documents_download}
                       </Button>
+                      {canManage && detail.has_stored_file ? (
+                        <Button
+                          variant="destructive"
+                          className="rounded-2xl"
+                          onClick={() => {
+                            setDeleteError("");
+                            setDeleteReason("");
+                            setDeleteOpen(true);
+                          }}
+                        >
+                          <Trash2 className="size-4" />
+                          {t.documents_delete_file}
+                        </Button>
+                      ) : null}
                       {detail.patient_id ? (
                         <Link
                           to={`/patients?patient=${detail.patient_id}`}
                           className="inline-flex h-10 items-center rounded-2xl border border-input bg-background px-4 text-sm font-medium text-slate-900 transition-colors hover:bg-accent hover:text-accent-foreground"
                         >
-                          Patient
+                          {t.orders_patient}
                         </Link>
                       ) : null}
                       {detail.order_id ? (
@@ -2975,7 +3222,7 @@ function StaffDocumentsPage() {
                           to={`/orders?order=${detail.order_id}`}
                           className="inline-flex h-10 items-center rounded-2xl border border-input bg-background px-4 text-sm font-medium text-slate-900 transition-colors hover:bg-accent hover:text-accent-foreground"
                         >
-                          Order
+                          {t.orders_title}
                         </Link>
                       ) : null}
                       {detail.appointment_id ? (
@@ -2983,12 +3230,37 @@ function StaffDocumentsPage() {
                           to={`/appointments?appointment=${detail.appointment_id}`}
                           className="inline-flex h-10 items-center rounded-2xl border border-input bg-background px-4 text-sm font-medium text-slate-900 transition-colors hover:bg-accent hover:text-accent-foreground"
                         >
-                          Appointment
+                          {t.appointments_title}
                         </Link>
                       ) : null}
                     </div>
                   </div>
                 </section>
+
+                {!detail.has_stored_file && detail.file_deleted_at ? (
+                  <Banner tone="warning">
+                    <div className="space-y-1">
+                      <div>
+                        {t.documents_file_deleted_banner.replace(
+                          "{datetime}",
+                          formatDateTime(detail.file_deleted_at),
+                        )}
+                        {detail.file_deleted_by_name
+                          ? ` · ${t.documents_file_deleted_by.replace(
+                              "{name}",
+                              detail.file_deleted_by_name,
+                            )}`
+                          : ""}
+                      </div>
+                      {detail.file_delete_reason ? (
+                        <div className="text-xs">
+                          {t.documents_delete_file_reason}:{" "}
+                          {detail.file_delete_reason}
+                        </div>
+                      ) : null}
+                    </div>
+                  </Banner>
+                ) : null}
 
                 <SectionCard title={t.common_provider}>
                   <div className="grid gap-4 md:grid-cols-2">
@@ -3026,18 +3298,18 @@ function StaffDocumentsPage() {
                     />
                     <DetailField
                       label={t.documents_uploaded_by}
-                      value={detail.uploaded_by_name || "Unknown"}
+                      value={detail.uploaded_by_name || t.documents_unknown_uploader}
                     />
                     <DetailField
                       label={t.users_created}
                       value={formatDateTime(detail.created_at)}
                     />
                     <DetailField
-                      label="Updated"
+                      label={t.documents_updated}
                       value={formatDateTime(detail.updated_at)}
                     />
                     <DetailField
-                      label="Version chain"
+                      label={t.documents_version_chain}
                       value={`v${detail.version_number} of ${detail.version_count}`}
                     />
                   </div>
@@ -3049,7 +3321,7 @@ function StaffDocumentsPage() {
                 </SectionCard>
 
                 {detailVersions.length > 0 ? (
-                  <SectionCard title="Version history">
+                  <SectionCard title={t.documents_version_history}>
                     <div className="space-y-3">
                       {detailVersions.map((version) => (
                         <button
@@ -3077,7 +3349,7 @@ function StaffDocumentsPage() {
                                     variant="outline"
                                     className="rounded-full border-slate-200 bg-slate-100 text-slate-700"
                                   >
-                                    archived
+                                    {t.documents_archived}
                                   </Badge>
                                 ) : null}
                               </div>
@@ -3098,7 +3370,7 @@ function StaffDocumentsPage() {
                   </SectionCard>
                 ) : null}
 
-                <SectionCard title="Text extraction">
+                <SectionCard title={t.documents_text_extraction}>
                   {textExtractionError ? (
                     <Banner tone="error">{textExtractionError}</Banner>
                   ) : null}
@@ -3114,9 +3386,9 @@ function StaffDocumentsPage() {
                             ),
                           )}
                         >
-                          {(textExtraction?.status ?? "not_started").replaceAll(
-                            "_",
-                            " ",
+                          {formatExtractionStatusLabel(
+                            textExtraction?.status ?? "not_started",
+                            t,
                           )}
                         </Badge>
                         {textExtraction?.method ? (
@@ -3130,8 +3402,11 @@ function StaffDocumentsPage() {
                       </div>
                       <p className="mt-2 text-sm text-slate-600">
                         {textExtraction?.extracted_at
-                          ? `Last processed ${formatDateTime(textExtraction.extracted_at)}`
-                          : "No extraction has been run for this document yet."}
+                          ? t.documents_last_processed.replace(
+                              "{datetime}",
+                              formatDateTime(textExtraction.extracted_at),
+                            )
+                          : t.documents_no_extraction_run}
                         {textExtraction?.extracted_by_name
                           ? ` · ${textExtraction.extracted_by_name}`
                           : ""}
@@ -3150,7 +3425,7 @@ function StaffDocumentsPage() {
                         ) : (
                           <RefreshCw className="size-4" />
                         )}
-                        Run extraction
+                        {t.documents_run_extraction}
                       </Button>
                     ) : null}
                   </div>
@@ -3162,7 +3437,7 @@ function StaffDocumentsPage() {
                   {textExtraction?.extracted_text ? (
                     <div className="mt-4 space-y-2">
                       <Label className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">
-                        Extracted text
+                        {t.documents_extracted_text}
                       </Label>
                       <textarea
                         readOnly
@@ -3172,15 +3447,13 @@ function StaffDocumentsPage() {
                     </div>
                   ) : (
                     <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">
-                      No extracted text available yet. Use extraction for
-                      text-based files or add manual transcription in the
-                      translation workspace.
+                      {t.documents_no_extracted_text}
                     </div>
                   )}
                 </SectionCard>
 
                 {detail.patient_id ? (
-                  <SectionCard title="Translation requests">
+                  <SectionCard title={t.documents_translation_requests}>
                     {translationError ? (
                       <Banner tone="error">{translationError}</Banner>
                     ) : null}
@@ -3217,7 +3490,7 @@ function StaffDocumentsPage() {
                               ) : (
                                 <FileText className="size-4" />
                               )}
-                              Request translation
+                              {t.documents_request_translation}
                             </Button>
                           </div>
                         </div>
@@ -3231,14 +3504,14 @@ function StaffDocumentsPage() {
                               }))
                             }
                             className={textareaClassName}
-                            placeholder="Scope, deadline or delivery notes"
+                            placeholder={t.documents_translation_note_placeholder}
                           />
                         </Field>
                       </form>
                     ) : null}
                     {translationRequests.length === 0 ? (
                       <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
-                        No translation requests recorded for this document.
+                        {t.documents_no_translation_requests}
                       </div>
                     ) : (
                       <div className="space-y-3">
@@ -3267,7 +3540,10 @@ function StaffDocumentsPage() {
                                         translationStatusBadge(request.status),
                                       )}
                                     >
-                                      {request.status.replaceAll("_", " ")}
+                                      {formatTranslationStatusLabel(
+                                        request.status,
+                                        t,
+                                      )}
                                     </Badge>
                                     <Badge
                                       variant="outline"
@@ -3277,7 +3553,8 @@ function StaffDocumentsPage() {
                                     </Badge>
                                   </div>
                                   <p className="mt-2 text-sm font-semibold text-slate-950">
-                                    {request.requested_by_name || "Unknown requester"}
+                                    {request.requested_by_name ||
+                                      t.documents_unknown_requester}
                                   </p>
                                   <p className="mt-1 text-xs text-slate-500">
                                     {formatDateTime(request.requested_at)}
@@ -3306,7 +3583,7 @@ function StaffDocumentsPage() {
                                           )
                                         }
                                       >
-                                        Start
+                                        {t.documents_translation_start}
                                       </Button>
                                     ) : null}
                                     <Button
@@ -3321,7 +3598,7 @@ function StaffDocumentsPage() {
                                         )
                                       }
                                     >
-                                      Complete
+                                      {t.documents_translation_complete}
                                     </Button>
                                     <Button
                                       type="button"
@@ -3335,7 +3612,7 @@ function StaffDocumentsPage() {
                                         )
                                       }
                                     >
-                                      Cancel
+                                      {t.documents_translation_cancel}
                                     </Button>
                                   </div>
                                 ) : null}
@@ -3343,7 +3620,7 @@ function StaffDocumentsPage() {
                               {canEditWorkspace ? (
                                 <div className="mt-4 space-y-4">
                                   <div className="grid gap-4 md:grid-cols-2">
-                                    <Field label="Source language">
+                                    <Field label={t.documents_source_language}>
                                       <select
                                         value={draft.sourceLanguage}
                                         onChange={(event) =>
@@ -3353,7 +3630,7 @@ function StaffDocumentsPage() {
                                         }
                                         className={selectClassName}
                                       >
-                                        <option value="">Not set</option>
+                                        <option value="">{t.common_not_set}</option>
                                         <option value="de">DE</option>
                                         <option value="en">EN</option>
                                         <option value="uk">UK</option>
@@ -3372,7 +3649,7 @@ function StaffDocumentsPage() {
                                             )
                                           }
                                         >
-                                          Use extracted text
+                                          {t.documents_use_extracted_text}
                                         </Button>
                                       ) : null}
                                       <Button
@@ -3386,7 +3663,7 @@ function StaffDocumentsPage() {
                                           )
                                         }
                                       >
-                                        Save workspace
+                                        {t.documents_save_workspace}
                                       </Button>
                                     </div>
                                   </div>
@@ -3399,10 +3676,10 @@ function StaffDocumentsPage() {
                                         })
                                       }
                                       className={textareaClassName}
-                                      placeholder="Scope, reviewer notes or delivery constraints"
+                                      placeholder={t.documents_translation_note_placeholder}
                                     />
                                   </Field>
-                                  <Field label="Source text">
+                                  <Field label={t.documents_source_text}>
                                     <textarea
                                       value={draft.sourceText}
                                       onChange={(event) =>
@@ -3411,10 +3688,10 @@ function StaffDocumentsPage() {
                                         })
                                       }
                                       className={textareaClassName}
-                                      placeholder="Original extracted or manually transcribed text"
+                                      placeholder={t.documents_source_text_placeholder}
                                     />
                                   </Field>
-                                  <Field label="Translated text">
+                                  <Field label={t.documents_translated_text}>
                                     <textarea
                                       value={draft.translatedText}
                                       onChange={(event) =>
@@ -3423,7 +3700,7 @@ function StaffDocumentsPage() {
                                         })
                                       }
                                       className={textareaClassName}
-                                      placeholder="Final translated text"
+                                      placeholder={t.documents_translated_text_placeholder}
                                     />
                                   </Field>
                                 </div>
@@ -3437,7 +3714,7 @@ function StaffDocumentsPage() {
                                   {request.source_text ? (
                                     <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3">
                                       <p className="text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
-                                        Source text
+                                        {t.documents_source_text}
                                       </p>
                                       <p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">
                                         {request.source_text}
@@ -3447,7 +3724,7 @@ function StaffDocumentsPage() {
                                   {request.translated_text ? (
                                     <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-3">
                                       <p className="text-xs font-medium uppercase tracking-[0.16em] text-emerald-700">
-                                        Translated text
+                                        {t.documents_translated_text}
                                       </p>
                                       <p className="mt-2 whitespace-pre-wrap text-sm text-emerald-900">
                                         {request.translated_text}
@@ -3465,15 +3742,13 @@ function StaffDocumentsPage() {
                 ) : null}
 
                 {canReviewSelectedDocument && editForm ? (
-                  <SectionCard title="Interpreter Review">
+                  <SectionCard title={t.documents_interpreter_review}>
                     {saveError ? (
                       <Banner tone="error">{saveError}</Banner>
                     ) : null}
                     <form onSubmit={handleSave} className="space-y-4">
                       <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                        Review the uploaded interpreter document, complete its
-                        classification and release it into active internal
-                        status.
+                        {t.documents_interpreter_review_hint}
                       </div>
                       {detail.classification_suggestion ? (
                         <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
@@ -3499,7 +3774,7 @@ function StaffDocumentsPage() {
                             className="h-10 rounded-xl border-slate-200 bg-slate-50"
                           />
                         </Field>
-                        <Field label="Taxonomy category">
+                        <Field label={t.documents_taxonomy_category}>
                           <select
                             value={editForm.category}
                             onChange={(event) =>
@@ -3511,7 +3786,7 @@ function StaffDocumentsPage() {
                             }
                             className={selectClassName}
                           >
-                            <option value="">Choose category</option>
+                            <option value="">{t.documents_choose_category}</option>
                             {categories.map((category) => (
                               <option key={category.key} value={category.key}>
                                 {category.label}
@@ -3536,9 +3811,9 @@ function StaffDocumentsPage() {
                           }
                           className="size-4 rounded border-slate-300"
                         />
-                        Mark as medical document
+                        {t.documents_mark_medical_data}
                       </label>
-                      <Field label="Review notes">
+                      <Field label={t.documents_review_notes}>
                         <textarea
                           value={editForm.notes}
                           onChange={(event) =>
@@ -3549,14 +3824,11 @@ function StaffDocumentsPage() {
                             )
                           }
                           className="min-h-[120px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-sky-300 focus:bg-white"
-                          placeholder="Add review notes or release context."
+                          placeholder={t.documents_review_notes}
                         />
                       </Field>
                       <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                        <span>
-                          Release keeps the document internal and sets status to
-                          `active`.
-                        </span>
+                        <span>{t.documents_release_internal_hint}</span>
                         <Button
                           type="submit"
                           className="rounded-xl"
@@ -3565,7 +3837,9 @@ function StaffDocumentsPage() {
                           {saveBusy ? (
                             <LoaderCircle className="mr-2 size-4 animate-spin" />
                           ) : null}
-                          {saveBusy ? "Releasing..." : "Release reviewed document"}
+                          {saveBusy
+                            ? t.documents_releasing
+                            : t.documents_release_reviewed_document}
                         </Button>
                       </div>
                     </form>
@@ -3596,7 +3870,7 @@ function StaffDocumentsPage() {
                             }
                             className={selectClassName}
                           >
-                            <option value="">No patient</option>
+                            <option value="">{t.documents_no_patient}</option>
                             {patients.map((patient) => (
                               <option key={patient.id} value={patient.id}>
                                 {patientOptionLabel(patient)}
@@ -3617,7 +3891,7 @@ function StaffDocumentsPage() {
                             className={selectClassName}
                             disabled={!editForm.patientId}
                           >
-                            <option value="">No order</option>
+                            <option value="">{t.documents_no_order}</option>
                             {detailOrders.map((order) => (
                               <option key={order.id} value={order.id}>
                                 {order.order_number} · {order.patient_pid}
@@ -3641,7 +3915,7 @@ function StaffDocumentsPage() {
                             className={selectClassName}
                             disabled={!editForm.patientId}
                           >
-                            <option value="">No appointment</option>
+                            <option value="">{t.documents_no_appointment}</option>
                             {detailAppointments.map((appointment) => (
                               <option
                                 key={appointment.id}
@@ -3692,7 +3966,7 @@ function StaffDocumentsPage() {
                             }
                             className={selectClassName}
                           >
-                            <option value="">No category</option>
+                            <option value="">{t.documents_no_category}</option>
                             {categories.map((category) => (
                               <option key={category.key} value={category.key}>
                                 {category.label}
@@ -3718,7 +3992,7 @@ function StaffDocumentsPage() {
                           >
                             {STATUS_OPTIONS.map((status) => (
                               <option key={status} value={status}>
-                                {status}
+                                {formatDocumentStatusLabel(status, t)}
                               </option>
                             ))}
                           </select>
@@ -3741,7 +4015,7 @@ function StaffDocumentsPage() {
                           >
                             {VISIBILITY_OPTIONS.map((value) => (
                               <option key={value} value={value}>
-                                {value.replaceAll("_", " ")}
+                                {formatVisibilityLabel(value, t)}
                               </option>
                             ))}
                           </select>
@@ -3789,7 +4063,7 @@ function StaffDocumentsPage() {
                           }
                           className="size-4 rounded border-slate-300"
                         />
-                        Mark as medical data
+                        {t.documents_mark_medical_data}
                       </label>
                       <Field label={t.patients_notes}>
                         <textarea
@@ -3815,14 +4089,14 @@ function StaffDocumentsPage() {
                           ) : (
                             <FileText className="size-4" />
                           )}
-                          {saveBusy ? "Saving…" : "Save metadata"}
+                          {saveBusy ? t.patients_saving : t.documents_save_metadata}
                         </Button>
                       </div>
                     </form>
                   </SectionCard>
                 ) : null}
 
-                <SectionCard title="Patient portal">
+                <SectionCard title={t.documents_patient_portal}>
                   <div className="grid gap-4 md:grid-cols-[1.2fr_0.8fr]">
                     <div className="rounded-[1.6rem] border border-slate-200 bg-slate-50/80 p-4">
                       <div className="flex flex-wrap items-center gap-2">
@@ -3836,22 +4110,23 @@ function StaffDocumentsPage() {
                           )}
                         >
                           {detail.visibility === "patient_visible"
-                            ? "Portal eligible"
-                            : "Not portal eligible"}
+                            ? t.documents_portal_eligible
+                            : t.documents_not_portal_eligible}
                         </Badge>
                         <Badge
                           variant="outline"
                           className="rounded-full border-sky-200 bg-sky-50 text-sky-700"
                         >
-                          {activePortalShares.length} active portal releases
+                          {activePortalShares.length}{" "}
+                          {t.documents_active_portal_releases}
                         </Badge>
                       </div>
                       <p className="mt-3 text-sm text-slate-600">
-                        Portal access is granted only to patient-linked portal users and remains visible in the portal only while the active release exists.
+                        {t.documents_portal_access_hint}
                       </p>
                       {!detail.patient_id ? (
                         <p className="mt-3 text-sm text-amber-700">
-                          Link the document to a patient before releasing it to the portal.
+                          {t.documents_link_patient_before_portal}
                         </p>
                       ) : null}
                       {activePortalShares.length > 0 ? (
@@ -3863,7 +4138,8 @@ function StaffDocumentsPage() {
                             >
                               <div className="flex flex-wrap items-center justify-between gap-2">
                                 <span>
-                                  {share.target_user_name || "Patient portal user"}
+                                  {share.target_user_name ||
+                                    t.documents_patient_portal_user}
                                 </span>
                                 <Badge
                                   variant="outline"
@@ -3877,16 +4153,19 @@ function StaffDocumentsPage() {
                                   )}
                                 >
                                   {share.confirmed
-                                    ? "Confirmed"
+                                    ? t.documents_confirmed
                                     : share.requires_confirmation
-                                      ? "Waiting for confirmation"
-                                      : "Released"}
+                                      ? t.documents_waiting_confirmation
+                                      : t.documents_released}
                                 </Badge>
                               </div>
                               <p className="mt-2 text-xs text-slate-500">
-                                Released {formatDateTime(share.shared_at)}
+                                {t.documents_portal_released_at.replace(
+                                  "{datetime}",
+                                  formatDateTime(share.shared_at),
+                                )}
                                 {share.confirmed
-                                  ? ` · confirmed by patient`
+                                  ? ` · ${t.documents_portal_confirmed_by_patient}`
                                   : ""}
                               </p>
                             </div>
@@ -3896,14 +4175,17 @@ function StaffDocumentsPage() {
                     </div>
                     <div className="rounded-[1.6rem] border border-slate-200 bg-white p-4">
                       <p className="text-sm font-semibold text-slate-950">
-                        Portal controls
+                        {t.documents_portal_controls}
                       </p>
                       <p className="mt-2 text-sm text-slate-500">
-                        Release creates a portal-specific share trail and keeps confirmation state in the audit flow.
+                        {t.documents_portal_trail_hint}
                       </p>
                       <div className="mt-4 grid gap-3">
                         <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                          Confirmed recipients: <span className="font-semibold text-slate-950">{confirmedPortalShares}</span>
+                          {t.documents_confirmed_recipients}:{" "}
+                          <span className="font-semibold text-slate-950">
+                            {confirmedPortalShares}
+                          </span>
                         </div>
                         {canManage ? (
                           <>
@@ -3914,7 +4196,9 @@ function StaffDocumentsPage() {
                               onClick={() => void handleReleaseToPortal()}
                             >
                               {portalBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                              {activePortalShares.length > 0 ? "Refresh portal release" : "Release to patient portal"}
+                              {activePortalShares.length > 0
+                                ? t.documents_refresh_portal_release
+                                : t.documents_release_to_portal}
                             </Button>
                             <Button
                               type="button"
@@ -3924,12 +4208,12 @@ function StaffDocumentsPage() {
                               onClick={() => void handleRevokePortalRelease()}
                             >
                               {portalBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                              Revoke portal release
+                              {t.documents_revoke_portal_release}
                             </Button>
                           </>
                         ) : (
                           <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
-                            Only CEO and patient manager can publish documents to the patient portal.
+                            {t.documents_only_ceo_pm_portal}
                           </div>
                         )}
                       </div>
@@ -3944,15 +4228,15 @@ function StaffDocumentsPage() {
                   <div className="space-y-3">
                     {shares.length === 0 ? (
                       <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
-                        No shares yet.
+                        {t.documents_no_shares_yet}
                       </div>
                     ) : (
                       shares.map((share) => {
                         const target = share.provider_name
-                          ? `Provider · ${share.provider_name}`
+                          ? `${t.documents_provider_target} · ${share.provider_name}`
                           : share.target_user_name
                             ? `${share.target_user_name} · ${share.target_user_role ?? "user"}`
-                            : "Unknown target";
+                            : t.documents_unknown_target;
                         const canCurrentUserConfirm =
                           !share.confirmed &&
                           !share.revoked_at &&
@@ -3968,9 +4252,22 @@ function StaffDocumentsPage() {
                                   {target}
                                 </p>
                                 <p className="mt-1 text-xs text-slate-500">
-                                  Shared by {share.shared_by_name || "Unknown"}{" "}
+                                  {t.documents_shared_by.replace(
+                                    "{name}",
+                                    share.shared_by_name || t.common_unknown,
+                                  )}{" "}
                                   · {formatDateTime(share.shared_at)}
                                 </p>
+                                {share.channel ? (
+                                  <p className="mt-1 text-xs text-slate-500">
+                                    {share.channel}
+                                  </p>
+                                ) : null}
+                                {share.message ? (
+                                  <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                                    {share.message}
+                                  </div>
+                                ) : null}
                               </div>
                               <div className="flex flex-wrap gap-2">
                                 {share.revoked_at ? (
@@ -3985,21 +4282,21 @@ function StaffDocumentsPage() {
                                     variant="outline"
                                     className="rounded-full border-emerald-200 bg-emerald-50 text-emerald-700"
                                   >
-                                    Confirmed
+                                    {t.documents_confirmed}
                                   </Badge>
                                 ) : share.requires_confirmation ? (
                                   <Badge
                                     variant="outline"
                                     className="rounded-full border-amber-200 bg-amber-50 text-amber-700"
                                   >
-                                    Pending confirmation
+                                    {t.documents_waiting_confirmation}
                                   </Badge>
                                 ) : (
                                   <Badge
                                     variant="outline"
                                     className="rounded-full border-sky-200 bg-sky-50 text-sky-700"
                                   >
-                                    Released
+                                    {t.documents_released}
                                   </Badge>
                                 )}
                               </div>
@@ -4014,7 +4311,7 @@ function StaffDocumentsPage() {
                                     void handleConfirmShare(share.id)
                                   }
                                 >
-                                  Confirm
+                                  {t.common_confirm}
                                 </Button>
                               ) : null}
                               {canManage && !share.revoked_at ? (
@@ -4027,7 +4324,7 @@ function StaffDocumentsPage() {
                                     void handleRevokeShare(share.id)
                                   }
                                 >
-                                  Revoke
+                                  {t.documents_revoke}
                                 </Button>
                               ) : null}
                             </div>
@@ -4043,8 +4340,10 @@ function StaffDocumentsPage() {
                     >
                       {selectedDocumentIds.length > 1 ? (
                         <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
-                          Sharing {selectedDocumentIds.length} selected
-                          {" "}documents in one action.
+                          {t.documents_sharing_selected.replace(
+                            "{count}",
+                            String(selectedDocumentIds.length),
+                          )}
                         </div>
                       ) : null}
                       <div className="flex flex-wrap gap-2">
@@ -4061,10 +4360,11 @@ function StaffDocumentsPage() {
                               ...current,
                               targetType: "user",
                               providerId: "",
+                              message: "",
                             }))
                           }
                         >
-                          Internal user
+                          {t.documents_internal_user}
                         </Button>
                         <Button
                           type="button"
@@ -4082,7 +4382,7 @@ function StaffDocumentsPage() {
                             }))
                           }
                         >
-                          Provider
+                          {t.documents_provider_target}
                         </Button>
                       </div>
                       <div className="grid gap-4 md:grid-cols-2">
@@ -4098,7 +4398,7 @@ function StaffDocumentsPage() {
                               }
                               className={selectClassName}
                             >
-                              <option value="">Select user</option>
+                              <option value="">{t.documents_select_user}</option>
                               {staff.map((item) => (
                                 <option key={item.id} value={item.id}>
                                   {item.name} · {item.role}
@@ -4118,10 +4418,11 @@ function StaffDocumentsPage() {
                               }
                               className={selectClassName}
                             >
-                              <option value="">Select provider</option>
+                              <option value="">{t.documents_select_provider}</option>
                               {providers.map((item) => (
                                 <option key={item.id} value={item.id}>
-                                  {item.name} · {item.address_city || "No city"}
+                                  {item.name} ·{" "}
+                                  {item.address_city || t.documents_no_city}
                                 </option>
                               ))}
                             </select>
@@ -4140,6 +4441,22 @@ function StaffDocumentsPage() {
                           />
                         </Field>
                       </div>
+                      <Field
+                        label={t.documents_share_message}
+                        required={shareForm.targetType === "provider"}
+                      >
+                        <textarea
+                          value={shareForm.message}
+                          onChange={(event) =>
+                            setShareForm((current) => ({
+                              ...current,
+                              message: event.target.value,
+                            }))
+                          }
+                          placeholder={t.documents_share_message_placeholder}
+                          className={textareaClassName}
+                        />
+                      </Field>
                       <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
                         <input
                           type="checkbox"
@@ -4152,7 +4469,7 @@ function StaffDocumentsPage() {
                           }
                           className="size-4 rounded border-slate-300"
                         />
-                        Require confirmation
+                        {t.documents_require_confirmation}
                       </label>
                       <div className="flex justify-end">
                         <Button
@@ -4165,7 +4482,7 @@ function StaffDocumentsPage() {
                           ) : (
                             <Share2 className="size-4" />
                           )}
-                          {shareBusy ? "Sharing…" : "Create share"}
+                          {shareBusy ? t.documents_sharing : t.documents_create_share}
                         </Button>
                       </div>
                     </form>
@@ -4189,6 +4506,8 @@ function Banner({
 }) {
   return (
     <div
+      role={tone === "error" ? "alert" : "status"}
+      aria-live={tone === "error" ? "assertive" : "polite"}
       className={cn(
         "rounded-2xl border px-4 py-3 text-sm",
         tone === "error"
@@ -4238,13 +4557,23 @@ function Field({
   children: ReactNode;
   required?: boolean;
 }) {
+  const generatedId = useId();
+  let htmlFor: string | undefined;
+  let content = children;
+  if (isValidElement(children) && !Array.isArray(children)) {
+    const element = children as ReactElement<{ id?: string }>;
+    const childProps = element.props as { id?: string };
+    const nextId = childProps.id ?? generatedId;
+    htmlFor = nextId;
+    content = cloneElement(element, { id: nextId });
+  }
   return (
     <div className="space-y-2">
-      <Label className="text-sm font-medium text-slate-800">
+      <Label htmlFor={htmlFor} className="text-sm font-medium text-slate-800">
         {label}
         {required ? <span className="ml-1 text-rose-600">*</span> : null}
       </Label>
-      {children}
+      {content}
     </div>
   );
 }

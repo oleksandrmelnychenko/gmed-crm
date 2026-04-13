@@ -197,6 +197,66 @@ async fn multipart_request(
     (status, payload)
 }
 
+async fn multipart_request_with_extra_fields(
+    app: &axum::Router,
+    path: &str,
+    bearer: &str,
+    file_content: &[u8],
+    filename: &str,
+    mime: &str,
+    message: Option<&str>,
+    extra_fields: &[(&str, &str)],
+) -> (StatusCode, Value) {
+    let boundary = "----TestBoundaryPortalMessagesExtra";
+    let mut body = Vec::new();
+
+    body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+    body.extend_from_slice(
+        format!("Content-Disposition: form-data; name=\"file\"; filename=\"{filename}\"\r\n")
+            .as_bytes(),
+    );
+    body.extend_from_slice(format!("Content-Type: {mime}\r\n\r\n").as_bytes());
+    body.extend_from_slice(file_content);
+    body.extend_from_slice(b"\r\n");
+
+    if let Some(msg) = message {
+        body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+        body.extend_from_slice(b"Content-Disposition: form-data; name=\"message\"\r\n\r\n");
+        body.extend_from_slice(msg.as_bytes());
+        body.extend_from_slice(b"\r\n");
+    }
+
+    for (name, value) in extra_fields {
+        body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+        body.extend_from_slice(
+            format!("Content-Disposition: form-data; name=\"{name}\"\r\n\r\n").as_bytes(),
+        );
+        body.extend_from_slice(value.as_bytes());
+        body.extend_from_slice(b"\r\n");
+    }
+
+    body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+
+    let request = Request::builder()
+        .method("POST")
+        .uri(path)
+        .header("Authorization", bearer)
+        .header(
+            "Content-Type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(Body::from(body))
+        .unwrap();
+
+    let response = app.clone().oneshot(request).await.unwrap();
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), 4 * 1024 * 1024)
+        .await
+        .unwrap();
+    let payload = serde_json::from_slice(&bytes).unwrap_or(json!(null));
+    (status, payload)
+}
+
 async fn audit_contexts(pool: &PgPool, user_id: Uuid, peer_id: Uuid, action: &str) -> Vec<Value> {
     sqlx::query_scalar::<_, Value>(
         r#"SELECT context
@@ -425,6 +485,156 @@ async fn patient_text_messages_can_use_e2e_envelopes() {
     assert!(plain_message.is_none());
     assert!(legacy_ciphertext.is_none());
     assert!(e2e_ciphertext.is_some());
+}
+
+#[tokio::test]
+async fn patient_attachments_can_use_e2e_envelopes() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("portal-chat-e2e-file");
+    let patient_user_id = seed_user(&pool, &tag, "patient").await;
+    let patient_manager_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+
+    seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, patient_manager_id, admin_id).await;
+
+    let patient_auth = auth_header_for(patient_user_id, "patient");
+    let pm_auth = auth_header_for(patient_manager_id, "patient_manager");
+
+    let patient_key = upsert_message_key(&app, &patient_auth, &[3u8; 65]).await;
+    let pm_key = upsert_message_key(&app, &pm_auth, &[4u8; 65]).await;
+
+    let file_ciphertext = b"opaque-e2e-attachment-ciphertext";
+    let attachment_nonce = BASE64.encode([5u8; 12]);
+    let attachment_salt = BASE64.encode([6u8; 16]);
+    let caption_ciphertext = BASE64.encode(b"opaque-e2e-caption");
+    let caption_nonce = BASE64.encode([7u8; 12]);
+    let caption_salt = BASE64.encode([8u8; 16]);
+    let sender_fingerprint = patient_key["fingerprint"].as_str().unwrap().to_string();
+    let recipient_fingerprint = pm_key["fingerprint"].as_str().unwrap().to_string();
+
+    let (status, body) = multipart_request_with_extra_fields(
+        &app,
+        &format!("/api/v1/messages/{patient_manager_id}/upload"),
+        &patient_auth,
+        file_ciphertext,
+        "secure-result.pdf",
+        "application/octet-stream",
+        None,
+        &[
+            ("attachment_plaintext_size", "19"),
+            ("attachment_e2e_algorithm", "p256-hkdf-aes256gcm-v1"),
+            ("attachment_e2e_nonce", attachment_nonce.as_str()),
+            ("attachment_e2e_salt", attachment_salt.as_str()),
+            ("e2e_algorithm", "p256-hkdf-aes256gcm-v1"),
+            ("e2e_ciphertext", caption_ciphertext.as_str()),
+            ("e2e_nonce", caption_nonce.as_str()),
+            ("e2e_salt", caption_salt.as_str()),
+            ("sender_key_fingerprint", sender_fingerprint.as_str()),
+            ("recipient_key_fingerprint", recipient_fingerprint.as_str()),
+        ],
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["attachment_is_e2e"], true);
+    assert_eq!(body["attachment_size"], 19);
+    let attachment_key = body["attachment_key"].as_str().unwrap();
+
+    let (status, conversation) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/messages/{patient_user_id}"),
+        &pm_auth,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let messages = conversation.as_array().unwrap();
+    let e2e_attachment = messages
+        .iter()
+        .find(|item| item["attachment_key"] == attachment_key)
+        .expect("expected E2E attachment message");
+    assert_eq!(e2e_attachment["attachment_is_e2e"], true);
+    assert_eq!(e2e_attachment["attachment_e2e_nonce"], attachment_nonce);
+    assert_eq!(e2e_attachment["attachment_e2e_salt"], attachment_salt);
+    assert_eq!(e2e_attachment["is_e2e"], true);
+    assert_eq!(e2e_attachment["e2e_ciphertext"], caption_ciphertext);
+    assert!(e2e_attachment["message"].is_null());
+
+    let (status, downloaded) = bytes_request(
+        &app,
+        "GET",
+        &format!("/api/v1/messages/file/{attachment_key}"),
+        &pm_auth,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(downloaded, file_ciphertext);
+
+    let row = sqlx::query(
+        r#"SELECT message_ciphertext, message_nonce, e2e_ciphertext, attachment_nonce,
+                  attachment_e2e_algorithm, attachment_e2e_nonce, attachment_e2e_salt,
+                  sender_key_fingerprint, recipient_key_fingerprint
+           FROM direct_messages
+           WHERE attachment_key = $1
+           LIMIT 1"#,
+    )
+    .bind(attachment_key)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    assert!(
+        row.try_get::<Option<Vec<u8>>, _>("message_ciphertext")
+            .unwrap_or_default()
+            .is_none()
+    );
+    assert!(
+        row.try_get::<Option<Vec<u8>>, _>("message_nonce")
+            .unwrap_or_default()
+            .is_none()
+    );
+    assert!(
+        row.try_get::<Option<Vec<u8>>, _>("e2e_ciphertext")
+            .unwrap_or_default()
+            .is_some()
+    );
+    assert!(
+        row.try_get::<Option<Vec<u8>>, _>("attachment_nonce")
+            .unwrap_or_default()
+            .is_none()
+    );
+    assert_eq!(
+        row.try_get::<Option<String>, _>("attachment_e2e_algorithm")
+            .unwrap_or_default()
+            .as_deref(),
+        Some("p256-hkdf-aes256gcm-v1")
+    );
+    assert!(
+        row.try_get::<Option<Vec<u8>>, _>("attachment_e2e_nonce")
+            .unwrap_or_default()
+            .is_some()
+    );
+    assert!(
+        row.try_get::<Option<Vec<u8>>, _>("attachment_e2e_salt")
+            .unwrap_or_default()
+            .is_some()
+    );
+    assert_eq!(
+        row.try_get::<Option<String>, _>("sender_key_fingerprint")
+            .unwrap_or_default()
+            .as_deref(),
+        Some(sender_fingerprint.as_str())
+    );
+    assert_eq!(
+        row.try_get::<Option<String>, _>("recipient_key_fingerprint")
+            .unwrap_or_default()
+            .as_deref(),
+        Some(recipient_fingerprint.as_str())
+    );
 }
 
 #[tokio::test]

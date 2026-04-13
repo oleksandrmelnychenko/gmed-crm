@@ -35,10 +35,31 @@ export interface E2EMessageEnvelope {
   recipient_key_fingerprint?: string | null;
 }
 
+export interface E2EAttachmentEnvelope {
+  attachment_is_e2e?: boolean;
+  attachment_e2e_algorithm?: string | null;
+  attachment_e2e_nonce?: string | null;
+  attachment_e2e_salt?: string | null;
+  sender_key_fingerprint?: string | null;
+  recipient_key_fingerprint?: string | null;
+}
+
+export interface KeyRingBackupEnvelope {
+  version: 1;
+  algorithm: "pbkdf2-sha256-aes256gcm";
+  iterations: number;
+  salt: string;
+  iv: string;
+  ciphertext: string;
+  exported_at: string;
+}
+
 type MessageKeyRing = {
   activeFingerprint: string | null;
   keys: Record<string, MessageKeyRecord>;
 };
+
+const KEYRING_BACKUP_ITERATIONS = 250_000;
 
 function emptyKeyRing(): MessageKeyRing {
   return {
@@ -189,6 +210,68 @@ async function deriveMessageKey(
   );
 }
 
+async function decryptEnvelopeBytes(
+  ciphertextBase64: string,
+  nonceBase64: string,
+  saltBase64: string,
+  algorithm: string,
+  myKey: MessageKeyRecord,
+  peerKey: MessageKeyEnvelope,
+) {
+  if (algorithm !== CHAT_E2E_ALGORITHM) {
+    throw new Error("Unsupported E2E algorithm");
+  }
+
+  const salt = base64ToBytes(saltBase64);
+  const nonce = base64ToBytes(nonceBase64);
+  const ciphertext = base64ToBytes(ciphertextBase64);
+  const aesKey = await deriveMessageKey(
+    myKey.privateKeyJwk,
+    peerKey.public_key,
+    salt,
+    "decrypt",
+  );
+  const plaintext = await crypto.subtle.decrypt(
+    {
+      name: "AES-GCM",
+      iv: nonce,
+    },
+    aesKey,
+    ciphertext,
+  );
+  return new Uint8Array(plaintext);
+}
+
+async function deriveBackupKey(
+  passphrase: string,
+  salt: Uint8Array,
+  usage: KeyUsage,
+) {
+  const baseKey = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(passphrase),
+    "PBKDF2",
+    false,
+    ["deriveKey"],
+  );
+
+  return crypto.subtle.deriveKey(
+    {
+      name: "PBKDF2",
+      hash: "SHA-256",
+      salt: toBufferSource(salt),
+      iterations: KEYRING_BACKUP_ITERATIONS,
+    },
+    baseKey,
+    {
+      name: "AES-GCM",
+      length: 256,
+    },
+    false,
+    [usage],
+  );
+}
+
 export async function ensureServerMessageKey(): Promise<MessageKeyRecord> {
   let ring = readKeyRing();
   let active =
@@ -279,6 +362,40 @@ export async function encryptMessageForPeer(
   };
 }
 
+export async function encryptAttachmentForPeer(
+  bytes: Uint8Array,
+  senderKey: MessageKeyRecord,
+  recipientKey: MessageKeyEnvelope,
+) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const nonce = crypto.getRandomValues(new Uint8Array(12));
+  const aesKey = await deriveMessageKey(
+    senderKey.privateKeyJwk,
+    recipientKey.public_key,
+    salt,
+    "encrypt",
+  );
+  const ciphertext = new Uint8Array(
+    await crypto.subtle.encrypt(
+      {
+        name: "AES-GCM",
+        iv: nonce,
+      },
+      aesKey,
+      toBufferSource(bytes),
+    ),
+  );
+
+  return {
+    ciphertext,
+    attachment_e2e_algorithm: CHAT_E2E_ALGORITHM,
+    attachment_e2e_nonce: bytesToBase64(nonce),
+    attachment_e2e_salt: bytesToBase64(salt),
+    sender_key_fingerprint: senderKey.fingerprint,
+    recipient_key_fingerprint: recipientKey.fingerprint,
+  };
+}
+
 export async function decryptMessageFromPeer(
   envelope: E2EMessageEnvelope,
   myKey: MessageKeyRecord,
@@ -296,22 +413,153 @@ export async function decryptMessageFromPeer(
     throw new Error("Unsupported E2E algorithm");
   }
 
-  const salt = base64ToBytes(envelope.e2e_salt);
-  const nonce = base64ToBytes(envelope.e2e_nonce);
-  const ciphertext = base64ToBytes(envelope.e2e_ciphertext);
-  const aesKey = await deriveMessageKey(
-    myKey.privateKeyJwk,
-    peerKey.public_key,
-    salt,
-    "decrypt",
-  );
-  const plaintext = await crypto.subtle.decrypt(
-    {
-      name: "AES-GCM",
-      iv: nonce,
-    },
-    aesKey,
-    ciphertext,
+  const plaintext = await decryptEnvelopeBytes(
+    envelope.e2e_ciphertext,
+    envelope.e2e_nonce,
+    envelope.e2e_salt,
+    envelope.e2e_algorithm,
+    myKey,
+    peerKey,
   );
   return new TextDecoder().decode(plaintext);
+}
+
+export async function decryptAttachmentFromPeer(
+  envelope: E2EAttachmentEnvelope,
+  ciphertext: Uint8Array,
+  myKey: MessageKeyRecord,
+  peerKey: MessageKeyEnvelope,
+) {
+  if (!(ciphertext instanceof Uint8Array) || ciphertext.length === 0) {
+    throw new Error("Missing E2E attachment ciphertext");
+  }
+  if (
+    !envelope.attachment_e2e_algorithm ||
+    !envelope.attachment_e2e_nonce ||
+    !envelope.attachment_e2e_salt
+  ) {
+    throw new Error("Incomplete E2E attachment envelope");
+  }
+
+  const plaintext = await decryptEnvelopeBytes(
+    bytesToBase64(ciphertext),
+    envelope.attachment_e2e_nonce,
+    envelope.attachment_e2e_salt,
+    envelope.attachment_e2e_algorithm,
+    myKey,
+    peerKey,
+  );
+  return plaintext;
+}
+
+export async function exportKeyRingBackup(passphrase: string) {
+  const trimmedPassphrase = passphrase.trim();
+  if (!trimmedPassphrase) {
+    throw new Error("Backup passphrase is required");
+  }
+
+  const ring = readKeyRing();
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await deriveBackupKey(trimmedPassphrase, salt, "encrypt");
+  const ciphertext = new Uint8Array(
+    await crypto.subtle.encrypt(
+      {
+        name: "AES-GCM",
+        iv,
+      },
+      key,
+      new TextEncoder().encode(JSON.stringify(ring)),
+    ),
+  );
+
+  return JSON.stringify(
+    {
+      version: 1,
+      algorithm: "pbkdf2-sha256-aes256gcm",
+      iterations: KEYRING_BACKUP_ITERATIONS,
+      salt: bytesToBase64(salt),
+      iv: bytesToBase64(iv),
+      ciphertext: bytesToBase64(ciphertext),
+      exported_at: new Date().toISOString(),
+    } satisfies KeyRingBackupEnvelope,
+    null,
+    2,
+  );
+}
+
+export async function importKeyRingBackup(
+  serializedBackup: string,
+  passphrase: string,
+) {
+  const trimmedPassphrase = passphrase.trim();
+  if (!trimmedPassphrase) {
+    throw new Error("Backup passphrase is required");
+  }
+
+  let backup: KeyRingBackupEnvelope;
+  try {
+    backup = JSON.parse(serializedBackup) as KeyRingBackupEnvelope;
+  } catch {
+    throw new Error("Invalid secure chat backup file");
+  }
+
+  if (
+    backup.version !== 1 ||
+    backup.algorithm !== "pbkdf2-sha256-aes256gcm" ||
+    !backup.salt ||
+    !backup.iv ||
+    !backup.ciphertext
+  ) {
+    throw new Error("Invalid secure chat backup file");
+  }
+
+  const salt = base64ToBytes(backup.salt);
+  const iv = base64ToBytes(backup.iv);
+  const ciphertext = base64ToBytes(backup.ciphertext);
+  const key = await deriveBackupKey(trimmedPassphrase, salt, "decrypt");
+  let decrypted: Uint8Array;
+  try {
+    decrypted = new Uint8Array(
+      await crypto.subtle.decrypt(
+        {
+          name: "AES-GCM",
+          iv,
+        },
+        key,
+        ciphertext,
+      ),
+    );
+  } catch {
+    throw new Error("Invalid secure chat backup passphrase");
+  }
+
+  let imported: MessageKeyRing;
+  try {
+    imported = JSON.parse(new TextDecoder().decode(decrypted)) as MessageKeyRing;
+  } catch {
+    throw new Error("Invalid secure chat backup file");
+  }
+
+  if (!imported || typeof imported !== "object" || !imported.keys) {
+    throw new Error("Invalid secure chat backup file");
+  }
+
+  const current = readKeyRing();
+  const merged: MessageKeyRing = {
+    activeFingerprint:
+      imported.activeFingerprint && imported.keys[imported.activeFingerprint]
+        ? imported.activeFingerprint
+        : current.activeFingerprint,
+    keys: {
+      ...current.keys,
+      ...imported.keys,
+    },
+  };
+  writeKeyRing(merged);
+
+  return {
+    importedKeys: Object.keys(imported.keys).length,
+    activeFingerprint: merged.activeFingerprint,
+  };
 }

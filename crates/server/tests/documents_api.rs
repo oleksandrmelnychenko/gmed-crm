@@ -1,7 +1,9 @@
+use std::path::Path as FsPath;
+
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use serde_json::{Value, json};
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 use tower::ServiceExt;
 use uuid::Uuid;
 
@@ -1297,6 +1299,80 @@ async fn document_user_share_can_be_confirmed_and_revoked() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert!(list_body[0]["revoked_at"].is_string());
+}
+
+#[tokio::test]
+async fn provider_document_share_requires_and_persists_cover_message() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-provider-message");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let appointment_id =
+        seed_appointment(&pool, patient_id, provider_id, doctor_id, admin_id, &tag).await;
+
+    let document_id = seed_document(
+        &pool,
+        admin_id,
+        patient_id,
+        appointment_id,
+        "released_external",
+        false,
+        "invoice",
+        &format!("{tag}-invoice"),
+    )
+    .await;
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/shares"),
+        &admin_bearer,
+        Some(json!({
+            "shared_with_provider_id": provider_id,
+            "channel": "email",
+            "requires_confirmation": true
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["message"], "Provider shares require a cover message");
+
+    let cover_message = "Bitte diese Unterlagen vor dem Termin medizinisch vorpruefen.";
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/shares"),
+        &admin_bearer,
+        Some(json!({
+            "shared_with_provider_id": provider_id,
+            "channel": "email",
+            "message": cover_message,
+            "requires_confirmation": true
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, list_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/shares"),
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = list_body.as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(
+        items[0]["provider_name"].as_str().unwrap(),
+        format!("Clinic {tag}")
+    );
+    assert_eq!(items[0]["message"].as_str().unwrap(), cover_message);
+    assert_eq!(items[0]["channel"].as_str().unwrap(), "email");
 }
 
 #[tokio::test]
@@ -2868,4 +2944,172 @@ async fn revoking_patient_portal_release_hides_document_from_me_workspace() {
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert_eq!(body["message"], "Document not found");
+}
+
+#[tokio::test]
+async fn deleting_document_file_revokes_shares_and_removes_stored_file() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("doc-delete-file");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let patient_user_id = seed_user(&pool, &tag, "patient").await;
+    let billing_user_id = seed_user(&pool, &tag, "billing").await;
+    seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
+
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let appointment_id =
+        seed_appointment(&pool, patient_id, provider_id, doctor_id, admin_id, &tag).await;
+
+    let (status, upload_body) = multipart_upload(
+        &app,
+        "/api/v1/documents/upload",
+        &admin_bearer,
+        &[
+            ("patient_id", patient_id.to_string()),
+            ("appointment_id", appointment_id.to_string()),
+            ("auto_name", format!("Delete file {tag}")),
+            ("art", "arztbrief".to_string()),
+            ("category", "medical".to_string()),
+            ("status", "active".to_string()),
+            ("visibility", "released_internal".to_string()),
+            ("is_medical", "true".to_string()),
+        ],
+        "delete-file.pdf",
+        "application/pdf",
+        b"%PDF-delete-file%",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let document_id = Uuid::parse_str(upload_body["id"].as_str().unwrap()).unwrap();
+
+    let storage_key: String = sqlx::query_scalar("SELECT storage_key FROM documents WHERE id = $1")
+        .bind(document_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let stored_path = FsPath::new("uploads/documents").join(&storage_key);
+    assert!(stored_path.exists());
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/shares"),
+        &admin_bearer,
+        Some(json!({
+            "shared_with_user_id": billing_user_id,
+            "channel": "email",
+            "requires_confirmation": true
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/portal-release"),
+        &admin_bearer,
+        Some(json!({
+            "channel": "patient_portal",
+            "requires_confirmation": false
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let patient_bearer = auth_header_for(patient_user_id, "patient");
+    let (status, patient_list_body) =
+        json_request(&app, "GET", "/api/v1/me/documents", &patient_bearer, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(patient_list_body.as_array().unwrap().len(), 1);
+
+    let delete_reason = "Uploaded wrong binary";
+    let (status, delete_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/delete"),
+        &admin_bearer,
+        Some(json!({
+            "reason": delete_reason
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(delete_body["revoked_share_count"], 2);
+    assert_eq!(delete_body["file_removed_from_disk"], true);
+    assert_eq!(delete_body["document"]["status"], "archived");
+    assert_eq!(delete_body["document"]["visibility"], "internal");
+    assert_eq!(delete_body["document"]["has_stored_file"], false);
+    assert_eq!(delete_body["document"]["file_delete_reason"], delete_reason);
+    assert!(delete_body["document"]["file_deleted_at"].is_string());
+
+    let deleted_row = sqlx::query(
+        r#"SELECT storage_key, status, visibility, file_deleted_at, file_delete_reason
+           FROM documents
+           WHERE id = $1"#,
+    )
+    .bind(document_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        deleted_row
+            .try_get::<Option<String>, _>("storage_key")
+            .unwrap_or_default(),
+        None
+    );
+    assert_eq!(
+        deleted_row.try_get::<String, _>("status").unwrap(),
+        "archived"
+    );
+    assert_eq!(
+        deleted_row.try_get::<String, _>("visibility").unwrap(),
+        "internal"
+    );
+    assert!(
+        deleted_row
+            .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("file_deleted_at")
+            .unwrap()
+            .is_some()
+    );
+    assert_eq!(
+        deleted_row
+            .try_get::<Option<String>, _>("file_delete_reason")
+            .unwrap()
+            .unwrap(),
+        delete_reason
+    );
+    assert!(!stored_path.exists());
+
+    let (status, shares_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/shares"),
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let shares = shares_body.as_array().unwrap();
+    assert_eq!(shares.len(), 2);
+    assert!(shares.iter().all(|item| item["revoked_at"].is_string()));
+
+    let (status, download_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/download"),
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::GONE);
+    assert_eq!(download_body["message"], "Document file was deleted");
+
+    let (status, refreshed_patient_list) =
+        json_request(&app, "GET", "/api/v1/me/documents", &patient_bearer, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(refreshed_patient_list.as_array().unwrap().is_empty());
 }
