@@ -98,6 +98,7 @@
 Підтверджено:
 
 - RBAC + assignment-based access
+- auth/session revocation semantics for `logout` and `logout-all`
 - audit logging
 - consent/privacy workflows
 - encryption / key-management layer для direct messages
@@ -137,6 +138,7 @@
 
 - `Partial`
 - quotes, invoices, Mahnwesen, patient invoices/documents/privacy/services, portal appointments є
+- finance-facing analytics already include provider/service price and cost movement reporting for internal pricing comparison
 - real payment checkout відсутній
 - e-signature відсутня
 
@@ -162,7 +164,9 @@
 
 - `CEO Assistant` read-only patient registry scope з field-level masking
 - `sales` deny на patient registry, executive dashboard, risk-analysis і restricted clinic/doctor exports
+- `CEO Assistant` access до reports / forecasting / risk workspaces як partial executive read model
 - `teamlead_interpreter` assignment-scoped patient/appointment visibility
+- broad analytics deny для `teamlead_interpreter`, `interpreter` і `concierge`
 - `it_admin` deny на patient registry, medical case detail і reports workspace
 - `billing` deny на medical case detail
 
@@ -184,6 +188,8 @@
 - CEO dashboard
 - PM / billing / interpreter / concierge KPIs
 - clinic / doctor / country / service-type reports
+- sales-safe medical provider performance and revenue reports
+- medical provider cost-intelligence reports with historical unit-price movement and CSV export
 - provider-quality signals in reports: treatment score, doctor communication, follow-up completion, organization/service/ambience/value scores, treatment-success and complication rates, written-findings turnaround, clinic/doctor response-time KPIs from appointment communications
 - NPS / feedback surfaces
 - risk-analysis
@@ -220,7 +226,6 @@
 Головні gaps Phase 2:
 
 - `E-Rechnung`
-- частина sales / provider quality analytics
 - частина advanced accounting features
 
 #### Phase 3
@@ -307,7 +312,7 @@ Target-state, але не повністю підтверджено:
 | Orders / Process Engine | Mostly confirmed | lifecycle, billing/package/debt gates, planning/execution/follow-up |
 | Appointments / Calendar | Confirmed | medical + non-medical, conflicts, recurrence, true split lineage, scope-aware bulk actions, portal requests and DB-level overlap constraints |
 | Documents / Sharing | Confirmed | upload, release, OCR/translation workspace, policy checks |
-| Billing / Finance | Partial | quotes, invoices, dunning, VAT, portal invoices є; DATEV/E-Rechnung/payments gap |
+| Billing / Finance | Partial | quotes, invoices, dunning, VAT, portal invoices, provider cost-intelligence reports and sales-safe medical-provider revenue reports є; DATEV/E-Rechnung/payments gap |
 | Portal | Mostly confirmed | documents, invoices, privacy, services, appointments, feedback, chat |
 | Messaging | Mostly confirmed | text + attachment E2E є, manual encrypted key backup/import закриває current-state device migration |
 | Feedback / NPS | Confirmed | portal submission + staff review + ranking |
@@ -362,7 +367,7 @@ Target-state, але не повністю підтверджено:
 
 - blocking non-AI/non-integration product gaps у core scope зараз не видно
 - залишаються stabilization / inventory і подальше ущільнення regression coverage
-- базовий browser-level `E2E` harness уже є і не обмежується навігацією: Playwright покриває staff shell (`dashboard -> patients -> appointments -> documents -> invoices`), staff document portal release/revoke flow, patient portal (`dashboard -> documents -> invoices`) і patient invoice payment-proof upload; незакритим лишається вже не наявність browser coverage, а поступове розширення mutation-сценаріїв
+- базовий browser-level `E2E` harness уже є і не обмежується навігацією: Playwright покриває staff shell (`dashboard -> patients -> appointments -> documents -> invoices`), staff document portal release/revoke flow, staff template-based document generation flow, provider share/revoke з cover message, patient portal (`dashboard -> documents -> invoices`), patient invoice payment-proof upload, patient data export + privacy request submission, recurring appointment whole-series cancellation з detail drawer і secure chat text-send flow з browser keyring/mock envelope path; окремо backend regression already цементує `logout` / `logout-all` session revocation semantics. Незакритим лишається вже не наявність browser/session coverage, а поступове розширення mutation-сценаріїв
 - `Documents / Sharing` уже підтверджені end-to-end: upload/release, OCR/translation workspace, policy checks, file delete lifecycle, provider cover-message trail і patient-requested third-party revoke workflow тепер автоматизовані regression tests
 - `AI / pseudonymization -> AI handoff`
 

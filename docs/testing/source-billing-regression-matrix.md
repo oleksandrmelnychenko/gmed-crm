@@ -108,6 +108,14 @@
   Covers:
   patient portal sees own invoice snapshots only, can open invoice detail, and payment-proof uploads feed back into billing-facing invoice metadata.
 
+- `patient can upload payment proof from invoice detail`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:131`
+  `docs/requirements/03_product-backlog_ua.md:203`
+  `docs/backlog/04_implementation-tasks_ua.md:284`
+  Covers:
+  browser-level patient portal invoice detail can attach a payment proof file, submit it to the billing handoff endpoint and surface the resulting upload timestamp back in the UI.
+
 - `patient_cannot_see_draft_invoices_in_portal_scope`
   Source:
   `docs/requirements/03_product-backlog_ua.md:131`

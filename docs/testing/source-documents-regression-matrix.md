@@ -95,6 +95,13 @@
   Covers:
   provider-facing document sharing requires a cover message, stores that message in the share record and keeps the message visible in the document share trail together with the official delivery channel.
 
+- `staff can share a document with provider and revoke it with cover message`
+  Source:
+  `docs/backlog/04_implementation-tasks_ua.md:128`
+  `docs/requirements/03_product-backlog_ua.md:82`
+  Covers:
+  browser-level document detail can create a provider-facing share with a mandatory cover message, surface that message back in the share trail and revoke the same provider share through the staff UI.
+
 - `medical_document_share_requires_matching_provider_specialty`
   Source:
   `docs/requirements/03_product-backlog_ua.md:242`
@@ -147,6 +154,14 @@
   `docs/backlog/04_implementation-tasks_ua.md:76`
   Covers:
   template catalog, treatment-plan PDF generation with text blocks, saved PDF document and download flow.
+
+- `staff can generate a document from template`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:51`
+  `docs/backlog/04_implementation-tasks_ua.md:66`
+  `docs/backlog/04_implementation-tasks_ua.md:76`
+  Covers:
+  browser-level document workspace can open the template dialog, pick a patient-bound template, submit generation and surface the new generated version in the staff detail sheet.
 
 - `document_templates_default_to_patient_language_when_omitted`
   Source:
@@ -220,6 +235,13 @@
   `docs/requirements/04_non-functional-requirements_ua.md:53`
   Covers:
   portal release revoke removes the document from patient self-service visibility and download access.
+
+- `staff can release and revoke a document from patient portal scope`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:160`
+  `docs/requirements/04_non-functional-requirements_ua.md:53`
+  Covers:
+  browser-level staff document detail can trigger portal release and revoke actions through the same UI controls used in daily operations, with visible success feedback for both transitions.
 
 - `patient_can_upload_document_for_self_and_download_it`
   Source:

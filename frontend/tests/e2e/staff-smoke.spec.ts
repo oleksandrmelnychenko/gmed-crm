@@ -11,8 +11,40 @@ function json(route: Route, body: unknown, status = 200) {
 async function installStaffApiMocks(page: Page) {
   let portalShareActive = false;
   const documentId = "00000000-0000-0000-0000-000000000501";
+  let nextGeneratedDocumentIndex = 1;
+  let nextProviderShareIndex = 1;
 
-  const buildDocument = () => ({
+  const templateCatalog = {
+    templates: [
+      {
+        id: "treatment_plan",
+        label: "Behandlungsplan",
+        description: "Erstellt einen patientenbezogenen Behandlungsplan.",
+        art: "treatment_plan",
+        category: "care_plan",
+        default_auto_name: "Behandlungsplan",
+        default_status: "active",
+        default_visibility: "patient_visible",
+        is_medical: true,
+        supported_languages: ["de", "uk", "ru"],
+        text_block_keys: ["intro", "next_steps"],
+      },
+    ],
+    text_blocks: [
+      {
+        key: "intro",
+        label: "Einleitung",
+        description: "Kurze Einführung für den Patienten.",
+      },
+      {
+        key: "next_steps",
+        label: "Nächste Schritte",
+        description: "Hinweise für die Nachbereitung.",
+      },
+    ],
+  };
+
+  const buildDocument = (overrides: Record<string, unknown> = {}) => ({
     id: documentId,
     patient_id: "00000000-0000-0000-0000-000000000301",
     order_id: null,
@@ -52,7 +84,26 @@ async function installStaffApiMocks(page: Page) {
     data_sensitivity: "medical",
     needs_categorization: false,
     classification_suggestion: null,
+    ...overrides,
   });
+
+  let documents = [buildDocument()];
+  let providerShares: Array<{
+    id: string;
+    shared_with_provider_id: string | null;
+    shared_with_user_id: string | null;
+    provider_name: string | null;
+    target_user_name: string | null;
+    target_user_role: string | null;
+    shared_by_name: string | null;
+    channel: string | null;
+    message: string | null;
+    requires_confirmation: boolean;
+    confirmed: boolean;
+    confirmed_at: string | null;
+    shared_at: string;
+    revoked_at: string | null;
+  }> = [];
 
   const buildPortalShares = () => [
     {
@@ -72,6 +123,17 @@ async function installStaffApiMocks(page: Page) {
       revoked_at: null,
     },
   ];
+
+  function buildSharesForDocument(requestedDocumentId: string) {
+    if (requestedDocumentId !== documentId) {
+      return [];
+    }
+
+    return [
+      ...(portalShareActive ? buildPortalShares() : []),
+      ...providerShares,
+    ];
+  }
 
   await page.route("**/auth/**", async (route) => {
     const url = new URL(route.request().url());
@@ -356,33 +418,149 @@ async function installStaffApiMocks(page: Page) {
     }
 
     if (path === "/documents/templates") {
-      return json(route, {
-        templates: [],
-        text_blocks: [],
-      });
+      return json(route, templateCatalog);
     }
 
     if (path === "/documents" || path.startsWith("/documents?")) {
-      return json(route, [buildDocument()]);
+      return json(route, documents);
     }
 
-    if (path === `/documents/${documentId}`) {
-      return json(route, buildDocument());
+    if (path === "/documents/generate" && route.request().method() === "POST") {
+      const payload = JSON.parse(route.request().postData() ?? "{}") as {
+        template_id?: string;
+        patient_id?: string | null;
+        auto_name?: string | null;
+        status?: string;
+        visibility?: string;
+        language?: string | null;
+      };
+      const template = templateCatalog.templates.find(
+        (item) => item.id === payload.template_id,
+      );
+      const generatedId = `00000000-0000-0000-0000-0000000005${10 + nextGeneratedDocumentIndex}`;
+      const generatedName =
+        payload.auto_name?.trim() || template?.default_auto_name || "Generated document";
+      const generatedDocument = buildDocument({
+        id: generatedId,
+        auto_name: generatedName,
+        original_filename: `${generatedName}.html`,
+        art: template?.art ?? "generated_document",
+        category: template?.category ?? "generated",
+        status: payload.status ?? template?.default_status ?? "active",
+        visibility:
+          payload.visibility ?? template?.default_visibility ?? "patient_visible",
+        mime_type: "text/html",
+        file_size: 4096,
+        uploaded_by_name: "Admin GMED",
+        version_root_document_id: generatedId,
+        version_number: 1,
+        version_count: 1,
+        patient_id: payload.patient_id ?? "00000000-0000-0000-0000-000000000301",
+        created_at: `2026-04-1${nextGeneratedDocumentIndex}T10:00:00Z`,
+        updated_at: `2026-04-1${nextGeneratedDocumentIndex}T10:00:00Z`,
+        share_count: 0,
+      });
+      nextGeneratedDocumentIndex += 1;
+      documents = [generatedDocument, ...documents];
+      return json(route, {
+        id: generatedId,
+        auto_name: generatedName,
+        original_filename: `${generatedName}.html`,
+        mime_type: "text/html",
+        file_size: 4096,
+        language: payload.language ?? "de",
+        version_number: 1,
+        preview_html: `<html><body><h1>${generatedName}</h1><p>Template preview</p></body></html>`,
+      });
     }
 
-    if (path === `/documents/${documentId}/shares`) {
-      return json(route, portalShareActive ? buildPortalShares() : []);
+    if (path.startsWith("/documents/") && path.endsWith("/download")) {
+      const requestedDocumentId = path
+        .replace("/documents/", "")
+        .replace("/download", "");
+      const requestedDocument = documents.find((item) => item.id === requestedDocumentId);
+      if (!requestedDocument) {
+        return json(route, { message: "Not found" }, 404);
+      }
+      return route.fulfill({
+        status: 200,
+        contentType: requestedDocument.mime_type ?? "text/html",
+        body: `<html><body><h1>${requestedDocument.auto_name}</h1></body></html>`,
+      });
     }
 
-    if (path === `/documents/${documentId}/versions`) {
-      return json(route, [buildDocument()]);
+    const requestedDocument = documents.find((item) => path === `/documents/${item.id}`);
+    if (requestedDocument) {
+      return json(route, requestedDocument);
     }
 
-    if (path === `/documents/${documentId}/translation-requests`) {
+    if (
+      path === `/documents/${documentId}/shares` &&
+      route.request().method() === "POST"
+    ) {
+      const payload = JSON.parse(route.request().postData() ?? "{}") as {
+        shared_with_provider_id?: string | null;
+        channel?: string | null;
+        message?: string | null;
+        requires_confirmation?: boolean;
+      };
+      const createdShare = {
+        id: `00000000-0000-0000-0000-0000000009${20 + nextProviderShareIndex}`,
+        shared_with_provider_id:
+          payload.shared_with_provider_id ?? "00000000-0000-0000-0000-000000000201",
+        shared_with_user_id: null,
+        provider_name: "Clinic Cologne",
+        target_user_name: null,
+        target_user_role: null,
+        shared_by_name: "Admin GMED",
+        channel: payload.channel ?? "email",
+        message: payload.message ?? null,
+        requires_confirmation: payload.requires_confirmation ?? true,
+        confirmed: false,
+        confirmed_at: null,
+        shared_at: `2026-04-0${5 + nextProviderShareIndex}T09:00:00Z`,
+        revoked_at: null,
+      };
+      nextProviderShareIndex += 1;
+      providerShares = [createdShare, ...providerShares];
+      return json(route, { ok: true });
+    }
+
+    if (
+      path.startsWith(`/documents/${documentId}/shares/`) &&
+      path.endsWith("/revoke") &&
+      route.request().method() === "POST"
+    ) {
+      const shareId = path
+        .replace(`/documents/${documentId}/shares/`, "")
+        .replace("/revoke", "");
+      providerShares = providerShares.map((share) =>
+        share.id === shareId
+          ? {
+              ...share,
+              revoked_at: "2026-04-12T09:00:00Z",
+            }
+          : share,
+      );
+      return json(route, { ok: true });
+    }
+
+    if (path.startsWith("/documents/") && path.endsWith("/shares")) {
+      const requestedId = path.replace("/documents/", "").replace("/shares", "");
+      return json(route, buildSharesForDocument(requestedId));
+    }
+
+    if (path.startsWith("/documents/") && path.endsWith("/versions")) {
+      const requestedId = path.replace("/documents/", "").replace("/versions", "");
+      const requested = documents.find((item) => item.id === requestedId);
+      return json(route, requested ? [requested] : []);
+    }
+
+    if (path.startsWith("/documents/") && path.endsWith("/translation-requests")) {
       return json(route, []);
     }
 
-    if (path === `/documents/${documentId}/text-extraction`) {
+    if (path.startsWith("/documents/") && path.endsWith("/text-extraction")) {
       return json(route, {
         status: "available",
         method: "pdf_text",
@@ -535,5 +713,80 @@ test.describe("staff smoke flows", () => {
         .locator('[role="status"]')
         .filter({ hasText: /Portalfreigabe widerrufen|Релиз портала отозван/i }),
     ).toBeVisible();
+  });
+
+  test("staff can generate a document from template", async ({ page }) => {
+    await page.goto("/documents");
+    await expect(page.getByText("MRI report")).toBeVisible();
+
+    await page
+      .getByRole("button", { name: /Aus Vorlage generieren/i })
+      .click();
+
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+
+    await dialog
+      .getByRole("combobox", { name: /Kategorie/i })
+      .selectOption("treatment_plan");
+    await dialog.getByRole("combobox", { name: /Patient/i }).selectOption(
+      "00000000-0000-0000-0000-000000000301",
+    );
+    await dialog.getByLabel("Dateiname").first().fill("Behandlungsplan April");
+
+    await dialog.locator("form").evaluate((formElement) => {
+      (formElement as HTMLFormElement).requestSubmit();
+    });
+
+    await expect(
+      page
+        .locator('[role="status"]')
+        .filter({ hasText: /Version 1 erzeugt/i }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Behandlungsplan April" }),
+    ).toBeVisible();
+  });
+
+  test("staff can share a document with provider and revoke it with cover message", async ({
+    page,
+  }) => {
+    await page.goto("/documents");
+    await expect(page.getByText("MRI report")).toBeVisible();
+
+    await page.getByText("MRI report").click();
+    const sheet = page.getByRole("dialog");
+    await expect(
+      sheet.getByRole("heading", { name: "MRI report" }),
+    ).toBeVisible();
+
+    const shareForm = sheet.locator("form").last();
+    const providerToggle = shareForm.getByRole("button", { name: /^Provider$/i });
+    await providerToggle.scrollIntoViewIfNeeded();
+    await providerToggle.click();
+    await shareForm.locator("select").first().selectOption(
+      "00000000-0000-0000-0000-000000000201",
+    );
+    await shareForm
+      .getByPlaceholder(/Kurzer Kontext/i)
+      .fill("Bitte fuer das Kardiologie-Team freigeben.");
+    await shareForm
+      .getByRole("button", { name: /Freigabe erstellen/i })
+      .click();
+
+    await expect(
+      page.locator('[role="status"]').filter({ hasText: /Freigabe erstellt\./i }),
+    ).toBeVisible();
+    await expect(sheet.getByText("Provider · Clinic Cologne")).toBeVisible();
+    await expect(
+      sheet.getByText("Bitte fuer das Kardiologie-Team freigeben."),
+    ).toBeVisible();
+
+    await sheet.getByRole("button", { name: /^Widerrufen$/i }).click();
+
+    await expect(
+      page.locator('[role="status"]').filter({ hasText: /Freigabe widerrufen\./i }),
+    ).toBeVisible();
+    await expect(sheet.getByText("Revoked")).toBeVisible();
   });
 });

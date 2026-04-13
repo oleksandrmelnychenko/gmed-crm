@@ -10,7 +10,7 @@
 - `22f6dea` — `Expand clinical subflows and provider analytics`
 - `dd52b16` — `Polish appointment UX and frontend translations`
 
-На момент оновлення цього файлу в dirty state лишався тільки `docs reconciliation / current-state docs` bucket.
+На момент оновлення цього файлу в dirty state лишався `docs reconciliation / current-state docs` bucket і окремий `identity + browser regression hardening` bucket для smoke/auth suites.
 
 ## 1. Загальний стан
 
@@ -64,6 +64,18 @@
 Статус:
 
 - це був останній active bucket перед clean worktree
+
+#### Identity / browser regression hardening
+
+- `crates/server/tests/auth_sessions_api.rs`
+- `frontend/tests/e2e/patient-portal-smoke.spec.ts`
+- `frontend/tests/e2e/staff-smoke.spec.ts`
+- `frontend/tests/e2e/appointments-recurring.spec.ts`
+- `frontend/tests/e2e/chat-secure.spec.ts`
+
+Статус:
+
+- bucket фіксує вже наявні auth/session і browser-level smoke сценарії, які треба було довести до regression-matrix coverage й тримати окремо від feature changes
 
 ### 2.1 Clinical / patient workspace
 

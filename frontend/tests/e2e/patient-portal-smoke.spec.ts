@@ -11,6 +11,21 @@ function json(route: Route, body: unknown, status = 200) {
 async function installPatientPortalMocks(page: Page) {
   let paymentProofUploadedAt: string | null = null;
   const paymentProofTimestamp = "2026-04-10T09:15:00Z";
+  let nextPrivacyRequestIndex = 1;
+  let privacyRequests = [
+    {
+      id: "00000000-0000-0000-0000-000000009801",
+      request_type: "restriction",
+      source: "patient_portal",
+      status: "approved",
+      reason: null,
+      due_at: "2026-04-20T00:00:00Z",
+      retention_until: null,
+      requested_at: "2026-04-04T10:00:00Z",
+      reviewed_at: "2026-04-05T10:00:00Z",
+      executed_at: null,
+    },
+  ];
 
   const buildPortalInvoice = () => ({
     id: "00000000-0000-0000-0000-000000009501",
@@ -239,21 +254,41 @@ async function installPatientPortalMocks(page: Page) {
       return json(route, { ok: true });
     }
 
-    if (path === "/me/privacy-requests") {
-      return json(route, [
-        {
-          id: "00000000-0000-0000-0000-000000009801",
-          request_type: "restriction",
-          source: "patient_portal",
-          status: "approved",
-          reason: null,
-          due_at: "2026-04-20T00:00:00Z",
-          retention_until: null,
-          requested_at: "2026-04-04T10:00:00Z",
-          reviewed_at: "2026-04-05T10:00:00Z",
-          executed_at: null,
+    if (path === "/me/export") {
+      return route.fulfill({
+        status: 200,
+        contentType: "application/zip",
+        headers: {
+          "content-disposition": 'attachment; filename="patient-export-2026-04-13.zip"',
         },
-      ]);
+        body: Buffer.from("PK\x03\x04playwright-portal-export"),
+      });
+    }
+
+    if (path === "/me/privacy-requests" && route.request().method() === "POST") {
+      const payload = JSON.parse(route.request().postData() ?? "{}") as {
+        request_type?: string;
+        reason?: string | null;
+      };
+      const created = {
+        id: `00000000-0000-0000-0000-0000000098${10 + nextPrivacyRequestIndex}`,
+        request_type: payload.request_type ?? "restriction",
+        source: "patient_portal",
+        status: "submitted",
+        reason: payload.reason ?? null,
+        due_at: "2026-04-27T00:00:00Z",
+        retention_until: null,
+        requested_at: `2026-04-1${nextPrivacyRequestIndex}T12:00:00Z`,
+        reviewed_at: null,
+        executed_at: null,
+      };
+      nextPrivacyRequestIndex += 1;
+      privacyRequests = [created, ...privacyRequests];
+      return json(route, created, 201);
+    }
+
+    if (path === "/me/privacy-requests") {
+      return json(route, privacyRequests);
     }
 
     if (path === "/me/feedback") {
@@ -355,5 +390,33 @@ test.describe("patient portal smoke flows", () => {
       page.getByText("Payment proof uploaded for the billing team."),
     ).toBeVisible();
     await expect(page.getByText(/Uploaded 10 Apr 2026/i)).toBeVisible();
+  });
+
+  test("patient can export data and submit privacy request", async ({ page }) => {
+    const exportRequest = page.waitForRequest((request) =>
+      request.method() === "GET" &&
+      request.url().includes("/api/v1/me/export?format=zip"),
+    );
+
+    await page.getByRole("button", { name: /Export my data/i }).click();
+    await exportRequest;
+
+    await page.goto("/privacy");
+    await expect(page).toHaveURL(/\/privacy$/);
+
+    await page.locator("#privacy-type").selectOption("third_party_revoke");
+    await page.locator("#privacy-reason").fill("Please stop sharing my records with external providers.");
+    await page.getByRole("button", { name: /Submit request/i }).click();
+
+    const submittedRequest = page
+      .locator("article")
+      .filter({ hasText: "Please stop sharing my records with external providers." });
+
+    await expect(page.getByText("Privacy request submitted.")).toBeVisible();
+    await expect(submittedRequest).toBeVisible();
+    await expect(
+      submittedRequest.getByText("Revoke third-party sharing"),
+    ).toBeVisible();
+    await expect(page.getByText(/Open requests:\s*2/i)).toBeVisible();
   });
 });

@@ -18,6 +18,22 @@
 
 ## Automated tests
 
+### Identity / session security
+
+- `logout_blacklists_current_access_token_and_revokes_family_refresh`
+  Source:
+  `docs/requirements/04_non-functional-requirements_ua.md:83`
+  `docs/backlog/01_mvp-backlog_ua.md:25`
+  Covers:
+  protected logout path inserts the current access-token `jti` into the denylist, blacklists the whole refresh-token family and makes both the old bearer token and refresh token unusable immediately instead of waiting for access-token expiry.
+
+- `logout_all_revokes_other_session_access_tokens_too`
+  Source:
+  `docs/requirements/04_non-functional-requirements_ua.md:83`
+  `docs/backlog/01_mvp-backlog_ua.md:25`
+  Covers:
+  user-driven `logout-all` revokes every active session family for the same account, so a second still-open device loses both bearer and refresh access right away instead of surviving until token expiry.
+
 ### CEO analytics
 
 - `ceo_dashboard_exposes_supported_finance_operational_and_feedback_kpis`
@@ -44,6 +60,13 @@
   `docs/backlog/03_kpi-catalog_ua.md:25`
   Covers:
   CEO can open the combined risk-analysis workspace and see both the patient-manager and billing signal layers, matching the executive analytics scope instead of being blocked by a stale route guard.
+
+- `ceo_assistant_can_open_reports_forecasting_and_risk_workspaces`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:9`
+  `docs/backlog/02_rbac-matrix_ua.md:15`
+  Covers:
+  `ceo_assistant` can open reports, forecasting and risk-analysis workspaces with financial visibility and export rights aligned to the current partial-executive read model.
 
 - `risk_analysis_returns_role_scoped_patient_manager_and_billing_signals`
   Source:
@@ -80,12 +103,41 @@
   Covers:
   reports workspace exposes clinic, doctor, country, service-type and non-medical provider reporting through a role-scoped read model, including counts-only mode for non-financial roles, CSV export for permitted sections, provider-quality metrics based on treatment feedback / doctor communication / follow-up completion, organization/service/ambience/value scores, treatment-success and complication rates, written-findings turnaround, response-time KPI signals from appointment communications and concierge-oriented partner load by service portfolio, vendors and request status.
 
+- `provider_cost_report_tracks_historical_price_changes`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:55`
+  `docs/testing/user-stories-excel-backlog-audit_ua.md:65`
+  Covers:
+  reports workspace exposes a dedicated medical-provider cost-intelligence section for `ceo`, `ceo_assistant`, `patient_manager` and `billing`, tracks first/latest/average gross unit prices per delivered service, derives monthly trend points, supports CSV export and keeps the section hidden from `sales`.
+
+- `sales_medical_provider_report_exposes_partner_revenue_without_restricted_exports`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:58`
+  `docs/requirements/03_product-backlog_ua.md:311`
+  Covers:
+  sales role gets a dedicated medical-provider performance section with aggregated partner revenue, appointment volume, service mix, specialty mix and patient-country mix, while `clinics` and `doctors` exports stay restricted.
+
+- `patient_manager_forecasting_hides_collections_but_keeps_operational_sections`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:10`
+  `docs/backlog/03_kpi-catalog_ua.md:45`
+  Covers:
+  patient manager can use forecasting for quote pipeline, follow-up pressure and clinic capacity with financial visibility, but does not inherit the dedicated billing collections section.
+
 - `sales_cannot_access_executive_risk_or_restricted_exports`
   Source:
   `docs/backlog/02_rbac-matrix_ua.md:14`
   `docs/backlog/03_kpi-catalog_ua.md:79`
   Covers:
   sales role stays blocked from CEO-only dashboard and risk-analysis routes and cannot export restricted `clinics` / `doctors` report sections even though the role can still use counts-only country, service-type and non-medical reporting.
+
+- `operational_roles_without_analytics_scope_are_forbidden_from_stats_workspaces`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:10`
+  `docs/backlog/02_rbac-matrix_ua.md:11`
+  `docs/backlog/02_rbac-matrix_ua.md:12`
+  Covers:
+  broad management analytics routes stay closed to `teamlead_interpreter`, `interpreter` and `concierge`; their KPI visibility remains limited to role-specific operational workspaces instead of inheriting executive reports, forecasting or risk analysis.
 
 - `patient_manager_sop_requires_ceo_approval_and_supports_acknowledgement`
   Source:
@@ -390,6 +442,13 @@
   Covers:
   patient self-service can request revocation of third-party sharing and route that request into the compliance queue for the responsible patient manager.
 
+- `patient can export data and submit privacy request`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:160`
+  `docs/requirements/04_non-functional-requirements_ua.md:46`
+  Covers:
+  browser-level patient portal can trigger the own DSGVO ZIP export and submit a new privacy request from the self-service workspace while showing the new request back in the portal history.
+
 - `document_can_be_released_to_patient_portal_and_confirmed_from_me_workspace`
   Source:
   `docs/requirements/03_product-backlog_ua.md:160`
@@ -467,6 +526,13 @@
   `docs/backlog/04_implementation-tasks_ua.md:295`
   Covers:
   secure chat file attachments store only opaque ciphertext plus attachment-level `e2e nonce / salt / key fingerprints` metadata on the backend, while download returns the encrypted payload for client-side decryption instead of server-side plaintext disclosure.
+
+- `staff can send a secure text message in browser E2E`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:213`
+  `docs/backlog/04_implementation-tasks_ua.md:295`
+  Covers:
+  browser-level secure chat flow boots a local keyring, fetches the peer public key, submits an encrypted text envelope and renders the just-sent secure message through the actual UI path instead of API-only assertions.
 
 - `patient_cannot_message_unassigned_staff`
   Source:
@@ -653,6 +719,13 @@
   `docs/backlog/04_implementation-tasks_ua.md:60`
   Covers:
   recurring appointment detail now exposes ancestor/current/descendant series analytics so the UI can show branch-level lineage history, date ranges and active/completed/cancelled occurrence counts after splits and trims.
+
+- `staff can cancel a whole recurring series from the detail drawer`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:213`
+  `docs/backlog/04_implementation-tasks_ua.md:60`
+  Covers:
+  browser detail-drawer workflow can execute whole-series cancellation for a recurring appointment chain and refresh the visible occurrence state through the same UI controls used by staff operations.
 
 - `appointment_schedule_exclusion_constraints_block_overlapping_patient_slots`
   Source:
