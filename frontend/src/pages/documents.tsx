@@ -710,6 +710,9 @@ function StaffDocumentsPage() {
   const { user } = useAuth();
   const { t } = useLang();
   const [searchParams, setSearchParams] = useSearchParams();
+  const documentsFailedLoadDocumentsText = t.documents_failed_load_documents;
+  const documentsFailedLoadIntakeQueueText = t.documents_failed_load_intake_queue;
+  const documentsFailedLoadDocumentText = t.documents_failed_load_document;
   const canView = canViewDocuments(user?.role);
   const canManage = canManageDocuments(user?.role);
   const canUpload = canUploadDocuments(user?.role);
@@ -922,7 +925,7 @@ function StaffDocumentsPage() {
         setError(
           nextError instanceof Error
             ? nextError.message
-            : t.documents_failed_load_documents,
+            : documentsFailedLoadDocumentsText,
         );
       } finally {
         if (active) setBusy(false);
@@ -932,7 +935,7 @@ function StaffDocumentsPage() {
     return () => {
       active = false;
     };
-  }, [canView, documentsPath, version]);
+  }, [canView, documentsFailedLoadDocumentsText, documentsPath, version]);
 
   useEffect(() => {
     if (!canManageIntake) {
@@ -956,7 +959,7 @@ function StaffDocumentsPage() {
         setIntakeError(
           nextError instanceof Error
             ? nextError.message
-            : t.documents_failed_load_intake_queue,
+            : documentsFailedLoadIntakeQueueText,
         );
       } finally {
         if (active) setIntakeBusy(false);
@@ -966,7 +969,7 @@ function StaffDocumentsPage() {
     return () => {
       active = false;
     };
-  }, [canManageIntake, version]);
+  }, [canManageIntake, documentsFailedLoadIntakeQueueText, version]);
 
   useEffect(() => {
     setSelectedDocumentIds((current) =>
@@ -1035,7 +1038,7 @@ function StaffDocumentsPage() {
         setDetailError(
           nextError instanceof Error
             ? nextError.message
-            : t.documents_failed_load_document,
+            : documentsFailedLoadDocumentText,
         );
       } finally {
         if (active) setDetailBusy(false);
@@ -1045,7 +1048,7 @@ function StaffDocumentsPage() {
     return () => {
       active = false;
     };
-  }, [canManage, canView, selectedId]);
+  }, [canManage, canView, documentsFailedLoadDocumentText, selectedId]);
 
   useEffect(() => {
     if (!uploadOpen || !uploadForm.patientId) {

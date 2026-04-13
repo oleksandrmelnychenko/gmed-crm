@@ -203,15 +203,19 @@ async fn seed_service(pool: &PgPool, provider_id: Uuid, name: &str, description:
     .unwrap()
 }
 
-async fn seed_provider_concierge_service(
-    pool: &PgPool,
+struct ProviderConciergeServiceSeed<'a> {
     patient_id: Uuid,
     provider_id: Uuid,
     created_by: Uuid,
-    service_kind: &str,
-    title: &str,
-    vendor_name: &str,
-    status: &str,
+    service_kind: &'a str,
+    title: &'a str,
+    vendor_name: &'a str,
+    status: &'a str,
+}
+
+async fn seed_provider_concierge_service(
+    pool: &PgPool,
+    seed: ProviderConciergeServiceSeed<'_>,
 ) -> Uuid {
     sqlx::query_scalar(
         r#"INSERT INTO concierge_services (
@@ -222,13 +226,13 @@ async fn seed_provider_concierge_service(
                 $6, $7
            ) RETURNING id"#,
     )
-    .bind(patient_id)
-    .bind(provider_id)
-    .bind(service_kind)
-    .bind(title)
-    .bind(status)
-    .bind(vendor_name)
-    .bind(created_by)
+    .bind(seed.patient_id)
+    .bind(seed.provider_id)
+    .bind(seed.service_kind)
+    .bind(seed.title)
+    .bind(seed.status)
+    .bind(seed.vendor_name)
+    .bind(seed.created_by)
     .fetch_one(pool)
     .await
     .unwrap()
@@ -5832,13 +5836,15 @@ async fn providers_list_and_detail_include_non_medical_concierge_activity() {
 
     let concierge_service_id = seed_provider_concierge_service(
         &pool,
-        patient_id,
-        provider_id,
-        admin_id,
-        "vip_terminal",
-        "VIP terminal escort",
-        "Elite Drives",
-        "planned",
+        ProviderConciergeServiceSeed {
+            patient_id,
+            provider_id,
+            created_by: admin_id,
+            service_kind: "vip_terminal",
+            title: "VIP terminal escort",
+            vendor_name: "Elite Drives",
+            status: "planned",
+        },
     )
     .await;
 

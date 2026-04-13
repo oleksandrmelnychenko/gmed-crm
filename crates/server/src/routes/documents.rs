@@ -236,6 +236,16 @@ struct ReplacementDocumentVersion {
     version_number: i32,
 }
 
+struct DocumentShareInsert<'a> {
+    document_id: Uuid,
+    auth_user_id: Uuid,
+    shared_with_provider_id: Option<Uuid>,
+    shared_with_user_id: Option<Uuid>,
+    channel: &'a str,
+    requires_confirmation: bool,
+    message: Option<&'a str>,
+}
+
 struct NewStoredDocument<'a> {
     patient_id: Option<Uuid>,
     order_id: Option<Uuid>,
@@ -4691,13 +4701,7 @@ async fn validate_document_share_target(
 
 async fn insert_document_share(
     state: &AppState,
-    document_id: Uuid,
-    auth_user_id: Uuid,
-    shared_with_provider_id: Option<Uuid>,
-    shared_with_user_id: Option<Uuid>,
-    channel: &str,
-    requires_confirmation: bool,
-    message: Option<&str>,
+    input: DocumentShareInsert<'_>,
 ) -> Result<Uuid, axum::response::Response> {
     sqlx::query(
         r#"INSERT INTO document_shares (
@@ -4706,18 +4710,18 @@ async fn insert_document_share(
            ) VALUES ($1, $2, $3, $4, $5, $6, $7)
            RETURNING id"#,
     )
-    .bind(document_id)
-    .bind(shared_with_provider_id)
-    .bind(shared_with_user_id)
-    .bind(auth_user_id)
-    .bind(channel)
-    .bind(requires_confirmation)
-    .bind(message)
+    .bind(input.document_id)
+    .bind(input.shared_with_provider_id)
+    .bind(input.shared_with_user_id)
+    .bind(input.auth_user_id)
+    .bind(input.channel)
+    .bind(input.requires_confirmation)
+    .bind(input.message)
     .fetch_one(&state.db)
     .await
     .map(|row| row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()))
     .map_err(|e| {
-        tracing::error!(error = %e, document_id = %document_id, "create document share");
+        tracing::error!(error = %e, document_id = %input.document_id, "create document share");
         err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create share")
     })
 }
@@ -9013,13 +9017,15 @@ async fn create_bulk_document_shares(
     for context in &contexts {
         let share_id = match insert_document_share(
             &state,
-            context.document_id,
-            auth.user_id,
-            body.shared_with_provider_id,
-            body.shared_with_user_id,
-            &channel,
-            requires_confirmation,
-            share_message.as_deref(),
+            DocumentShareInsert {
+                document_id: context.document_id,
+                auth_user_id: auth.user_id,
+                shared_with_provider_id: body.shared_with_provider_id,
+                shared_with_user_id: body.shared_with_user_id,
+                channel: &channel,
+                requires_confirmation,
+                message: share_message.as_deref(),
+            },
         )
         .await
         {
@@ -9113,13 +9119,15 @@ async fn create_document_share(
 
     let share_id = match insert_document_share(
         &state,
-        id,
-        auth.user_id,
-        body.shared_with_provider_id,
-        body.shared_with_user_id,
-        &channel,
-        requires_confirmation,
-        share_message.as_deref(),
+        DocumentShareInsert {
+            document_id: id,
+            auth_user_id: auth.user_id,
+            shared_with_provider_id: body.shared_with_provider_id,
+            shared_with_user_id: body.shared_with_user_id,
+            channel: &channel,
+            requires_confirmation,
+            message: share_message.as_deref(),
+        },
     )
     .await
     {

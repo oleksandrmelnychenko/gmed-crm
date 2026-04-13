@@ -197,36 +197,43 @@ async fn multipart_request(
     (status, payload)
 }
 
+struct MultipartMessageUpload<'a> {
+    file_content: &'a [u8],
+    filename: &'a str,
+    mime: &'a str,
+    message: Option<&'a str>,
+    extra_fields: &'a [(&'a str, &'a str)],
+}
+
 async fn multipart_request_with_extra_fields(
     app: &axum::Router,
     path: &str,
     bearer: &str,
-    file_content: &[u8],
-    filename: &str,
-    mime: &str,
-    message: Option<&str>,
-    extra_fields: &[(&str, &str)],
+    upload: MultipartMessageUpload<'_>,
 ) -> (StatusCode, Value) {
     let boundary = "----TestBoundaryPortalMessagesExtra";
     let mut body = Vec::new();
 
     body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
     body.extend_from_slice(
-        format!("Content-Disposition: form-data; name=\"file\"; filename=\"{filename}\"\r\n")
-            .as_bytes(),
+        format!(
+            "Content-Disposition: form-data; name=\"file\"; filename=\"{}\"\r\n",
+            upload.filename
+        )
+        .as_bytes(),
     );
-    body.extend_from_slice(format!("Content-Type: {mime}\r\n\r\n").as_bytes());
-    body.extend_from_slice(file_content);
+    body.extend_from_slice(format!("Content-Type: {}\r\n\r\n", upload.mime).as_bytes());
+    body.extend_from_slice(upload.file_content);
     body.extend_from_slice(b"\r\n");
 
-    if let Some(msg) = message {
+    if let Some(msg) = upload.message {
         body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
         body.extend_from_slice(b"Content-Disposition: form-data; name=\"message\"\r\n\r\n");
         body.extend_from_slice(msg.as_bytes());
         body.extend_from_slice(b"\r\n");
     }
 
-    for (name, value) in extra_fields {
+    for (name, value) in upload.extra_fields {
         body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
         body.extend_from_slice(
             format!("Content-Disposition: form-data; name=\"{name}\"\r\n\r\n").as_bytes(),
@@ -520,22 +527,24 @@ async fn patient_attachments_can_use_e2e_envelopes() {
         &app,
         &format!("/api/v1/messages/{patient_manager_id}/upload"),
         &patient_auth,
-        file_ciphertext,
-        "secure-result.pdf",
-        "application/octet-stream",
-        None,
-        &[
-            ("attachment_plaintext_size", "19"),
-            ("attachment_e2e_algorithm", "p256-hkdf-aes256gcm-v1"),
-            ("attachment_e2e_nonce", attachment_nonce.as_str()),
-            ("attachment_e2e_salt", attachment_salt.as_str()),
-            ("e2e_algorithm", "p256-hkdf-aes256gcm-v1"),
-            ("e2e_ciphertext", caption_ciphertext.as_str()),
-            ("e2e_nonce", caption_nonce.as_str()),
-            ("e2e_salt", caption_salt.as_str()),
-            ("sender_key_fingerprint", sender_fingerprint.as_str()),
-            ("recipient_key_fingerprint", recipient_fingerprint.as_str()),
-        ],
+        MultipartMessageUpload {
+            file_content: file_ciphertext,
+            filename: "secure-result.pdf",
+            mime: "application/octet-stream",
+            message: None,
+            extra_fields: &[
+                ("attachment_plaintext_size", "19"),
+                ("attachment_e2e_algorithm", "p256-hkdf-aes256gcm-v1"),
+                ("attachment_e2e_nonce", attachment_nonce.as_str()),
+                ("attachment_e2e_salt", attachment_salt.as_str()),
+                ("e2e_algorithm", "p256-hkdf-aes256gcm-v1"),
+                ("e2e_ciphertext", caption_ciphertext.as_str()),
+                ("e2e_nonce", caption_nonce.as_str()),
+                ("e2e_salt", caption_salt.as_str()),
+                ("sender_key_fingerprint", sender_fingerprint.as_str()),
+                ("recipient_key_fingerprint", recipient_fingerprint.as_str()),
+            ],
+        },
     )
     .await;
     assert_eq!(status, StatusCode::OK);

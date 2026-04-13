@@ -60,8 +60,8 @@ async function installStaffApiMocks(page: Page) {
       shared_with_provider_id: null,
       shared_with_user_id: null,
       provider_name: null,
-      target_user_name: null,
-      target_user_role: null,
+      target_user_name: "Anna Muster",
+      target_user_role: "patient",
       shared_by_name: "Admin GMED",
       channel: "patient_portal",
       message: null,
@@ -531,7 +531,9 @@ test.describe("staff smoke flows", () => {
       })
       .click();
     await expect(
-      page.getByText(/Portalfreigabe widerrufen|Релиз портала отозван/i),
+      page
+        .locator('[role="status"]')
+        .filter({ hasText: /Portalfreigabe widerrufen|Релиз портала отозван/i }),
     ).toBeVisible();
   });
 });

@@ -362,7 +362,7 @@ Target-state, але не повністю підтверджено:
 
 - blocking non-AI/non-integration product gaps у core scope зараз не видно
 - залишаються stabilization / inventory і подальше ущільнення regression coverage
-- базовий browser-level `E2E` smoke уже є: Playwright покриває staff shell (`dashboard -> patients -> appointments -> documents -> invoices`) і patient portal (`dashboard -> documents -> invoices`) через окремі smoke specs; незакритим лишається вже не наявність harness, а поступове розширення сценаріїв
+- базовий browser-level `E2E` harness уже є і не обмежується навігацією: Playwright покриває staff shell (`dashboard -> patients -> appointments -> documents -> invoices`), staff document portal release/revoke flow, patient portal (`dashboard -> documents -> invoices`) і patient invoice payment-proof upload; незакритим лишається вже не наявність browser coverage, а поступове розширення mutation-сценаріїв
 - `Documents / Sharing` уже підтверджені end-to-end: upload/release, OCR/translation workspace, policy checks, file delete lifecycle, provider cover-message trail і patient-requested third-party revoke workflow тепер автоматизовані regression tests
 - `AI / pseudonymization -> AI handoff`
 
