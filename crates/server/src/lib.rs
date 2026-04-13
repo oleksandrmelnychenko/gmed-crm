@@ -5,6 +5,7 @@ pub mod crypto;
 pub mod file_scan;
 pub mod file_sniff;
 pub mod routes;
+pub mod security_headers;
 pub mod settings;
 pub mod state;
 
@@ -17,8 +18,10 @@ pub fn build_app(app_state: state::AppState) -> Router {
         auth::middleware::require_auth,
     ));
 
-    Router::new()
+    let router = Router::new()
         .merge(routes::health::router())
         .nest("/api/v1", routes::public_router().merge(protected))
-        .with_state(app_state)
+        .with_state(app_state);
+
+    security_headers::apply(router)
 }

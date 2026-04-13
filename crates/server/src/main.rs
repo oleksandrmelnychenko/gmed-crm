@@ -67,13 +67,10 @@ async fn main() {
         ])
         .allow_credentials(true);
 
-    let app = build_app(app_state)
-        .layer(cors)
-        .layer(tower_http::set_header::SetResponseHeaderLayer::overriding(
-            http::header::X_CONTENT_TYPE_OPTIONS,
-            http::HeaderValue::from_static("nosniff"),
-        ))
-        .layer(TraceLayer::new_for_http());
+    // Security-header baseline is applied inside `build_app` so integration
+    // tests exercise it too; here we only add the CORS layer (which needs
+    // config-time origin values) and HTTP tracing.
+    let app = build_app(app_state).layer(cors).layer(TraceLayer::new_for_http());
 
     tracing::info!("Server starting on {}", cfg.listen_addr);
 
