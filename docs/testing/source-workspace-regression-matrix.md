@@ -103,6 +103,14 @@
   Covers:
   reports workspace exposes clinic, doctor, country, service-type and non-medical provider reporting through a role-scoped read model, including counts-only mode for non-financial roles, CSV export for permitted sections, provider-quality metrics based on treatment feedback / doctor communication / follow-up completion, organization/service/ambience/value scores, treatment-success and complication rates, written-findings turnaround, response-time KPI signals from appointment communications and concierge-oriented partner load by service portfolio, vendors and request status.
 
+- `reports_workspace_exposes_billing_and_sales_kpi_scorecards`
+  Source:
+  `docs/backlog/03_kpi-catalog_ua.md:49`
+  `docs/backlog/03_kpi-catalog_ua.md:61`
+  `docs/backlog/03_kpi-catalog_ua.md:79`
+  Covers:
+  reports workspace now exposes explicit billing KPI scorecards for executive and billing roles with invoices per 30 days, service-to-invoice timing, on-time-14-day rate, open receivables, dunning share, self-pay mix and cost-passthrough share, while sales/executive users get a separate lead-and-partner KPI scorecard with recent lead volume, qualified/converted counts, lead-to-patient conversion, lead-country spread and new partner clinics per quarter.
+
 - `provider_cost_report_tracks_historical_price_changes`
   Source:
   `docs/requirements/03_product-backlog_ua.md:55`
@@ -138,6 +146,14 @@
   `docs/backlog/02_rbac-matrix_ua.md:12`
   Covers:
   broad management analytics routes stay closed to `teamlead_interpreter`, `interpreter` and `concierge`; their KPI visibility remains limited to role-specific operational workspaces instead of inheriting executive reports, forecasting or risk analysis.
+
+- `operational_roles_can_fetch_their_own_kpi_scorecards`
+  Source:
+  `docs/backlog/03_kpi-catalog_ua.md:27`
+  `docs/backlog/03_kpi-catalog_ua.md:42`
+  `docs/backlog/03_kpi-catalog_ua.md:54`
+  Covers:
+  `patient_manager`, `teamlead_interpreter` / `interpreter` and `concierge` can fetch their own KPI scorecard from a dedicated operational dashboard route with role-scoped payloads, while unrelated roles such as `billing` stay blocked from that endpoint.
 
 - `patient_manager_sop_requires_ceo_approval_and_supports_acknowledgement`
   Source:
@@ -478,6 +494,13 @@
   Covers:
   patient portal can request concierge-style additional services, the request stays patient-bound in `concierge_services`, and responsible patient-facing staff receive operational notifications.
 
+- `patient can request and cancel an additional service`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:394`
+  `docs/backlog/04_implementation-tasks_ua.md:285`
+  Covers:
+  browser-level patient portal can submit a new concierge service request through the self-service form, surface the created request in the same history list and cancel it again while it is still patient-portal owned.
+
 - `patient_can_cancel_own_pending_additional_service_request`
   Source:
   `docs/requirements/03_product-backlog_ua.md:394`
@@ -491,6 +514,14 @@
   `docs/backlog/04_implementation-tasks_ua.md:295`
   Covers:
   patient portal secure chat exposes only allowed agency peers, patient can message the assigned care team and exchange file attachments inside the same conversation.
+
+- `deleting_portal_document_file_does_not_break_patient_manager_chat`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:160`
+  `docs/requirements/03_product-backlog_ua.md:213`
+  `docs/requirements/04_non-functional-requirements_ua.md:84`
+  Covers:
+  deleting a patient-portal document file removes the self-service document access path and revokes the portal share, but patient-to-assigned-manager chat remains available so the patient can report the issue through the normal secure communication channel.
 
 - `patient_message_creates_staff_notifications_and_mark_read_clears_them`
   Source:
@@ -592,6 +623,13 @@
   `docs/backlog/04_implementation-tasks_ua.md:283`
   Covers:
   approved portal appointment request can be converted into a real appointment, and the patient sees the scheduled non-internal visit in the portal workspace.
+
+- `patient can submit an appointment request and see it in portal history`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:203`
+  `docs/backlog/04_implementation-tasks_ua.md:283`
+  Covers:
+  browser-level patient portal can submit a new appointment request with preferred date window and reason, then immediately see the created request and requested status in the same request-history section.
 
 - `patient_timeline_includes_compliance_audit_events`
   Source:

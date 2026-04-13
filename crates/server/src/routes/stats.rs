@@ -21,6 +21,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/stats/overview", get(overview))
         .route("/stats/ceo/dashboard", get(ceo_dashboard))
+        .route("/stats/my-kpis", get(my_kpis))
         .route("/stats/reports/workspace", get(reports_workspace))
         .route("/stats/reports/export", get(reports_export))
         .route("/stats/forecasting", get(forecasting_workspace))
@@ -145,6 +146,14 @@ fn percentage(value: i64, total: i64) -> Option<f64> {
         None
     } else {
         Some(((value as f64 / total as f64) * 100.0 * 10.0).round() / 10.0)
+    }
+}
+
+fn decimal_percentage(value: Decimal, total: Decimal) -> Option<f64> {
+    if total <= Decimal::ZERO {
+        None
+    } else {
+        ((value / total) * Decimal::from(100)).round_dp(1).to_f64()
     }
 }
 
@@ -292,6 +301,48 @@ async fn ceo_dashboard(
     .into_response()
 }
 
+async fn my_kpis(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+) -> axum::response::Response {
+    let user_id = auth.user_id.to_string();
+    let (section, kpi_result) = match auth.role {
+        Role::PatientManager => (
+            "patient_manager",
+            load_patient_manager_kpis(&state).await.map(|rows| {
+                rows.into_iter()
+                    .find(|item| item["user_id"].as_str() == Some(user_id.as_str()))
+            }),
+        ),
+        Role::TeamleadInterpreter | Role::Interpreter => (
+            "interpreter",
+            load_interpreter_kpis(&state).await.map(|rows| {
+                rows.into_iter()
+                    .find(|item| item["user_id"].as_str() == Some(user_id.as_str()))
+            }),
+        ),
+        Role::Concierge => (
+            "concierge",
+            load_concierge_kpis(&state).await.map(|rows| {
+                rows.into_iter()
+                    .find(|item| item["user_id"].as_str() == Some(user_id.as_str()))
+            }),
+        ),
+        _ => return err(StatusCode::FORBIDDEN, "Forbidden"),
+    };
+
+    match kpi_result {
+        Ok(kpi) => Json(json!({ "section": section, "kpi": kpi })).into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, section, user_id = %auth.user_id, "load my kpis");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load operational KPI scorecard",
+            )
+        }
+    }
+}
+
 async fn reports_workspace(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -327,6 +378,7 @@ async fn reports_workspace(
         role,
         Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing
     );
+    let include_billing_kpis = matches!(role, Role::Ceo | Role::CeoAssistant | Role::Billing);
     let include_doctors = matches!(
         role,
         Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing
@@ -335,6 +387,7 @@ async fn reports_workspace(
         role,
         Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing | Role::Sales
     );
+    let include_sales_kpis = matches!(role, Role::Ceo | Role::CeoAssistant | Role::Sales);
     let can_see_financial = role.can_see_financial_data();
 
     let summary = match load_reports_summary(&state, can_see_financial).await {
@@ -418,6 +471,20 @@ async fn reports_workspace(
     } else {
         Vec::new()
     };
+    let billing_kpis = if include_billing_kpis {
+        match load_billing_kpis(&state).await {
+            Ok(value) => Some(value),
+            Err(e) => {
+                tracing::error!(error = %e, "load billing kpis");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to load reports workspace",
+                );
+            }
+        }
+    } else {
+        None
+    };
     let doctors = if include_doctors {
         match load_report_doctors(&state, can_see_financial, None).await {
             Ok(value) => value,
@@ -446,6 +513,20 @@ async fn reports_workspace(
     } else {
         Vec::new()
     };
+    let sales_kpis = if include_sales_kpis {
+        match load_sales_kpis(&state).await {
+            Ok(value) => Some(value),
+            Err(e) => {
+                tracing::error!(error = %e, "load sales kpis");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to load reports workspace",
+                );
+            }
+        }
+    } else {
+        None
+    };
 
     let mut allowed_sections = Vec::new();
     if include_clinics {
@@ -463,11 +544,17 @@ async fn reports_workspace(
     if include_provider_costs {
         allowed_sections.push("provider_costs");
     }
+    if include_billing_kpis {
+        allowed_sections.push("billing_kpis");
+    }
     if include_doctors {
         allowed_sections.push("doctors");
     }
     if include_non_medical_providers {
         allowed_sections.push("non_medical_providers");
+    }
+    if include_sales_kpis {
+        allowed_sections.push("sales_kpis");
     }
 
     Json(json!({
@@ -478,8 +565,10 @@ async fn reports_workspace(
         "service_types": service_types,
         "medical_providers": medical_providers,
         "provider_costs": provider_costs,
+        "billing_kpis": billing_kpis,
         "doctors": doctors,
         "non_medical_providers": non_medical_providers,
+        "sales_kpis": sales_kpis,
         "financial_metrics_visible": can_see_financial,
     }))
     .into_response()
@@ -1512,6 +1601,216 @@ async fn load_concierge_kpis(state: &AppState) -> Result<Vec<Value>, sqlx::Error
             })
         })
         .collect())
+}
+
+async fn load_billing_kpis(state: &AppState) -> Result<Value, sqlx::Error> {
+    let row = sqlx::query(
+        r#"WITH invoice_scope AS (
+                SELECT
+                    i.id,
+                    i.order_id,
+                    i.patient_id,
+                    i.status,
+                    i.issued_at,
+                    i.created_at,
+                    i.total_gross,
+                    i.paid_amount,
+                    i.paid_at
+                FROM invoices i
+                WHERE i.status <> 'cancelled'
+           ),
+           service_anchor AS (
+                SELECT
+                    i.id AS invoice_id,
+                    MIN(COALESCE(ol.approved_at, ol.delivered_at, ol.created_at)) AS first_service_at
+                FROM invoice_scope i
+                LEFT JOIN order_leistungen ol
+                    ON ol.order_id = i.order_id
+                   AND ol.status IN ('approved', 'delivered', 'invoiced')
+                GROUP BY i.id
+           ),
+           delivered_mix AS (
+                SELECT
+                    COALESCE(
+                        SUM(ol.quantity * ol.unit_price * (1 + (ol.vat_rate / 100))),
+                        0
+                    ) AS delivered_gross,
+                    COALESCE(
+                        SUM(
+                            CASE
+                                WHEN ol.is_cost_passthrough
+                                    THEN ol.quantity * ol.unit_price * (1 + (ol.vat_rate / 100))
+                                ELSE 0
+                            END
+                        ),
+                        0
+                    ) AS cost_passthrough_gross
+                FROM order_leistungen ol
+                WHERE ol.status IN ('approved', 'delivered', 'invoiced')
+           ),
+           invoice_patient_mix AS (
+                SELECT
+                    COALESCE(
+                        SUM(
+                            CASE
+                                WHEN p.insurance_type = 'self_pay' THEN i.total_gross
+                                ELSE 0
+                            END
+                        ),
+                        0
+                    ) AS self_pay_gross,
+                    COALESCE(SUM(i.total_gross), 0) AS invoice_gross_total
+                FROM invoice_scope i
+                JOIN patients p ON p.id = i.patient_id
+           )
+           SELECT
+                COUNT(*) FILTER (WHERE i.created_at >= now() - interval '30 days')::bigint AS invoices_30d,
+                COUNT(*)::bigint AS tracked_invoice_count,
+                COUNT(*) FILTER (WHERE i.status = 'overdue')::bigint AS overdue_invoice_count,
+                ROUND(AVG(i.total_gross)::numeric, 2) AS avg_invoice_gross,
+                ROUND(
+                    AVG(EXTRACT(EPOCH FROM (i.issued_at - sa.first_service_at)) / 86400.0)::numeric,
+                    2
+                ) AS avg_service_to_invoice_days,
+                ROUND(
+                    AVG(
+                        CASE
+                            WHEN i.paid_at IS NOT NULL
+                                 AND i.paid_at <= i.issued_at + interval '14 days'
+                                THEN 100
+                            ELSE 0
+                        END
+                    )::numeric,
+                    2
+                ) AS paid_within_14d_rate_pct,
+                COALESCE(
+                    SUM(
+                        CASE
+                            WHEN i.status IN ('sent', 'partially_paid', 'overdue')
+                                THEN i.total_gross - i.paid_amount
+                            ELSE 0
+                        END
+                    ),
+                    0
+                ) AS outstanding_receivables_total,
+                dm.delivered_gross,
+                dm.cost_passthrough_gross,
+                ipm.self_pay_gross,
+                ipm.invoice_gross_total
+           FROM invoice_scope i
+           LEFT JOIN service_anchor sa ON sa.invoice_id = i.id
+           CROSS JOIN delivered_mix dm
+           CROSS JOIN invoice_patient_mix ipm"#,
+    )
+    .fetch_one(&state.db)
+    .await?;
+
+    let tracked_invoice_count = row.try_get::<i64, _>("tracked_invoice_count").unwrap_or(0);
+    let overdue_invoice_count = row.try_get::<i64, _>("overdue_invoice_count").unwrap_or(0);
+    let delivered_gross = row
+        .try_get::<Decimal, _>("delivered_gross")
+        .unwrap_or(Decimal::ZERO);
+    let cost_passthrough_gross = row
+        .try_get::<Decimal, _>("cost_passthrough_gross")
+        .unwrap_or(Decimal::ZERO);
+    let self_pay_gross = row
+        .try_get::<Decimal, _>("self_pay_gross")
+        .unwrap_or(Decimal::ZERO);
+    let invoice_gross_total = row
+        .try_get::<Decimal, _>("invoice_gross_total")
+        .unwrap_or(Decimal::ZERO);
+
+    Ok(json!({
+        "invoices_30d": row.try_get::<i64, _>("invoices_30d").unwrap_or(0),
+        "tracked_invoice_count": tracked_invoice_count,
+        "overdue_invoice_count": overdue_invoice_count,
+        "dunning_rate_pct": percentage(overdue_invoice_count, tracked_invoice_count),
+        "avg_invoice_gross": optional_decimal_to_f64(
+            row.try_get::<Option<Decimal>, _>("avg_invoice_gross").unwrap_or_default()
+        ),
+        "avg_service_to_invoice_days": optional_decimal_to_f64(
+            row.try_get::<Option<Decimal>, _>("avg_service_to_invoice_days").unwrap_or_default()
+        ),
+        "paid_within_14d_rate_pct": optional_decimal_to_f64(
+            row.try_get::<Option<Decimal>, _>("paid_within_14d_rate_pct").unwrap_or_default()
+        ),
+        "outstanding_receivables_total": decimal_to_string(
+            row.try_get::<Decimal, _>("outstanding_receivables_total").unwrap_or(Decimal::ZERO)
+        ),
+        "self_pay_share_pct": decimal_percentage(self_pay_gross, invoice_gross_total),
+        "cost_passthrough_share_pct": decimal_percentage(cost_passthrough_gross, delivered_gross),
+    }))
+}
+
+async fn load_sales_kpis(state: &AppState) -> Result<Value, sqlx::Error> {
+    let summary = sqlx::query(
+        r#"SELECT
+                (SELECT COUNT(*)::bigint
+                 FROM leads
+                 WHERE created_at >= now() - interval '30 days') AS new_leads_30d,
+                (SELECT COUNT(*)::bigint
+                 FROM leads
+                 WHERE qualification_status = 'qualified'
+                   AND updated_at >= now() - interval '30 days') AS qualified_leads_30d,
+                (SELECT COUNT(*)::bigint
+                 FROM leads
+                 WHERE qualification_status = 'converted'
+                   AND updated_at >= now() - interval '30 days') AS converted_leads_30d,
+                (SELECT COUNT(*)::bigint
+                 FROM leads
+                 WHERE created_at >= now() - interval '90 days') AS leads_90d,
+                (SELECT COUNT(*)::bigint
+                 FROM leads
+                 WHERE qualification_status = 'converted'
+                   AND updated_at >= now() - interval '90 days') AS converted_leads_90d,
+                (SELECT COUNT(DISTINCT COALESCE(NULLIF(BTRIM(country), ''), 'Unknown'))::bigint
+                 FROM leads
+                 WHERE created_at >= now() - interval '90 days') AS active_lead_country_count,
+                (SELECT COUNT(*)::bigint
+                 FROM providers
+                 WHERE provider_type = 'medical'
+                   AND created_at >= now() - interval '90 days') AS new_partner_clinics_90d"#,
+    )
+    .fetch_one(&state.db)
+    .await?;
+
+    let top_countries = sqlx::query(
+        r#"SELECT
+                COALESCE(NULLIF(BTRIM(country), ''), 'Unknown') AS country,
+                COUNT(*)::bigint AS lead_count
+           FROM leads
+           WHERE created_at >= now() - interval '90 days'
+           GROUP BY 1
+           ORDER BY 2 DESC, 1
+           LIMIT 5"#,
+    )
+    .fetch_all(&state.db)
+    .await?;
+
+    let leads_90d = summary.try_get::<i64, _>("leads_90d").unwrap_or(0);
+    let converted_leads_90d = summary
+        .try_get::<i64, _>("converted_leads_90d")
+        .unwrap_or(0);
+
+    Ok(json!({
+        "new_leads_30d": summary.try_get::<i64, _>("new_leads_30d").unwrap_or(0),
+        "qualified_leads_30d": summary.try_get::<i64, _>("qualified_leads_30d").unwrap_or(0),
+        "converted_leads_30d": summary.try_get::<i64, _>("converted_leads_30d").unwrap_or(0),
+        "lead_to_patient_conversion_rate_pct": percentage(converted_leads_90d, leads_90d),
+        "active_lead_country_count": summary
+            .try_get::<i64, _>("active_lead_country_count")
+            .unwrap_or(0),
+        "new_partner_clinics_90d": summary
+            .try_get::<i64, _>("new_partner_clinics_90d")
+            .unwrap_or(0),
+        "top_countries": top_countries
+            .into_iter()
+            .map(|row| json!({
+                "country": row.try_get::<String, _>("country").unwrap_or_default(),
+                "lead_count": row.try_get::<i64, _>("lead_count").unwrap_or(0),
+            }))
+            .collect::<Vec<_>>(),
+    }))
 }
 
 async fn load_provider_kpis(state: &AppState) -> Result<Vec<Value>, sqlx::Error> {

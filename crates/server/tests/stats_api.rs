@@ -337,6 +337,77 @@ async fn seed_invoice(
         .unwrap();
 }
 
+#[allow(clippy::too_many_arguments)]
+async fn seed_invoice_at(
+    pool: &PgPool,
+    order_id: Uuid,
+    patient_id: Uuid,
+    created_by: Uuid,
+    tag: &str,
+    status: &str,
+    total_gross: i32,
+    paid_amount: i32,
+    issued_at_sql: &str,
+    due_date_sql: &str,
+    paid_at_sql: &str,
+) {
+    let sql = format!(
+        r#"INSERT INTO invoices (
+                order_id, patient_id, invoice_number, invoice_type, status,
+                issued_at, due_date, total_net, total_vat, total_gross, paid_amount, paid_at, created_by, created_at
+           ) VALUES (
+                $1, $2, $3, 'final', $4,
+                {issued_at_sql}, {due_date_sql}, $5, $6, $7, $8, {paid_at_sql}, $9, {issued_at_sql}
+           )"#
+    );
+
+    sqlx::query(&sql)
+        .bind(order_id)
+        .bind(patient_id)
+        .bind(format!("INV-{tag}-{}", Uuid::new_v4().simple()))
+        .bind(status)
+        .bind(total_gross - (total_gross * 19 / 119))
+        .bind(total_gross * 19 / 119)
+        .bind(total_gross)
+        .bind(paid_amount)
+        .bind(created_by)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+async fn seed_lead(
+    pool: &PgPool,
+    created_by: Uuid,
+    tag: &str,
+    country: &str,
+    qualification_status: &str,
+    created_at_sql: &str,
+    updated_at_sql: &str,
+) {
+    let sql = format!(
+        r#"INSERT INTO leads (
+                first_name, last_name, email, phone, source, country,
+                compliance_status, qualification_status, created_by, created_at, updated_at
+           ) VALUES (
+                $1, $2, $3, $4, 'web', $5,
+                'signed', $6, $7, {created_at_sql}, {updated_at_sql}
+           )"#
+    );
+
+    sqlx::query(&sql)
+        .bind(format!("Lead {tag}"))
+        .bind(country)
+        .bind(format!("{tag}-{country}@example.com"))
+        .bind(format!("+49-{tag}"))
+        .bind(country)
+        .bind(qualification_status)
+        .bind(created_by)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
 async fn seed_quote(
     pool: &PgPool,
     order_id: Uuid,
@@ -1261,6 +1332,166 @@ async fn operational_roles_without_analytics_scope_are_forbidden_from_stats_work
 }
 
 #[tokio::test]
+async fn operational_roles_can_fetch_their_own_kpi_scorecards() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("my-kpis");
+    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    let teamlead_id = seed_user(&pool, &format!("{tag}-teamlead"), "teamlead_interpreter").await;
+    let concierge_id = seed_user(&pool, &format!("{tag}-concierge"), "concierge").await;
+    let billing_id = seed_user(&pool, &format!("{tag}-billing"), "billing").await;
+
+    let patient_id = seed_patient(&pool, admin_id, &tag, "UA").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag, "active").await;
+    seed_task(
+        &pool,
+        pm_id,
+        admin_id,
+        patient_id,
+        order_id,
+        &format!("PM task {tag}"),
+        "now() + interval '1 day'",
+    )
+    .await;
+    seed_workflow_item(
+        &pool,
+        patient_id,
+        order_id,
+        pm_id,
+        admin_id,
+        &tag,
+        "pm-item-open",
+        false,
+    )
+    .await;
+    seed_workflow_item(
+        &pool,
+        patient_id,
+        order_id,
+        pm_id,
+        admin_id,
+        &tag,
+        "pm-item-done",
+        true,
+    )
+    .await;
+
+    let appointment_id = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        None,
+        order_id,
+        teamlead_id,
+        pm_id,
+        admin_id,
+        &format!("{tag}-teamlead"),
+    )
+    .await;
+    seed_interpreter_report(&pool, appointment_id, teamlead_id).await;
+
+    seed_concierge_service(
+        &pool,
+        patient_id,
+        concierge_id,
+        admin_id,
+        &format!("{tag}-concierge-active"),
+        "planned",
+        "draft",
+        "patient_portal",
+        false,
+    )
+    .await;
+    seed_concierge_service(
+        &pool,
+        patient_id,
+        concierge_id,
+        admin_id,
+        &format!("{tag}-concierge-done"),
+        "completed",
+        "ready",
+        "staff",
+        true,
+    )
+    .await;
+
+    seed_feedback(
+        &pool,
+        patient_id,
+        provider_id,
+        pm_id,
+        teamlead_id,
+        concierge_id,
+        admin_id,
+    )
+    .await;
+
+    let (pm_status, pm_body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/stats/my-kpis",
+        &auth_header_for(pm_id, "patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(pm_status, StatusCode::OK);
+    assert_eq!(pm_body["section"], "patient_manager");
+    assert_eq!(pm_body["kpi"]["user_id"], pm_id.to_string());
+    assert_eq!(pm_body["kpi"]["active_patients"], 1);
+    assert_eq!(pm_body["kpi"]["active_orders"], 1);
+    assert_eq!(pm_body["kpi"]["open_tasks"], 1);
+    assert_eq!(pm_body["kpi"]["checklist_total"], 2);
+    assert_eq!(pm_body["kpi"]["checklist_completed"], 1);
+    assert_eq!(pm_body["kpi"]["checklist_completion_rate_pct"], 50.0);
+
+    let (teamlead_status, teamlead_body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/stats/my-kpis",
+        &auth_header_for(teamlead_id, "teamlead_interpreter"),
+        None,
+    )
+    .await;
+    assert_eq!(teamlead_status, StatusCode::OK);
+    assert_eq!(teamlead_body["section"], "interpreter");
+    assert_eq!(teamlead_body["kpi"]["user_id"], teamlead_id.to_string());
+    assert_eq!(teamlead_body["kpi"]["approved_hours_30d"], "2");
+    assert_eq!(teamlead_body["kpi"]["booked_hours_30d"], "2");
+    assert_eq!(teamlead_body["kpi"]["completed_appointments_30d"], 1);
+    assert_eq!(teamlead_body["kpi"]["utilization_rate_pct"], 100.0);
+
+    let (concierge_status, concierge_body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/stats/my-kpis",
+        &auth_header_for(concierge_id, "concierge"),
+        None,
+    )
+    .await;
+    assert_eq!(concierge_status, StatusCode::OK);
+    assert_eq!(concierge_body["section"], "concierge");
+    assert_eq!(concierge_body["kpi"]["user_id"], concierge_id.to_string());
+    assert_eq!(concierge_body["kpi"]["active_services"], 1);
+    assert_eq!(concierge_body["kpi"]["completed_services_30d"], 1);
+    assert_eq!(concierge_body["kpi"]["ready_for_billing"], 1);
+    assert_eq!(concierge_body["kpi"]["portal_requests_30d"], 1);
+
+    let (billing_status, _) = json_request(
+        &app,
+        "GET",
+        "/api/v1/stats/my-kpis",
+        &auth_header_for(billing_id, "billing"),
+        None,
+    )
+    .await;
+    assert_eq!(billing_status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
 async fn reports_workspace_returns_role_scoped_sections() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;
@@ -1703,6 +1934,252 @@ async fn reports_workspace_returns_role_scoped_sections() {
     assert!(non_medical_export_body.contains("Airport transfer"));
     assert!(non_medical_export_body.contains("Elite Drives"));
     assert!(non_medical_export_body.contains("concierge_score"));
+}
+
+#[tokio::test]
+async fn reports_workspace_exposes_billing_and_sales_kpi_scorecards() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("reports-kpi-scorecards");
+    let billing_id = seed_user(&pool, &format!("{tag}-billing"), "billing").await;
+    let sales_id = seed_user(&pool, &format!("{tag}-sales"), "sales").await;
+    let ceo_assistant_id = seed_user(&pool, &format!("{tag}-assistant"), "ceo_assistant").await;
+
+    let patient_self = seed_patient(&pool, admin_id, &format!("{tag}-self"), "UA").await;
+    let patient_insured = seed_patient(&pool, admin_id, &format!("{tag}-insured"), "DE").await;
+    sqlx::query(
+        r#"UPDATE patients
+           SET insurance_type = CASE
+                WHEN id = $1 THEN 'self_pay'
+                WHEN id = $2 THEN 'public'
+                ELSE insurance_type
+           END
+           WHERE id IN ($1, $2)"#,
+    )
+    .bind(patient_self)
+    .bind(patient_insured)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let provider_id = seed_provider(&pool, &format!("{tag}-clinic")).await;
+    let order_self = seed_order(
+        &pool,
+        patient_self,
+        admin_id,
+        &format!("{tag}-self"),
+        "active",
+    )
+    .await;
+    let order_insured = seed_order(
+        &pool,
+        patient_insured,
+        admin_id,
+        &format!("{tag}-insured"),
+        "active",
+    )
+    .await;
+
+    seed_order_service_at(&pool, order_self, provider_id, "Surgery", 1000, 3).await;
+    seed_order_service_at(&pool, order_insured, provider_id, "Procedure", 500, 5).await;
+    sqlx::query(
+        r#"INSERT INTO order_leistungen (
+                order_id, description, quantity, unit_price, vat_rate, provider_id,
+                is_cost_passthrough, status, created_at, approved_at
+           ) VALUES (
+                $1, 'Medication pass-through', 1, 200, 19, $2,
+                true, 'approved', CURRENT_TIMESTAMP - interval '2 days',
+                CURRENT_TIMESTAMP - interval '2 days'
+           )"#,
+    )
+    .bind(order_insured)
+    .bind(provider_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    seed_invoice_at(
+        &pool,
+        order_self,
+        patient_self,
+        admin_id,
+        &format!("{tag}-paid"),
+        "paid",
+        1190,
+        1190,
+        "now() - interval '10 days'",
+        "CURRENT_DATE + 4",
+        "now() - interval '6 days'",
+    )
+    .await;
+    seed_invoice_at(
+        &pool,
+        order_insured,
+        patient_insured,
+        admin_id,
+        &format!("{tag}-overdue"),
+        "overdue",
+        595,
+        0,
+        "now() - interval '18 days'",
+        "CURRENT_DATE - 4",
+        "NULL",
+    )
+    .await;
+
+    seed_lead(
+        &pool,
+        admin_id,
+        &format!("{tag}-ua-new"),
+        "UA",
+        "new",
+        "now() - interval '12 days'",
+        "now() - interval '12 days'",
+    )
+    .await;
+    seed_lead(
+        &pool,
+        admin_id,
+        &format!("{tag}-de-qualified"),
+        "DE",
+        "qualified",
+        "now() - interval '9 days'",
+        "now() - interval '3 days'",
+    )
+    .await;
+    seed_lead(
+        &pool,
+        admin_id,
+        &format!("{tag}-ua-converted"),
+        "UA",
+        "converted",
+        "now() - interval '7 days'",
+        "now() - interval '2 days'",
+    )
+    .await;
+
+    let (billing_status, billing_body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/stats/reports/workspace",
+        &auth_header_for(billing_id, "billing"),
+        None,
+    )
+    .await;
+    assert_eq!(billing_status, StatusCode::OK);
+    assert!(
+        billing_body["allowed_sections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == "billing_kpis")
+    );
+    assert!(
+        billing_body["allowed_sections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|value| value != "sales_kpis")
+    );
+    let billing_kpis = &billing_body["billing_kpis"];
+    assert_eq!(billing_kpis["invoices_30d"], 2);
+    assert_eq!(billing_kpis["tracked_invoice_count"], 2);
+    assert_eq!(billing_kpis["overdue_invoice_count"], 1);
+    assert_eq!(billing_kpis["outstanding_receivables_total"], "595");
+    assert!(
+        (billing_kpis["avg_invoice_gross"]
+            .as_f64()
+            .unwrap_or_default()
+            - 892.5)
+            .abs()
+            < 0.1
+    );
+    assert!(
+        (billing_kpis["avg_service_to_invoice_days"]
+            .as_f64()
+            .unwrap_or_default()
+            - 4.0)
+            .abs()
+            < 0.1
+    );
+    assert_eq!(billing_kpis["paid_within_14d_rate_pct"], 50.0);
+    assert_eq!(billing_kpis["dunning_rate_pct"], 50.0);
+    assert!(
+        (billing_kpis["self_pay_share_pct"]
+            .as_f64()
+            .unwrap_or_default()
+            - 66.7)
+            .abs()
+            < 0.1
+    );
+    assert!(
+        (billing_kpis["cost_passthrough_share_pct"]
+            .as_f64()
+            .unwrap_or_default()
+            - 11.8)
+            .abs()
+            < 0.1
+    );
+
+    let (sales_status, sales_body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/stats/reports/workspace",
+        &auth_header_for(sales_id, "sales"),
+        None,
+    )
+    .await;
+    assert_eq!(sales_status, StatusCode::OK);
+    assert!(
+        sales_body["allowed_sections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == "sales_kpis")
+    );
+    assert!(
+        sales_body["allowed_sections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|value| value != "billing_kpis")
+    );
+    let sales_kpis = &sales_body["sales_kpis"];
+    assert_eq!(sales_kpis["new_leads_30d"], 3);
+    assert_eq!(sales_kpis["qualified_leads_30d"], 1);
+    assert_eq!(sales_kpis["converted_leads_30d"], 1);
+    assert_eq!(sales_kpis["active_lead_country_count"], 2);
+    assert_eq!(sales_kpis["new_partner_clinics_90d"], 1);
+    assert_eq!(sales_kpis["lead_to_patient_conversion_rate_pct"], 33.3);
+    let top_countries = sales_kpis["top_countries"].as_array().unwrap();
+    assert_eq!(top_countries[0]["country"], "UA");
+    assert_eq!(top_countries[0]["lead_count"], 2);
+
+    let (assistant_status, assistant_body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/stats/reports/workspace",
+        &auth_header_for(ceo_assistant_id, "ceo_assistant"),
+        None,
+    )
+    .await;
+    assert_eq!(assistant_status, StatusCode::OK);
+    assert!(
+        assistant_body["allowed_sections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == "billing_kpis")
+    );
+    assert!(
+        assistant_body["allowed_sections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == "sales_kpis")
+    );
 }
 
 #[tokio::test]

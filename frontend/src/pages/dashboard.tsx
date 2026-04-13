@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useMemo, useState } from "react";
+import { startTransition, useEffect, useMemo, useState, type ElementType } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   ArrowRight,
@@ -167,6 +167,10 @@ type ForecastingPayload = {
   };
   allowed_sections: string[];
 };
+type MyKpiPayload =
+  | { section: "patient_manager"; kpi: CeoPatientManagerKpi | null }
+  | { section: "interpreter"; kpi: CeoInterpreterKpi | null }
+  | { section: "concierge"; kpi: CeoConciergeKpi | null };
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -174,6 +178,21 @@ function card(extra?: string) {
   return cn(
     "rounded-[1.75rem] border border-border/70 bg-card shadow-[0_20px_60px_rgba(15,23,42,0.05)]",
     extra
+  );
+}
+
+function metricCard(label: string, value: string | number, icon: ElementType) {
+  const Icon = icon;
+  return (
+    <article className="rounded-[1.25rem] border border-slate-200 bg-white px-4 py-4 shadow-sm">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">{label}</p>
+        <span className="rounded-2xl bg-slate-100 p-2 text-slate-700">
+          <Icon className="size-4" />
+        </span>
+      </div>
+      <p className="mt-4 text-2xl font-semibold tracking-tight text-slate-950">{value}</p>
+    </article>
   );
 }
 
@@ -297,6 +316,7 @@ function StaffDashboardPage() {
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [ceoDashboard, setCeoDashboard] = useState<CeoDashboardPayload | null>(null);
+  const [myKpis, setMyKpis] = useState<MyKpiPayload | null>(null);
   const [forecasting, setForecasting] = useState<ForecastingPayload | null>(null);
   const [riskAnalysis, setRiskAnalysis] = useState<RiskAnalysisPayload | null>(null);
   const [feedbackSummary, setFeedbackSummary] = useState<PortalFeedbackSummary | null>(null);
@@ -307,6 +327,11 @@ function StaffDashboardPage() {
   const canOrders = executive || role === "patient_manager" || role === "billing";
   const canUpcoming = executive || role === "patient_manager" || role === "teamlead_interpreter";
   const canRiskAnalysis = executive || role === "patient_manager" || role === "billing";
+  const canMyKpis =
+    role === "patient_manager" ||
+    role === "teamlead_interpreter" ||
+    role === "interpreter" ||
+    role === "concierge";
   const canTasks =
     role === "ceo" ||
     role === "patient_manager" ||
@@ -325,7 +350,7 @@ function StaffDashboardPage() {
       } else {
         setRefreshing(true);
       }
-      const [ov, ls, mo, op, up, ta, no, executiveDashboard, executiveForecasting, riskSignals, executiveFeedback] = await Promise.all([
+      const [ov, ls, mo, op, up, ta, no, executiveDashboard, ownKpis, executiveForecasting, riskSignals, executiveFeedback] = await Promise.all([
         canOverview ? apiFetch<OverviewStats>("/stats/overview").catch(() => null) : Promise.resolve(null),
         canLeads ? apiFetch<LeadsStats>("/stats/leads").catch(() => null) : Promise.resolve(null),
         canLeads ? apiFetch<MonthlyEntry[]>("/stats/leads/monthly").catch(() => []) : Promise.resolve([]),
@@ -334,6 +359,7 @@ function StaffDashboardPage() {
         canTasks ? apiFetch<TaskItem[]>("/tasks?mine_only=true").catch(() => []) : Promise.resolve([]),
         apiFetch<NotificationItem[]>("/notifications").catch(() => []),
         executive ? apiFetch<CeoDashboardPayload>("/stats/ceo/dashboard").catch(() => null) : Promise.resolve(null),
+        canMyKpis ? apiFetch<MyKpiPayload>("/stats/my-kpis").catch(() => null) : Promise.resolve(null),
         executive ? apiFetch<ForecastingPayload>("/stats/forecasting").catch(() => null) : Promise.resolve(null),
         canRiskAnalysis ? apiFetch<RiskAnalysisPayload>("/stats/risk-analysis").catch(() => null) : Promise.resolve(null),
         executive ? apiFetch<PortalFeedbackSummary>("/feedback/summary").catch(() => null) : Promise.resolve(null),
@@ -348,6 +374,7 @@ function StaffDashboardPage() {
         setTasks(ta);
         setNotifications(no);
         setCeoDashboard(executiveDashboard);
+        setMyKpis(ownKpis);
         setForecasting(executiveForecasting);
         setRiskAnalysis(riskSignals);
         setFeedbackSummary(executiveFeedback);
@@ -360,7 +387,7 @@ function StaffDashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [canLeads, canOrders, canOverview, canRiskAnalysis, canTasks, canUpcoming, executive, loading, user, version]);
+  }, [canLeads, canMyKpis, canOrders, canOverview, canRiskAnalysis, canTasks, canUpcoming, executive, loading, user, version]);
 
   const activeTasks = useMemo(
     () => tasks.filter((item) => item.status !== "completed" && item.status !== "cancelled"),
@@ -536,6 +563,69 @@ function StaffDashboardPage() {
               <p className="mt-4 text-3xl font-semibold tracking-tight text-slate-950">{item.value}</p>
             </Link>
           ))}
+        </section>
+      ) : null}
+
+      {canMyKpis && myKpis?.kpi ? (
+        <section className={card("p-6")}>
+          {myKpis.section === "patient_manager" ? (
+            <>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-base font-semibold text-slate-950">My patient-manager KPI scorecard</h2>
+                  <p className="mt-1 text-sm text-slate-500">Assigned patient load, open operational pressure and checklist quality in one view.</p>
+                </div>
+                <Badge className="bg-sky-100 text-sky-700 hover:bg-sky-100">{myKpis.kpi.active_patients} patients</Badge>
+              </div>
+              <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+                {metricCard("Active patients", myKpis.kpi.active_patients, Users)}
+                {metricCard("Active orders", myKpis.kpi.active_orders, FileText)}
+                {metricCard("Open tasks", myKpis.kpi.open_tasks, Bell)}
+                {metricCard("Overdue tasks", myKpis.kpi.overdue_tasks, RefreshCw)}
+                {metricCard("Checklist completion", formatPercent(myKpis.kpi.checklist_completion_rate_pct), TrendingUp)}
+                {metricCard("Feedback", formatRating(myKpis.kpi.avg_feedback_score), ArrowRight)}
+              </div>
+            </>
+          ) : null}
+
+          {myKpis.section === "interpreter" ? (
+            <>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-base font-semibold text-slate-950">My interpreter KPI scorecard</h2>
+                  <p className="mt-1 text-sm text-slate-500">Booked versus approved hours, current load and patient feedback for your own assignments.</p>
+                </div>
+                <Badge className="bg-violet-100 text-violet-700 hover:bg-violet-100">{formatPercent(myKpis.kpi.utilization_rate_pct)}</Badge>
+              </div>
+              <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+                {metricCard("Approved hours / 30d", formatCompactNumber(myKpis.kpi.approved_hours_30d, "h"), CalendarDays)}
+                {metricCard("Booked hours / 30d", formatCompactNumber(myKpis.kpi.booked_hours_30d, "h"), CalendarDays)}
+                {metricCard("Upcoming / 30d", formatCompactNumber(myKpis.kpi.upcoming_hours_30d, "h"), TrendingUp)}
+                {metricCard("Completed appointments", myKpis.kpi.completed_appointments_30d, BriefcaseMedical)}
+                {metricCard("Utilization", formatPercent(myKpis.kpi.utilization_rate_pct), RefreshCw)}
+                {metricCard("Feedback", formatRating(myKpis.kpi.avg_feedback_score), ArrowRight)}
+              </div>
+            </>
+          ) : null}
+
+          {myKpis.section === "concierge" ? (
+            <>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-base font-semibold text-slate-950">My concierge KPI scorecard</h2>
+                  <p className="mt-1 text-sm text-slate-500">Service execution load, billing handoff readiness and patient-portal demand for your queue.</p>
+                </div>
+                <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100">{myKpis.kpi.active_services} active</Badge>
+              </div>
+              <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+                {metricCard("Active services", myKpis.kpi.active_services, BriefcaseMedical)}
+                {metricCard("Completed / 30d", myKpis.kpi.completed_services_30d, CalendarDays)}
+                {metricCard("Ready for billing", myKpis.kpi.ready_for_billing, FileText)}
+                {metricCard("Portal requests / 30d", myKpis.kpi.portal_requests_30d, UserPlus)}
+                {metricCard("Feedback", formatRating(myKpis.kpi.avg_feedback_score), ArrowRight)}
+              </div>
+            </>
+          ) : null}
         </section>
       ) : null}
 

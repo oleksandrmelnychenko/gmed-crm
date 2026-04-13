@@ -176,8 +176,29 @@ type ReportsWorkspacePayload = {
   service_types: ServiceTypeReportRow[];
   medical_providers: MedicalProviderReportRow[];
   provider_costs: ProviderCostRow[];
+  billing_kpis?: {
+    invoices_30d: number;
+    tracked_invoice_count: number;
+    overdue_invoice_count: number;
+    dunning_rate_pct?: number | null;
+    avg_invoice_gross?: number | null;
+    avg_service_to_invoice_days?: number | null;
+    paid_within_14d_rate_pct?: number | null;
+    outstanding_receivables_total?: string | null;
+    self_pay_share_pct?: number | null;
+    cost_passthrough_share_pct?: number | null;
+  } | null;
   doctors: DoctorReportRow[];
   non_medical_providers: NonMedicalProviderReportRow[];
+  sales_kpis?: {
+    new_leads_30d: number;
+    qualified_leads_30d: number;
+    converted_leads_30d: number;
+    lead_to_patient_conversion_rate_pct?: number | null;
+    active_lead_country_count: number;
+    new_partner_clinics_90d: number;
+    top_countries: Array<{ country: string; lead_count: number }>;
+  } | null;
   financial_metrics_visible: boolean;
 };
 
@@ -306,6 +327,11 @@ function formatPercent(value?: number | null) {
 function formatHours(value?: number | null) {
   if (typeof value !== "number" || Number.isNaN(value)) return "No responses";
   return `${value.toFixed(1)} h`;
+}
+
+function formatDays(value?: number | null) {
+  if (typeof value !== "number" || Number.isNaN(value)) return "No baseline";
+  return `${value.toFixed(1)} d`;
 }
 
 function formatChange(value?: number | null) {
@@ -519,6 +545,112 @@ export function ReportsPage() {
               BarChart3,
             )}
           </section>
+
+          {allowedSections.has("billing_kpis") && data.billing_kpis ? (
+            <section className={card("p-6")}>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-base font-semibold text-slate-950">Billing KPI scorecard</h2>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Invoice throughput, collection discipline and payer mix from the current billing model.
+                  </p>
+                </div>
+                <Badge className="bg-slate-100 text-slate-700 hover:bg-slate-100">
+                  {data.billing_kpis.tracked_invoice_count} tracked invoices
+                </Badge>
+              </div>
+              <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {metricCard("Invoices / 30d", data.billing_kpis.invoices_30d, Wallet)}
+                {metricCard(
+                  "Open receivables",
+                  formatMoneyMetric(data.billing_kpis.outstanding_receivables_total),
+                  Wallet,
+                )}
+                {metricCard(
+                  "Paid within 14d",
+                  formatPercent(data.billing_kpis.paid_within_14d_rate_pct),
+                  Activity,
+                )}
+                {metricCard(
+                  "Dunning share",
+                  formatPercent(data.billing_kpis.dunning_rate_pct),
+                  BarChart3,
+                )}
+                {metricCard(
+                  "Avg service -> invoice",
+                  formatDays(data.billing_kpis.avg_service_to_invoice_days),
+                  CalendarDays,
+                )}
+                {metricCard(
+                  "Self-pay share",
+                  formatPercent(data.billing_kpis.self_pay_share_pct),
+                  Globe2,
+                )}
+              </div>
+              <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                <article className="rounded-[1.25rem] border border-slate-200 bg-slate-50 px-4 py-4">
+                  <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Average invoice gross</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-950">{formatMoneyMetric(data.billing_kpis.avg_invoice_gross)}</p>
+                </article>
+                <article className="rounded-[1.25rem] border border-slate-200 bg-slate-50 px-4 py-4">
+                  <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Overdue invoices</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-950">{data.billing_kpis.overdue_invoice_count}</p>
+                </article>
+                <article className="rounded-[1.25rem] border border-slate-200 bg-slate-50 px-4 py-4">
+                  <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Cost passthrough share</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-950">{formatPercent(data.billing_kpis.cost_passthrough_share_pct)}</p>
+                </article>
+              </div>
+            </section>
+          ) : null}
+
+          {allowedSections.has("sales_kpis") && data.sales_kpis ? (
+            <section className={card("p-6")}>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-base font-semibold text-slate-950">Sales KPI scorecard</h2>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Lead momentum, conversion pressure and new clinic growth from the CRM layer.
+                  </p>
+                </div>
+                <Badge className="bg-slate-100 text-slate-700 hover:bg-slate-100">
+                  {data.sales_kpis.active_lead_country_count} lead countries
+                </Badge>
+              </div>
+              <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                {metricCard("New leads / 30d", data.sales_kpis.new_leads_30d, Activity)}
+                {metricCard("Qualified / 30d", data.sales_kpis.qualified_leads_30d, Rows3)}
+                {metricCard("Converted / 30d", data.sales_kpis.converted_leads_30d, Wallet)}
+                {metricCard(
+                  "Lead -> patient",
+                  formatPercent(data.sales_kpis.lead_to_patient_conversion_rate_pct),
+                  BarChart3,
+                )}
+              </div>
+              <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-[0.8fr_1.2fr]">
+                <article className="rounded-[1.25rem] border border-slate-200 bg-slate-50 px-4 py-4">
+                  <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">New partner clinics / quarter</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-950">{data.sales_kpis.new_partner_clinics_90d}</p>
+                </article>
+                <article className="rounded-[1.25rem] border border-slate-200 bg-slate-50 px-4 py-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Top lead countries / 90d</p>
+                    <Badge className="bg-white text-slate-700 hover:bg-white">{data.sales_kpis.top_countries.length}</Badge>
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    {data.sales_kpis.top_countries.length > 0 ? data.sales_kpis.top_countries.map((item) => (
+                      <div key={item.country} className="flex items-center justify-between gap-3 text-sm">
+                        <span className="text-slate-600">{item.country}</span>
+                        <span className="font-semibold text-slate-950">{item.lead_count}</span>
+                      </div>
+                    )) : (
+                      <p className="text-sm text-slate-500">No lead geography yet.</p>
+                    )}
+                  </div>
+                </article>
+              </div>
+            </section>
+          ) : null}
 
           {forecasting ? (
             <>

@@ -188,8 +188,11 @@
 
 - CEO dashboard
 - PM / billing / interpreter / concierge KPIs
+- role-scoped operational `my KPI` dashboard scorecards for `patient_manager`, `teamlead/interpreter` and `concierge`
 - clinic / doctor / country / service-type reports
 - sales-safe medical provider performance and revenue reports
+- explicit billing KPI scorecard in reports workspace: invoices, service-to-invoice timing, on-time-14-day rate, receivables, dunning, self-pay share and cost-passthrough share
+- explicit sales KPI scorecard in reports workspace: new/qualified/converted leads, lead-to-patient conversion, lead-country spread and new partner clinics per quarter
 - medical provider cost-intelligence reports with historical unit-price movement and CSV export
 - provider-quality signals in reports: treatment score, doctor communication, follow-up completion, organization/service/ambience/value scores, treatment-success and complication rates, written-findings turnaround, clinic/doctor response-time KPIs from appointment communications
 - NPS / feedback surfaces
@@ -198,7 +201,7 @@
 
 Частково:
 
-- не всі KPI із каталогу мають окремий explicit regression test або окремий dedicated dashboard tile
+- не всі KPI із каталогу мають окремий explicit regression test або окремий dedicated dashboard tile, але billing/sales scorecards тепер закриті окремим analytics regression
 - predictive / AI-style analytics лишаються gap
 
 ### 4.4 `docs/backlog/04_implementation-tasks_ua.md`
@@ -318,7 +321,7 @@ Target-state, але не повністю підтверджено:
 | Messaging | Mostly confirmed | text + attachment E2E є, manual encrypted key backup/import закриває current-state device migration |
 | Feedback / NPS | Confirmed | portal submission + staff review + ranking |
 | SOP / Learning | Confirmed | library, approval flow, acknowledgement |
-| Reports / KPI / Forecasting / Risk | Mostly confirmed | CEO dashboard, reports, risk-analysis, forecasting |
+| Reports / KPI / Forecasting / Risk | Mostly confirmed | CEO dashboard, reports, billing/sales KPI scorecards, risk-analysis, forecasting |
 | AI / pseudonymization | Gap | privacy anonymization є, AI handoff workflow окремо не реалізований |
 | eSignature | Gap | немає current-state `eIDAS/QES` flow |
 
@@ -331,7 +334,7 @@ Target-state, але не повністю підтверджено:
 - Явних blocking product gaps без зовнішніх інтеграцій у core current-state scope зараз не видно.
 - У clinical intake specialty-subflow pattern уже закритий як reusable pattern; подальші branches — це extension work по бібліотеці specialty sections, а не missing базовий workflow.
 - `RBAC` матриця загалом збігається з кодом; high-risk boundaries вже покриті regression tests, а незакритим лишається тільки поступове добивання exhaustive matrix coverage.
-- KPI / reports / forecasting уже покривають current-state executive і provider layers; подальша робота тут — це catalog expansion і stronger regression granularity, а не missing базовий analytics slice.
+- KPI / reports / forecasting уже покривають current-state executive, provider, billing і sales layers; подальша робота тут — це catalog expansion і stronger regression granularity, а не missing базовий analytics slice.
 - `AI / pseudonymization` як окремий прикладний workflow усе ще лишається gap; privacy/anonymization mechanics уже є, але AI-ready handoff поверх них не реалізований.
 
 ### 8.2 Platform / verification gaps
@@ -368,7 +371,7 @@ Target-state, але не повністю підтверджено:
 
 - blocking non-AI/non-integration product gaps у core scope зараз не видно
 - залишаються stabilization / inventory і подальше ущільнення regression coverage
-- базовий browser-level `E2E` harness уже є і не обмежується навігацією: Playwright покриває staff shell (`dashboard -> patients -> appointments -> documents -> invoices`), staff document portal release/revoke flow, staff template-based document generation flow, provider share/revoke з cover message, staff file-delete lifecycle, staff translation-workspace request/save/complete flow, patient portal (`dashboard -> documents -> invoices`), patient invoice payment-proof upload, patient data export + privacy request submission, portal document receipt confirmation, portal self-upload + re-download loop, recurring appointment whole-series cancellation з detail drawer і secure chat text-send + secure attachment-send flows з browser keyring/mock envelope path; окремо backend regression already цементує `logout` / `logout-all` session revocation semantics. Незакритим лишається вже не наявність browser/session coverage, а поступове розширення mutation-сценаріїв
+- базовий browser-level `E2E` harness уже є і не обмежується навігацією: Playwright покриває staff shell (`dashboard -> patients -> appointments -> documents -> invoices`), staff document portal release/revoke flow, staff template-based document generation flow, provider share/revoke з cover message, staff file-delete lifecycle, staff translation-workspace request/save/complete flow, patient portal (`dashboard -> documents -> invoices -> appointments -> services`), patient invoice payment-proof upload, patient data export + privacy request submission, portal document receipt confirmation, portal self-upload + re-download loop, portal appointment-request submit, portal concierge-service request/cancel, recurring appointment whole-series cancellation з detail drawer і secure chat text-send + secure attachment-send flows з browser keyring/mock envelope path; окремо backend regression already цементує `logout` / `logout-all` session revocation semantics. Незакритим лишається вже не наявність browser/session coverage, а поступове розширення mutation-сценаріїв
 - `Documents / Sharing` уже підтверджені end-to-end: upload/release, OCR/translation workspace, policy checks, file delete lifecycle, provider cover-message trail і patient-requested third-party revoke workflow тепер автоматизовані regression tests
 - `AI / pseudonymization -> AI handoff`
 
