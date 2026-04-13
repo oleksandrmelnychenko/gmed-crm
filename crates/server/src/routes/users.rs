@@ -8,6 +8,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::audit;
 use crate::auth::{middleware::AuthUser, password};
 use crate::state::AppState;
 use gmed_domain::role::Role;
@@ -231,15 +232,13 @@ async fn create_user(
         Ok(r) => {
             tracing::info!(created_by = %auth.user_id, new_user = %r.id, role = %body.role, "User created");
 
-            let _ = sqlx::query!(
-                "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context)
-                 VALUES ($1, 'create_user', 'user', $2, $3)",
-                auth.user_id,
-                r.id,
-                serde_json::json!({ "role": body.role, "email": body.email })
-            )
-            .execute(&state.db)
-            .await;
+            state.audit_sender.try_send(audit::domain_event(
+                "create_user",
+                Some(auth.user_id),
+                "user",
+                Some(r.id),
+                serde_json::json!({ "role": body.role, "email": body.email }),
+            ));
 
             Ok((
                 StatusCode::CREATED,
@@ -311,16 +310,22 @@ async fn update_user(
     .await
     {
         Ok(r) => {
-            let _ = sqlx::query!(
-                "INSERT INTO audit_log (user_id, action, entity_type, entity_id, old_value, new_value)
-                 VALUES ($1, 'update_user', 'user', $2, $3, $4)",
-                auth.user_id,
-                user_id,
-                serde_json::json!({ "name": current.name, "role": current.role, "email": current.email }),
-                serde_json::json!({ "name": new_name, "role": new_role, "email": new_email })
-            )
-            .execute(&state.db)
-            .await;
+            state.audit_sender.try_send(audit::domain_diff_event(
+                "update_user",
+                Some(auth.user_id),
+                "user",
+                Some(user_id),
+                serde_json::json!({
+                    "name": current.name,
+                    "role": current.role,
+                    "email": current.email,
+                }),
+                serde_json::json!({
+                    "name": new_name,
+                    "role": new_role,
+                    "email": new_email,
+                }),
+            ));
 
             Ok(Json(UserResponse {
                 id: r.id,

@@ -14,6 +14,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use crate::access;
+use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::state::AppState;
 use gmed_domain::role::Role;
@@ -774,22 +775,20 @@ async fn create_custom_workflow_item(
         );
     }
 
-    let _ = sqlx::query(
-        r#"INSERT INTO audit_log (user_id, action, entity_type, entity_id, context)
-           VALUES ($1, 'workflow_checklist_item_created', 'patient', $2, $3)"#,
-    )
-    .bind(auth.user_id)
-    .bind(context.patient_id)
-    .bind(json!({
-        "scope_type": scope.as_str(),
-        "scope_id": scope_id,
-        "order_id": context.order_id,
-        "checklist_item_id": checklist_item_id,
-        "task_id": task_id,
-        "item_text": item_text,
-    }))
-    .execute(&state.db)
-    .await;
+    state.audit_sender.try_send(audit::domain_event(
+        "workflow_checklist_item_created",
+        Some(auth.user_id),
+        "patient",
+        Some(context.patient_id),
+        json!({
+            "scope_type": scope.as_str(),
+            "scope_id": scope_id,
+            "order_id": context.order_id,
+            "checklist_item_id": checklist_item_id,
+            "task_id": task_id,
+            "item_text": item_text,
+        }),
+    ));
 
     (
         StatusCode::CREATED,
@@ -883,22 +882,20 @@ async fn complete_workflow_item(
         .await;
     }
 
-    let _ = sqlx::query(
-        r#"INSERT INTO audit_log (user_id, action, entity_type, entity_id, context)
-           VALUES ($1, 'workflow_checklist_item_completed', 'patient', $2, $3)"#,
-    )
-    .bind(auth.user_id)
-    .bind(patient_id)
-    .bind(json!({
-        "scope_type": scope.as_str(),
-        "scope_id": scope_id,
-        "order_id": order_id,
-        "checklist_item_id": item_id,
-        "task_id": linked_task_id,
-        "item_text": row.try_get::<String, _>("item_text").unwrap_or_default(),
-    }))
-    .execute(&state.db)
-    .await;
+    state.audit_sender.try_send(audit::domain_event(
+        "workflow_checklist_item_completed",
+        Some(auth.user_id),
+        "patient",
+        Some(patient_id),
+        json!({
+            "scope_type": scope.as_str(),
+            "scope_id": scope_id,
+            "order_id": order_id,
+            "checklist_item_id": item_id,
+            "task_id": linked_task_id,
+            "item_text": row.try_get::<String, _>("item_text").unwrap_or_default(),
+        }),
+    ));
 
     Json(json!({ "ok": true })).into_response()
 }
