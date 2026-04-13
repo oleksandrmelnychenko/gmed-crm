@@ -22,6 +22,8 @@ async function installPatientPortalMocks(page: Page) {
   const paymentProofTimestamp = "2026-04-10T09:15:00Z";
   let nextPrivacyRequestIndex = 1;
   let nextPortalUploadIndex = 1;
+  let nextAppointmentRequestIndex = 1;
+  let nextServiceRequestIndex = 1;
   let privacyRequests = [
     {
       id: "00000000-0000-0000-0000-000000009801",
@@ -87,6 +89,33 @@ async function installPatientPortalMocks(page: Page) {
       notes: "Uploaded from portal.",
       created_at: "2026-04-03T10:00:00Z",
       updated_at: "2026-04-03T10:00:00Z",
+    },
+  ];
+  let appointmentRequests: Array<Record<string, unknown>> = [];
+  let conciergeServices = [
+    {
+      id: "00000000-0000-0000-0000-000000009201",
+      appointment_id: "00000000-0000-0000-0000-000000009101",
+      appointment_title: "Clinic follow-up",
+      provider_id: "00000000-0000-0000-0000-000000009301",
+      provider_name: "Clinic Cologne",
+      assigned_concierge_name: "Concierge Team",
+      service_kind: "transfer",
+      title: "Airport transfer",
+      status: "booked",
+      booking_reference: "TR-001",
+      vendor_name: "Transfer Vendor",
+      vendor_contact: null,
+      starts_at: "2026-04-20T06:00:00Z",
+      ends_at: "2026-04-20T07:00:00Z",
+      cost_estimate: "150.00",
+      currency: "EUR",
+      service_notes: null,
+      request_source: "patient_portal",
+      completed_at: null,
+      created_at: "2026-04-01T09:00:00Z",
+      updated_at: "2026-04-01T09:00:00Z",
+      can_cancel: true,
     },
   ];
 
@@ -168,33 +197,119 @@ async function installPatientPortalMocks(page: Page) {
       ]);
     }
 
+    if (path === "/me/appointment-requests" && route.request().method() === "POST") {
+      const payload = JSON.parse(route.request().postData() ?? "{}") as {
+        appointment_type?: string;
+        preferred_date_from?: string;
+        preferred_date_to?: string;
+        preferred_time_of_day?: string;
+        specialty?: string;
+        location?: string;
+        reason?: string;
+        notes?: string;
+      };
+      const createdRequest = {
+        id: `00000000-0000-0000-0000-0000000096${10 + nextAppointmentRequestIndex}`,
+        patient_id: "00000000-0000-0000-0000-000000009001",
+        requested_by: "00000000-0000-0000-0000-000000009001",
+        order_id: null,
+        appointment_type: payload.appointment_type ?? "medical",
+        preferred_date_from: payload.preferred_date_from ?? null,
+        preferred_date_to: payload.preferred_date_to ?? null,
+        preferred_time_of_day: payload.preferred_time_of_day ?? "flexible",
+        requested_provider_id: null,
+        requested_provider_name: null,
+        requested_doctor_id: null,
+        requested_doctor_name: null,
+        specialty: payload.specialty ?? null,
+        location: payload.location ?? null,
+        reason: payload.reason ?? null,
+        notes: payload.notes ?? null,
+        status: "requested",
+        review_note: null,
+        reviewed_at: null,
+        requested_at: `2026-04-1${nextAppointmentRequestIndex}T13:00:00Z`,
+        converted_appointment_id: null,
+        converted_appointment_title: null,
+        converted_appointment_date: null,
+      };
+      nextAppointmentRequestIndex += 1;
+      appointmentRequests = [createdRequest, ...appointmentRequests];
+      return json(route, createdRequest, 201);
+    }
+
+    if (path === "/me/appointment-requests") {
+      return json(route, appointmentRequests);
+    }
+
+    if (path === "/me/followup-milestones") {
+      return json(route, []);
+    }
+
+    if (path === "/me/concierge-services" && route.request().method() === "POST") {
+      const payload = JSON.parse(route.request().postData() ?? "{}") as {
+        service_kind?: string;
+        title?: string;
+        vendor_name?: string;
+        vendor_contact?: string;
+        starts_at?: string;
+        ends_at?: string;
+        cost_estimate?: number;
+        service_notes?: string;
+      };
+      const createdService = {
+        id: `00000000-0000-0000-0000-0000000092${10 + nextServiceRequestIndex}`,
+        appointment_id: null,
+        appointment_title: null,
+        provider_id: null,
+        provider_name: null,
+        assigned_concierge_name: null,
+        service_kind: payload.service_kind ?? "hotel",
+        title: payload.title ?? `Portal request ${nextServiceRequestIndex}`,
+        status: "pending",
+        booking_reference: null,
+        vendor_name: payload.vendor_name ?? null,
+        vendor_contact: payload.vendor_contact ?? null,
+        starts_at: payload.starts_at ?? null,
+        ends_at: payload.ends_at ?? null,
+        cost_estimate:
+          payload.cost_estimate !== undefined ? String(payload.cost_estimate.toFixed(2)) : null,
+        currency: "EUR",
+        service_notes: payload.service_notes ?? null,
+        request_source: "patient_portal",
+        completed_at: null,
+        created_at: `2026-04-1${nextServiceRequestIndex}T14:00:00Z`,
+        updated_at: `2026-04-1${nextServiceRequestIndex}T14:00:00Z`,
+        can_cancel: true,
+      };
+      nextServiceRequestIndex += 1;
+      conciergeServices = [createdService, ...conciergeServices];
+      return json(route, createdService, 201);
+    }
+
     if (path === "/me/concierge-services") {
-      return json(route, [
-        {
-          id: "00000000-0000-0000-0000-000000009201",
-          appointment_id: "00000000-0000-0000-0000-000000009101",
-          appointment_title: "Clinic follow-up",
-          provider_id: "00000000-0000-0000-0000-000000009301",
-          provider_name: "Clinic Cologne",
-          assigned_concierge_name: "Concierge Team",
-          service_kind: "transfer",
-          title: "Airport transfer",
-          status: "booked",
-          booking_reference: "TR-001",
-          vendor_name: "Transfer Vendor",
-          vendor_contact: null,
-          starts_at: "2026-04-20T06:00:00Z",
-          ends_at: "2026-04-20T07:00:00Z",
-          cost_estimate: "150.00",
-          currency: "EUR",
-          service_notes: null,
-          request_source: "patient_portal",
-          completed_at: null,
-          created_at: "2026-04-01T09:00:00Z",
-          updated_at: "2026-04-01T09:00:00Z",
-          can_cancel: true,
-        },
-      ]);
+      return json(route, conciergeServices);
+    }
+
+    if (
+      path.startsWith("/me/concierge-services/") &&
+      path.endsWith("/cancel") &&
+      route.request().method() === "POST"
+    ) {
+      const serviceId = path
+        .replace("/me/concierge-services/", "")
+        .replace("/cancel", "");
+      conciergeServices = conciergeServices.map((item) =>
+        item.id === serviceId
+          ? {
+              ...item,
+              status: "cancelled",
+              can_cancel: false,
+              updated_at: "2026-04-13T15:30:00Z",
+            }
+          : item,
+      );
+      return json(route, { ok: true });
     }
 
     if (path === "/me/documents") {
@@ -558,5 +673,55 @@ test.describe("patient portal smoke flows", () => {
     );
     await uploadedCard.getByRole("button", { name: /^Download$/i }).click();
     await uploadDownloadRequest;
+  });
+
+  test("patient can submit an appointment request and see it in portal history", async ({
+    page,
+  }) => {
+    await page.goto("/appointments");
+    await expect(page).toHaveURL(/\/appointments$/);
+
+    await page.getByLabel("Preferred from").fill("2026-05-10");
+    await page.getByLabel("Preferred to").fill("2026-05-12");
+    await page.getByLabel("Specialty or topic").fill("Cardiology follow-up");
+    await page.getByLabel("Location preference").fill("Clinic Cologne");
+    await page
+      .getByLabel("Reason")
+      .fill("Need a follow-up appointment after receiving the latest findings.");
+    await page.getByLabel("Additional note").fill("Morning slots preferred.");
+    await page.getByRole("button", { name: /Send appointment request/i }).click();
+
+    await expect(page.getByText("Appointment request sent to the care team.")).toBeVisible();
+
+    const requestCard = page
+      .locator("article")
+      .filter({ hasText: "Need a follow-up appointment after receiving the latest findings." });
+    await expect(requestCard).toBeVisible();
+    await expect(requestCard.getByText("requested", { exact: true })).toBeVisible();
+  });
+
+  test("patient can request and cancel an additional service", async ({ page }) => {
+    await page.goto("/services");
+    await expect(page).toHaveURL(/\/services$/);
+
+    await page.getByLabel("Title").fill("Hotel near clinic");
+    await page.getByLabel("Preferred vendor").fill("River Hotel");
+    await page.getByLabel("Vendor contact").fill("booking@river.example");
+    await page.getByLabel("Estimated budget (EUR)").fill("240");
+    await page
+      .getByLabel("Notes")
+      .fill("Need a quiet room close to the clinic for two nights.");
+    await page.getByRole("button", { name: /Send request/i }).click();
+
+    await expect(page.getByText("Additional service request sent to the care team.")).toBeVisible();
+
+    const createdCard = page.locator("article").filter({ hasText: "Hotel near clinic" });
+    await expect(createdCard).toBeVisible();
+    await expect(createdCard.getByText("pending", { exact: true })).toBeVisible();
+    await createdCard.getByRole("button", { name: /Cancel request/i }).click();
+
+    await expect(page.getByText("Service request cancelled.")).toBeVisible();
+    await expect(createdCard.getByText("cancelled")).toBeVisible();
+    await expect(createdCard.getByRole("button", { name: /Cancel request/i })).toHaveCount(0);
   });
 });

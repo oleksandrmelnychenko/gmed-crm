@@ -97,6 +97,34 @@ async fn seed_patient_assignment(
     .unwrap();
 }
 
+async fn seed_document(
+    pool: &PgPool,
+    patient_id: Uuid,
+    uploaded_by: Uuid,
+    tag: &str,
+    visibility: &str,
+) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO documents (
+                patient_id, auto_name, original_filename, art, category, status, visibility,
+                is_medical, mime_type, file_size, uploaded_by, notes
+           ) VALUES (
+                $1, $2, $3, 'medical_report', 'report', 'active', $4,
+                true, 'application/pdf', 1024, $5, $6
+           )
+           RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(format!("Portal document {tag}"))
+    .bind(format!("{tag}.pdf"))
+    .bind(visibility)
+    .bind(uploaded_by)
+    .bind(format!("Portal notes {tag}"))
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
 async fn json_request(
     app: &axum::Router,
     method: &str,
@@ -831,6 +859,92 @@ async fn patient_message_mark_read_sets_per_message_read_timestamps() {
     .await
     .unwrap();
     assert_eq!(stored_read_at_count, 2);
+}
+
+#[tokio::test]
+async fn deleting_portal_document_file_does_not_break_patient_manager_chat() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("portal-doc-delete-chat");
+    let patient_user_id = seed_user(&pool, &tag, "patient").await;
+    let patient_manager_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+
+    seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, patient_manager_id, admin_id).await;
+
+    let document_id = seed_document(&pool, patient_id, patient_manager_id, &tag, "patient_visible").await;
+    sqlx::query(
+        r#"INSERT INTO document_shares (
+                document_id, shared_with_user_id, shared_by, channel, requires_confirmation,
+                confirmed, confirmed_at
+           ) VALUES (
+                $1, $2, $3, 'patient_portal', true, true, now()
+           )"#,
+    )
+    .bind(document_id)
+    .bind(patient_user_id)
+    .bind(patient_manager_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let patient_auth = auth_header_for(patient_user_id, "patient");
+    let pm_auth = auth_header_for(patient_manager_id, "patient_manager");
+
+    let (status, before_delete_docs) =
+        json_request(&app, "GET", "/api/v1/me/documents", &patient_auth, None).await;
+    assert_eq!(status, StatusCode::OK);
+    let items = before_delete_docs.as_array().expect("portal document list before delete");
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["id"], document_id.to_string());
+
+    let delete_reason = "Portal binary removed after wrong upload";
+    let (status, delete_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/delete"),
+        &pm_auth,
+        Some(json!({ "reason": delete_reason })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(delete_body["document"]["status"], "archived");
+    assert_eq!(delete_body["revoked_share_count"], 1);
+
+    let (status, after_delete_docs) =
+        json_request(&app, "GET", "/api/v1/me/documents", &patient_auth, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(after_delete_docs.as_array().unwrap().is_empty());
+
+    let patient_message = "The portal file disappeared, please resend the corrected document.";
+    let (status, send_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/messages/{patient_manager_id}"),
+        &patient_auth,
+        Some(json!({ "message": patient_message })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(send_body["ok"], true);
+
+    let (status, conversation_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/messages/{patient_user_id}"),
+        &pm_auth,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let conversation = conversation_body.as_array().expect("conversation after document delete");
+    assert!(
+        conversation.iter().any(|item| item["message"] == patient_message),
+        "patient-manager chat should stay available after portal document deletion"
+    );
 }
 
 #[tokio::test]

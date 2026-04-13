@@ -5751,11 +5751,8 @@ async fn finalize_staged_document_delete(staged: &StagedDocumentDelete) {
 }
 
 async fn list_document_templates(Extension(auth): Extension<AuthUser>) -> axum::response::Response {
-    if let Err(resp) = auth.require_any_role(&[
-        Role::Ceo,
-        Role::CeoAssistant,
-        Role::PatientManager,
-    ]) {
+    if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::CeoAssistant, Role::PatientManager])
+    {
         return resp;
     }
 

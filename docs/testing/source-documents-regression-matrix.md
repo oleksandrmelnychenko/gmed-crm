@@ -298,4 +298,12 @@
   `docs/requirements/03_product-backlog_ua.md:337`
   `docs/requirements/03_product-backlog_ua.md:355`
   Covers:
-  patient-requested third-party revoke executes through the compliance workflow, revokes the external consent bundle and removes active provider-facing document shares without touching patient portal releases.
+  patient-requested third-party revoke executes through the compliance workflow, revokes the external consent bundle and removes active provider-facing document shares without touching patient portal releases or assigned patient-manager communication paths.
+
+- `deleting_portal_document_file_does_not_break_patient_manager_chat`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:160`
+  `docs/requirements/03_product-backlog_ua.md:213`
+  `docs/requirements/04_non-functional-requirements_ua.md:84`
+  Covers:
+  deleting a patient-visible document file removes the portal listing/share path for the patient while leaving the patient-to-assigned-manager secure chat operational for follow-up coordination.

@@ -921,6 +921,60 @@ async fn third_party_revoke_request_can_be_executed_by_patient_manager_and_revok
     .unwrap();
     assert_eq!(active_patient_portal_share_count, 1);
 
+    let patient_bearer = auth_header_for(patient_user_id, "patient");
+    let (status, portal_documents) =
+        json_request(&app, "GET", "/api/v1/me/documents", &patient_bearer, None).await;
+    assert_eq!(status, StatusCode::OK);
+    let portal_items = portal_documents.as_array().expect("portal documents");
+    assert_eq!(portal_items.len(), 1);
+    assert_eq!(portal_items[0]["id"], portal_document_id.to_string());
+    assert_eq!(portal_items[0]["channel"], "patient_portal");
+
+    let (status, peers_body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/messages/allowed-peers",
+        &patient_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let peers = peers_body.as_array().expect("allowed peers");
+    assert!(
+        peers.iter().any(|item| item["id"] == pm_id.to_string()),
+        "assigned patient manager should remain reachable after third_party_revoke execution"
+    );
+
+    let patient_message = "Portal release remains available after third-party revoke.";
+    let (status, message_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/messages/{pm_id}"),
+        &patient_bearer,
+        Some(json!({ "message": patient_message })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(message_body["ok"], true);
+
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let (status, conversation_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/messages/{patient_user_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let conversation = conversation_body.as_array().expect("pm conversation");
+    assert!(
+        conversation
+            .iter()
+            .any(|item| item["message"] == patient_message),
+        "patient-manager chat should stay operational after third_party_revoke execution"
+    );
+
     let consent_revoke_audits: i64 = sqlx::query_scalar(
         r#"SELECT count(*)
            FROM audit_log
