@@ -13,6 +13,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use crate::access;
+use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::state::AppState;
 use gmed_domain::role::Role;
@@ -527,19 +528,17 @@ async fn create_framework_contract(
     {
         Ok(row) => {
             let contract_id = row.try_get::<Uuid, _>("id").unwrap_or_default();
-            let _ = sqlx::query(
-                "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, $2, 'framework_contract', $3, $4)",
-            )
-            .bind(auth.user_id)
-            .bind("create_framework_contract")
-            .bind(contract_id)
-            .bind(serde_json::json!({
-                "contract_number": contract_number,
-                "patient_id": body.patient_id,
-                "status": status,
-            }))
-            .execute(&state.db)
-            .await;
+            state.audit_sender.try_send(audit::domain_event(
+                "create_framework_contract",
+                Some(auth.user_id),
+                "framework_contract",
+                Some(contract_id),
+                serde_json::json!({
+                    "contract_number": contract_number,
+                    "patient_id": body.patient_id,
+                    "status": status,
+                }),
+            ));
 
             (
                 StatusCode::CREATED,
@@ -643,18 +642,16 @@ async fn update_framework_contract_status(
     .await
     {
         Ok(result) if result.rows_affected() > 0 => {
-            let _ = sqlx::query(
-                "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, $2, 'framework_contract', $3, $4)",
-            )
-            .bind(auth.user_id)
-            .bind("update_framework_contract_status")
-            .bind(contract_id)
-            .bind(serde_json::json!({
-                "status": body.status,
-                "signed_at": signed_at.map(|v| v.to_rfc3339()),
-            }))
-            .execute(&state.db)
-            .await;
+            state.audit_sender.try_send(audit::domain_event(
+                "update_framework_contract_status",
+                Some(auth.user_id),
+                "framework_contract",
+                Some(contract_id),
+                serde_json::json!({
+                    "status": body.status,
+                    "signed_at": signed_at.map(|v| v.to_rfc3339()),
+                }),
+            ));
 
             match load_contract_detail(&state, contract_id, &auth).await {
                 Ok(Some(value)) => Json(value).into_response(),
@@ -1148,6 +1145,8 @@ async fn create_quote(
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create quote");
     }
 
+    // TODO(audit-migrate): transactional — coupled to quote creation via
+    // `.execute(&mut *tx)`. Migration would break rollback semantics.
     if let Err(e) = sqlx::query(
         "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, $2, 'quote', $3, $4)",
     )
@@ -1412,6 +1411,7 @@ async fn update_quote_status(
         );
     }
 
+    // TODO(audit-migrate): transactional — coupled to quote status update.
     if let Err(e) = sqlx::query(
         "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, $2, 'quote', $3, $4)",
     )
