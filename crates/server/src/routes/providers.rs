@@ -10,6 +10,7 @@ use serde_json::{Value, json};
 use sqlx::Row;
 use uuid::Uuid;
 
+use crate::audit::{self as audit_mod};
 use crate::auth::middleware::AuthUser;
 use crate::state::AppState;
 use gmed_domain::role::Role;
@@ -1764,18 +1765,21 @@ async fn audit(
     entity_id: Option<Uuid>,
     new_value: Option<serde_json::Value>,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        r#"INSERT INTO audit_log (user_id, action, entity_type, entity_id, new_value)
-           VALUES ($1, $2, $3, $4, $5)"#,
-    )
-    .bind(user_id)
-    .bind(action)
-    .bind(entity_type)
-    .bind(entity_id)
-    .bind(new_value)
-    .execute(&state.db)
-    .await
-    .map(|_| ())
+    // new_value is carried on the context blob (no dedicated diff column)
+    // because this helper's callers always report an after-state only, not
+    // a before/after pair.
+    let context = match new_value {
+        Some(value) => serde_json::json!({ "new_value": value }),
+        None => serde_json::json!({}),
+    };
+    state.audit_sender.try_send(audit_mod::domain_event(
+        action.to_string(),
+        Some(user_id),
+        entity_type.to_string(),
+        entity_id,
+        context,
+    ));
+    Ok(())
 }
 
 fn err(status: StatusCode, message: &str) -> axum::response::Response {

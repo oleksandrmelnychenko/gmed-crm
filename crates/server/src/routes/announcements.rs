@@ -8,6 +8,7 @@ use axum::{
 use serde::Deserialize;
 use uuid::Uuid;
 
+use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::state::AppState;
 use gmed_domain::role::Role;
@@ -134,10 +135,13 @@ async fn create_announcement(
         starts, ends, auth.user_id
     ).fetch_one(&state.db).await {
         Ok(r) => {
-            let _ = sqlx::query!(
-                "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'create_announcement', 'announcement', $2, $3)",
-                auth.user_id, r.id, serde_json::json!({"title": body.title})
-            ).execute(&state.db).await;
+            state.audit_sender.try_send(audit::domain_event(
+                "create_announcement",
+                Some(auth.user_id),
+                "announcement",
+                Some(r.id),
+                serde_json::json!({ "title": body.title }),
+            ));
             Json(serde_json::json!({"ok": true, "id": r.id})).into_response()
         }
         Err(e) => { tracing::error!(error = %e, "create announcement"); err(StatusCode::INTERNAL_SERVER_ERROR, "Failed") }

@@ -8,6 +8,7 @@ use axum::{
 use serde::Deserialize;
 use uuid::Uuid;
 
+use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::state::AppState;
 use gmed_domain::role::Role;
@@ -126,10 +127,13 @@ async fn delete_channel(
     let _ = sqlx::query!("DELETE FROM notification_channels WHERE id = $1", id)
         .execute(&state.db)
         .await;
-    let _ = sqlx::query!(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id) VALUES ($1, 'delete_notification_channel', 'notification_channel', $2)",
-        auth.user_id, id
-    ).execute(&state.db).await;
+    state.audit_sender.try_send(audit::domain_event(
+        "delete_notification_channel",
+        Some(auth.user_id),
+        "notification_channel",
+        Some(id),
+        serde_json::json!({}),
+    ));
     Json(serde_json::json!({"ok": true})).into_response()
 }
 

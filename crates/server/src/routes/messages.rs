@@ -17,6 +17,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use crate::access::has_active_patient_assignment;
+use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::auth::{blacklist, jwt};
 use crate::file_scan::{FileScanOutcome, scan_upload_bytes};
@@ -255,16 +256,13 @@ async fn write_message_peer_audit(
     peer_id: Uuid,
     context: Value,
 ) {
-    let _ = sqlx::query(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context)
-         VALUES ($1, $2, 'message_peer', $3, $4)",
-    )
-    .bind(actor_user_id)
-    .bind(action)
-    .bind(peer_id)
-    .bind(context)
-    .execute(&state.db)
-    .await;
+    state.audit_sender.try_send(audit::domain_event(
+        action.to_string(),
+        Some(actor_user_id),
+        "message_peer",
+        Some(peer_id),
+        context,
+    ));
 }
 
 async fn list_allowed_peers(

@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::access;
+use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::state::AppState;
 use gmed_domain::role::Role;
@@ -31,6 +32,12 @@ pub fn router() -> Router<AppState> {
         .route("/cases/{case_id}/pain", post(save_pain_records))
         .route("/cases/{case_id}/symptome", post(save_symptome))
         .route("/cases/{case_id}/cardiology", post(save_cardiology))
+        .route(
+            "/cases/{case_id}/gastroenterology",
+            post(save_gastroenterology),
+        )
+        .route("/cases/{case_id}/orthopedics", post(save_orthopedics))
+        .route("/cases/{case_id}/neurology", post(save_neurology))
         .route("/cases/{case_id}/vegetative", post(save_vegetative))
         .route("/cases/{case_id}/impfstatus", post(save_impfstatus))
 }
@@ -144,6 +151,54 @@ struct CardiologyAssessmentRequest {
     notes: Option<String>,
 }
 
+#[derive(Deserialize, Serialize, Clone)]
+struct GastroenterologyAssessmentRequest {
+    is_relevant: Option<bool>,
+    abdominal_pain: Option<bool>,
+    reflux: Option<bool>,
+    nausea: Option<bool>,
+    diarrhea: Option<bool>,
+    constipation: Option<bool>,
+    gi_bleeding: Option<bool>,
+    prior_endoscopy: Option<String>,
+    bowel_habits: Option<String>,
+    liver_history: Option<String>,
+    food_intolerance: Option<String>,
+    red_flags: Option<String>,
+    notes: Option<String>,
+}
+
+#[derive(Deserialize, Serialize, Clone)]
+struct OrthopedicsAssessmentRequest {
+    is_relevant: Option<bool>,
+    joint_pain: Option<bool>,
+    back_pain: Option<bool>,
+    mobility_limitation: Option<bool>,
+    trauma_history: Option<bool>,
+    prior_imaging: Option<String>,
+    assistive_devices: Option<String>,
+    physiotherapy_history: Option<String>,
+    pain_triggers: Option<String>,
+    red_flags: Option<String>,
+    notes: Option<String>,
+}
+
+#[derive(Deserialize, Serialize, Clone)]
+struct NeurologyAssessmentRequest {
+    is_relevant: Option<bool>,
+    headache: Option<bool>,
+    dizziness: Option<bool>,
+    sensory_changes: Option<bool>,
+    weakness: Option<bool>,
+    seizure_history: Option<bool>,
+    gait_balance_issues: Option<bool>,
+    prior_neuro_imaging: Option<String>,
+    prior_neurology_workup: Option<String>,
+    cognitive_changes: Option<String>,
+    red_flags: Option<String>,
+    notes: Option<String>,
+}
+
 #[derive(Deserialize)]
 struct ItemsWrapper<T> {
     items: Vec<T>,
@@ -164,6 +219,18 @@ struct CaseHistoryQuery {
 fn gen_case_id(seq: i64) -> String {
     let now = chrono::Utc::now();
     format!("C-{}-{:04}", now.format("%Y%m%d"), seq)
+}
+
+fn symptom_matches_specialty(item: &serde_json::Value, aliases: &[&str]) -> bool {
+    item["fachrichtung"]
+        .as_str()
+        .map(|value| {
+            let normalized = value.trim().to_lowercase();
+            aliases
+                .iter()
+                .any(|alias| normalized.contains(&alias.to_lowercase()))
+        })
+        .unwrap_or(false)
 }
 
 async fn list_cases(
@@ -335,10 +402,16 @@ async fn create_case(
     )
     .await;
 
-    let _ = sqlx::query!(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'create_case', 'case', $2, $3)",
-        auth.user_id, created_case_id, serde_json::json!({"case_id": created_case_code.clone(), "patient_id": body.patient_id})
-    ).execute(&state.db).await;
+    state.audit_sender.try_send(audit::domain_event(
+        "create_case",
+        Some(auth.user_id),
+        "case",
+        Some(created_case_id),
+        serde_json::json!({
+            "case_id": created_case_code.clone(),
+            "patient_id": body.patient_id,
+        }),
+    ));
 
     tracing::info!(by = %auth.user_id, case = %created_case_code, "Case created");
 
@@ -456,6 +529,42 @@ async fn get_case_full(
     .await
     .ok()
     .flatten();
+    let gastroenterology = sqlx::query(
+        r#"SELECT is_relevant, abdominal_pain, reflux, nausea, diarrhea, constipation,
+                  gi_bleeding, prior_endoscopy, bowel_habits, liver_history,
+                  food_intolerance, red_flags, notes
+           FROM case_gastroenterology_assessments
+           WHERE case_id = $1"#,
+    )
+    .bind(case_uuid)
+    .fetch_optional(&state.db)
+    .await
+    .ok()
+    .flatten();
+    let orthopedics = sqlx::query(
+        r#"SELECT is_relevant, joint_pain, back_pain, mobility_limitation, trauma_history,
+                  prior_imaging, assistive_devices, physiotherapy_history, pain_triggers,
+                  red_flags, notes
+           FROM case_orthopedics_assessments
+           WHERE case_id = $1"#,
+    )
+    .bind(case_uuid)
+    .fetch_optional(&state.db)
+    .await
+    .ok()
+    .flatten();
+    let neurology = sqlx::query(
+        r#"SELECT is_relevant, headache, dizziness, sensory_changes, weakness,
+                  seizure_history, gait_balance_issues, prior_neuro_imaging,
+                  prior_neurology_workup, cognitive_changes, red_flags, notes
+           FROM case_neurology_assessments
+           WHERE case_id = $1"#,
+    )
+    .bind(case_uuid)
+    .fetch_optional(&state.db)
+    .await
+    .ok()
+    .flatten();
     let veg = sqlx::query!("SELECT appetit_durst, koerpergroesse, gewicht, gewichtsveraenderung, grund FROM vegetative_anamnese WHERE case_id = $1", case_uuid)
         .fetch_optional(&state.db).await.ok().flatten();
     let impf = sqlx::query!(
@@ -517,15 +626,18 @@ async fn get_case_full(
             serde_json::json!({"beschreibung": s.beschreibung, "fachrichtung": s.fachrichtung}),
         );
     }
-    let cardiology_recommended = symptoms_json.iter().any(|item| {
-        item["fachrichtung"]
-            .as_str()
-            .map(|value| {
-                let normalized = value.trim().to_lowercase();
-                normalized.contains("cardio") || normalized.contains("kardio")
-            })
-            .unwrap_or(false)
-    });
+    let cardiology_recommended = symptoms_json
+        .iter()
+        .any(|item| symptom_matches_specialty(item, &["cardio", "kardio"]));
+    let gastroenterology_recommended = symptoms_json
+        .iter()
+        .any(|item| symptom_matches_specialty(item, &["gastro", "kolo", "colo"]));
+    let orthopedics_recommended = symptoms_json
+        .iter()
+        .any(|item| symptom_matches_specialty(item, &["ortho", "orthop", "trauma", "bewegung"]));
+    let neurology_recommended = symptoms_json
+        .iter()
+        .any(|item| symptom_matches_specialty(item, &["neuro", "neurol"]));
     let recent_history = match load_case_history(&state.db, case_uuid, 12).await {
         Ok(items) => items,
         Err(e) => {
@@ -572,6 +684,51 @@ async fn get_case_full(
             "cardiovascular_risk_factors": item.try_get::<Option<String>, _>("cardiovascular_risk_factors").unwrap_or_default(),
             "anticoagulation": item.try_get::<Option<String>, _>("anticoagulation").unwrap_or_default(),
             "family_history": item.try_get::<Option<String>, _>("family_history").unwrap_or_default(),
+            "red_flags": item.try_get::<Option<String>, _>("red_flags").unwrap_or_default(),
+            "notes": item.try_get::<Option<String>, _>("notes").unwrap_or_default(),
+        })),
+        "gastroenterology_recommended": gastroenterology_recommended,
+        "gastroenterology": gastroenterology.map(|item| serde_json::json!({
+            "is_relevant": item.try_get::<bool, _>("is_relevant").unwrap_or(false),
+            "abdominal_pain": item.try_get::<bool, _>("abdominal_pain").unwrap_or(false),
+            "reflux": item.try_get::<bool, _>("reflux").unwrap_or(false),
+            "nausea": item.try_get::<bool, _>("nausea").unwrap_or(false),
+            "diarrhea": item.try_get::<bool, _>("diarrhea").unwrap_or(false),
+            "constipation": item.try_get::<bool, _>("constipation").unwrap_or(false),
+            "gi_bleeding": item.try_get::<bool, _>("gi_bleeding").unwrap_or(false),
+            "prior_endoscopy": item.try_get::<Option<String>, _>("prior_endoscopy").unwrap_or_default(),
+            "bowel_habits": item.try_get::<Option<String>, _>("bowel_habits").unwrap_or_default(),
+            "liver_history": item.try_get::<Option<String>, _>("liver_history").unwrap_or_default(),
+            "food_intolerance": item.try_get::<Option<String>, _>("food_intolerance").unwrap_or_default(),
+            "red_flags": item.try_get::<Option<String>, _>("red_flags").unwrap_or_default(),
+            "notes": item.try_get::<Option<String>, _>("notes").unwrap_or_default(),
+        })),
+        "orthopedics_recommended": orthopedics_recommended,
+        "orthopedics": orthopedics.map(|item| serde_json::json!({
+            "is_relevant": item.try_get::<bool, _>("is_relevant").unwrap_or(false),
+            "joint_pain": item.try_get::<bool, _>("joint_pain").unwrap_or(false),
+            "back_pain": item.try_get::<bool, _>("back_pain").unwrap_or(false),
+            "mobility_limitation": item.try_get::<bool, _>("mobility_limitation").unwrap_or(false),
+            "trauma_history": item.try_get::<bool, _>("trauma_history").unwrap_or(false),
+            "prior_imaging": item.try_get::<Option<String>, _>("prior_imaging").unwrap_or_default(),
+            "assistive_devices": item.try_get::<Option<String>, _>("assistive_devices").unwrap_or_default(),
+            "physiotherapy_history": item.try_get::<Option<String>, _>("physiotherapy_history").unwrap_or_default(),
+            "pain_triggers": item.try_get::<Option<String>, _>("pain_triggers").unwrap_or_default(),
+            "red_flags": item.try_get::<Option<String>, _>("red_flags").unwrap_or_default(),
+            "notes": item.try_get::<Option<String>, _>("notes").unwrap_or_default(),
+        })),
+        "neurology_recommended": neurology_recommended,
+        "neurology": neurology.map(|item| serde_json::json!({
+            "is_relevant": item.try_get::<bool, _>("is_relevant").unwrap_or(false),
+            "headache": item.try_get::<bool, _>("headache").unwrap_or(false),
+            "dizziness": item.try_get::<bool, _>("dizziness").unwrap_or(false),
+            "sensory_changes": item.try_get::<bool, _>("sensory_changes").unwrap_or(false),
+            "weakness": item.try_get::<bool, _>("weakness").unwrap_or(false),
+            "seizure_history": item.try_get::<bool, _>("seizure_history").unwrap_or(false),
+            "gait_balance_issues": item.try_get::<bool, _>("gait_balance_issues").unwrap_or(false),
+            "prior_neuro_imaging": item.try_get::<Option<String>, _>("prior_neuro_imaging").unwrap_or_default(),
+            "prior_neurology_workup": item.try_get::<Option<String>, _>("prior_neurology_workup").unwrap_or_default(),
+            "cognitive_changes": item.try_get::<Option<String>, _>("cognitive_changes").unwrap_or_default(),
             "red_flags": item.try_get::<Option<String>, _>("red_flags").unwrap_or_default(),
             "notes": item.try_get::<Option<String>, _>("notes").unwrap_or_default(),
         })),
@@ -1273,6 +1430,278 @@ async fn save_cardiology(
     Json(serde_json::json!({"ok": true})).into_response()
 }
 
+async fn save_gastroenterology(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(case_uuid): Path<Uuid>,
+    Json(body): Json<GastroenterologyAssessmentRequest>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
+        return e;
+    }
+    match can_access_case(&state, &auth, case_uuid, None).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(resp) => return resp,
+    }
+
+    let old_value = match load_case_section_snapshot(&state.db, case_uuid, "gastroenterology").await
+    {
+        Ok(value) => value.unwrap_or(serde_json::Value::Null),
+        Err(e) => {
+            tracing::error!(
+                error = %e,
+                case_id = %case_uuid,
+                "load gastroenterology snapshot"
+            );
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+
+    if let Err(e) = sqlx::query(
+        r#"INSERT INTO case_gastroenterology_assessments (
+                case_id, is_relevant, abdominal_pain, reflux, nausea, diarrhea,
+                constipation, gi_bleeding, prior_endoscopy, bowel_habits,
+                liver_history, food_intolerance, red_flags, notes
+           ) VALUES (
+                $1, $2, $3, $4, $5, $6,
+                $7, $8, $9, $10, $11, $12, $13, $14
+           )
+           ON CONFLICT (case_id) DO UPDATE SET
+                is_relevant = EXCLUDED.is_relevant,
+                abdominal_pain = EXCLUDED.abdominal_pain,
+                reflux = EXCLUDED.reflux,
+                nausea = EXCLUDED.nausea,
+                diarrhea = EXCLUDED.diarrhea,
+                constipation = EXCLUDED.constipation,
+                gi_bleeding = EXCLUDED.gi_bleeding,
+                prior_endoscopy = EXCLUDED.prior_endoscopy,
+                bowel_habits = EXCLUDED.bowel_habits,
+                liver_history = EXCLUDED.liver_history,
+                food_intolerance = EXCLUDED.food_intolerance,
+                red_flags = EXCLUDED.red_flags,
+                notes = EXCLUDED.notes"#,
+    )
+    .bind(case_uuid)
+    .bind(body.is_relevant.unwrap_or(false))
+    .bind(body.abdominal_pain.unwrap_or(false))
+    .bind(body.reflux.unwrap_or(false))
+    .bind(body.nausea.unwrap_or(false))
+    .bind(body.diarrhea.unwrap_or(false))
+    .bind(body.constipation.unwrap_or(false))
+    .bind(body.gi_bleeding.unwrap_or(false))
+    .bind(body.prior_endoscopy.clone())
+    .bind(body.bowel_habits.clone())
+    .bind(body.liver_history.clone())
+    .bind(body.food_intolerance.clone())
+    .bind(body.red_flags.clone())
+    .bind(body.notes.clone())
+    .execute(&state.db)
+    .await
+    {
+        tracing::error!(
+            error = %e,
+            case_id = %case_uuid,
+            "save gastroenterology assessment"
+        );
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+
+    let new_value = match load_case_section_snapshot(&state.db, case_uuid, "gastroenterology").await
+    {
+        Ok(value) => value.unwrap_or(serde_json::Value::Null),
+        Err(e) => {
+            tracing::error!(
+                error = %e,
+                case_id = %case_uuid,
+                "reload gastroenterology snapshot"
+            );
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+
+    version_log(
+        &state,
+        case_uuid,
+        auth.user_id,
+        "gastroenterology",
+        old_value,
+        new_value,
+    )
+    .await;
+    Json(serde_json::json!({"ok": true})).into_response()
+}
+
+async fn save_orthopedics(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(case_uuid): Path<Uuid>,
+    Json(body): Json<OrthopedicsAssessmentRequest>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
+        return e;
+    }
+    match can_access_case(&state, &auth, case_uuid, None).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(resp) => return resp,
+    }
+
+    let old_value = match load_case_section_snapshot(&state.db, case_uuid, "orthopedics").await {
+        Ok(value) => value.unwrap_or(serde_json::Value::Null),
+        Err(e) => {
+            tracing::error!(error = %e, case_id = %case_uuid, "load orthopedics snapshot");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+
+    if let Err(e) = sqlx::query(
+        r#"INSERT INTO case_orthopedics_assessments (
+                case_id, is_relevant, joint_pain, back_pain, mobility_limitation,
+                trauma_history, prior_imaging, assistive_devices, physiotherapy_history,
+                pain_triggers, red_flags, notes
+           ) VALUES (
+                $1, $2, $3, $4, $5,
+                $6, $7, $8, $9, $10, $11, $12
+           )
+           ON CONFLICT (case_id) DO UPDATE SET
+                is_relevant = EXCLUDED.is_relevant,
+                joint_pain = EXCLUDED.joint_pain,
+                back_pain = EXCLUDED.back_pain,
+                mobility_limitation = EXCLUDED.mobility_limitation,
+                trauma_history = EXCLUDED.trauma_history,
+                prior_imaging = EXCLUDED.prior_imaging,
+                assistive_devices = EXCLUDED.assistive_devices,
+                physiotherapy_history = EXCLUDED.physiotherapy_history,
+                pain_triggers = EXCLUDED.pain_triggers,
+                red_flags = EXCLUDED.red_flags,
+                notes = EXCLUDED.notes"#,
+    )
+    .bind(case_uuid)
+    .bind(body.is_relevant.unwrap_or(false))
+    .bind(body.joint_pain.unwrap_or(false))
+    .bind(body.back_pain.unwrap_or(false))
+    .bind(body.mobility_limitation.unwrap_or(false))
+    .bind(body.trauma_history.unwrap_or(false))
+    .bind(body.prior_imaging.clone())
+    .bind(body.assistive_devices.clone())
+    .bind(body.physiotherapy_history.clone())
+    .bind(body.pain_triggers.clone())
+    .bind(body.red_flags.clone())
+    .bind(body.notes.clone())
+    .execute(&state.db)
+    .await
+    {
+        tracing::error!(error = %e, case_id = %case_uuid, "save orthopedics assessment");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+
+    let new_value = match load_case_section_snapshot(&state.db, case_uuid, "orthopedics").await {
+        Ok(value) => value.unwrap_or(serde_json::Value::Null),
+        Err(e) => {
+            tracing::error!(error = %e, case_id = %case_uuid, "reload orthopedics snapshot");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+
+    version_log(
+        &state,
+        case_uuid,
+        auth.user_id,
+        "orthopedics",
+        old_value,
+        new_value,
+    )
+    .await;
+    Json(serde_json::json!({"ok": true})).into_response()
+}
+
+async fn save_neurology(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(case_uuid): Path<Uuid>,
+    Json(body): Json<NeurologyAssessmentRequest>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
+        return e;
+    }
+    match can_access_case(&state, &auth, case_uuid, None).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(resp) => return resp,
+    }
+
+    let old_value = match load_case_section_snapshot(&state.db, case_uuid, "neurology").await {
+        Ok(value) => value.unwrap_or(serde_json::Value::Null),
+        Err(e) => {
+            tracing::error!(error = %e, case_id = %case_uuid, "load neurology snapshot");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+
+    if let Err(e) = sqlx::query(
+        r#"INSERT INTO case_neurology_assessments (
+                case_id, is_relevant, headache, dizziness, sensory_changes,
+                weakness, seizure_history, gait_balance_issues, prior_neuro_imaging,
+                prior_neurology_workup, cognitive_changes, red_flags, notes
+           ) VALUES (
+                $1, $2, $3, $4, $5,
+                $6, $7, $8, $9, $10, $11, $12, $13
+           )
+           ON CONFLICT (case_id) DO UPDATE SET
+                is_relevant = EXCLUDED.is_relevant,
+                headache = EXCLUDED.headache,
+                dizziness = EXCLUDED.dizziness,
+                sensory_changes = EXCLUDED.sensory_changes,
+                weakness = EXCLUDED.weakness,
+                seizure_history = EXCLUDED.seizure_history,
+                gait_balance_issues = EXCLUDED.gait_balance_issues,
+                prior_neuro_imaging = EXCLUDED.prior_neuro_imaging,
+                prior_neurology_workup = EXCLUDED.prior_neurology_workup,
+                cognitive_changes = EXCLUDED.cognitive_changes,
+                red_flags = EXCLUDED.red_flags,
+                notes = EXCLUDED.notes"#,
+    )
+    .bind(case_uuid)
+    .bind(body.is_relevant.unwrap_or(false))
+    .bind(body.headache.unwrap_or(false))
+    .bind(body.dizziness.unwrap_or(false))
+    .bind(body.sensory_changes.unwrap_or(false))
+    .bind(body.weakness.unwrap_or(false))
+    .bind(body.seizure_history.unwrap_or(false))
+    .bind(body.gait_balance_issues.unwrap_or(false))
+    .bind(body.prior_neuro_imaging.clone())
+    .bind(body.prior_neurology_workup.clone())
+    .bind(body.cognitive_changes.clone())
+    .bind(body.red_flags.clone())
+    .bind(body.notes.clone())
+    .execute(&state.db)
+    .await
+    {
+        tracing::error!(error = %e, case_id = %case_uuid, "save neurology assessment");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+
+    let new_value = match load_case_section_snapshot(&state.db, case_uuid, "neurology").await {
+        Ok(value) => value.unwrap_or(serde_json::Value::Null),
+        Err(e) => {
+            tracing::error!(error = %e, case_id = %case_uuid, "reload neurology snapshot");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+
+    version_log(
+        &state,
+        case_uuid,
+        auth.user_id,
+        "neurology",
+        old_value,
+        new_value,
+    )
+    .await;
+    Json(serde_json::json!({"ok": true})).into_response()
+}
+
 async fn save_vegetative(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -1694,6 +2123,75 @@ async fn load_case_section_snapshot(
                         'notes', notes
                     ) AS value
                    FROM case_cardiology_assessments
+                   WHERE case_id = $1"#,
+            )
+            .bind(case_id)
+            .fetch_optional(db)
+            .await?,
+        ),
+        "gastroenterology" => Some(
+            sqlx::query(
+                r#"SELECT jsonb_build_object(
+                        'is_relevant', is_relevant,
+                        'abdominal_pain', abdominal_pain,
+                        'reflux', reflux,
+                        'nausea', nausea,
+                        'diarrhea', diarrhea,
+                        'constipation', constipation,
+                        'gi_bleeding', gi_bleeding,
+                        'prior_endoscopy', prior_endoscopy,
+                        'bowel_habits', bowel_habits,
+                        'liver_history', liver_history,
+                        'food_intolerance', food_intolerance,
+                        'red_flags', red_flags,
+                        'notes', notes
+                    ) AS value
+                   FROM case_gastroenterology_assessments
+                   WHERE case_id = $1"#,
+            )
+            .bind(case_id)
+            .fetch_optional(db)
+            .await?,
+        ),
+        "orthopedics" => Some(
+            sqlx::query(
+                r#"SELECT jsonb_build_object(
+                        'is_relevant', is_relevant,
+                        'joint_pain', joint_pain,
+                        'back_pain', back_pain,
+                        'mobility_limitation', mobility_limitation,
+                        'trauma_history', trauma_history,
+                        'prior_imaging', prior_imaging,
+                        'assistive_devices', assistive_devices,
+                        'physiotherapy_history', physiotherapy_history,
+                        'pain_triggers', pain_triggers,
+                        'red_flags', red_flags,
+                        'notes', notes
+                    ) AS value
+                   FROM case_orthopedics_assessments
+                   WHERE case_id = $1"#,
+            )
+            .bind(case_id)
+            .fetch_optional(db)
+            .await?,
+        ),
+        "neurology" => Some(
+            sqlx::query(
+                r#"SELECT jsonb_build_object(
+                        'is_relevant', is_relevant,
+                        'headache', headache,
+                        'dizziness', dizziness,
+                        'sensory_changes', sensory_changes,
+                        'weakness', weakness,
+                        'seizure_history', seizure_history,
+                        'gait_balance_issues', gait_balance_issues,
+                        'prior_neuro_imaging', prior_neuro_imaging,
+                        'prior_neurology_workup', prior_neurology_workup,
+                        'cognitive_changes', cognitive_changes,
+                        'red_flags', red_flags,
+                        'notes', notes
+                    ) AS value
+                   FROM case_neurology_assessments
                    WHERE case_id = $1"#,
             )
             .bind(case_id)

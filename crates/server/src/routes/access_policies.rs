@@ -8,6 +8,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::state::AppState;
 use gmed_domain::role::Role;
@@ -184,21 +185,24 @@ async fn update_policy(
         ));
     };
 
-    let _ = sqlx::query!(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, new_value)
-         VALUES ($1, 'update_access_policy', 'field_access_policy', $2, $3)",
-        auth.user_id,
-        row.id,
+    // Policy update captures an after-state only, so the new state is
+    // surfaced on the context blob rather than the dedicated new_value
+    // column. Equivalent information, same SQL row count.
+    state.audit_sender.try_send(audit::domain_event(
+        "update_access_policy",
+        Some(auth.user_id),
+        "field_access_policy",
+        Some(row.id),
         serde_json::json!({
-            "role": body.role,
-            "entity_type": body.entity_type,
-            "field_name": body.field_name,
-            "access_level": body.access_level,
-            "condition_type": body.condition_type,
-        })
-    )
-    .execute(&state.db)
-    .await;
+            "new_value": {
+                "role": body.role,
+                "entity_type": body.entity_type,
+                "field_name": body.field_name,
+                "access_level": body.access_level,
+                "condition_type": body.condition_type,
+            }
+        }),
+    ));
 
     tracing::info!(
         by = %auth.user_id,
