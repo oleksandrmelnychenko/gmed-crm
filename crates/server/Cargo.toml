@@ -16,6 +16,7 @@ path = "src/main.rs"
 axum = { version = "0.8", features = ["multipart", "ws"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "fs", "sync"] }
 tower-http = { version = "0.6", features = ["cors", "trace", "set-header"] }
+tower_governor = "0.7"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 serde = { version = "1", features = ["derive"] }

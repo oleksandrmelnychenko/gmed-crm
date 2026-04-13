@@ -33,13 +33,6 @@ pub(crate) mod workflow_lifecycle;
 use crate::state::AppState;
 use axum::Router;
 
-pub fn public_router() -> Router<AppState> {
-    Router::new()
-        .merge(auth::public_router())
-        .merge(leads::public_router())
-        .merge(messages::public_router())
-}
-
 pub fn protected_router() -> Router<AppState> {
     Router::new()
         .merge(me::router())
