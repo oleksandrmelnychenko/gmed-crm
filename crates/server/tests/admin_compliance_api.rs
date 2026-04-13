@@ -153,6 +153,7 @@ async fn patient_manager_can_manage_patient_consents_and_export_contains_history
     assert_eq!(status, StatusCode::CREATED);
     assert_eq!(body["consent_type"], "dsgvo_data_transfer");
     assert_eq!(body["granted"], true);
+    assert!(body["expires_at"].is_string());
 
     let (status, body) = json_request(
         &app,
@@ -195,6 +196,11 @@ async fn patient_manager_can_manage_patient_consents_and_export_contains_history
     assert_eq!(status, StatusCode::OK);
     let exported_consents = body["consents"].as_array().expect("exported consents");
     assert_eq!(exported_consents.len(), 2);
+    assert!(
+        exported_consents
+            .iter()
+            .any(|item| item["granted"] == true && item["expires_at"].is_string())
+    );
 
     let audit_count: i64 = sqlx::query_scalar(
         r#"SELECT count(*)
@@ -310,6 +316,123 @@ async fn compliance_dashboard_is_scoped_to_assigned_patients() {
 }
 
 #[tokio::test]
+async fn patient_manager_cannot_create_duplicate_open_privacy_request_for_patient() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("admin-privacy-dup");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let bearer = auth_header_for(pm_id, "patient_manager");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/admin/compliance/patient/{patient_id}/privacy-requests"),
+        &bearer,
+        Some(json!({
+            "request_type": "restriction",
+            "source": "admin_intake",
+            "reason": "Initial intake note"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(body["status"], "requested");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/admin/compliance/patient/{patient_id}/privacy-requests"),
+        &bearer,
+        Some(json!({
+            "request_type": "restriction",
+            "source": "admin_intake",
+            "reason": "Duplicate intake should fail"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(
+        body["message"],
+        "An open privacy request of this type already exists"
+    );
+}
+
+#[tokio::test]
+async fn expired_consents_use_explicit_expiry_and_active_counts_ignore_them() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("admin-consent-expiry");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+
+    sqlx::query(
+        r#"INSERT INTO consent_records (
+                patient_id, user_id, consent_type, granted, granted_at, expires_at, context
+           ) VALUES (
+                $1, $2, $3, true, now(), now() - interval '2 days', '{}'::jsonb
+           )"#,
+    )
+    .bind(patient_id)
+    .bind(pm_id)
+    .bind("dsgvo_data_transfer")
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        r#"INSERT INTO consent_records (
+                patient_id, user_id, consent_type, granted, granted_at, expires_at, context
+           ) VALUES (
+                $1, $2, $3, true, now() - interval '2 years', now() + interval '30 days', '{}'::jsonb
+           )"#,
+    )
+    .bind(patient_id)
+    .bind(pm_id)
+    .bind("third_party_sharing")
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let bearer = auth_header_for(pm_id, "patient_manager");
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/admin/compliance/consents/expired",
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let expired = body.as_array().expect("expired consents");
+    assert_eq!(expired.len(), 1);
+    assert_eq!(expired[0]["patient_id"], patient_id.to_string());
+    assert_eq!(expired[0]["consent_type"], "dsgvo_data_transfer");
+    assert!(expired[0]["expires_at"].is_string());
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/admin/compliance/consents",
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["total"], 2);
+    assert_eq!(body["granted_active"], 1);
+    assert_eq!(body["by_type"][0]["active"], 0);
+    assert_eq!(body["by_type"][1]["active"], 1);
+}
+
+#[tokio::test]
 async fn patient_manager_erasure_request_can_be_reviewed_and_executed() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;
@@ -317,9 +440,37 @@ async fn patient_manager_erasure_request_can_be_reviewed_and_executed() {
 
     let tag = unique_tag("privacy-erasure");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let patient_user_id = seed_user(&pool, &format!("{tag}-patient"), "patient").await;
     let pm_id = seed_user(&pool, &tag, "patient_manager").await;
     let it_admin_id = seed_user(&pool, &tag, "it_admin").await;
+    seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
     seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+
+    let attachment_key = format!("gdpr-erasure-{}.txt", Uuid::new_v4().simple());
+    let attachment_path = std::path::Path::new("uploads/chat").join(&attachment_key);
+    tokio::fs::create_dir_all("uploads/chat").await.unwrap();
+    tokio::fs::write(&attachment_path, b"sensitive-chat-attachment")
+        .await
+        .unwrap();
+
+    sqlx::query(
+        r#"INSERT INTO direct_messages (
+                from_user, to_user, message,
+                attachment_filename, attachment_mime, attachment_size, attachment_key
+           ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7
+           )"#,
+    )
+    .bind(patient_user_id)
+    .bind(pm_id)
+    .bind("Sensitive patient message")
+    .bind("erasure-note.txt")
+    .bind("text/plain")
+    .bind(25_i64)
+    .bind(&attachment_key)
+    .execute(&pool)
+    .await
+    .unwrap();
 
     let (status, body) = json_request(
         &app,
@@ -385,6 +536,46 @@ async fn patient_manager_erasure_request_can_be_reviewed_and_executed() {
         None
     );
     assert!(!patient_row.try_get::<bool, _>("is_active").unwrap());
+
+    let redacted_message = sqlx::query(
+        r#"SELECT message, attachment_key, redacted_at, redaction_reason
+           FROM direct_messages
+           WHERE (from_user = $1 AND to_user = $2) OR (from_user = $2 AND to_user = $1)
+           ORDER BY created_at DESC
+           LIMIT 1"#,
+    )
+    .bind(patient_user_id)
+    .bind(pm_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        redacted_message
+            .try_get::<Option<String>, _>("message")
+            .unwrap()
+            .as_deref(),
+        Some("[redacted due to DSGVO erasure]")
+    );
+    assert_eq!(
+        redacted_message
+            .try_get::<Option<String>, _>("attachment_key")
+            .unwrap(),
+        None
+    );
+    assert!(
+        redacted_message
+            .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("redacted_at")
+            .unwrap()
+            .is_some()
+    );
+    assert_eq!(
+        redacted_message
+            .try_get::<Option<String>, _>("redaction_reason")
+            .unwrap()
+            .as_deref(),
+        Some("dsgvo_erasure")
+    );
+    assert!(!attachment_path.exists());
 
     let audit_count: i64 = sqlx::query_scalar(
         r#"SELECT count(*)

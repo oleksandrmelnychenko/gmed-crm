@@ -93,6 +93,10 @@ async fn settings_list_ok_for_it_admin() {
     assert!(arr.iter().any(|s| s["key"] == "agency_name"));
     assert!(arr.iter().any(|s| s["key"] == "agency_email"));
     assert!(arr.iter().any(|s| s["key"] == "required_patient_documents"));
+    assert!(
+        arr.iter()
+            .any(|s| s["key"] == "clinical_case_retention_years")
+    );
 }
 
 #[tokio::test]
@@ -209,6 +213,17 @@ async fn settings_update_accepts_agency_profile_values() {
           {"key":"passport","label":"Reisepass","art":["passport_scan"],"category":["identity"]},
           {"key":"consent_form","label":"Einverständniserklärung","art":["consent_form"],"category":["consent"]}
         ]"#})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["ok"], true);
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/admin/settings/clinical_case_retention_years",
+        &admin,
+        Some(json!({"value": "35"})),
     )
     .await;
     assert_eq!(status, StatusCode::OK);

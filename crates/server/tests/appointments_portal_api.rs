@@ -159,6 +159,27 @@ async fn seed_order(pool: &PgPool, patient_id: Uuid, created_by: Uuid, tag: &str
     .unwrap()
 }
 
+async fn seed_order_with_phase(
+    pool: &PgPool,
+    patient_id: Uuid,
+    created_by: Uuid,
+    tag: &str,
+    phase: &str,
+) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO orders (order_number, patient_id, phase, status, created_by)
+           VALUES ($1, $2, $3, 'active', $4)
+           RETURNING id"#,
+    )
+    .bind(format!("ORD-{tag}-{phase}"))
+    .bind(patient_id)
+    .bind(phase)
+    .bind(created_by)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
 #[tokio::test]
 async fn patient_can_create_appointment_request_and_pm_can_review_queue() {
     let Some((app, pool, admin_id)) = test_context().await else {
@@ -377,4 +398,98 @@ async fn approved_request_can_be_converted_and_patient_sees_schedule() {
     .await
     .unwrap();
     assert_eq!(patient_notifications, 2);
+}
+
+#[tokio::test]
+async fn patient_can_view_order_followup_milestones_from_portal() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("portal-followup");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let patient_user_id = seed_user(&pool, &tag, "patient").await;
+    let patient_manager_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    let order_id = seed_order_with_phase(&pool, patient_id, admin_id, &tag, "closure").await;
+
+    seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, patient_manager_id, admin_id).await;
+
+    sqlx::query(
+        r#"INSERT INTO order_followup_flows (
+                order_id, doctor_followup_status, followup_1w_status, followup_1m_status,
+                followup_6m_status, package_end_date, package_end_status, results_handoff_status,
+                followup_summary
+           ) VALUES (
+                $1, 'scheduled', 'scheduled', 'scheduled',
+                'scheduled', '2026-12-31', 'scheduled', 'completed',
+                'Portal-visible follow-up plan'
+           )"#,
+    )
+    .bind(order_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        r#"INSERT INTO workflow_lifecycle_events (
+                entity_type, entity_id, from_stage, to_stage, transition_kind, metadata, changed_by
+           ) VALUES (
+                'order', $1, 'execution', 'closure', 'phase_change', '{}'::jsonb, $2
+           )"#,
+    )
+    .bind(order_id)
+    .bind(patient_manager_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        r#"INSERT INTO appointments (
+                patient_id, order_id, appointment_type, title, date, status, checklist_phase, created_by
+           ) VALUES
+                ($1, $2, 'medical', 'Doctor-directed: Echo review', CURRENT_DATE + 3, 'planned', 'followup', $3),
+                ($1, $2, 'medical', '1-week follow-up check-in', CURRENT_DATE + 7, 'planned', 'followup', $3),
+                ($1, $2, 'medical', '1-month follow-up check-in', CURRENT_DATE + 30, 'planned', 'followup', $3),
+                ($1, $2, 'medical', '6-month follow-up check-in', CURRENT_DATE + 180, 'planned', 'followup', $3)"#,
+    )
+    .bind(patient_id)
+    .bind(order_id)
+    .bind(patient_manager_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        r#"INSERT INTO tasks (
+                title, description, assigned_to, assigned_by, patient_id, order_id, priority, status
+           ) VALUES (
+                'Package-end: Renewal outreach', 'Package handoff', $1, $1, $2, $3, 'normal', 'open'
+           )"#,
+    )
+    .bind(patient_manager_id)
+    .bind(patient_id)
+    .bind(order_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let patient_bearer = auth_header_for(patient_user_id, "patient");
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/me/followup-milestones",
+        &patient_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body.as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["order_id"], order_id.to_string());
+    assert_eq!(items[0]["doctor_followup_status"], "scheduled");
+    assert_eq!(items[0]["package_end_status"], "scheduled");
+    assert_eq!(items[0]["results_handoff_status"], "completed");
+    assert_eq!(items[0]["followup_ready"], true);
 }

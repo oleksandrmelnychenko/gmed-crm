@@ -10,6 +10,11 @@ use gmed_server::settings::{SettingsCache, TokenSettings};
 use gmed_server::state::AppState;
 
 const TEST_SECRET: &str = "test-secret-at-least-32-characters-long!!";
+const TINY_TRANSPARENT_PNG: &[u8] = &[
+    137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0,
+    0, 0, 31, 21, 196, 137, 0, 0, 0, 13, 73, 68, 65, 84, 8, 29, 99, 248, 255, 255, 255, 127, 0, 9,
+    251, 3, 253, 5, 67, 69, 202, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+];
 
 async fn test_context() -> Option<(axum::Router, PgPool, Uuid, String)> {
     let db_url = std::env::var("DATABASE_URL").ok()?;
@@ -240,6 +245,15 @@ async fn seed_provider(pool: &PgPool, tag: &str) -> Uuid {
 }
 
 async fn seed_provider_with_type(pool: &PgPool, tag: &str, provider_type: &str) -> Uuid {
+    seed_provider_with_type_and_specialty(pool, tag, provider_type, &format!("Fach {tag}")).await
+}
+
+async fn seed_provider_with_type_and_specialty(
+    pool: &PgPool,
+    tag: &str,
+    provider_type: &str,
+    specialty: &str,
+) -> Uuid {
     sqlx::query_scalar(
         r#"INSERT INTO providers (
                 name, provider_type, address_street, address_city, fachbereich, address_country, phone, email
@@ -250,7 +264,7 @@ async fn seed_provider_with_type(pool: &PgPool, tag: &str, provider_type: &str) 
     .bind(format!("Clinic {tag}"))
     .bind(provider_type)
     .bind(format!("City {tag}"))
-    .bind(format!("Fach {tag}"))
+    .bind(specialty)
     .bind(format!("+49-221-{tag}"))
     .bind(format!("{tag}@clinic.example"))
     .fetch_one(pool)
@@ -259,6 +273,15 @@ async fn seed_provider_with_type(pool: &PgPool, tag: &str, provider_type: &str) 
 }
 
 async fn seed_doctor(pool: &PgPool, provider_id: Uuid, tag: &str) -> Uuid {
+    seed_doctor_with_specialty(pool, provider_id, tag, &format!("Fach {tag}")).await
+}
+
+async fn seed_doctor_with_specialty(
+    pool: &PgPool,
+    provider_id: Uuid,
+    tag: &str,
+    specialty: &str,
+) -> Uuid {
     sqlx::query_scalar(
         r#"INSERT INTO provider_doctors (provider_id, name, fachbereich)
            VALUES ($1, $2, $3)
@@ -266,7 +289,7 @@ async fn seed_doctor(pool: &PgPool, provider_id: Uuid, tag: &str) -> Uuid {
     )
     .bind(provider_id)
     .bind(format!("Doctor {tag}"))
-    .bind(format!("Fach {tag}"))
+    .bind(specialty)
     .fetch_one(pool)
     .await
     .unwrap()
@@ -285,7 +308,7 @@ async fn seed_appointment(
                 patient_id, provider_id, doctor_id, appointment_type, title, date, status, created_by
            ) VALUES (
                 $1, $2, $3, 'medical', $4, '2026-04-15', 'planned', $5
-           ) RETURNING id"#,
+           )"#,
     )
     .bind(patient_id)
     .bind(provider_id)
@@ -589,6 +612,473 @@ async fn document_upload_list_get_and_download_work() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert!(String::from_utf8_lossy(&bytes).contains("%PDF-test-binary%"));
+}
+
+#[tokio::test]
+async fn document_upload_without_explicit_art_is_auto_classified_from_filename() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-autoclassify");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let appointment_id =
+        seed_appointment(&pool, patient_id, provider_id, doctor_id, admin_id, &tag).await;
+
+    let (status, upload_body) = multipart_upload(
+        &app,
+        "/api/v1/documents/upload",
+        &admin_bearer,
+        &[
+            ("patient_id", patient_id.to_string()),
+            ("appointment_id", appointment_id.to_string()),
+            ("status", "active".to_string()),
+            ("visibility", "internal".to_string()),
+        ],
+        &format!("passport-copy-{tag}.pdf"),
+        "application/pdf",
+        b"%PDF-passport%",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(upload_body["art"], "passport_scan");
+    assert_eq!(upload_body["category"], "identity");
+    assert_eq!(upload_body["is_medical"], false);
+    assert_eq!(upload_body["needs_categorization"], false);
+
+    let document_id = Uuid::parse_str(upload_body["id"].as_str().unwrap()).unwrap();
+    let (status, detail_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}"),
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail_body["art"], "passport_scan");
+    assert_eq!(detail_body["category"], "identity");
+    assert_eq!(detail_body["is_medical"], false);
+    assert_eq!(detail_body["needs_categorization"], false);
+
+    let (status, queue_body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/documents/intake-queue",
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        !queue_body
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["id"] == document_id.to_string())
+    );
+}
+
+#[tokio::test]
+async fn uncategorized_uploads_land_in_document_intake_queue() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-intake");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let appointment_id =
+        seed_appointment(&pool, patient_id, provider_id, doctor_id, admin_id, &tag).await;
+
+    let (status, upload_body) = multipart_upload(
+        &app,
+        "/api/v1/documents/upload",
+        &admin_bearer,
+        &[
+            ("patient_id", patient_id.to_string()),
+            ("appointment_id", appointment_id.to_string()),
+            ("auto_name", format!("Scan import {tag}")),
+            ("ursprung", "scan_import".to_string()),
+            ("status", "active".to_string()),
+            ("visibility", "internal".to_string()),
+        ],
+        &format!("scan-import-{tag}.bin"),
+        "application/octet-stream",
+        b"raw-scan-import",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(upload_body["art"], "uploaded_document");
+    assert_eq!(upload_body["needs_categorization"], true);
+    assert!(upload_body["classification_suggestion"].is_null());
+
+    let document_id = Uuid::parse_str(upload_body["id"].as_str().unwrap()).unwrap();
+    let (status, queue_body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/documents/intake-queue",
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let queue_items = queue_body.as_array().unwrap();
+    let queued_item = queue_items
+        .iter()
+        .find(|item| item["id"] == document_id.to_string())
+        .expect("upload should be visible in intake queue");
+    assert_eq!(queued_item["art"], "uploaded_document");
+    assert_eq!(queued_item["needs_categorization"], true);
+}
+
+#[tokio::test]
+async fn interpreter_uploads_land_in_teamlead_review_queue_and_teamlead_can_release_them() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("interpreter-doc-review");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let appointment_id =
+        seed_appointment(&pool, patient_id, provider_id, doctor_id, admin_id, &tag).await;
+    let teamlead_id = seed_user(&pool, &tag, "teamlead_interpreter").await;
+    let interpreter_id = seed_user(&pool, &format!("{tag}-int"), "interpreter").await;
+
+    seed_patient_assignment(&pool, patient_id, teamlead_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, interpreter_id, admin_id).await;
+
+    let interpreter_bearer = auth_header_for(interpreter_id, "interpreter");
+    let teamlead_bearer = auth_header_for(teamlead_id, "teamlead_interpreter");
+
+    let (status, upload_body) = multipart_upload(
+        &app,
+        "/api/v1/documents/upload",
+        &interpreter_bearer,
+        &[
+            ("patient_id", patient_id.to_string()),
+            ("appointment_id", appointment_id.to_string()),
+            ("auto_name", format!("Interpreter findings {tag}")),
+            ("notes", "Interpreter uploaded visit findings".to_string()),
+        ],
+        &format!("befund-{tag}.pdf"),
+        "application/pdf",
+        b"%PDF-interpreter-findings%",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let document_id = Uuid::parse_str(upload_body["id"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        upload_body["classification_suggestion"]["art"],
+        "medical_report"
+    );
+
+    let (status, queue_body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/documents/intake-queue",
+        &teamlead_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let queued_item = queue_body
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == document_id.to_string())
+        .expect("interpreter upload should be visible in teamlead review queue");
+    assert_eq!(queued_item["status"], "draft");
+    assert_eq!(queued_item["ursprung"], "interpreter_upload");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/update"),
+        &teamlead_bearer,
+        Some(json!({
+            "visibility": "released_external"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(
+        body["message"],
+        "Teamlead review may update only document classification fields"
+    );
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/update"),
+        &teamlead_bearer,
+        Some(json!({
+            "art": "medical_report",
+            "category": "medical",
+            "is_medical": true,
+            "status": "active",
+            "notes": "Reviewed by teamlead"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, detail_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}"),
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail_body["art"], "medical_report");
+    assert_eq!(detail_body["category"], "medical");
+    assert_eq!(detail_body["status"], "active");
+    assert_eq!(detail_body["is_medical"], true);
+    assert_eq!(detail_body["notes"], "Reviewed by teamlead");
+
+    let (status, queue_body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/documents/intake-queue",
+        &teamlead_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        !queue_body
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["id"] == document_id.to_string())
+    );
+}
+
+#[tokio::test]
+async fn teamlead_cannot_release_interpreter_upload_without_classification() {
+    let Some((app, pool, admin_id, _admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("interpreter-doc-release-guard");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let appointment_id =
+        seed_appointment(&pool, patient_id, provider_id, doctor_id, admin_id, &tag).await;
+    let teamlead_id = seed_user(&pool, &tag, "teamlead_interpreter").await;
+    let interpreter_id = seed_user(&pool, &format!("{tag}-int"), "interpreter").await;
+
+    seed_patient_assignment(&pool, patient_id, teamlead_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, interpreter_id, admin_id).await;
+
+    let interpreter_bearer = auth_header_for(interpreter_id, "interpreter");
+    let teamlead_bearer = auth_header_for(teamlead_id, "teamlead_interpreter");
+
+    let (status, upload_body) = multipart_upload(
+        &app,
+        "/api/v1/documents/upload",
+        &interpreter_bearer,
+        &[
+            ("patient_id", patient_id.to_string()),
+            ("appointment_id", appointment_id.to_string()),
+            ("auto_name", format!("Interpreter scan {tag}")),
+        ],
+        &format!("scan-{tag}.pdf"),
+        "application/pdf",
+        b"%PDF-generic-scan%",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let document_id = Uuid::parse_str(upload_body["id"].as_str().unwrap()).unwrap();
+    assert_eq!(upload_body["needs_categorization"], true);
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/update"),
+        &teamlead_bearer,
+        Some(json!({
+            "status": "active"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        body["message"],
+        "Teamlead release requires document classification fields"
+    );
+}
+
+#[tokio::test]
+async fn document_text_extraction_can_prefill_translation_request_workspace() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-extraction");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let appointment_id =
+        seed_appointment(&pool, patient_id, provider_id, doctor_id, admin_id, &tag).await;
+
+    let (status, upload_body) = multipart_upload(
+        &app,
+        "/api/v1/documents/upload",
+        &admin_bearer,
+        &[
+            ("patient_id", patient_id.to_string()),
+            ("appointment_id", appointment_id.to_string()),
+            ("auto_name", format!("Visit summary {tag}")),
+            ("art", "medical_report".to_string()),
+            ("category", "medical".to_string()),
+            ("status", "active".to_string()),
+            ("visibility", "released_internal".to_string()),
+            ("is_medical", "true".to_string()),
+        ],
+        &format!("visit-summary-{tag}.txt"),
+        "text/plain",
+        b"Hallo Befund\nZweite Zeile",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let document_id = Uuid::parse_str(upload_body["id"].as_str().unwrap()).unwrap();
+
+    let (status, extraction_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/text-extraction"),
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(extraction_body["status"], "completed");
+    assert_eq!(extraction_body["method"], "text_utf8");
+    assert_eq!(extraction_body["has_text"], true);
+    assert!(
+        extraction_body["extracted_text"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("Hallo Befund")
+    );
+
+    let (status, rerun_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/text-extraction/run"),
+        &admin_bearer,
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(rerun_body["status"], "completed");
+
+    let (status, create_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/translation-requests"),
+        &admin_bearer,
+        Some(json!({
+            "requested_language": "en",
+            "note": "Translate the uploaded findings."
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        create_body["source_text"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("Hallo Befund")
+    );
+}
+
+#[tokio::test]
+async fn image_document_text_extraction_uses_ocr_or_reports_runtime_unavailable() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-image-ocr");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let appointment_id =
+        seed_appointment(&pool, patient_id, provider_id, doctor_id, admin_id, &tag).await;
+
+    let (status, upload_body) = multipart_upload(
+        &app,
+        "/api/v1/documents/upload",
+        &admin_bearer,
+        &[
+            ("patient_id", patient_id.to_string()),
+            ("appointment_id", appointment_id.to_string()),
+            ("auto_name", format!("Image scan {tag}")),
+            ("art", "medical_report".to_string()),
+            ("category", "medical".to_string()),
+            ("status", "active".to_string()),
+            ("visibility", "released_internal".to_string()),
+            ("is_medical", "true".to_string()),
+        ],
+        &format!("image-scan-{tag}.png"),
+        "image/png",
+        TINY_TRANSPARENT_PNG,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let document_id = Uuid::parse_str(upload_body["id"].as_str().unwrap()).unwrap();
+
+    let (status, extraction_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/text-extraction"),
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let method = extraction_body["method"].as_str().unwrap_or_default();
+    let extraction_status = extraction_body["status"].as_str().unwrap_or_default();
+    assert!(
+        matches!(method, "windows_ocr" | "tesseract_cli" | "ocr_unavailable"),
+        "unexpected extraction method: {method}"
+    );
+    assert!(
+        matches!(extraction_status, "completed" | "unsupported" | "failed"),
+        "unexpected extraction status: {extraction_status}"
+    );
+
+    let (status, rerun_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/text-extraction/run"),
+        &admin_bearer,
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let rerun_method = rerun_body["method"].as_str().unwrap_or_default();
+    let rerun_status = rerun_body["status"].as_str().unwrap_or_default();
+    assert!(
+        matches!(
+            rerun_method,
+            "windows_ocr" | "tesseract_cli" | "ocr_unavailable"
+        ),
+        "unexpected rerun method: {rerun_method}"
+    );
+    assert!(
+        matches!(rerun_status, "completed" | "unsupported" | "failed"),
+        "unexpected rerun status: {rerun_status}"
+    );
+
+    if rerun_method == "ocr_unavailable" {
+        assert_eq!(rerun_status, "unsupported");
+    }
 }
 
 #[tokio::test]
@@ -924,6 +1414,268 @@ async fn provider_share_requires_allowed_official_channel() {
 }
 
 #[tokio::test]
+async fn medical_document_share_requires_matching_provider_specialty() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-provider-specialty");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let order_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO orders (
+                order_number, patient_id, phase, status, created_by
+           ) VALUES (
+                $1, $2, 'execution', 'active', $3
+           ) RETURNING id"#,
+    )
+    .bind(format!("AUF-{tag}"))
+    .bind(patient_id)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let cardiology_provider = seed_provider_with_type_and_specialty(
+        &pool,
+        &format!("{tag}-cardio"),
+        "medical",
+        "cardiology",
+    )
+    .await;
+    let cardiology_doctor =
+        seed_doctor_with_specialty(&pool, cardiology_provider, &tag, "cardiology").await;
+    let orthopedics_provider = seed_provider_with_type_and_specialty(
+        &pool,
+        &format!("{tag}-ortho"),
+        "medical",
+        "orthopedics",
+    )
+    .await;
+    let orthopedics_doctor =
+        seed_doctor_with_specialty(&pool, orthopedics_provider, &tag, "orthopedics").await;
+
+    let appointment_id = seed_appointment(
+        &pool,
+        patient_id,
+        cardiology_provider,
+        cardiology_doctor,
+        admin_id,
+        &tag,
+    )
+    .await;
+
+    sqlx::query("UPDATE appointments SET order_id = $2 WHERE id = $1")
+        .bind(appointment_id)
+        .bind(order_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    sqlx::query(
+        r#"INSERT INTO order_leistungen (
+                order_id, description, quantity, unit_price, provider_id, doctor_id
+           ) VALUES
+                ($1, 'Cardiology treatment', 1, 1000, $2, $3),
+                ($1, 'Orthopedics consult', 1, 900, $4, $5)"#,
+    )
+    .bind(order_id)
+    .bind(cardiology_provider)
+    .bind(cardiology_doctor)
+    .bind(orthopedics_provider)
+    .bind(orthopedics_doctor)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let document_id = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO documents (
+                id, patient_id, order_id, appointment_id, auto_name, original_filename,
+                art, category, status, visibility, is_medical, mime_type, file_size,
+                version_root_document_id, version_number, uploaded_by
+           ) VALUES (
+                $1, $2, $3, $4, $5, $6,
+                'arztbrief', 'medical', 'active', 'released_external', true, 'application/pdf', 1234,
+                $1, 1, $7
+           )"#,
+    )
+    .bind(document_id)
+    .bind(patient_id)
+    .bind(order_id)
+    .bind(appointment_id)
+    .bind(format!("Doctor letter {tag}"))
+    .bind(format!("{tag}-doctor-letter.pdf"))
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/shares"),
+        &admin_bearer,
+        Some(json!({
+            "shared_with_provider_id": cardiology_provider,
+            "channel": "email",
+            "requires_confirmation": true
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/shares"),
+        &admin_bearer,
+        Some(json!({
+            "shared_with_provider_id": orthopedics_provider,
+            "channel": "email",
+            "requires_confirmation": true
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("specialty does not match")
+    );
+}
+
+#[tokio::test]
+async fn appointment_linked_document_share_prefers_appointment_provider_over_order_context() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-provider-precedence");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let order_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO orders (
+                order_number, patient_id, phase, status, created_by
+           ) VALUES (
+                $1, $2, 'execution', 'active', $3
+           ) RETURNING id"#,
+    )
+    .bind(format!("AUF-{tag}"))
+    .bind(patient_id)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let appointment_provider = seed_provider_with_type_and_specialty(
+        &pool,
+        &format!("{tag}-apt"),
+        "medical",
+        "cardiology",
+    )
+    .await;
+    let appointment_doctor =
+        seed_doctor_with_specialty(&pool, appointment_provider, &tag, "cardiology").await;
+    let other_order_provider = seed_provider_with_type_and_specialty(
+        &pool,
+        &format!("{tag}-order"),
+        "medical",
+        "cardiology",
+    )
+    .await;
+    let other_order_doctor =
+        seed_doctor_with_specialty(&pool, other_order_provider, &tag, "cardiology").await;
+
+    let appointment_id = seed_appointment(
+        &pool,
+        patient_id,
+        appointment_provider,
+        appointment_doctor,
+        admin_id,
+        &tag,
+    )
+    .await;
+
+    sqlx::query("UPDATE appointments SET order_id = $2 WHERE id = $1")
+        .bind(appointment_id)
+        .bind(order_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    sqlx::query(
+        r#"INSERT INTO order_leistungen (
+                order_id, description, quantity, unit_price, provider_id, doctor_id
+           ) VALUES
+                ($1, 'Appointment provider treatment', 1, 1000, $2, $3),
+                ($1, 'Other order cardiology treatment', 1, 900, $4, $5)"#,
+    )
+    .bind(order_id)
+    .bind(appointment_provider)
+    .bind(appointment_doctor)
+    .bind(other_order_provider)
+    .bind(other_order_doctor)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let document_id = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO documents (
+                id, patient_id, order_id, appointment_id, auto_name, original_filename,
+                art, category, status, visibility, is_medical, mime_type, file_size,
+                version_root_document_id, version_number, uploaded_by
+           ) VALUES (
+                $1, $2, $3, $4, $5, $6,
+                'arztbrief', 'medical', 'active', 'released_external', true, 'application/pdf', 1234,
+                $1, 1, $7
+           )"#,
+    )
+    .bind(document_id)
+    .bind(patient_id)
+    .bind(order_id)
+    .bind(appointment_id)
+    .bind(format!("Doctor letter {tag}"))
+    .bind(format!("{tag}-doctor-letter.pdf"))
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/shares"),
+        &admin_bearer,
+        Some(json!({
+            "shared_with_provider_id": appointment_provider,
+            "channel": "email",
+            "requires_confirmation": true
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/shares"),
+        &admin_bearer,
+        Some(json!({
+            "shared_with_provider_id": other_order_provider,
+            "channel": "email",
+            "requires_confirmation": true
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("Provider is not involved")
+    );
+}
+
+#[tokio::test]
 async fn patient_email_share_requires_active_channel_consent() {
     let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
         return;
@@ -1130,6 +1882,78 @@ async fn document_translation_requests_can_be_created_and_completed() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(update_body["status"], "completed");
     assert!(update_body["completed_at"].as_str().is_some());
+}
+
+#[tokio::test]
+async fn translation_workspace_can_store_source_and_translated_text() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("doc-translation-workspace");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let appointment_id =
+        seed_appointment(&pool, patient_id, provider_id, doctor_id, admin_id, &tag).await;
+    let document_id = seed_document(
+        &pool,
+        admin_id,
+        patient_id,
+        appointment_id,
+        "released_internal",
+        true,
+        "arztbrief",
+        &tag,
+    )
+    .await;
+
+    let (status, create_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/translation-requests"),
+        &admin_bearer,
+        Some(json!({
+            "requested_language": "en",
+            "note": "Prepare a patient-safe translation."
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let request_id = create_body["id"].as_str().unwrap().to_string();
+
+    let (status, update_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/translation-requests/{request_id}/update"),
+        &admin_bearer,
+        Some(json!({
+            "status": "completed",
+            "source_language": "de",
+            "source_text": "Hallo Welt",
+            "translated_text": "Hello world",
+            "note": "Ready for patient delivery."
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(update_body["status"], "completed");
+    assert_eq!(update_body["source_language"], "de");
+    assert_eq!(update_body["source_text"], "Hallo Welt");
+    assert_eq!(update_body["translated_text"], "Hello world");
+    assert!(update_body["translated_at"].as_str().is_some());
+    assert!(update_body["completed_at"].as_str().is_some());
+
+    let (status, list_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/translation-requests"),
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(list_body[0]["translated_text"], "Hello world");
 }
 
 #[tokio::test]

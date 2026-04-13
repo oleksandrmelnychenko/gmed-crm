@@ -66,6 +66,27 @@ async fn json_request(
     (status, value)
 }
 
+async fn bytes_request(
+    app: &axum::Router,
+    method: &str,
+    path: &str,
+    bearer: &str,
+) -> (StatusCode, Vec<u8>) {
+    let req = Request::builder()
+        .method(method)
+        .uri(path)
+        .header("Authorization", bearer)
+        .body(Body::empty())
+        .unwrap();
+
+    let resp = app.clone().oneshot(req).await.unwrap();
+    let status = resp.status();
+    let bytes = axum::body::to_bytes(resp.into_body(), 4 * 1024 * 1024)
+        .await
+        .unwrap();
+    (status, bytes.to_vec())
+}
+
 fn unique_tag(prefix: &str) -> String {
     format!("{prefix}-{}", Uuid::new_v4().simple())
 }
@@ -956,6 +977,295 @@ async fn cases_list_supports_search_and_status_filters() {
 }
 
 #[tokio::test]
+async fn case_doctor_registry_metadata_and_fk_round_trip_work() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("case-doctor-fk");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+
+    let (status, doctors_body) =
+        json_request(&app, "GET", "/api/v1/cases/meta/doctors", &pm_bearer, None).await;
+    assert_eq!(status, StatusCode::OK);
+    let doctors = doctors_body.as_array().expect("doctors array");
+    assert!(
+        doctors.iter().any(|item| {
+            item["id"] == doctor_id.to_string() && item["provider_id"] == provider_id.to_string()
+        }),
+        "expected seeded doctor in case doctor registry metadata"
+    );
+
+    let (status, created_body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/cases",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "hauptanfragegrund": "Doctor FK case",
+            "zuweiser_doctor_id": doctor_id
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let case_id = Uuid::parse_str(created_body["id"].as_str().expect("created case id")).unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/cases/{case_id}/operationen"),
+        &pm_bearer,
+        Some(json!({
+            "items": [{
+                "datum": "2026-04-01",
+                "grund": "Shoulder surgery",
+                "arzt_id": doctor_id,
+                "notiz": "registry linked"
+            }]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["count"], 1);
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/cases/{case_id}/medikamente"),
+        &pm_bearer,
+        Some(json!({
+            "items": [{
+                "handelsname": "Medication A",
+                "med_typ": "permanent",
+                "verordnender_arzt_id": doctor_id
+            }]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["count"], 1);
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/cases/{case_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["zuweiser_doctor_id"], doctor_id.to_string());
+    assert_eq!(body["zuweiser"], format!("Doctor {tag}"));
+    assert_eq!(body["operationen"][0]["arzt_id"], doctor_id.to_string());
+    assert_eq!(body["operationen"][0]["arzt"], format!("Doctor {tag}"));
+    assert_eq!(
+        body["medikamente"][0]["verordnender_arzt_id"],
+        doctor_id.to_string()
+    );
+    assert_eq!(
+        body["medikamente"][0]["verordnender_arzt"],
+        format!("Doctor {tag}")
+    );
+}
+
+#[tokio::test]
+async fn case_cardiology_subflow_round_trip_works() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("case-cardiology");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    let (status, created_body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/cases",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "hauptanfragegrund": "Cardiology case"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let case_id = Uuid::parse_str(created_body["id"].as_str().expect("created case id")).unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/cases/{case_id}/symptome"),
+        &pm_bearer,
+        Some(json!({
+            "items": [{
+                "beschreibung": "Chest pain on exertion",
+                "fachrichtung": "cardiology"
+            }]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["count"], 1);
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/cases/{case_id}/cardiology"),
+        &pm_bearer,
+        Some(json!({
+            "is_relevant": true,
+            "chest_pain": true,
+            "dyspnea": true,
+            "palpitations": false,
+            "syncope": false,
+            "edema": false,
+            "known_diagnosis": "Hypertension",
+            "prior_cardiac_workup": "Echo 2025",
+            "cardiovascular_risk_factors": "Smoking history",
+            "anticoagulation": "None",
+            "family_history": "Father with CAD",
+            "red_flags": "Exertional chest pain",
+            "notes": "Needs cardiology workup"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/cases/{case_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["cardiology_recommended"], true);
+    assert_eq!(body["cardiology"]["is_relevant"], true);
+    assert_eq!(body["cardiology"]["chest_pain"], true);
+    assert_eq!(body["cardiology"]["known_diagnosis"], "Hypertension");
+    assert_eq!(body["cardiology"]["prior_cardiac_workup"], "Echo 2025");
+    assert_eq!(body["cardiology"]["notes"], "Needs cardiology workup");
+}
+
+#[tokio::test]
+async fn case_history_exposes_system_uuid_retention_and_append_only_versions() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("case-history");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    let (status, created_body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/cases",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "hauptanfragegrund": "Clinical retention case",
+            "aktuelle_anamnese": "Initial narrative"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let case_id = Uuid::parse_str(created_body["id"].as_str().expect("created case id")).unwrap();
+    assert_eq!(created_body["case_uuid"], case_id.to_string());
+    assert!(created_body["retention_until"].as_str().is_some());
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/cases/{case_id}/anamnesis"),
+        &pm_bearer,
+        Some(json!({
+            "aktuelle_anamnese": "Updated narrative"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/cases/{case_id}/vegetative"),
+        &pm_bearer,
+        Some(json!({
+            "appetit_durst": "Reduced appetite",
+            "koerpergroesse": 172.0,
+            "gewicht": 68.5,
+            "gewichtsveraenderung": "Recent loss",
+            "grund": "Stress"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/cases/{case_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["case_uuid"], case_id.to_string());
+    assert!(body["retention_until"].as_str().is_some());
+    assert!(body["last_clinical_update_at"].as_str().is_some());
+    assert!(body["version_count"].as_i64().unwrap_or_default() >= 3);
+    assert!(
+        body["history"]
+            .as_array()
+            .is_some_and(|items| !items.is_empty())
+    );
+
+    let (status, history_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/cases/{case_id}/history?limit=10"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let history = history_body.as_array().expect("history array");
+    let overview_entry = history
+        .iter()
+        .find(|entry| entry["section"] == "overview" && entry["old_value"].is_object())
+        .expect("overview history entry with old/new payload");
+    assert_eq!(
+        overview_entry["old_value"]["aktuelle_anamnese"],
+        "Initial narrative"
+    );
+    assert_eq!(
+        overview_entry["new_value"]["aktuelle_anamnese"],
+        "Updated narrative"
+    );
+
+    let version_id = history[0]["id"].as_i64().expect("history row id");
+    let update_attempt = sqlx::query("UPDATE case_versions SET section = 'tampered' WHERE id = $1")
+        .bind(version_id)
+        .execute(&pool)
+        .await;
+    assert!(update_attempt.is_err(), "case_versions must be immutable");
+}
+
+#[tokio::test]
 async fn invalid_filter_values_are_rejected() {
     let Some((app, _, _, bearer)) = test_context().await else {
         return;
@@ -1255,6 +1565,12 @@ async fn patient_detail_view_audit_logs_visible_fields_for_role_filtered_payload
 
     let tag = unique_tag("patient-view-audit");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    sqlx::query("UPDATE patients SET functional_labels = $2 WHERE id = $1")
+        .bind(patient_id)
+        .bind(vec!["vip".to_string(), "high_risk".to_string()])
+        .execute(&pool)
+        .await
+        .unwrap();
     let interpreter_id = seed_user(&pool, &tag, "interpreter").await;
     seed_patient_assignment(&pool, patient_id, interpreter_id, admin_id).await;
     let interpreter_bearer = auth_header_for(interpreter_id, "interpreter");
@@ -1273,6 +1589,8 @@ async fn patient_detail_view_audit_logs_visible_fields_for_role_filtered_payload
     assert!(body.get("insurance_number").is_none());
     assert!(body.get("legal_status").is_none());
     assert!(body.get("notes").is_none());
+    assert_eq!(body["functional_labels"][0], "vip");
+    assert_eq!(body["functional_labels"][1], "high_risk");
 
     let context: Value = sqlx::query_scalar(
         r#"SELECT context
@@ -1305,6 +1623,11 @@ async fn patient_detail_view_audit_logs_visible_fields_for_role_filtered_payload
     );
     assert!(visible_fields.iter().all(|field| field != "legal_status"));
     assert!(visible_fields.iter().all(|field| field != "notes"));
+    assert!(
+        visible_fields
+            .iter()
+            .any(|field| field == "functional_labels")
+    );
 }
 
 #[tokio::test]
@@ -1681,6 +2004,115 @@ async fn non_medical_appointment_bootstraps_concierge_service_record() {
     assert_eq!(items[0]["service_kind"], "transfer");
     assert_eq!(items[0]["billing_status"], "draft");
     assert_eq!(items[0]["assigned_concierge_id"], concierge_id.to_string());
+}
+
+#[tokio::test]
+async fn patient_manager_can_create_weekly_recurring_appointment_series() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("recurring-appointment");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let title = format!("Recurring therapy {tag}");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/appointments",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "provider_id": provider_id,
+            "doctor_id": doctor_id,
+            "owner_user_id": pm_id,
+            "appointment_type": "medical",
+            "title": title,
+            "date": "2026-05-04",
+            "time_start": "09:00",
+            "time_end": "10:00",
+            "recurrence_frequency": "weekly",
+            "recurrence_interval": 1,
+            "recurrence_count": 4
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(body["series_created_count"], 4);
+    let root_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+
+    let rows = sqlx::query(
+        r#"SELECT id, date, recurrence_series_id, recurrence_frequency, recurrence_interval,
+                  recurrence_count, recurrence_index
+           FROM appointments
+           WHERE patient_id = $1
+             AND title = $2
+           ORDER BY date, recurrence_index"#,
+    )
+    .bind(patient_id)
+    .bind(&title)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(rows.len(), 4);
+    let expected_dates = ["2026-05-04", "2026-05-11", "2026-05-18", "2026-05-25"];
+
+    for (index, row) in rows.iter().enumerate() {
+        let appointment_id: Uuid = row.try_get("id").unwrap();
+        let recurrence_series_id: Option<Uuid> = row.try_get("recurrence_series_id").unwrap();
+        let recurrence_frequency: Option<String> = row.try_get("recurrence_frequency").unwrap();
+        let recurrence_interval: Option<i32> = row.try_get("recurrence_interval").unwrap();
+        let recurrence_count: Option<i32> = row.try_get("recurrence_count").unwrap();
+        let recurrence_index: i32 = row.try_get("recurrence_index").unwrap();
+        let appointment_date = row
+            .try_get::<chrono::NaiveDate, _>("date")
+            .unwrap()
+            .to_string();
+
+        if index == 0 {
+            assert_eq!(appointment_id, root_id);
+        }
+        assert_eq!(recurrence_series_id, Some(root_id));
+        assert_eq!(recurrence_frequency.as_deref(), Some("weekly"));
+        assert_eq!(recurrence_interval, Some(1));
+        assert_eq!(recurrence_count, Some(4));
+        assert_eq!(recurrence_index, index as i32);
+        assert_eq!(appointment_date, expected_dates[index]);
+    }
+
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/appointments/{root_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail["recurrence_frequency"], "weekly");
+    assert_eq!(detail["recurrence_series_size"], 4);
+    assert_eq!(detail["recurrence_index"], 0);
+
+    let (status, list_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/appointments?search={tag}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = list_body.as_array().unwrap();
+    assert_eq!(items.len(), 4);
+    assert!(items.iter().all(|item| item["recurrence_series_size"] == 4));
 }
 
 #[tokio::test]
@@ -2296,6 +2728,58 @@ async fn attention_endpoint_excludes_resolved_completed_visits() {
     assert_eq!(status, StatusCode::OK);
     let items = body.as_array().unwrap();
     assert!(items.is_empty());
+}
+
+#[tokio::test]
+async fn appointment_completion_is_blocked_when_checklist_items_remain_open() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("appointment-complete-gate");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+
+    let appointment_id = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        pm_id,
+        "Checklist-blocked visit",
+        "confirmed",
+        "2026-05-10",
+    )
+    .await;
+
+    sqlx::query(
+        r#"INSERT INTO appointment_checklists (appointment_id, phase, item_text, sort_order)
+           VALUES ($1, 'follow_up', 'Send discharge summary to patient', 1)"#,
+    )
+    .bind(appointment_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{appointment_id}/status"),
+        &pm_bearer,
+        Some(json!({ "status": "completed" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("open checklist")
+    );
 }
 
 #[tokio::test]
@@ -3423,6 +3907,36 @@ async fn provider_and_doctor_detail_expose_linked_patients_and_interactions() {
     let tag = unique_tag("provider-detail");
     let provider_id = seed_provider(&pool, &tag).await;
     let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    sqlx::query(
+        r#"UPDATE providers
+           SET legal_name = $2,
+               tax_id = $3
+           WHERE id = $1"#,
+    )
+    .bind(provider_id)
+    .bind(format!("Clinic Legal {tag} GmbH"))
+    .bind(format!("DE-TAX-{tag}"))
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"UPDATE provider_doctors
+           SET languages = $3,
+               license_number = $4,
+               licensing_country = $5,
+               licensing_valid_until = $6
+           WHERE provider_id = $1
+             AND id = $2"#,
+    )
+    .bind(provider_id)
+    .bind(doctor_id)
+    .bind(vec!["de".to_string(), "en".to_string()])
+    .bind(format!("LIC-{tag}"))
+    .bind("DE")
+    .bind(chrono::NaiveDate::from_ymd_opt(2027, 12, 31).unwrap())
+    .execute(&pool)
+    .await
+    .unwrap();
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
 
     seed_appointment(
@@ -3469,6 +3983,8 @@ async fn provider_and_doctor_detail_expose_linked_patients_and_interactions() {
     assert_eq!(linked_patients[0]["id"], patient_id.to_string());
     assert_eq!(linked_patients[0]["appointment_count"], 1);
     assert_eq!(linked_patients[0]["leistung_count"], 1);
+    assert_eq!(body["legal_name"], format!("Clinic Legal {tag} GmbH"));
+    assert_eq!(body["tax_id"], format!("DE-TAX-{tag}"));
     let interactions = body["interactions"].as_array().unwrap();
     assert!(
         interactions
@@ -3488,6 +4004,11 @@ async fn provider_and_doctor_detail_expose_linked_patients_and_interactions() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(doctor_body["patient_count"], 1);
     assert_eq!(doctor_body["appointment_count"], 1);
+    assert_eq!(doctor_body["license_number"], format!("LIC-{tag}"));
+    assert_eq!(doctor_body["licensing_country"], "DE");
+    assert_eq!(doctor_body["licensing_valid_until"], "2027-12-31");
+    assert_eq!(doctor_body["languages"][0], "de");
+    assert_eq!(doctor_body["languages"][1], "en");
     assert_eq!(
         doctor_body["linked_patients"]
             .as_array()
@@ -3998,7 +4519,8 @@ async fn patient_profile_updates_structured_legal_status() {
                 "compliance_completed": false,
                 "contract_status": "sent",
                 "notes": "Waiting for signed framework package"
-            }
+            },
+            "functional_labels": ["vip", "high_risk"]
         })),
     )
     .await;
@@ -4027,6 +4549,8 @@ async fn patient_profile_updates_structured_legal_status() {
         detail_body["legal_status"]["notes"],
         "Waiting for signed framework package"
     );
+    assert_eq!(detail_body["functional_labels"][0], "vip");
+    assert_eq!(detail_body["functional_labels"][1], "high_risk");
 }
 
 #[tokio::test]
@@ -4037,6 +4561,12 @@ async fn patient_manager_can_export_patient_dsgvo_bundle() {
 
     let tag = unique_tag("patient-dsgvo-export");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    sqlx::query("UPDATE patients SET functional_labels = $2 WHERE id = $1")
+        .bind(patient_id)
+        .bind(vec!["complex_coordination".to_string()])
+        .execute(&pool)
+        .await
+        .unwrap();
     let pm_id = seed_user(&pool, &tag, "patient_manager").await;
     seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
     let pm_bearer = auth_header_for(pm_id, "patient_manager");
@@ -4052,10 +4582,53 @@ async fn patient_manager_can_export_patient_dsgvo_bundle() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["export_type"], "DSGVO Art. 15 - Right of Access");
     assert_eq!(body["patient"]["id"], patient_id.to_string());
+    assert_eq!(
+        body["patient"]["functional_labels"][0],
+        "complex_coordination"
+    );
     assert!(body["appointments"].is_array());
     assert!(body["cases"].is_array());
     assert!(body["orders"].is_array());
     assert!(body["assignments"].is_array());
+}
+
+#[tokio::test]
+async fn patient_manager_can_download_patient_dsgvo_bundle_as_zip() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("patient-dsgvo-export-zip");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    let (status, bytes) = bytes_request(
+        &app,
+        "GET",
+        &format!("/api/v1/admin/compliance/patient/{patient_id}/export?format=zip"),
+        &pm_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        bytes.starts_with(b"PK"),
+        "zip bundle should start with PK signature"
+    );
+
+    let audit_count: i64 = sqlx::query_scalar(
+        r#"SELECT count(*)
+           FROM audit_log
+           WHERE entity_type = 'patient'
+             AND entity_id = $1
+             AND action = 'dsgvo_data_export'"#,
+    )
+    .bind(patient_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(audit_count >= 1);
 }
 
 #[tokio::test]
@@ -4106,7 +4679,7 @@ async fn patient_timeline_includes_compliance_audit_events() {
     .await;
     assert_eq!(status, StatusCode::OK);
 
-    let items = body.as_array().expect("timeline array");
+    let items = body["items"].as_array().expect("timeline array");
     assert!(
         items.iter().any(|item| {
             item["entity_type"] == "compliance"
@@ -4257,13 +4830,15 @@ async fn patient_timeline_aggregates_events_in_descending_order() {
     let (status, body) = json_request(
         &app,
         "GET",
-        &format!("/api/v1/patients/{patient_id}/timeline"),
+        &format!("/api/v1/patients/{patient_id}/timeline?limit=7&offset=0"),
         &bearer,
         None,
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let items = body.as_array().expect("timeline array");
+    assert!(body["total"].as_i64().unwrap_or_default() >= 7);
+    assert_eq!(body["limit"].as_i64().unwrap_or_default(), 7);
+    let items = body["items"].as_array().expect("timeline array");
     assert!(items.len() >= 7);
     assert_eq!(items[0]["entity_type"], "document");
     assert_eq!(items[0]["entity_id"], document_id.to_string());

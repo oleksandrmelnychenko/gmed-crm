@@ -485,3 +485,124 @@ async fn billing_can_update_quote_status_and_payment_but_interpreter_cannot_acce
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert!(body["message"].as_str().is_some());
 }
+
+#[tokio::test]
+async fn quote_versions_capture_initial_and_status_update_snapshots() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("quote-versions");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let billing_bearer = auth_header_for(billing_id, "billing");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/orders",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "needs_description": "Quote version trail"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let order_id = body["id"].as_str().unwrap().to_string();
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/leistungen"),
+        &pm_bearer,
+        Some(json!({
+            "description": "Versioned service",
+            "quantity": 1.0,
+            "unit_price": 100.0,
+            "provider_id": provider_id,
+            "doctor_id": doctor_id
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/quotes"),
+        &billing_bearer,
+        Some(json!({
+            "valid_until": "2026-05-15",
+            "notes": "Initial commercial snapshot"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let quote_id = body["id"].as_str().unwrap().to_string();
+    assert_eq!(body["version_count"], 1);
+    assert_eq!(body["current_version_number"], 1);
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/quotes/{quote_id}/versions"),
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let versions = body.as_array().unwrap();
+    assert_eq!(versions.len(), 1);
+    assert_eq!(versions[0]["version_number"], 1);
+    assert_eq!(versions[0]["change_reason"], "initial_snapshot");
+    assert_eq!(versions[0]["status"], "draft");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{quote_id}/status"),
+        &billing_bearer,
+        Some(json!({
+            "status": "accepted",
+            "paid_amount": 119.0,
+            "notes": "Snapshot moved to accepted"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["current_version_number"], 2);
+    assert_eq!(body["version_count"], 2);
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/quotes/{quote_id}/versions"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let versions = body.as_array().unwrap();
+    assert_eq!(versions.len(), 2);
+    assert_eq!(versions[0]["version_number"], 2);
+    assert_eq!(versions[0]["change_reason"], "status_update");
+    assert_eq!(versions[0]["status"], "accepted");
+    assert_eq!(versions[0]["paid_amount"], "119");
+    assert_eq!(versions[1]["version_number"], 1);
+
+    let stored_version_count: i64 =
+        sqlx::query_scalar("SELECT count(*)::bigint FROM quote_versions WHERE quote_id = $1")
+            .bind(Uuid::parse_str(&quote_id).unwrap())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(stored_version_count, 2);
+}
