@@ -8,6 +8,12 @@ pub struct Config {
     pub jwt_secret: String,
     pub cors_origin: String,
     pub message_key_registry: KeyRegistry,
+    /// Salt used to pseudonymise peer IPs before they reach `audit_log`.
+    /// Falls back to `JWT_SECRET` when `AUDIT_IP_SALT` is not set so a
+    /// fresh deployment works out of the box, but operators rotating
+    /// `JWT_SECRET` should set a dedicated `AUDIT_IP_SALT` beforehand
+    /// to keep IP-hash stability across the rotation.
+    pub audit_ip_salt: String,
 }
 
 impl Config {
@@ -35,6 +41,8 @@ impl Config {
             )
         });
 
+        let audit_ip_salt = std::env::var("AUDIT_IP_SALT").unwrap_or_else(|_| jwt_secret.clone());
+
         Self {
             database_url: std::env::var("DATABASE_URL").expect("DATABASE_URL must be set"),
             listen_addr: SocketAddr::from(([0, 0, 0, 0], port)),
@@ -42,6 +50,7 @@ impl Config {
             cors_origin: std::env::var("CORS_ORIGIN")
                 .unwrap_or_else(|_| "http://localhost:8080".into()),
             message_key_registry,
+            audit_ip_salt,
         }
     }
 }

@@ -1,4 +1,5 @@
 pub mod access;
+pub mod audit;
 pub mod auth;
 pub mod config;
 pub mod crypto;
@@ -37,9 +38,23 @@ pub fn build_app(app_state: state::AppState) -> Router {
             .merge(routes::messages::public_router()),
     );
 
-    let protected = rate_limit::apply_general(routes::protected_router().layer(
-        middleware::from_fn_with_state(app_state.clone(), auth::middleware::require_auth),
-    ));
+    // Protected routes get three concentric middlewares, applied in
+    // `.layer()` order (outermost first runtime-wise):
+    //   1. require_auth — attaches AuthUser to the request extensions
+    //   2. audit::middleware — records one audit_log row per request,
+    //      using the AuthUser left behind by require_auth
+    //   3. rate_limit::apply_general — per-IP token bucket
+    let protected = rate_limit::apply_general(
+        routes::protected_router()
+            .layer(middleware::from_fn_with_state(
+                app_state.clone(),
+                audit::middleware,
+            ))
+            .layer(middleware::from_fn_with_state(
+                app_state.clone(),
+                auth::middleware::require_auth,
+            )),
+    );
 
     let router = Router::new()
         .merge(routes::health::router())

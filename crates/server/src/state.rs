@@ -5,6 +5,7 @@ use secrecy::{ExposeSecret, SecretString};
 use serde_json::Value;
 use tokio::sync::broadcast;
 
+use crate::audit::AuditSender;
 use crate::crypto::KeyRegistry;
 use crate::settings::SettingsCache;
 
@@ -15,10 +16,13 @@ pub struct AppState {
     pub settings: SettingsCache,
     pub message_events: broadcast::Sender<Value>,
     pub message_keys: Arc<KeyRegistry>,
+    pub audit_sender: AuditSender,
 }
 
 impl AppState {
-    /// Test/legacy constructor — installs a single deterministic key.
+    /// Test/legacy constructor — installs a single deterministic key and a
+    /// no-op audit sender. Tests that do not exercise the audit pipeline
+    /// continue to work without any changes.
     pub fn new(db: DbPool, jwt_secret: impl Into<String>, settings: SettingsCache) -> Self {
         let registry =
             KeyRegistry::from_pairs(vec![("test".to_string(), [0u8; 32])], "test".to_string())
@@ -39,7 +43,15 @@ impl AppState {
             settings,
             message_events,
             message_keys: Arc::new(message_keys),
+            audit_sender: AuditSender::noop(),
         }
+    }
+
+    /// Install a live audit sender on an otherwise-constructed state.
+    /// `main` calls this once after [`crate::audit::spawn_writer`].
+    pub fn with_audit_sender(mut self, sender: AuditSender) -> Self {
+        self.audit_sender = sender;
+        self
     }
 
     pub fn jwt_secret(&self) -> &str {

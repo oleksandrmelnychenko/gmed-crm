@@ -1,6 +1,8 @@
+use std::net::SocketAddr;
+
 use tower_http::cors::CorsLayer;
 
-use gmed_server::{build_app, config, settings, state, telemetry};
+use gmed_server::{audit, build_app, config, settings, state, telemetry};
 
 #[tokio::main]
 async fn main() {
@@ -33,12 +35,14 @@ async fn main() {
     );
     let settings_cache = settings::SettingsCache::new(token_settings);
 
+    let audit_sender = audit::spawn_writer(pool.clone(), cfg.audit_ip_salt);
     let app_state = state::AppState::new_with_keys(
         pool,
         cfg.jwt_secret,
         settings_cache,
         cfg.message_key_registry,
-    );
+    )
+    .with_audit_sender(audit_sender);
     gmed_server::routes::invoices::spawn_auto_dunning_scheduler(app_state.clone());
     spawn_blacklist_purger(app_state.db.clone());
     spawn_message_rewrap_sweeper(app_state.clone());
@@ -80,13 +84,21 @@ async fn main() {
         }
     };
 
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-        .unwrap_or_else(|e| {
-            tracing::error!("Server error: {e}");
-            std::process::exit(1);
-        });
+    // `into_make_service_with_connect_info` injects ConnectInfo<SocketAddr>
+    // into every request's extensions. The audit middleware reads this to
+    // hash the peer IP, and `tower_governor::PeerIpKeyExtractor` reads it
+    // for per-IP rate limiting. Without this the rate limiter silently
+    // collapses into a single global bucket.
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await
+    .unwrap_or_else(|e| {
+        tracing::error!("Server error: {e}");
+        std::process::exit(1);
+    });
 
     tracing::info!("Server shut down gracefully");
 }
