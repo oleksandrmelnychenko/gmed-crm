@@ -46,6 +46,7 @@ import {
 } from "@/components/ui/sheet";
 import { apiFetch } from "@/lib/api";
 import { convertLead as apiConvertLead, downloadLeadAttachment } from "@/lib/api/leads";
+import { computeLeadConversionGate } from "./leads.helpers";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import type {
@@ -845,18 +846,13 @@ export function LeadsPage() {
                 {leads.map((lead) => {
                   const canQualify =
                     lead.qualification_status === "new" || lead.qualification_status === "in_progress";
-                  const canConvertRole =
-                    permissions.canConvert && lead.qualification_status === "qualified";
-                  // Respect the backend `conversion_ready` gate when the
-                  // list payload carries it. If the field is absent (older
-                  // server build) we fall back to the role+status check
-                  // alone so the button stays usable.
-                  const conversionReady = lead.conversion_ready ?? true;
-                  const canConvert = canConvertRole && conversionReady;
-                  const convertDisabledReason =
-                    canConvertRole && !conversionReady
-                      ? "Missing required data — open the lead to see what's blocking conversion."
-                      : null;
+                  const {
+                    canConvertRole,
+                    canConvert,
+                    disabledReason: convertDisabledReason,
+                  } = computeLeadConversionGate(lead, {
+                    canConvert: permissions.canConvert,
+                  });
                   const canResolveFailed =
                     lead.qualification_status !== "converted" &&
                     lead.failed_outcome?.status !== "delete_anonymized";

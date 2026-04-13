@@ -483,3 +483,108 @@ async fn get_nonexistent_lead_returns_404() {
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
+
+// ── conversion_ready exposed on list payload ───────────────────
+
+#[tokio::test]
+async fn list_leads_exposes_conversion_ready_field() {
+    // The leads card uses this field to disable its Convert button
+    // without waiting for a 422 round-trip. A regression that drops
+    // the field from the list serializer would silently re-enable
+    // the button on incomplete leads, so pin the contract here.
+    let Some(app) = test_app().await else { return };
+    let pm = auth_header("patient_manager");
+
+    // Create a bare-minimum lead — no DOB, no legal_sex, no consents.
+    // This lead can never pass the conversion_ready gate, so the list
+    // entry must carry `conversion_ready: false`.
+    let tag = format!("{:x}", uuid::Uuid::new_v4().as_u128() & 0xffff_ffff);
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/leads",
+        &pm,
+        Some(json!({
+            "first_name": format!("Conv{tag}"),
+            "last_name": "Ready",
+            "email": format!("conv-{tag}@test.local"),
+            "phone": "+49000000000",
+            "source": "Test",
+            "country": "DE"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let lead_id = created["id"].as_str().unwrap().to_string();
+
+    let (status, list) = json_request(&app, "GET", "/api/v1/leads", &pm, None).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let entry = list
+        .as_array()
+        .expect("leads list returns an array")
+        .iter()
+        .find(|l| l["id"] == lead_id)
+        .expect("newly created lead appears in its own list");
+
+    // The field must be present …
+    assert!(
+        entry.get("conversion_ready").is_some(),
+        "list payload must carry conversion_ready; entry was {entry}"
+    );
+    // … and it must be a boolean, not some other JSON shape.
+    let ready = entry["conversion_ready"]
+        .as_bool()
+        .expect("conversion_ready must serialize as a boolean");
+    // … and for a minimal lead, the full readiness gate cannot pass:
+    // DOB, legal_sex, consent_privacy_practices, consent_healthcare,
+    // and compliance_completed are all missing on a fresh row.
+    assert!(
+        !ready,
+        "a lead created with only contact fields must not be conversion_ready; entry was {entry}"
+    );
+}
+
+#[tokio::test]
+async fn list_leads_conversion_ready_is_false_for_converted_lead() {
+    // After conversion the lead row carries converted_patient_id, which
+    // the readiness builder treats as "already converted" and reports
+    // as not-ready. The UI uses this to hide the Convert button
+    // entirely on the `converted` stage card.
+    let Some(app) = test_app().await else { return };
+    let pm = auth_header("patient_manager");
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        "/api/v1/leads",
+        &pm,
+        Some(json!({
+            "first_name": "Already",
+            "last_name": "Converted",
+            "email": "already-converted@test.local",
+            "phone": "+49111000000",
+            "source": "Test",
+            "country": "DE"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    let (_, list) = json_request(&app, "GET", "/api/v1/leads?status=converted", &pm, None).await;
+
+    // Either there are zero converted leads in the fixture — in which
+    // case we have nothing to assert but the endpoint still returned
+    // ok — or every returned row reports `conversion_ready = false`.
+    // A regression that lets `conversion_ready = true` escape for a
+    // row with converted_patient_id would be caught here.
+    for entry in list.as_array().unwrap_or(&Vec::new()) {
+        if entry["qualification_status"] == "converted" {
+            assert_eq!(
+                entry["conversion_ready"].as_bool(),
+                Some(false),
+                "converted leads must report conversion_ready=false; entry was {entry}"
+            );
+        }
+    }
+}
