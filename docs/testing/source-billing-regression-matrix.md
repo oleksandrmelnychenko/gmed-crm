@@ -86,6 +86,12 @@
   Covers:
   advance invoices can be issued from quote context without consuming approved order service lines.
 
+- `second_advance_invoice_for_same_quote_is_rejected`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:245`
+  Covers:
+  one active advance invoice scope per quote is enforced as well, so the same quote cannot spawn duplicate prepayment invoices.
+
 - `billing_can_update_invoice_payment_state_and_interpreter_cannot_access_invoice`
   Source:
   `docs/requirements/03_product-backlog_ua.md:117`
@@ -101,6 +107,13 @@
   `docs/backlog/04_implementation-tasks_ua.md:284`
   Covers:
   patient portal sees own invoice snapshots only, can open invoice detail, and payment-proof uploads feed back into billing-facing invoice metadata.
+
+- `patient_cannot_see_draft_invoices_in_portal_scope`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:131`
+  `docs/backlog/04_implementation-tasks_ua.md:284`
+  Covers:
+  patient portal excludes draft invoices from list, detail and PDF download until billing has published a patient-visible invoice state.
 
 - `staff_can_download_invoice_pdf_document`
   Source:

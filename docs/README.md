@@ -44,6 +44,7 @@
 ### Testing
 
 - `testing/user-stories-excel-backlog-audit_ua.md` - аудит 1:1 між Excel `User Stories` і `requirements/03_product-backlog_ua.md`
+- `testing/full-docs-backlog-reconciliation_ua.md` - повна звірка `requirements/`, `backlog/`, `architecture/`, planning docs і current-state коду
 - `testing/source-workspace-regression-matrix.md` - regression coverage по workspace slices
 - `testing/source-billing-regression-matrix.md` - regression coverage по billing slice
 - `testing/source-documents-regression-matrix.md` - regression coverage по documents slice
@@ -55,6 +56,10 @@
 Якщо треба зафіксувати, **що є джерелом правди** і як PDF/Excel пов’язані з `.md`:
 
 - почни з `00_source-of-truth_ua.md`
+
+Якщо треба побачити **повну current-state звірку** між `docs/` і реальним кодом:
+
+- почни з `testing/full-docs-backlog-reconciliation_ua.md`
 
 Якщо треба зрозуміти узгоджені вимоги до продукту:
 

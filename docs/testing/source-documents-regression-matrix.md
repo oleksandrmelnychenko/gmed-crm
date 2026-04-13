@@ -88,6 +88,13 @@
   Covers:
   provider-facing external sharing is rejected when the selected communication channel is not part of the allowed official channel policy.
 
+- `provider_document_share_requires_and_persists_cover_message`
+  Source:
+  `docs/backlog/04_implementation-tasks_ua.md:128`
+  `docs/requirements/03_product-backlog_ua.md:82`
+  Covers:
+  provider-facing document sharing requires a cover message, stores that message in the share record and keeps the message visible in the document share trail together with the official delivery channel.
+
 - `medical_document_share_requires_matching_provider_specialty`
   Source:
   `docs/requirements/03_product-backlog_ua.md:242`
@@ -221,9 +228,16 @@
   Covers:
   patient portal supports self-upload for internal care-team intake, keeps the upload patient-bound and lets the patient re-download the submitted file.
 
-## Not automated yet
+- `deleting_document_file_revokes_shares_and_removes_stored_file`
+  Source:
+  `docs/requirements/04_non-functional-requirements_ua.md:84`
+  `docs/requirements/04_non-functional-requirements_ua.md:94`
+  Covers:
+  controlled document file-delete lifecycle archives the document row, revokes active shares, removes the stored binary from disk and blocks further download access without erasing audit/history metadata.
 
-- file delete lifecycle
-- external provider messaging around documents
-- OCR/categorization pipeline
-- patient-requested revoke of third-party medical sharing outside portal document scope
+- `third_party_revoke_request_can_be_executed_by_patient_manager_and_revokes_only_external_consents_and_provider_document_shares`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:337`
+  `docs/requirements/03_product-backlog_ua.md:355`
+  Covers:
+  patient-requested third-party revoke executes through the compliance workflow, revokes the external consent bundle and removes active provider-facing document shares without touching patient portal releases.

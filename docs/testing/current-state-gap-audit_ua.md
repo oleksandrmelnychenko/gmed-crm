@@ -29,7 +29,7 @@
 
 ### 3.2 Anamnese / clinical intake
 
-- `Cardiology` тепер виділений як окремий section-level sub-flow з structured assessment, recommendation trigger від symptoms і окремим version log; незакритими лишаються інші specialty branches того ж класу, а не сам cardiology path.
+- `Cardiology`, `Gastroenterology`, `Orthopedics`, `Neurology`, `Pulmonology` і `Urology` тепер виділені як окремі section-level sub-flows з structured assessment, recommendation trigger від symptoms і окремим version log; далі це вже розширення specialty library, а не незакритий базовий gap самого specialty-subflow pattern.
 
 ### 3.3 Billing / finance
 
@@ -41,21 +41,23 @@
 ### 3.4 Security / analytics / learning / AI
 
 - `eIDAS / QES` e-signature не підтверджена як готовий current-state flow.
-- secure in-portal messaging тепер already має client-side `E2E` для text messages через per-user message keys і envelope storage на backend; незакритими лишаються attachment `E2E` і richer multi-device key-management semantics, а не сам базовий encrypted text-chat layer.
-- CEO dashboard, окремий reports workspace, role-scoped risk-analysis і forecasting workspace уже покривають current-state метрики по виручці, дебіторці, країнах пацієнтів, клініках, service-type mix, PM/interpreter/concierge load, clinic volume, NPS/feedback surfacing, doctor drill-down/export, quote pipeline, collections outlook, follow-up milestone pressure і clinic capacity next 30 days; незакритими лишаються predictive / AI-style forecasting і зовнішній accounting intelligence, а не сам базовий executive forecast layer.
+- secure in-portal messaging тепер already має client-side `E2E` і для text messages, і для file attachments через per-user message keys та envelope storage на backend; ручний encrypted key backup / import закриває current-state device migration semantics без серверного доступу до private keys.
+- CEO dashboard, окремий reports workspace, role-scoped risk-analysis і forecasting workspace уже покривають current-state метрики по виручці, дебіторці, країнах пацієнтів, клініках, service-type mix, PM/interpreter/concierge load, clinic volume, NPS/feedback surfacing, doctor drill-down/export, provider-quality signals по treatment / doctor communication / follow-up completion, organization / service / ambience / value scores, treatment-success / complication rates, written-findings turnaround, response-time KPI signals із appointment communications, non-medical provider reporting/search по service portfolio і concierge load, quote pipeline, collections outlook, follow-up milestone pressure і clinic capacity next 30 days; незакритими лишаються predictive / AI-style forecasting і зовнішній accounting intelligence, а не сам базовий executive forecast layer.
+- High-risk `RBAC` boundaries вже підтверджені regression tests не тільки для sales, а й для `CEO Assistant` patient read-only scope, `teamlead_interpreter` assignment visibility, `it_admin` deny на patient/case/reports workspaces та `billing` deny на medical case detail; залишок тут — це вже exhaustive matrix hardening, а не відсутність базових policy boundaries.
 - AI / pseudonymization flow не підтверджений як реалізований current-state slice.
 
 ## 4. Що вже ближче до реалізації
 
 - Реєстр клінік і лікарів та зв'язка з пацієнтами через appointments/orders, включно з `legal_name / tax_id` на provider-рівні та `languages / licensing` на doctor-рівні.
 - Patient profile з tabs, timeline, compliance trail, functional labels, consent register і privacy workflow.
+- `CEO Assistant` тепер має окремо перевірений read-only доступ до patient registry list/detail через explicit patient field policies, без insurance/legal-status/internal-notes/functional-label exposure.
 - Privacy-request schema тепер канонізується окремою follow-up migration: нормалізовані statuses/source/defaults, перестворені canonical indexes, а duplicate open requests одного типу для того ж пацієнта блокуються і в admin intake flow, і в patient self-service, і на DB-рівні через partial unique index.
 - Consent register тепер моделює явний `expires_at`, вміє показувати прострочені згоди окремо і не рахує їх як active grants у compliance dashboard.
 - Patient timeline тепер має backend pagination (`limit/offset`) і не вимагає завантаження всієї історії пацієнта одним запитом.
 - Case intake sections `Overview`, `Operationen` і `Medikamente` тепер підтримують реальний doctor registry link через `provider_doctors` FK (`zuweiser_doctor_id`, `arzt_id`, `verordnender_arzt_id`) з legacy text fallback для історичних або ручних записів.
 - Clinical cases тепер явно розводять системний UUID і human-readable reference code: `cases.id` / `case_uuid` є канонічним системним ідентифікатором, а `case_id` лишається операційним reference code формату `C-YYYYMMDD-####`.
 - Clinical history більше не є лише прихованим snapshot log: `case_versions` тепер append-only на рівні БД, detail/history API віддає old/new values по секціях, а `cases` тримають `retention_until`, `last_clinical_update_at` і `version_count`.
-- Case intake тепер має і окремий `Cardiology` sub-flow з structured clinical fields, symptom-triggered recommendation і section-level version logging.
+- Case intake тепер має окремі `Cardiology`, `Gastroenterology`, `Orthopedics`, `Neurology`, `Pulmonology` і `Urology` sub-flows з structured clinical fields, symptom-triggered recommendation і section-level version logging.
 - Patient- і order-level workflow checklists з auto-seeded PM/concierge tasks, timeline sync і UI в profile/order workspace.
 - Lead qualification/conversion readiness gates і order execution gates з debt hold, billing release та package coverage controls.
 - Existing-customer `re-check` перед створенням нового order: backend readiness API перевіряє base data, compliance, identity, required documents, contract validity і overdue debt, а create-order UI показує blockers до submit.
@@ -65,11 +67,12 @@
 - Lead failed-resolution workflow і order lifecycle transitions з history та blockers на `execution -> closure -> follow-up`.
 - CEO dashboard / KPI slice поверх current-state transactional data: revenue and receivables, patient geography, patient-manager workload, interpreter and concierge productivity, clinic volume and feedback-based patient sentiment.
 - Debt-management workflow поверх orders: queue, status machine, owner/review timestamps, order-level blockers і surfacing в existing-customer re-check.
-- Dedicated reports workspace by clinics, doctors, countries and service types with role-scoped financial visibility, clinic-to-doctor drill-down and CSV export for executive, patient-manager, billing and sales users.
+- Dedicated reports workspace by clinics, doctors, countries, service types and non-medical providers with role-scoped financial visibility, clinic-to-doctor drill-down, provider-quality metrics, experience scores (`organization / service / ambience / value`), treatment-success / complication rates, written-findings turnaround, communication response-time KPIs, concierge partner load and CSV export for executive, patient-manager, billing and sales users.
 - Dedicated forecasting workspace for executive / billing / PM / sales roles: quote pipeline weighting, collections outlook, follow-up milestone pressure and clinic capacity for the next 30 days.
-- Role-scoped risk-analysis workspace: patient managers бачать автоматичні сигнали по своїх assigned patients/orders, а billing бачить фінансовий risk layer по overdue invoices, blocked billing/package gates і uninvoiced service exposure.
+- Role-scoped risk-analysis workspace: CEO/CEO Assistant бачать обидва шари, patient managers бачать автоматичні сигнали по своїх assigned patients/orders, а billing бачить фінансовий risk layer по overdue invoices, blocked billing/package gates і uninvoiced service exposure.
 - Quotes, invoices, quote version snapshots, dunning, auto-dunning scheduler, VAT / passthrough logic, on-demand invoice PDF export and patient-facing invoice visibility.
-- Appointment cycle з conflicts, preparation / execution / follow-up markers, portal appointment requests і creation-time recurring series для стандартних повторюваних слотів.
+- Appointment cycle з conflicts, preparation / execution / follow-up markers, portal appointment requests, creation-time recurring series, post-create recurrence-rule editing (`frequency / interval / count / until`), true split semantics for this-and-following reschedule/cancel, recurring bulk status controls for single occurrence / tail slice / whole active series, explicit split-lineage surfacing plus lineage-history analytics in the detail drawer, month/week grid quick actions, UI preflight warnings for bulk-complete checklist blockers і DB-level exclusion constraints поверх patient / interpreter / doctor overlap rules.
+- Mobile-specific delivery for interpreter operations now has a dedicated compact appointment agenda on small screens, while `teamlead_interpreter` visibility over patients and appointments is explicitly regression-verified as assignment-scoped.
 - Document release до patient portal, patient uploads, interpreter internal uploads з teamlead review/categorization queue, best-effort text extraction with `windows_ocr` / `tesseract_cli` fallback, portal privacy requests, concierge self-service requests, self-service `/me/export` as downloadable DSGVO ZIP bundle and patient-facing required-document alerts through `/me/document-alerts`.
 - Provider-facing medical document sharing тепер додатково валідує specialty-match по appointment doctor context, щоб order-level involvement іншої клініки саме по собі не відкривало шлях для пересилки невідповідному медичному провайдеру.
 - Для appointment-linked документів provider share policy тепер також віддає пріоритет самому appointment context над ширшим order context: інший provider з того ж order більше не вважається допустимим target лише через order-level involvement.

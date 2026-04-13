@@ -1,14 +1,69 @@
 # Worktree Stabilization Inventory (UA)
 
-> Операційний зріз незведеного worktree станом на **2026-04-13**. Це не backlog і не source-of-truth; файл потрібен, щоб перед фінальним stabilization pass було видно, які зміни вже лежать у дереві і якими bounded slices їх треба зводити.
+> Операційний зріз stabilization pass станом на **2026-04-13**. Це не backlog і не source-of-truth; файл потрібен, щоб було видно, як брудний worktree був зведений у bounded commits і що залишалось на момент фінального docs commit.
+
+## Update: stabilization resolved into bounded commits
+
+Під час stabilization pass незведений worktree був розкладений у такі bounded commits:
+
+- `4cfd8e2` — `Harden portal messaging and document workflows`
+- `22f6dea` — `Expand clinical subflows and provider analytics`
+- `dd52b16` — `Polish appointment UX and frontend translations`
+
+На момент оновлення цього файлу в dirty state лишався тільки `docs reconciliation / current-state docs` bucket.
 
 ## 1. Загальний стан
 
-- `git status` не чистий.
-- У дереві одночасно лежать і feature-зміни, і service-layer/security зміни, і нові міграції, і churn у `.sqlx`.
-- Поки це не рознесено по bounded commits, ризик не в самому коді, а в змішуванні різних slices в один великий diff.
+- Основні product / platform зміни вже рознесені по bounded commits.
+- На момент фінального docs pass `git status` ще не чистий тільки через documentation sync.
+- Основний ризик великого змішаного diff вже знято; далі важливо не повертатись до практики накопичення багатьох slices в один worktree.
 
 ## 2. Основні change-buckets
+
+### 2.0 Current active buckets after narrowing
+
+#### Portal messaging / document workflows
+
+- commit `4cfd8e2`
+
+Зміст:
+
+- attachment-level `E2E`
+- document file delete lifecycle
+- provider cover-message requirement for shares
+- patient/self-service and compliance revocation hardening
+- frontend smoke harness for staff and portal
+
+#### Clinical / analytics / RBAC hardening
+
+- commit `22f6dea`
+
+Зміст:
+
+- `CEO Assistant` patient read policies
+- specialty sub-flows `Gastroenterology / Orthopedics / Neurology / Pulmonology / Urology`
+- provider reporting and feedback-quality KPI expansion
+- RBAC regression hardening for `sales / it_admin / billing`
+
+#### Appointment UX / translation sync
+
+- commit `dd52b16`
+
+Зміст:
+
+- recurring appointment lineage and exclusion-constraint migration sync
+- mobile interpreter agenda
+- quick actions and recurrence UX polish
+- frontend translation catalog sync for the touched workspaces
+
+#### Docs reconciliation
+
+- `docs/README.md`
+- `docs/testing/full-docs-backlog-reconciliation_ua.md`
+
+Статус:
+
+- це був останній active bucket перед clean worktree
 
 ### 2.1 Clinical / patient workspace
 

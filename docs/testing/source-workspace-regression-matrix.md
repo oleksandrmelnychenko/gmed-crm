@@ -38,6 +38,13 @@
   Covers:
   executive analytics endpoint stays limited to `ceo` and `ceo_assistant` instead of leaking the full cross-workspace read model to patient managers.
 
+- `ceo_can_open_risk_analysis_workspace`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:15`
+  `docs/backlog/03_kpi-catalog_ua.md:25`
+  Covers:
+  CEO can open the combined risk-analysis workspace and see both the patient-manager and billing signal layers, matching the executive analytics scope instead of being blocked by a stale route guard.
+
 - `risk_analysis_returns_role_scoped_patient_manager_and_billing_signals`
   Source:
   `docs/requirements/03_product-backlog_ua.md:422`
@@ -55,6 +62,14 @@
   Covers:
   forecasting workspace aggregates quote pipeline weighting, due-soon and overdue collections, debt-workflow pressure, follow-up milestones due in the next 30 days and clinic capacity derived from planned appointments.
 
+- `forecasting_workspace_counts_package_end_followup_due_next_30_days`
+  Source:
+  `docs/requirements/01_process-mapping_ua.md:135`
+  `docs/backlog/04_implementation-tasks_ua.md:145`
+  `docs/backlog/04_implementation-tasks_ua.md:178`
+  Covers:
+  forecasting follow-up KPI payload counts a package-end milestone inside the next 30 days as its own due bucket and rolls it into the aggregate milestone pressure figure.
+
 ### Reports and learning
 
 - `reports_workspace_returns_role_scoped_sections`
@@ -63,7 +78,14 @@
   `docs/backlog/02_rbac-matrix_ua.md:14`
   `docs/backlog/02_rbac-matrix_ua.md:15`
   Covers:
-  reports workspace exposes clinic, doctor, country and service-type reporting through a role-scoped read model, including counts-only mode for non-financial roles and CSV export for permitted sections.
+  reports workspace exposes clinic, doctor, country, service-type and non-medical provider reporting through a role-scoped read model, including counts-only mode for non-financial roles, CSV export for permitted sections, provider-quality metrics based on treatment feedback / doctor communication / follow-up completion, organization/service/ambience/value scores, treatment-success and complication rates, written-findings turnaround, response-time KPI signals from appointment communications and concierge-oriented partner load by service portfolio, vendors and request status.
+
+- `sales_cannot_access_executive_risk_or_restricted_exports`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:14`
+  `docs/backlog/03_kpi-catalog_ua.md:79`
+  Covers:
+  sales role stays blocked from CEO-only dashboard and risk-analysis routes and cannot export restricted `clinics` / `doctors` report sections even though the role can still use counts-only country, service-type and non-medical reporting.
 
 - `patient_manager_sop_requires_ceo_approval_and_supports_acknowledgement`
   Source:
@@ -103,7 +125,21 @@
   `docs/requirements/03_product-backlog_ua.md:26`
   `docs/backlog/04_implementation-tasks_ua.md:45`
   Covers:
-  provider registry filters by provider type, country, doctor name, doctor specialty, service text.
+  provider registry filters by provider type, country, doctor name, doctor specialty and service text under the actual role-scoped sales read path.
+
+- `providers_list_and_detail_include_non_medical_concierge_activity`
+  Source:
+  `docs/backlog/04_implementation-tasks_ua.md:249`
+  `docs/backlog/04_implementation-tasks_ua.md:250`
+  Covers:
+  non-medical provider registry search also matches live concierge activity (`service_kind`, title, vendor), summary cards surface concierge load, and provider detail includes concierge-driven linked-patient counts plus interaction history instead of limiting the chain to appointments and order services only.
+
+- `sales_can_read_provider_registry_but_cannot_update_provider`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:14`
+  `docs/requirements/03_product-backlog_ua.md:24`
+  Covers:
+  sales role can open provider registry in read-only mode for partner analytics and search, but update routes remain blocked.
 
 - `provider_and_doctor_detail_expose_linked_patients_and_interactions`
   Source:
@@ -111,7 +147,7 @@
   `docs/requirements/03_product-backlog_ua.md:31`
   `docs/backlog/04_implementation-tasks_ua.md:46`
   Covers:
-  provider card and doctor card expose legal/tax registry fields, doctor languages/licensing, linked patients and the full interaction chain from appointments and order services.
+  provider card and doctor card expose legal/tax registry fields, doctor languages/licensing, linked patients and the full interaction chain from appointments, order services and provider-scoped concierge operations.
 
 - `patients_list_supports_provider_and_doctor_filters_across_appointments_and_orders`
   Source:
@@ -140,6 +176,41 @@
   `docs/backlog/04_implementation-tasks_ua.md:39`
   Covers:
   cardiology-related symptoms trigger a dedicated structured cardiology section on the case, and that section persists/reloads as its own clinical sub-flow.
+
+- `case_gastroenterology_subflow_round_trip_works`
+  Source:
+  `docs/requirements/02_anamnese-flow_ua.md:66`
+  `docs/backlog/04_implementation-tasks_ua.md:39`
+  Covers:
+  gastroenterology-related symptoms trigger a dedicated structured gastroenterology section on the case, and that section persists/reloads as its own clinical sub-flow.
+
+- `case_orthopedics_subflow_round_trip_works`
+  Source:
+  `docs/requirements/02_anamnese-flow_ua.md:158`
+  `docs/backlog/04_implementation-tasks_ua.md:39`
+  Covers:
+  orthopedics-related symptoms trigger a dedicated structured orthopedics section on the case, and that section persists/reloads as its own clinical sub-flow.
+
+- `case_neurology_subflow_round_trip_works`
+  Source:
+  `docs/requirements/02_anamnese-flow_ua.md:159`
+  `docs/backlog/04_implementation-tasks_ua.md:39`
+  Covers:
+  neurology-related symptoms trigger a dedicated structured neurology section on the case, and that section persists/reloads as its own clinical sub-flow.
+
+- `case_pulmonology_subflow_round_trip_works`
+  Source:
+  `docs/requirements/02_anamnese-flow_ua.md:67`
+  `docs/backlog/04_implementation-tasks_ua.md:39`
+  Covers:
+  pulmonology-related symptoms now trigger a dedicated structured pulmonology section on the case, with persisted respiratory history and section-level round-trip reload.
+
+- `case_urology_subflow_round_trip_works`
+  Source:
+  `docs/requirements/02_anamnese-flow_ua.md:67`
+  `docs/backlog/04_implementation-tasks_ua.md:39`
+  Covers:
+  urology-related symptoms now trigger a dedicated structured urology section on the case, with persisted urinary-workup history and section-level round-trip reload.
 
 - `case_history_exposes_system_uuid_retention_and_append_only_versions`
   Source:
@@ -191,6 +262,33 @@
   `docs/architecture/02_field-level-access-control.md:260`
   Covers:
   viewing a patient card writes an audit event with the role and the concrete set of visible fields, including policy-governed functional labels, after role-based masking or hiding is applied.
+
+- `ceo_assistant_can_read_patient_registry_with_role_filtered_fields`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:8`
+  `docs/architecture/02_field-level-access-control.md:7`
+  Covers:
+  CEO Assistant can open patient list/detail in read-only mode, while explicit patient field policies still hide insurance, legal-status, notes and functional labels.
+
+- `sales_cannot_open_patient_registry`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:14`
+  Covers:
+  sales users stay blocked from patient registry list/detail routes instead of inheriting demographic visibility through other staff workspaces.
+
+- `it_admin_cannot_open_patient_registry_case_or_reports_workspace`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:21`
+  `docs/architecture/02_field-level-access-control.md:30`
+  Covers:
+  `it_admin` remains outside patient registry, medical case detail and reporting workspaces, matching the technical-admin boundary instead of inheriting operational visibility.
+
+- `billing_cannot_open_medical_case_detail`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:19`
+  `docs/architecture/02_field-level-access-control.md:30`
+  Covers:
+  billing can work with financial data but stays blocked from medical case detail, preserving the explicit finance-versus-medical boundary in the field-access design.
 
 - `patient_manager_can_export_patient_dsgvo_bundle`
   Source:
@@ -363,6 +461,13 @@
   Covers:
   direct text chat publishes per-user message keys, stores only `e2e_ciphertext / nonce / salt / key fingerprints` for secure text messages on the backend, and leaves plaintext rendering to the client after local key-based decryption.
 
+- `patient_attachments_can_use_e2e_envelopes`
+  Source:
+  `docs/requirements/04_non-functional-requirements_ua.md:83`
+  `docs/backlog/04_implementation-tasks_ua.md:295`
+  Covers:
+  secure chat file attachments store only opaque ciphertext plus attachment-level `e2e nonce / salt / key fingerprints` metadata on the backend, while download returns the encrypted payload for client-side decryption instead of server-side plaintext disclosure.
+
 - `patient_cannot_message_unassigned_staff`
   Source:
   `docs/requirements/03_product-backlog_ua.md:213`
@@ -383,7 +488,7 @@
   `docs/backlog/03_kpi-catalog_ua.md:129`
   `docs/backlog/04_implementation-tasks_ua.md:315`
   Covers:
-  patient portal can submit a satisfaction survey tied to an appointment, assigned patient-facing staff get notified, and patient manager sees the resulting NPS summary.
+  patient portal can submit an appointment-linked satisfaction survey with doctor, organization, service, ambience and value scores plus treatment-success and complication signals; assigned patient-facing staff get notified, and patient manager sees the resulting summary roll-up.
 
 - `teamlead_and_concierge_only_see_relevant_feedback_rows`
   Source:
@@ -391,7 +496,7 @@
   `docs/backlog/02_rbac-matrix_ua.md:16`
   `docs/backlog/02_rbac-matrix_ua.md:18`
   Covers:
-  feedback workspace stays role-scoped so teamlead sees interpreter-related rows only and concierge sees service-feedback rows only for assigned patients.
+  feedback workspace stays role-scoped so teamlead sees interpreter-related rows only and concierge sees service-feedback rows only for assigned patients, while the richer quality metrics remain scoped to the same relevant slices.
 
 - `review_writes_timeline_feedback_events`
   Source:
@@ -486,6 +591,76 @@
   Covers:
   create flow can generate a recurring appointment series with persisted cadence metadata and occurrence linkage.
 
+- `patient_manager_can_reschedule_whole_recurring_appointment_series`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:213`
+  `docs/backlog/04_implementation-tasks_ua.md:60`
+  Covers:
+  recurring appointment schedule changes can be applied to the whole active series with a consistent day shift and shared schedule metadata.
+
+- `patient_manager_can_cancel_whole_recurring_appointment_series`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:213`
+  `docs/backlog/04_implementation-tasks_ua.md:60`
+  Covers:
+  recurring appointment cancellation can target the whole active series while preserving already completed occurrences.
+
+- `patient_manager_can_confirm_whole_recurring_appointment_series`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:213`
+  `docs/backlog/04_implementation-tasks_ua.md:60`
+  Covers:
+  recurring appointment bulk status updates now support whole-series confirmation, not only cancellation.
+
+- `patient_manager_can_reschedule_this_and_following_occurrences`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:213`
+  `docs/backlog/04_implementation-tasks_ua.md:60`
+  Covers:
+  recurring appointment reschedule can split a new tail series from the current occurrence and retarget later active slots without mutating earlier history.
+
+- `patient_manager_can_cancel_this_and_following_occurrences`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:213`
+  `docs/backlog/04_implementation-tasks_ua.md:60`
+  Covers:
+  recurring appointment cancellation can split and cancel only the current-and-following slice of a series while keeping earlier occurrences unchanged.
+
+- `recurring_appointment_detail_exposes_scope_checklist_blockers`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:213`
+  `docs/backlog/04_implementation-tasks_ua.md:60`
+  Covers:
+  recurring appointment detail now exposes active-series scope preview data so the UI can explain split lineage and preflight which occurrences still block bulk completion because of open checklist items.
+
+- `patient_manager_can_edit_whole_series_recurrence_rule`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:213`
+  `docs/backlog/04_implementation-tasks_ua.md:60`
+  Covers:
+  recurring appointment edit can change the cadence/count of the whole active series, regenerate future dates and append extra occurrences without rebuilding the workflow from scratch.
+
+- `patient_manager_can_trim_following_series_via_recurrence_rule`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:213`
+  `docs/backlog/04_implementation-tasks_ua.md:60`
+  Covers:
+  recurring appointment edit can shorten a split tail series, keep the requested active occurrences and archive the removed future tail as a cancelled lineage branch instead of silently dropping history.
+
+- `recurring_appointment_detail_exposes_lineage_history_metrics`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:213`
+  `docs/backlog/04_implementation-tasks_ua.md:60`
+  Covers:
+  recurring appointment detail now exposes ancestor/current/descendant series analytics so the UI can show branch-level lineage history, date ranges and active/completed/cancelled occurrence counts after splits and trims.
+
+- `appointment_schedule_exclusion_constraints_block_overlapping_patient_slots`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:213`
+  `docs/backlog/04_implementation-tasks_ua.md:60`
+  Covers:
+  Postgres-level exclusion constraints now reject overlapping patient bookings even if an application-side race bypasses the advisory-lock overlap preflight.
+
 - `teamlead_cannot_reassign_owner_to_patient_manager_during_reschedule`
   Source:
   `docs/requirements/03_product-backlog_ua.md:214`
@@ -521,6 +696,14 @@
   `docs/backlog/04_implementation-tasks_ua.md:222`
   Covers:
   operational visibility is assignment-based for interpreter and concierge roles.
+
+- `teamlead_only_sees_assigned_patients_and_appointments`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:41`
+  `docs/requirements/03_product-backlog_ua.md:42`
+  `docs/backlog/04_implementation-tasks_ua.md:305`
+  Covers:
+  `teamlead_interpreter` patient registry and appointment workspace remain assignment-scoped instead of exposing unrelated patients or slots outside the current interpreter chain.
 
 - `concierge_sees_medical_appointments_as_blocked_slots`
   Source:
@@ -837,7 +1020,3 @@
   `docs/backlog/04_implementation-tasks_ua.md:141`
   Covers:
   concierge service lifecycle reaches `ready for billing` after operational completion.
-
-## Not automated yet
-
-- package-end follow-up KPI timing assertions

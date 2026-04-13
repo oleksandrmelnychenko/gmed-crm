@@ -1,0 +1,428 @@
+# Full Docs / Backlog Reconciliation (UA)
+
+> Повна звірка документації в `docs/` з поточним станом репозиторію станом на **2026-04-13**. Це не заміняє канонічні вимоги; файл потрібен, щоб розвести: `source-of-truth`, planning docs, current-state код і явні gaps.
+
+## 1. Методика звірки
+
+Перевірені шари:
+
+- `docs/00_source-of-truth_ua.md`
+- `docs/requirements/*`
+- `docs/backlog/*`
+- `docs/architecture/*`
+- `docs/development-plan.md`
+- `docs/testing/*`
+- route layer, frontend pages, міграції, integration tests і regression matrices
+
+Статуси в цьому файлі:
+
+- `Confirmed` — підтверджено кодом і/або regression tests
+- `Partial` — є суттєва частина, але не повний scope документа
+- `Gap` — вимога/беклог є, реалізація не підтверджена
+- `Planning/Stale` — документ корисний як план або target-state, але не є актуальним status-документом
+
+## 2. Source-of-truth layer
+
+### 2.1 Оригінали
+
+- `docs/1 (Update 2) User Story Salesforce.xlsx` — **є**
+- `docs/Process Mapping (Kundenjourney allg.)(in Bearbeitung).pdf` — **є**
+- `docs/Allgemeine Anamnese (in Bearbeitung).pdf` — **є**
+
+### 2.2 Трасованість
+
+- `docs/testing/user-stories-excel-backlog-audit_ua.md` підтверджує **1:1** відповідність між Excel `User Stories` і `docs/requirements/03_product-backlog_ua.md`
+- `docs/requirements/01_process-mapping_ua.md` і `docs/requirements/02_anamnese-flow_ua.md` лишаються канонічними текстовими нормалізаціями PDF
+
+Висновок:
+
+- source layer **узгоджений**
+- проблема не в трасованості документів, а в тому, що planning docs і код живуть швидше, ніж чекбокси у backlog
+
+## 3. Статус по документах
+
+### 3.1 `docs/requirements/01_process-mapping_ua.md`
+
+Статус: `Confirmed + Partial`
+
+Підтверджено current-state:
+
+- lead qualification / conversion gates
+- existing-customer `re-check`
+- order lifecycle `discovery -> intake -> execution -> closure -> follow-up`
+- planning / preparation / execution / follow-up readiness
+- appointments, interpreter / concierge handoff, checklists, timeline
+- billing release / package coverage / debt hold / failed-lead resolution
+
+Незакрито відносно process map:
+
+- зовнішній `DATEV` / accounting handoff
+- real payment-provider checkout / settlement
+- повний `E-Rechnung`
+- eSign / `eIDAS / QES`
+
+### 3.2 `docs/requirements/02_anamnese-flow_ua.md`
+
+Статус: `Confirmed + Partial`
+
+Підтверджено current-state:
+
+- structured case intake
+- repeatable sections: preconditions, allergies, operations, medications, symptoms, pain, vegetative, vaccination
+- doctor FK links for `Zuweiser`, `Arzt`, `Verordnender Arzt`
+- dedicated `Cardiology`, `Gastroenterology`, `Orthopedics`, `Neurology`, `Pulmonology` and `Urology` sub-flows
+- section history via `case_versions`
+- explicit `case_uuid`, retention metadata and append-only clinical history
+
+Ключові рішення після звірки:
+
+- `cases.id` / `case_uuid` тепер трактуються як системний UUID
+- `case_id` лишається human-readable reference code
+
+Незакрито:
+
+- подальші specialty branches тепер є вже розширенням specialty library, а не незакритим базовим pattern gap
+
+### 3.3 `docs/requirements/03_product-backlog_ua.md`
+
+Статус: `Confirmed as scope catalog`, не як live status
+
+- файл коректний як канонічний каталог scope
+- не можна читати його як список “що вже зроблено”
+- live status треба брати з `docs/testing/*`
+
+### 3.4 `docs/requirements/04_non-functional-requirements_ua.md`
+
+Статус: `Partial`
+
+Підтверджено:
+
+- RBAC + assignment-based access
+- audit logging
+- consent/privacy workflows
+- encryption / key-management layer для direct messages
+- immutable clinical/document/compliance history в ключових slices
+
+Незакрито або не підтверджено повністю:
+
+- `eIDAS / QES`
+- payment-provider integration
+- `DATEV`
+- AI pseudonymization handoff
+- production-grade infra items типу backup/DR не видно з самого коду repo
+
+## 4. Статус по backlog-документах
+
+### 4.1 `docs/backlog/01_mvp-backlog_ua.md`
+
+Статус: `Mostly aligned as release decomposition`
+
+#### Foundation
+
+- `Confirmed/Partial`
+- auth, roles, assignments, audit, compliance, settings, core reference data є
+- інфраструктурні речі типу backup/recovery і TLS не верифікуються з repo напряму
+
+#### Intake & Case
+
+- `Confirmed`
+- patient registry, anamnesis, leads, orders, provider registry реально покриті
+
+#### Delivery Operations
+
+- `Confirmed`
+- appointments, providers, interpreter/concierge operations, documents, sharing, workflow gates є
+
+#### Finance & Portal
+
+- `Partial`
+- quotes, invoices, Mahnwesen, patient invoices/documents/privacy/services, portal appointments є
+- real payment checkout відсутній
+- e-signature відсутня
+
+#### Analytics / SOP / AI
+
+- `Partial`
+- KPI, reports, risk-analysis, forecasting, SOP/library є
+- AI readiness / pseudonymization / AI integration — gap
+
+### 4.2 `docs/backlog/02_rbac-matrix_ua.md`
+
+Статус: `Mostly to strongly confirmed`
+
+Підтверджено:
+
+- усі 10 ролей існують у домені
+- patient-manager visibility scoped by assignments
+- interpreter / concierge / billing segregation реально є
+- patient portal працює через explicit release/freigabe
+- documents / medical sharing мають окремі policy layers
+
+Додатково вже regression-підтверджено:
+
+- `CEO Assistant` read-only patient registry scope з field-level masking
+- `sales` deny на patient registry, executive dashboard, risk-analysis і restricted clinic/doctor exports
+- `teamlead_interpreter` assignment-scoped patient/appointment visibility
+- `it_admin` deny на patient registry, medical case detail і reports workspace
+- `billing` deny на medical case detail
+
+Частково / потребує подальшої перевірки:
+
+- не кожен можливий осередок матриці підтверджений окремим integration/regression test
+
+Висновок:
+
+- матриця коректна як policy target
+- current-state загалом їй відповідає; незакритим лишається радше exhaustiveness regression coverage, а не відсутність ключових access boundaries
+
+### 4.3 `docs/backlog/03_kpi-catalog_ua.md`
+
+Статус: `Mostly confirmed`
+
+Підтверджено:
+
+- CEO dashboard
+- PM / billing / interpreter / concierge KPIs
+- clinic / doctor / country / service-type reports
+- provider-quality signals in reports: treatment score, doctor communication, follow-up completion, organization/service/ambience/value scores, treatment-success and complication rates, written-findings turnaround, clinic/doctor response-time KPIs from appointment communications
+- NPS / feedback surfaces
+- risk-analysis
+- forecasting workspace
+
+Частково:
+
+- не всі KPI із каталогу мають окремий explicit regression test або окремий dedicated dashboard tile
+- predictive / AI-style analytics лишаються gap
+
+### 4.4 `docs/backlog/04_implementation-tasks_ua.md`
+
+Статус: `Planning/Stale`
+
+Файл корисний як phase/task decomposition, але **не відображає реальний статус**. Чекбокси залишаються unchecked навіть для вже реалізованих slices.
+
+#### Phase 1
+
+- `Mostly confirmed`
+- patient registry, anamnesis, providers, orders, appointments, documents, billing basics, assignments, workflows, templates, communication, CEO module, process engine значною мірою закриті
+
+Головні gaps Phase 1:
+
+- `T-003` / `T-004` / `T-009` інфраструктурного класу не верифікуються з repo
+- `T-066 DATEV`
+- частина advanced accounting / compliance operationalization
+- `T-100 AI preparation`
+
+#### Phase 2
+
+- `Partial to Mostly confirmed`
+- reminders, reports, KPI, risk analysis, SOP, conflict handling, partner/provider reporting значною мірою є
+
+Головні gaps Phase 2:
+
+- `E-Rechnung`
+- частина sales / provider quality analytics
+- частина advanced accounting features
+
+#### Phase 3
+
+- `Mostly confirmed`
+- interpreter / concierge flows, feedback, calendar extensions, teamlead SOP path, role KPIs largely є
+
+Частково:
+
+- повний end-to-end interpreter communication package still depends on broader messaging layer maturity
+
+#### Phase 4
+
+- `Partial`
+- patient portal, appointment requests, invoice visibility, uploads, privacy, services, feedback є
+- secure messaging already має text + attachment `E2E` і manual secure key backup / import для переносу між девайсами
+
+Незакрито:
+
+- `T-162` real invoice payment
+- `T-164..166` e-signature
+- `T-172..174` AI
+
+## 5. Статус по architecture docs
+
+### 5.1 `docs/architecture/01_target-architecture_ua.md`
+
+Статус: `Mostly aligned as target-state`
+
+Підтверджено:
+
+- modular monolith
+- main bounded modules in route/service layer
+- PostgreSQL as transactional store
+- object/document storage model
+- reporting / KPI read-model style slices
+
+Target-state, але не повністю підтверджено:
+
+- external payment provider
+- accounting / DATEV export
+- AI gateway
+- full queue/search decomposition as explicit infra modules
+
+### 5.2 `docs/architecture/02_field-level-access-control.md`
+
+Статус: `Mostly aligned as design pattern`
+
+Підтверджено:
+
+- system rules + role/context access model
+- field access policies / overrides concept
+- document release / share-status based filtering
+
+Потрібно не плутати:
+
+- це design doc, а не exhaustive test matrix
+- для фактичної перевірки треба дивитись `access`, `patients`, `documents`, `messages` і regression suites
+
+## 6. `docs/development-plan.md`
+
+Статус: `Planning/Stale`
+
+Ключові розходження з repo:
+
+- документ планує `Leptos`, а реальний frontend зараз `React/Vite`
+- документ планує `AWS Cognito або самостійний JWT`; у repo current-state — власний auth/JWT stack
+- документ описує цільовий delivery timeline, а не фактичний live status
+
+Висновок:
+
+- використовувати тільки як historical delivery baseline
+- не використовувати для відповіді на питання “що вже зроблено”
+
+## 7. Current-state reconciliation по функціональних доменах
+
+| Домен | Статус | Примітка |
+|------|--------|----------|
+| Identity / RBAC / Audit | Mostly confirmed | ролі, assignments, MFA/admin, audit, compliance routes є |
+| Patient Registry | Confirmed | profile, tabs, timeline, relations, labels, consents, privacy |
+| Medical Case / Anamnesis | Mostly confirmed | structured sections, FK doctors, 6 specialty sub-flows, history, retention |
+| Providers / Clinics / Doctors | Mostly confirmed | registry, doctors, enrichments, clinic/doctor reports |
+| Leads / CRM | Mostly confirmed | qualification, conversion, failed-flow, readiness gates |
+| Orders / Process Engine | Mostly confirmed | lifecycle, billing/package/debt gates, planning/execution/follow-up |
+| Appointments / Calendar | Confirmed | medical + non-medical, conflicts, recurrence, true split lineage, scope-aware bulk actions, portal requests and DB-level overlap constraints |
+| Documents / Sharing | Confirmed | upload, release, OCR/translation workspace, policy checks |
+| Billing / Finance | Partial | quotes, invoices, dunning, VAT, portal invoices є; DATEV/E-Rechnung/payments gap |
+| Portal | Mostly confirmed | documents, invoices, privacy, services, appointments, feedback, chat |
+| Messaging | Mostly confirmed | text + attachment E2E є, manual encrypted key backup/import закриває current-state device migration |
+| Feedback / NPS | Confirmed | portal submission + staff review + ranking |
+| SOP / Learning | Confirmed | library, approval flow, acknowledgement |
+| Reports / KPI / Forecasting / Risk | Mostly confirmed | CEO dashboard, reports, risk-analysis, forecasting |
+| AI / pseudonymization | Gap | privacy anonymization є, AI handoff workflow окремо не реалізований |
+| eSignature | Gap | немає current-state `eIDAS/QES` flow |
+
+## 8. Реальні незакриті моменти без зовнішніх інтеграцій
+
+Цей блок спеціально **не включає** `DATEV`, payment-provider checkout, `E-Rechnung`, `eIDAS/QES` та інші зовнішні інтеграції.
+
+### 8.1 Product / domain gaps
+
+- Явних blocking product gaps без зовнішніх інтеграцій у core current-state scope зараз не видно.
+- У clinical intake specialty-subflow pattern уже закритий як reusable pattern; подальші branches — це extension work по бібліотеці specialty sections, а не missing базовий workflow.
+- `RBAC` матриця загалом збігається з кодом; high-risk boundaries вже покриті regression tests, а незакритим лишається тільки поступове добивання exhaustive matrix coverage.
+- KPI / reports / forecasting уже покривають current-state executive і provider layers; подальша робота тут — це catalog expansion і stronger regression granularity, а не missing базовий analytics slice.
+- `AI / pseudonymization` як окремий прикладний workflow усе ще лишається gap; privacy/anonymization mechanics уже є, але AI-ready handoff поверх них не реалізований.
+
+### 8.2 Platform / verification gaps
+
+- Частина foundation/non-functional scope не верифікується з самого repo: backup/recovery, DR, TLS/perimeter hardening, production ops.
+- `docs/backlog/04_implementation-tasks_ua.md` і `docs/development-plan.md` не синхронізовані з кодом як live-status документи; їх треба читати як planning-only.
+- Найбільший поточний engineering risk не в документах, а у великому незведеному worktree: це підвищує ризик змішаних slices і погіршує прозорість фактичного status per feature.
+
+## 9. Документи, що зараз найбільш корисні як live status
+
+Для реального стану системи варто читати в такому порядку:
+
+1. `docs/testing/full-docs-backlog-reconciliation_ua.md`
+2. `docs/testing/current-state-gap-audit_ua.md`
+3. `docs/testing/source-workspace-regression-matrix.md`
+4. `docs/testing/source-documents-regression-matrix.md`
+5. `docs/testing/source-billing-regression-matrix.md`
+6. `docs/testing/worktree-stabilization-inventory_ua.md`
+
+## 10. Підсумок
+
+### Що вже узгоджено добре
+
+- source docs і їх трасованість
+- requirements layer як канонічний scope
+- більша частина core product slices: patient, case, provider, order, appointment, documents, billing basics, portal, SOP, reports
+
+### Що треба вважати planning-only
+
+- `docs/backlog/04_implementation-tasks_ua.md`
+- `docs/development-plan.md`
+
+### Найбільші реальні gaps після повної звірки
+
+- blocking non-AI/non-integration product gaps у core scope зараз не видно
+- залишаються stabilization / inventory і подальше ущільнення regression coverage
+- базовий browser-level `E2E` smoke уже є: Playwright покриває staff shell (`dashboard -> patients -> appointments -> documents -> invoices`) і patient portal (`dashboard -> documents -> invoices`) через окремі smoke specs; незакритим лишається вже не наявність harness, а поступове розширення сценаріїв
+- `Documents / Sharing` уже підтверджені end-to-end: upload/release, OCR/translation workspace, policy checks, file delete lifecycle, provider cover-message trail і patient-requested third-party revoke workflow тепер автоматизовані regression tests
+- `AI / pseudonymization -> AI handoff`
+
+### Окремо: інтеграційні gaps
+
+- `DATEV`
+- `E-Rechnung`
+- real payment checkout / settlement
+- `eIDAS / QES`
+
+### Найбільший технічний ризик не в docs, а в worktree
+
+- документація вже достатньо розкладена, щоб бачити картину
+- основний engineering risk зараз — великий незведений worktree, а не відсутність розуміння scope
+
+## 11. Практичний Execution Order Без Інтеграцій
+
+Нижче не “весь беклог”, а короткий порядок робіт по **реальних внутрішніх gaps**, які ще лишилися після звірки.
+
+### P0. Stabilization / inventory
+
+1. Розвести поточний великий worktree по bounded commits / slices.
+2. Зафіксувати окремо, що вже current-state, а що ще WIP.
+3. Не брати нові широкі фічі, поки дерево не стане прозорим для нормального regression pass.
+
+Причина:
+
+- зараз найбільший engineering risk саме в змішаному worktree, а не в нестачі scope-розуміння
+
+### P1. Regression hardening
+
+1. Добити regression coverage для решти клітинок `docs/backlog/02_rbac-matrix_ua.md`, які ще не мають explicit tests.
+2. Зафіксувати granular KPI assertions там, де read-model already є, але ще не весь catalog перевіряється окремими tests.
+3. Не змішувати це з новими великими feature slices.
+
+Що має вийти:
+
+- не нові фічі, а прозорий current-state з щільнішим regression-proof
+
+### P2. Optional scope extensions
+
+1. Нові specialty branches робити тільки якщо вони реально потрібні бізнесу, а не як “добити список заради списку”.
+2. KPI catalog розширювати тільки там, де є конкретний decision use-case, а не як абстрактний dashboard growth.
+3. Не розширювати scope, поки не завершено stabilization.
+
+Що має вийти:
+
+- тільки осмислені extension slices після стабілізації, без штучного “добивання” вже закритого базового scope
+
+### P3. AI / pseudonymization handoff
+
+1. Не починати з “AI features”.
+2. Спочатку визначити bounded workflow: які дані готуються, де псевдонімізуються, хто має доступ, який audit trail потрібен.
+3. Тільки після цього додавати AI-ready pipeline поверх already existing privacy/anonymization mechanics.
+
+## 12. Що Робити Прямо Зараз
+
+Якщо рухатись прагматично, правильний порядок такий:
+
+1. `Stabilization / inventory`
+2. `Regression hardening`
+3. optional targeted extensions only if they have real business pressure
+4. `AI / pseudonymization handoff`
