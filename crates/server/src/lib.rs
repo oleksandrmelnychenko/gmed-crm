@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 pub mod access;
 pub mod audit;
 pub mod auth;

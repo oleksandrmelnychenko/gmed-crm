@@ -19,6 +19,7 @@ use std::str::FromStr;
 use uuid::Uuid;
 
 use crate::access;
+use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::routes::me::resolve_self_patient_id;
 use crate::state::AppState;
@@ -275,16 +276,13 @@ async fn write_invoice_audit(
     invoice_id: Uuid,
     context: Value,
 ) {
-    let _ = sqlx::query(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context)
-         VALUES ($1, $2, 'invoice', $3, $4)",
-    )
-    .bind(user_id)
-    .bind(action)
-    .bind(invoice_id)
-    .bind(context)
-    .execute(&state.db)
-    .await;
+    state.audit_sender.try_send(audit::domain_event(
+        action.to_string(),
+        Some(user_id),
+        "invoice",
+        Some(invoice_id),
+        context,
+    ));
 }
 
 fn validate_dunning_level_transition(
@@ -2330,25 +2328,22 @@ async fn create_invoice_from_quote(
                 return resp;
             }
 
-            let _ = sqlx::query(
-                "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context)
-                 VALUES ($1, $2, 'invoice', $3, $4)",
-            )
-            .bind(auth.user_id)
-            .bind("create_invoice")
-            .bind(invoice_id)
-            .bind(serde_json::json!({
-                "invoice_number": invoice_number,
-                "invoice_type": invoice_type,
-                "quote_id": ctx.quote_id,
-                "order_id": ctx.order_id,
-                "patient_id": ctx.patient_id,
-                "contract_id": ctx.contract_id,
-                "quote_number": ctx.quote_number,
-                "order_number": ctx.order_number,
-            }))
-            .execute(&state.db)
-            .await;
+            state.audit_sender.try_send(audit::domain_event(
+                "create_invoice",
+                Some(auth.user_id),
+                "invoice",
+                Some(invoice_id),
+                serde_json::json!({
+                    "invoice_number": invoice_number,
+                    "invoice_type": invoice_type,
+                    "quote_id": ctx.quote_id,
+                    "order_id": ctx.order_id,
+                    "patient_id": ctx.patient_id,
+                    "contract_id": ctx.contract_id,
+                    "quote_number": ctx.quote_number,
+                    "order_number": ctx.order_number,
+                }),
+            ));
 
             match load_invoice_detail(&state, invoice_id, &auth).await {
                 Ok(Some(invoice)) => (StatusCode::CREATED, Json(invoice)).into_response(),
@@ -2411,19 +2406,16 @@ async fn download_invoice_pdf(
         Err(message) => return err(StatusCode::INTERNAL_SERVER_ERROR, message),
     };
 
-    let _ = sqlx::query(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context)
-         VALUES ($1, $2, 'invoice', $3, $4)",
-    )
-    .bind(auth.user_id)
-    .bind("download_invoice_pdf")
-    .bind(context.invoice_id)
-    .bind(serde_json::json!({
-        "invoice_number": context.invoice_number,
-        "source": "staff_workspace",
-    }))
-    .execute(&state.db)
-    .await;
+    state.audit_sender.try_send(audit::domain_event(
+        "download_invoice_pdf",
+        Some(auth.user_id),
+        "invoice",
+        Some(context.invoice_id),
+        serde_json::json!({
+            "invoice_number": context.invoice_number,
+            "source": "staff_workspace",
+        }),
+    ));
 
     let disposition = format!(
         "inline; filename=\"{}\"",
@@ -2470,19 +2462,16 @@ async fn download_my_invoice_pdf(
         Err(message) => return err(StatusCode::INTERNAL_SERVER_ERROR, message),
     };
 
-    let _ = sqlx::query(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context)
-         VALUES ($1, $2, 'invoice', $3, $4)",
-    )
-    .bind(auth.user_id)
-    .bind("download_portal_invoice_pdf")
-    .bind(context.invoice_id)
-    .bind(serde_json::json!({
-        "invoice_number": context.invoice_number,
-        "source": "patient_portal",
-    }))
-    .execute(&state.db)
-    .await;
+    state.audit_sender.try_send(audit::domain_event(
+        "download_portal_invoice_pdf",
+        Some(auth.user_id),
+        "invoice",
+        Some(context.invoice_id),
+        serde_json::json!({
+            "invoice_number": context.invoice_number,
+            "source": "patient_portal",
+        }),
+    ));
 
     let disposition = format!(
         "inline; filename=\"{}\"",
@@ -2786,20 +2775,17 @@ async fn update_invoice_status(
     .await
     {
         Ok(result) if result.rows_affected() > 0 => {
-            let _ = sqlx::query(
-                "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context)
-                 VALUES ($1, $2, 'invoice', $3, $4)",
-            )
-            .bind(auth.user_id)
-            .bind("update_invoice_status")
-            .bind(invoice_id)
-            .bind(serde_json::json!({
-                "status": effective_status,
-                "paid_amount": decimal_to_string(effective_paid_amount),
-                "due_date": due_date.map(|value| value.to_string()),
-            }))
-            .execute(&state.db)
-            .await;
+            state.audit_sender.try_send(audit::domain_event(
+                "update_invoice_status",
+                Some(auth.user_id),
+                "invoice",
+                Some(invoice_id),
+                serde_json::json!({
+                    "status": effective_status,
+                    "paid_amount": decimal_to_string(effective_paid_amount),
+                    "due_date": due_date.map(|value| value.to_string()),
+                }),
+            ));
 
             match load_invoice_detail(&state, invoice_id, &auth).await {
                 Ok(Some(invoice)) => Json(invoice).into_response(),
