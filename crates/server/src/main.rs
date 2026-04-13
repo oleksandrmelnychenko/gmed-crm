@@ -70,7 +70,9 @@ async fn main() {
     // Security-header baseline is applied inside `build_app` so integration
     // tests exercise it too; here we only add the CORS layer (which needs
     // config-time origin values) and HTTP tracing.
-    let app = build_app(app_state).layer(cors).layer(TraceLayer::new_for_http());
+    let app = build_app(app_state)
+        .layer(cors)
+        .layer(TraceLayer::new_for_http());
 
     tracing::info!("Server starting on {}", cfg.listen_addr);
 

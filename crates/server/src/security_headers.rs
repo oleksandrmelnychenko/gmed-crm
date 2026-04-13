@@ -136,10 +136,7 @@ mod tests {
     async fn overriding_beats_handler_set_header() {
         // A handler that tries to set a weaker policy must lose.
         async fn bad_handler() -> impl axum::response::IntoResponse {
-            (
-                [(header::X_FRAME_OPTIONS, "ALLOWALL")],
-                "weakening attempt",
-            )
+            ([(header::X_FRAME_OPTIONS, "ALLOWALL")], "weakening attempt")
         }
         let app = apply(Router::new().route("/", get(bad_handler)));
 
