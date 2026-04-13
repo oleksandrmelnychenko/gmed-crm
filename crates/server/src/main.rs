@@ -37,7 +37,15 @@ async fn main() {
     );
     let settings_cache = settings::SettingsCache::new(token_settings);
 
-    let app_state = state::AppState::new(pool, cfg.jwt_secret, settings_cache);
+    let app_state = state::AppState::new_with_keys(
+        pool,
+        cfg.jwt_secret,
+        settings_cache,
+        cfg.message_key_registry,
+    );
+    gmed_server::routes::invoices::spawn_auto_dunning_scheduler(app_state.clone());
+    spawn_blacklist_purger(app_state.db.clone());
+    spawn_message_rewrap_sweeper(app_state.clone());
 
     let cors = CorsLayer::new()
         .allow_origin(
@@ -86,6 +94,52 @@ async fn main() {
         });
 
     tracing::info!("Server shut down gracefully");
+}
+
+fn spawn_message_rewrap_sweeper(state: state::AppState) {
+    // Re-encrypts up to 200 rows every 10 minutes onto the active key.
+    // Designed to be fail-safe — errors are logged but never crash the loop.
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(600));
+        ticker.tick().await; // skip initial fire
+        loop {
+            ticker.tick().await;
+            match gmed_server::routes::key_rotation::rewrap_messages(
+                &state.db,
+                &state.message_keys,
+                200,
+            )
+            .await
+            {
+                Ok(report) if report.messages_rewrapped > 0 => {
+                    tracing::info!(
+                        rewrapped = report.messages_rewrapped,
+                        attachments = report.attachments_rewrapped,
+                        remaining = report.remaining_old_rows,
+                        active_key = %report.active_key_id,
+                        "Periodic message key rewrap"
+                    );
+                }
+                Ok(_) => {}
+                Err(e) => tracing::warn!(error = ?e, "Periodic rewrap failed"),
+            }
+        }
+    });
+}
+
+fn spawn_blacklist_purger(pool: gmed_db::DbPool) {
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(3600));
+        ticker.tick().await;
+        loop {
+            ticker.tick().await;
+            match gmed_server::auth::blacklist::purge_expired(&pool).await {
+                Ok(0) => {}
+                Ok(n) => tracing::info!(rows = n, "Purged expired access-token blacklist rows"),
+                Err(e) => tracing::warn!(error = %e, "Blacklist purge failed"),
+            }
+        }
+    });
 }
 
 async fn shutdown_signal() {

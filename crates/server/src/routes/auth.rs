@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use uuid::Uuid;
 
-use crate::auth::{middleware::AuthUser, password, tokens};
+use crate::auth::{blacklist, middleware::AuthUser, password, tokens};
 use crate::state::AppState;
 
 pub fn public_router() -> Router<AppState> {
@@ -356,6 +356,18 @@ async fn refresh(
 }
 
 async fn logout(State(state): State<AppState>, Extension(auth): Extension<AuthUser>) -> StatusCode {
+    if let Err(e) = blacklist::revoke_token(
+        &state.db,
+        auth.access_token_jti,
+        auth.user_id,
+        auth.family_id,
+        auth.access_token_expires_at,
+        "user_logout",
+    )
+    .await
+    {
+        tracing::error!(error = %e, jti = %auth.access_token_jti, "Failed to blacklist current access token on logout");
+    }
     tokens::revoke_family(&state.db, auth.family_id, "user_logout").await;
     tracing::info!(user_id = %auth.user_id, family_id = %auth.family_id, "User logged out");
     StatusCode::NO_CONTENT
@@ -365,6 +377,18 @@ async fn logout_all(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> StatusCode {
+    if let Err(e) = blacklist::revoke_token(
+        &state.db,
+        auth.access_token_jti,
+        auth.user_id,
+        auth.family_id,
+        auth.access_token_expires_at,
+        "user_logout_all",
+    )
+    .await
+    {
+        tracing::error!(error = %e, jti = %auth.access_token_jti, "Failed to blacklist current access token on logout-all");
+    }
     tokens::revoke_all_families(&state.db, auth.user_id, "user_logout_all").await;
     tracing::info!(user_id = %auth.user_id, "User logged out from all devices");
     StatusCode::NO_CONTENT
@@ -429,6 +453,19 @@ async fn revoke_session(
         return StatusCode::NOT_FOUND.into_response();
     }
 
+    if family_id == auth.family_id
+        && let Err(e) = blacklist::revoke_token(
+            &state.db,
+            auth.access_token_jti,
+            auth.user_id,
+            auth.family_id,
+            auth.access_token_expires_at,
+            "user_revoked_session",
+        )
+        .await
+    {
+        tracing::error!(error = %e, jti = %auth.access_token_jti, "Failed to blacklist current access token on session revoke");
+    }
     tokens::revoke_family(&state.db, family_id, "user_revoked_session").await;
     tracing::info!(user_id = %auth.user_id, family_id = %family_id, "Session revoked");
     StatusCode::NO_CONTENT.into_response()

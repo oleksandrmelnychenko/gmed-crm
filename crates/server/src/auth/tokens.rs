@@ -4,7 +4,7 @@ use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use super::jwt;
+use super::{blacklist, jwt};
 use crate::settings::TokenSettings;
 
 const REFRESH_TOKEN_BYTES: usize = 48;
@@ -228,9 +228,20 @@ pub async fn revoke_family(pool: &PgPool, family_id: Uuid, reason: &str) {
     {
         tracing::error!(family_id = %family_id, error = %e, "Failed to revoke token family");
     }
+    if let Err(e) = blacklist::blacklist_family(pool, family_id, reason).await {
+        tracing::error!(family_id = %family_id, error = %e, "Failed to add family to access-token blacklist");
+    }
 }
 
 pub async fn revoke_all_families(pool: &PgPool, user_id: Uuid, reason: &str) {
+    let families: Vec<Uuid> = sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM token_families WHERE user_id = $1 AND NOT is_revoked",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
+
     if let Err(e) = sqlx::query!(
         "UPDATE token_families SET is_revoked = true, revoked_reason = $2
          WHERE user_id = $1 AND NOT is_revoked",
@@ -241,6 +252,12 @@ pub async fn revoke_all_families(pool: &PgPool, user_id: Uuid, reason: &str) {
     .await
     {
         tracing::error!(user_id = %user_id, error = %e, "Failed to revoke all families");
+    }
+
+    for family_id in families {
+        if let Err(e) = blacklist::blacklist_family(pool, family_id, reason).await {
+            tracing::error!(family_id = %family_id, error = %e, "Failed to add family to access-token blacklist");
+        }
     }
 
     if let Err(e) = sqlx::query!(
@@ -258,6 +275,12 @@ pub async fn revoke_all_families(pool: &PgPool, user_id: Uuid, reason: &str) {
 
 /// Revoke all sessions for ALL users (admin force-logout-all).
 pub async fn revoke_all_users(pool: &PgPool, admin_id: Uuid, reason: &str) {
+    let families: Vec<Uuid> =
+        sqlx::query_scalar::<_, Uuid>("SELECT id FROM token_families WHERE NOT is_revoked")
+            .fetch_all(pool)
+            .await
+            .unwrap_or_default();
+
     if let Err(e) = sqlx::query!(
         "UPDATE token_families SET is_revoked = true, revoked_reason = $1 WHERE NOT is_revoked",
         reason
@@ -266,6 +289,12 @@ pub async fn revoke_all_users(pool: &PgPool, admin_id: Uuid, reason: &str) {
     .await
     {
         tracing::error!(error = %e, "Failed to revoke all user sessions");
+    }
+
+    for family_id in families {
+        if let Err(e) = blacklist::blacklist_family(pool, family_id, reason).await {
+            tracing::error!(family_id = %family_id, error = %e, "Failed to add family to access-token blacklist");
+        }
     }
 
     if let Err(e) = sqlx::query!(

@@ -5,10 +5,11 @@ use axum::{
     middleware::Next,
     response::{IntoResponse, Response},
 };
+use chrono::{DateTime, Utc};
 use serde_json::json;
 use uuid::Uuid;
 
-use super::jwt;
+use super::{blacklist, jwt};
 use crate::state::AppState;
 use gmed_domain::role::Role;
 
@@ -17,6 +18,8 @@ pub struct AuthUser {
     pub user_id: Uuid,
     pub role: Role,
     pub family_id: Uuid,
+    pub access_token_jti: Uuid,
+    pub access_token_expires_at: DateTime<Utc>,
 }
 
 impl AuthUser {
@@ -88,10 +91,36 @@ pub async fn require_auth(State(state): State<AppState>, mut req: Request, next:
         return unauthorized();
     };
 
+    match blacklist::is_revoked(&state.db, data.claims.jti).await {
+        Ok(true) => {
+            tracing::info!(jti = %data.claims.jti, user_id = %data.claims.sub, "Rejected revoked access token");
+            return unauthorized();
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to check token revocation — denying request");
+            return unauthorized();
+        }
+        Ok(false) => {}
+    }
+    match blacklist::is_family_revoked(&state.db, data.claims.fam).await {
+        Ok(true) => {
+            tracing::info!(family_id = %data.claims.fam, user_id = %data.claims.sub, "Rejected token from revoked family");
+            return unauthorized();
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to check family revocation — denying request");
+            return unauthorized();
+        }
+        Ok(false) => {}
+    }
+
     req.extensions_mut().insert(AuthUser {
         user_id: data.claims.sub,
         role,
         family_id: data.claims.fam,
+        access_token_jti: data.claims.jti,
+        access_token_expires_at: DateTime::<Utc>::from_timestamp(data.claims.exp, 0)
+            .unwrap_or_else(Utc::now),
     });
 
     next.run(req).await
@@ -122,6 +151,8 @@ mod tests {
             user_id: Uuid::new_v4(),
             role,
             family_id: Uuid::new_v4(),
+            access_token_jti: Uuid::new_v4(),
+            access_token_expires_at: Utc::now(),
         }
     }
 

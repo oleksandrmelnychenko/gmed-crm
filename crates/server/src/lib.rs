@@ -1,6 +1,9 @@
 pub mod access;
 pub mod auth;
 pub mod config;
+pub mod crypto;
+pub mod file_scan;
+pub mod file_sniff;
 pub mod routes;
 pub mod settings;
 pub mod state;

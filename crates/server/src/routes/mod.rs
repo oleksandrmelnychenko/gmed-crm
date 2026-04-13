@@ -9,9 +9,12 @@ pub mod cases;
 pub mod concierge_services;
 pub mod contracts;
 pub mod custom_fields;
+pub(crate) mod debt_management;
 pub mod documents;
+pub mod feedback;
 pub mod health;
 pub mod invoices;
+pub mod key_rotation;
 pub mod leads;
 pub mod me;
 pub mod messages;
@@ -19,10 +22,13 @@ pub mod notifications;
 pub mod orders;
 pub mod patients;
 pub mod providers;
+pub mod sops;
 pub mod stats;
 pub mod tasks;
 pub mod user_notifications;
 pub mod users;
+pub mod workflow_checklists;
+pub(crate) mod workflow_lifecycle;
 
 use crate::state::AppState;
 use axum::Router;
@@ -31,6 +37,7 @@ pub fn public_router() -> Router<AppState> {
     Router::new()
         .merge(auth::public_router())
         .merge(leads::public_router())
+        .merge(messages::public_router())
 }
 
 pub fn protected_router() -> Router<AppState> {
@@ -41,6 +48,7 @@ pub fn protected_router() -> Router<AppState> {
         .merge(access_policies::router())
         .merge(patients::router())
         .merge(providers::router())
+        .merge(sops::router())
         .merge(cases::router())
         .merge(concierge_services::router())
         .merge(contracts::router())
@@ -52,11 +60,14 @@ pub fn protected_router() -> Router<AppState> {
         .merge(invoices::router())
         .merge(admin_settings::router())
         .merge(admin_security::router())
+        .merge(key_rotation::router())
         .merge(admin_compliance::router())
         .merge(notifications::router())
         .merge(custom_fields::router())
         .merge(documents::router())
+        .merge(feedback::router())
         .merge(announcements::router())
         .merge(user_notifications::router())
         .merge(messages::router())
+        .merge(workflow_checklists::router())
 }
