@@ -2,9 +2,9 @@ CREATE TABLE IF NOT EXISTS patient_privacy_requests (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     patient_id UUID NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
     requested_by UUID NOT NULL REFERENCES users(id),
-    request_type TEXT NOT NULL CHECK (request_type IN ('erasure', 'restriction')),
-    source TEXT NOT NULL DEFAULT 'patient_request' CHECK (source IN ('patient_request', 'admin_intake', 'legal_hold')),
-    status TEXT NOT NULL CHECK (status IN ('requested', 'retention_hold', 'approved', 'rejected', 'completed')),
+    request_type TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'patient_request',
+    status TEXT NOT NULL DEFAULT 'requested',
     reason TEXT,
     due_at TIMESTAMPTZ,
     retention_until TIMESTAMPTZ,
@@ -19,11 +19,36 @@ CREATE TABLE IF NOT EXISTS patient_privacy_requests (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+ALTER TABLE patient_privacy_requests
+    ADD COLUMN IF NOT EXISTS retention_until TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS review_note TEXT,
+    ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
+
+ALTER TABLE patient_privacy_requests
+    DROP CONSTRAINT IF EXISTS patient_privacy_requests_request_type_check,
+    DROP CONSTRAINT IF EXISTS patient_privacy_requests_source_check,
+    DROP CONSTRAINT IF EXISTS patient_privacy_requests_status_check;
+
+UPDATE patient_privacy_requests
+SET status = 'completed'
+WHERE status = 'executed';
+
+ALTER TABLE patient_privacy_requests
+    ADD CONSTRAINT patient_privacy_requests_request_type_check
+        CHECK (request_type IN ('erasure', 'restriction', 'third_party_revoke')),
+    ADD CONSTRAINT patient_privacy_requests_source_check
+        CHECK (source IN ('patient_request', 'admin_intake', 'legal_hold')),
+    ADD CONSTRAINT patient_privacy_requests_status_check
+        CHECK (status IN ('requested', 'retention_hold', 'approved', 'rejected', 'completed'));
+
 CREATE INDEX IF NOT EXISTS idx_patient_privacy_requests_patient
     ON patient_privacy_requests(patient_id, created_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_patient_privacy_requests_status
     ON patient_privacy_requests(status, due_at);
+
+DROP TRIGGER IF EXISTS set_updated_at_patient_privacy_requests ON patient_privacy_requests;
 
 CREATE TRIGGER set_updated_at_patient_privacy_requests
     BEFORE UPDATE ON patient_privacy_requests
