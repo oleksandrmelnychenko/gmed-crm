@@ -129,6 +129,8 @@ async fn list_leads(
     match sqlx::query(
         r#"SELECT id, first_name, last_name, email, phone, source, country,
                   intake_source, flow, qualification_status, compliance_status,
+                  converted_patient_id, date_of_birth, legal_sex,
+                  consent_privacy_practices, consent_healthcare,
                   submitted_at, created_at,
                   failed_outcome_status, failed_reason, failed_processed_at,
                   (SELECT COUNT(*) FROM lead_attachments a WHERE a.lead_id = leads.id) AS attachment_count
@@ -164,6 +166,13 @@ async fn list_leads(
         Ok(rows) => {
             let mut leads = Vec::with_capacity(rows.len());
             for r in rows {
+                // conversion_ready is surfaced on the list payload so the
+                // `Convert` button on the leads card can reflect the same
+                // gate the backend enforces, without making the user click
+                // through and wait for a 422. The full readiness object
+                // stays on the detail endpoint — we only lift the single
+                // boolean here to keep the list payload light.
+                let readiness = build_lead_conversion_readiness(&r);
                 leads.push(json!({
                     "id": r.try_get::<Uuid, _>("id").unwrap_or_default(),
                     "first_name": r.try_get::<String, _>("first_name").unwrap_or_default(),
@@ -176,6 +185,7 @@ async fn list_leads(
                     "flow": r.try_get::<Option<String>, _>("flow").unwrap_or_default(),
                     "qualification_status": r.try_get::<String, _>("qualification_status").unwrap_or_default(),
                     "compliance_status": r.try_get::<String, _>("compliance_status").unwrap_or_default(),
+                    "conversion_ready": readiness.conversion_ready,
                     "failed_outcome": {
                         "status": r
                             .try_get::<String, _>("failed_outcome_status")

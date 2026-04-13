@@ -121,10 +121,21 @@ export interface Lead {
   flow: string | null;
   qualification_status: string;
   compliance_status?: string;
+  /**
+   * Mirrors the backend `LeadConversionReadiness::conversion_ready` flag on
+   * list payloads so the Convert button can stay disabled when the lead is
+   * missing required data, instead of waiting for a 422.
+   */
+  conversion_ready?: boolean;
   failed_outcome?: FailedLeadOutcome;
   submitted_at: string | null;
   created_at: string;
   attachment_count?: number;
+}
+
+export interface ConvertLeadResponse {
+  patient_id: string;
+  patient_pid: string;
 }
 
 export interface LeadAttachment {

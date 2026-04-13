@@ -7,7 +7,7 @@ import {
   type FormEvent,
   type ReactNode,
 } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowDownRight,
   ArrowUpRight,
@@ -28,8 +28,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -43,7 +45,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { apiFetch } from "@/lib/api";
-import { downloadLeadAttachment } from "@/lib/api/leads";
+import { convertLead as apiConvertLead, downloadLeadAttachment } from "@/lib/api/leads";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import type {
@@ -244,14 +246,22 @@ function cardClass(extra?: string) {
   );
 }
 
-function Banner({ tone, children }: { tone: "error" | "warning"; children: ReactNode }) {
+function Banner({
+  tone,
+  children,
+}: {
+  tone: "error" | "warning" | "success";
+  children: ReactNode;
+}) {
   return (
     <div
       className={cn(
         "rounded-2xl border px-4 py-3 text-sm",
         tone === "error"
           ? "border-rose-200 bg-rose-50 text-rose-700"
-          : "border-amber-200 bg-amber-50 text-amber-700"
+          : tone === "warning"
+            ? "border-amber-200 bg-amber-50 text-amber-700"
+            : "border-emerald-200 bg-emerald-50 text-emerald-700"
       )}
     >
       {children}
@@ -300,6 +310,7 @@ function StatCard({
 export function LeadsPage() {
   const { user } = useAuth();
   const { t } = useLang();
+  const navigate = useNavigate();
   const failedLoadMessage = t.common_failed_load;
   const [searchParams, setSearchParams] = useSearchParams();
   const permissions = useMemo(() => leadPermissions(user?.role), [user?.role]);
@@ -310,6 +321,11 @@ export function LeadsPage() {
   const [leads, setLeads] = useState<LeadListItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
+  // When a PM clicks "Convert" on the card we open a confirmation modal
+  // keyed on the lead id, instead of firing POST immediately. The actual
+  // convert call happens in `confirmConvertLead` below.
+  const [pendingConvertLead, setPendingConvertLead] = useState<LeadListItem | null>(null);
 
   const [stats, setStats] = useState<LeadsStats | null>(null);
   const [monthly, setMonthly] = useState<MonthlyEntry[]>([]);
@@ -519,11 +535,23 @@ export function LeadsPage() {
     }
   }
 
-  async function convertLead(leadId: string) {
+  async function confirmConvertLead(leadId: string) {
     setActionBusy(`convert:${leadId}`);
+    setError("");
+    setSuccessMessage("");
     try {
-      await apiFetch(`/leads/${leadId}/convert`, { method: "POST" });
+      const result = await apiConvertLead(leadId);
+      // Close the dialog first so the success banner and the navigation
+      // are not visually occluded by the modal overlay.
+      setPendingConvertLead(null);
+      setSuccessMessage(
+        `Patient ${result.patient_pid} created. Opening detail view…`,
+      );
       reload();
+      // Give the banner a beat to register before routing away.
+      window.setTimeout(() => {
+        navigate(`/patients/${result.patient_id}`);
+      }, 400);
     } catch (actionError) {
       const message =
         actionError instanceof Error ? actionError.message : t.common_failed_update;
@@ -797,6 +825,12 @@ export function LeadsPage() {
               </div>
             ) : null}
 
+            {successMessage ? (
+              <div className="mt-5">
+                <Banner tone="success">{successMessage}</Banner>
+              </div>
+            ) : null}
+
             {loading ? (
               <div className="flex min-h-[320px] items-center justify-center text-sm text-slate-500">
                 <LoaderCircle className="mr-2 size-4 animate-spin" />
@@ -811,7 +845,18 @@ export function LeadsPage() {
                 {leads.map((lead) => {
                   const canQualify =
                     lead.qualification_status === "new" || lead.qualification_status === "in_progress";
-                  const canConvert = permissions.canConvert && lead.qualification_status === "qualified";
+                  const canConvertRole =
+                    permissions.canConvert && lead.qualification_status === "qualified";
+                  // Respect the backend `conversion_ready` gate when the
+                  // list payload carries it. If the field is absent (older
+                  // server build) we fall back to the role+status check
+                  // alone so the button stays usable.
+                  const conversionReady = lead.conversion_ready ?? true;
+                  const canConvert = canConvertRole && conversionReady;
+                  const convertDisabledReason =
+                    canConvertRole && !conversionReady
+                      ? "Missing required data — open the lead to see what's blocking conversion."
+                      : null;
                   const canResolveFailed =
                     lead.qualification_status !== "converted" &&
                     lead.failed_outcome?.status !== "delete_anonymized";
@@ -894,16 +939,17 @@ export function LeadsPage() {
                             Qualify
                           </Button>
                         ) : null}
-                        {canConvert ? (
+                        {canConvertRole ? (
                           <Button
                             type="button"
                             size="sm"
                             variant="outline"
                             className="rounded-2xl"
-                            disabled={Boolean(actionBusy)}
+                            disabled={Boolean(actionBusy) || !canConvert}
+                            title={convertDisabledReason ?? undefined}
                             onClick={(event) => {
                               event.stopPropagation();
-                              void convertLead(lead.id);
+                              setPendingConvertLead(lead);
                             }}
                           >
                             {actionBusy === `convert:${lead.id}` ? <LoaderCircle className="size-4 animate-spin" /> : null}
@@ -1706,6 +1752,56 @@ export function LeadsPage() {
           </div>
         </SheetContent>
       </Sheet>
+
+      <Dialog
+        open={pendingConvertLead !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingConvertLead(null);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Convert lead to patient?</DialogTitle>
+            <DialogDescription>
+              {pendingConvertLead ? (
+                <>
+                  This will create a patient record for{" "}
+                  <span className="font-medium text-slate-900">
+                    {pendingConvertLead.first_name} {pendingConvertLead.last_name}
+                  </span>
+                  , assign you as the patient manager, and bootstrap the default
+                  workflow checklist. The lead itself moves to the{" "}
+                  <span className="font-mono text-xs">converted</span> state.
+                  This action cannot be undone.
+                </>
+              ) : null}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <DialogClose
+              render={
+                <Button type="button" variant="outline" disabled={Boolean(actionBusy)}>
+                  Cancel
+                </Button>
+              }
+            />
+            <Button
+              type="button"
+              disabled={Boolean(actionBusy) || pendingConvertLead === null}
+              onClick={() => {
+                if (pendingConvertLead) {
+                  void confirmConvertLead(pendingConvertLead.id);
+                }
+              }}
+            >
+              {pendingConvertLead && actionBusy === `convert:${pendingConvertLead.id}` ? (
+                <LoaderCircle className="mr-2 size-4 animate-spin" />
+              ) : null}
+              Create patient
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

@@ -1,10 +1,11 @@
-import { get, post, postNoBody } from "./client";
+import { get, post } from "./client";
 import { getAccessToken } from "@/lib/api";
 import type {
   Lead,
   LeadDetail,
   CreateLeadBody,
   QualifyLeadBody,
+  ConvertLeadResponse,
 } from "./types";
 
 export function fetchLeads(params?: {
@@ -44,8 +45,8 @@ export function qualifyLead(
   return post(`/leads/${id}/qualify`, body);
 }
 
-export function convertLead(id: string): Promise<void> {
-  return postNoBody(`/leads/${id}/convert`);
+export function convertLead(id: string): Promise<ConvertLeadResponse> {
+  return post<ConvertLeadResponse>(`/leads/${id}/convert`, undefined);
 }
 
 export async function downloadLeadAttachment(
