@@ -51,6 +51,17 @@
 - `testing/current-state-gap-audit_ua.md` - робочий зріз того, що вже є в коді, а що ще лишається gap відносно source scope
 - `testing/worktree-stabilization-inventory_ua.md` - інвентаризація незведеного worktree перед фінальним stabilization pass
 
+### Поточний Freeze Status
+
+Станом на `2026-04-13` current-state зріз підтверджений повним freeze pass:
+
+- `cargo test --workspace`
+- `frontend npm test`
+- `frontend npm run build`
+- `frontend npm run test:e2e`
+
+Детальний status і незакриті інтеграційні/engineering tails дивись у `testing/full-docs-backlog-reconciliation_ua.md` і `testing/current-state-gap-audit_ua.md`.
+
 ## Як читати документацію
 
 Якщо треба зафіксувати, **що є джерелом правди** і як PDF/Excel пов’язані з `.md`:

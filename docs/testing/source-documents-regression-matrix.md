@@ -68,6 +68,14 @@
   Covers:
   billing role sees invoice-like docs but not medical findings.
 
+- `sales_and_it_admin_cannot_access_documents_workspace_or_meta_routes`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:20`
+  `docs/backlog/02_rbac-matrix_ua.md:21`
+  `docs/architecture/02_field-level-access-control.md:257`
+  Covers:
+  roles outside patient-facing and operational document workflows stay blocked from document list/detail and lookup/template read paths instead of inheriting access through the generic staff shell.
+
 - `document_user_share_can_be_confirmed_and_revoked`
   Source:
   `docs/architecture/02_field-level-access-control.md:92`
@@ -127,6 +135,13 @@
   Covers:
   multi-document sharing in one request, with share records created for each selected document.
 
+- `patient_manager_cannot_manage_provider_shares_for_unassigned_documents`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:8`
+  `docs/architecture/02_field-level-access-control.md`
+  Covers:
+  provider-share list/create/bulk/revoke routes stay assignment-bound for `patient_manager`; unassigned documents cannot be inspected or mutated through share endpoints.
+
 - `patient_document_alerts_report_missing_required_documents`
   Source:
   `docs/requirements/03_product-backlog_ua.md:173`
@@ -139,6 +154,13 @@
   `docs/architecture/02_field-level-access-control.md`
   Covers:
   CEO assistant can work only with released sensitive docs, not internal medical files.
+
+- `ceo_assistant_can_view_provider_share_trail_but_cannot_mutate_provider_shares`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:9`
+  `docs/architecture/02_field-level-access-control.md`
+  Covers:
+  `ceo_assistant` gets read-only access to the provider-share trail for released documents, while create/revoke mutations remain limited to `ceo` and `patient_manager`.
 
 - `document_meta_endpoints_return_seeded_categories_and_staff`
   Source:
@@ -207,6 +229,13 @@
   `docs/requirements/03_product-backlog_ua.md:149`
   Covers:
   translation workspace stores source language, source text, translated text and blocks completion without final translated content.
+
+- `ceo_assistant_can_review_translation_requests_but_cannot_mutate_them`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:9`
+  `docs/architecture/02_field-level-access-control.md`
+  Covers:
+  `ceo_assistant` can inspect translation-request history on released documents, but request creation and workspace/status mutations remain blocked.
 
 - `staff can create and complete a document translation workspace flow`
   Source:

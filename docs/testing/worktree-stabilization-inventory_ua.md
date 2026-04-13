@@ -15,8 +15,8 @@
 ## 1. Загальний стан
 
 - Основні product / platform зміни вже рознесені по bounded commits.
-- На момент фінального docs pass `git status` ще не чистий тільки через documentation sync.
-- Основний ризик великого змішаного diff вже знято; далі важливо не повертатись до практики накопичення багатьох slices в один worktree.
+- На момент останнього freeze pass verification already зелений (`cargo test --workspace`, `frontend npm test`, `frontend npm run build`, `frontend npm run test:e2e`), але `git status` усе ще не чистий.
+- Поточний dirty tree вже не про “невідомий стан системи”, а про незведений change set після зеленого freeze; основний ризик тут у commit hygiene, а не в функціональній невизначеності.
 
 ## 2. Основні change-buckets
 

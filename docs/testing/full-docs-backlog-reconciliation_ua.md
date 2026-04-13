@@ -164,12 +164,21 @@
 
 - `CEO Assistant` read-only patient registry scope з field-level masking
 - `CEO Assistant` read-only document-template catalog access without generation rights
+- `CEO Assistant` read-only document share/translation trail access on released documents, while provider-share and translation mutations remain blocked
+- documents workspace/nav тепер більше не світиться і не відкривається для `sales` та `it_admin`, включно з list/detail/meta/template read paths
+- `CEO` full commercial access plus `CEO Assistant` read-only access for contracts/quotes workspace, while `sales` and `concierge` stay denied from patient-bound commercial routes
+- `CEO Assistant` read-only invoice/PDF/dunning access, while `CEO` and `billing` retain finance mutation rights and `sales` / `concierge` stay denied from invoice workspace surfaces
+- patient profile shell більше не обходить ці RBAC межі через UI: restricted operational/document/commercial tabs не рендеряться, `documents` quick-link лишається тільки для document-workspace roles, а timeline не deep-links у `documents / contracts / invoices`, якщо ця surface для ролі закрита
 - `sales` deny на patient registry, executive dashboard, risk-analysis і restricted clinic/doctor exports
 - `CEO Assistant` access до reports / forecasting / risk workspaces як partial executive read model
 - `teamlead_interpreter` assignment-scoped patient/appointment visibility
 - broad analytics deny для `teamlead_interpreter`, `interpreter` і `concierge`
 - `it_admin` deny на patient registry, medical case detail і reports workspace
 - `billing` deny на medical case detail
+- `patient_manager` document share routes remain assignment-scoped even on direct endpoint access
+- internal chat workspace тепер теж role-aligned: `sales` повністю відрізаний від agency chat, а operational staff allowed-peer lists не світять sales-користувачів як внутрішніх chat targets
+- appointments workspace/nav тепер більше не світиться і не відкривається для `sales`, `billing`, `ceo_assistant` та `it_admin`, тобто поза реальним operational appointment chain
+- feedback workspace/nav тепер більше не світиться і не відкривається для `billing`, `sales`, `interpreter` та `it_admin`, тобто staff feedback surfaces лишаються тільки для реальних review/capture roles
 
 Частково / потребує подальшої перевірки:
 
@@ -317,8 +326,8 @@ Target-state, але не повністю підтверджено:
 | Appointments / Calendar | Confirmed | medical + non-medical, conflicts, recurrence, true split lineage, scope-aware bulk actions, portal requests and DB-level overlap constraints |
 | Documents / Sharing | Confirmed | upload, release, OCR/translation workspace, policy checks |
 | Billing / Finance | Partial | quotes, invoices, dunning, VAT, portal invoices, provider cost-intelligence reports and sales-safe medical-provider revenue reports є; DATEV/E-Rechnung/payments gap |
-| Portal | Mostly confirmed | documents, invoices, privacy, services, appointments, feedback, chat |
-| Messaging | Mostly confirmed | text + attachment E2E є, manual encrypted key backup/import закриває current-state device migration |
+| Portal | Confirmed | documents, invoices, privacy, services, appointments, feedback, chat |
+| Messaging | Confirmed | text + attachment E2E, allowed-peer scope, portal/staff chat flows і audit/regression coverage зібрані |
 | Feedback / NPS | Confirmed | portal submission + staff review + ranking |
 | SOP / Learning | Confirmed | library, approval flow, acknowledgement |
 | Reports / KPI / Forecasting / Risk | Mostly confirmed | CEO dashboard, reports, billing/sales KPI scorecards, risk-analysis, forecasting |
@@ -339,9 +348,10 @@ Target-state, але не повністю підтверджено:
 
 ### 8.2 Platform / verification gaps
 
+- Current-state freeze verification уже зелений: `cargo test --workspace`, `frontend npm test`, `frontend npm run build` і `frontend npm run test:e2e` пройшли на цьому зрізі коду.
 - Частина foundation/non-functional scope не верифікується з самого repo: backup/recovery, DR, TLS/perimeter hardening, production ops.
 - `docs/backlog/04_implementation-tasks_ua.md` і `docs/development-plan.md` не синхронізовані з кодом як live-status документи; їх треба читати як planning-only.
-- Найбільший поточний engineering risk не в документах, а у великому незведеному worktree: це підвищує ризик змішаних slices і погіршує прозорість фактичного status per feature.
+- Найбільший поточний engineering risk не в verification coverage, а у все ще великому dirty worktree: freeze pass уже зелений, але дерево лишається змішаним і його все ще треба розвести по bounded commits / PR slices.
 
 ## 9. Документи, що зараз найбільш корисні як live status
 
@@ -371,7 +381,7 @@ Target-state, але не повністю підтверджено:
 
 - blocking non-AI/non-integration product gaps у core scope зараз не видно
 - залишаються stabilization / inventory і подальше ущільнення regression coverage
-- базовий browser-level `E2E` harness уже є і не обмежується навігацією: Playwright покриває staff shell (`dashboard -> patients -> appointments -> documents -> invoices`), staff document portal release/revoke flow, staff template-based document generation flow, provider share/revoke з cover message, staff file-delete lifecycle, staff translation-workspace request/save/complete flow, patient portal (`dashboard -> documents -> invoices -> appointments -> services`), patient invoice payment-proof upload, patient data export + privacy request submission, portal document receipt confirmation, portal self-upload + re-download loop, portal appointment-request submit, portal concierge-service request/cancel, recurring appointment whole-series cancellation з detail drawer і secure chat text-send + secure attachment-send flows з browser keyring/mock envelope path; окремо backend regression already цементує `logout` / `logout-all` session revocation semantics. Незакритим лишається вже не наявність browser/session coverage, а поступове розширення mutation-сценаріїв
+- базовий browser-level `E2E` harness уже є і не обмежується навігацією: Playwright покриває staff shell (`dashboard -> patients -> appointments -> documents -> invoices`), staff document portal release/revoke flow, staff template-based document generation flow, provider share/revoke з cover message, staff file-delete lifecycle, staff translation-workspace request/save/complete flow, staff feedback review flow, patient portal (`dashboard -> documents -> invoices -> appointments -> services -> feedback -> chat`), patient invoice payment-proof upload, patient data export + privacy request submission, portal document receipt confirmation, portal self-upload + re-download loop, portal appointment-request submit, portal concierge-service request/cancel, portal appointment-linked feedback submit, recurring appointment whole-series cancellation з detail drawer, staff secure chat text-send + secure attachment-send flows і окремий patient-portal secure chat flow з encrypted text + attachment, unread-state clearing і allowed-peer picker filtering через browser keyring/mock envelope path; окремо backend regression уже цементує `logout` / `logout-all` session revocation semantics, `portal feedback -> staff review -> patient history`, `portal feedback notifications -> assigned roles only` і `portal service request -> assigned staff notifications/queue only + portal status reflection`. На цьому зрізі весь consolidated freeze pass зелений, тому незакритим лишається вже не наявність browser/session coverage, а тільки подальше optional-ущільнення mutation-сценаріїв.
 - `Documents / Sharing` уже підтверджені end-to-end: upload/release, OCR/translation workspace, policy checks, file delete lifecycle, provider cover-message trail і patient-requested third-party revoke workflow тепер автоматизовані regression tests
 - `AI / pseudonymization -> AI handoff`
 
@@ -385,7 +395,7 @@ Target-state, але не повністю підтверджено:
 ### Найбільший технічний ризик не в docs, а в worktree
 
 - документація вже достатньо розкладена, щоб бачити картину
-- основний engineering risk зараз — великий незведений worktree, а не відсутність розуміння scope
+- основний engineering risk зараз — великий незведений worktree, а не відсутність розуміння scope або verification coverage
 
 ## 11. Практичний Execution Order Без Інтеграцій
 
@@ -395,11 +405,11 @@ Target-state, але не повністю підтверджено:
 
 1. Розвести поточний великий worktree по bounded commits / slices.
 2. Зафіксувати окремо, що вже current-state, а що ще WIP.
-3. Не брати нові широкі фічі, поки дерево не стане прозорим для нормального regression pass.
+3. Не брати нові широкі фічі, поки дерево не стане прозорим для clean commit/PR slicing після вже зеленого regression freeze pass.
 
 Причина:
 
-- зараз найбільший engineering risk саме в змішаному worktree, а не в нестачі scope-розуміння
+- зараз найбільший engineering risk саме в змішаному worktree, а не в нестачі scope-розуміння або у відсутності regression verification
 
 ### P1. Regression hardening
 

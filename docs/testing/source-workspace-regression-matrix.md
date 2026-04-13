@@ -185,6 +185,45 @@
   Covers:
   teamlead-authored SOP scope remains limited to interpreter-team distribution instead of spilling into concierge, billing or other unrelated staff roles.
 
+### Contracts and quotes
+
+- `ceo_can_manage_contracts_and_quotes_without_patient_assignment`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:8`
+  `docs/backlog/02_rbac-matrix_ua.md:14`
+  Covers:
+  `ceo` keeps real full commercial access in the contracts workspace: framework-contract create/status-update, quote create/status-update and version history all work without a patient assignment shortcut.
+
+- `ceo_assistant_can_read_but_cannot_mutate_contracts_and_quotes`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:9`
+  `docs/backlog/02_rbac-matrix_ua.md:14`
+  Covers:
+  `ceo_assistant` can open framework-contract and quote list/detail/version endpoints, including the patient-profile contract tab, but stays read-only and cannot create contracts, update contract status, create quotes or change quote status.
+
+- `sales_and_concierge_cannot_access_contracts_or_quotes_workspaces`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:12`
+  `docs/backlog/02_rbac-matrix_ua.md:14`
+  Covers:
+  `sales` and `concierge` remain outside the commercial workspace entirely: contracts/quotes list routes and the patient-profile contract tab reject them instead of leaking patient-bound financial state.
+
+### Invoices and dunning
+
+- `ceo_assistant_can_read_but_cannot_mutate_invoice_workspace`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:9`
+  `docs/backlog/02_rbac-matrix_ua.md:14`
+  Covers:
+  `ceo_assistant` can open invoice list/detail, patient-profile invoice tab, invoice PDF and dunning history in read-only mode, but cannot create invoices from quotes, update invoice status or trigger dunning escalation.
+
+- `sales_and_concierge_cannot_access_invoice_workspace`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:12`
+  `docs/backlog/02_rbac-matrix_ua.md:14`
+  Covers:
+  `sales` and `concierge` stay outside patient-bound finance surfaces: invoice workspace routes and nested patient invoice list reject them instead of exposing billing state.
+
 ### Providers and patients
 
 - `providers_list_supports_country_and_doctor_filters`
@@ -494,6 +533,13 @@
   Covers:
   patient portal can request concierge-style additional services, the request stays patient-bound in `concierge_services`, and responsible patient-facing staff receive operational notifications.
 
+- `portal_service_notifications_and_staff_queue_stay_assignment_scoped`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:394`
+  `docs/backlog/04_implementation-tasks_ua.md:285`
+  Covers:
+  patient-portal service notifications fan out only to the assigned patient-facing staff, and unrelated concierge / patient-manager users do not see the request in notifications or the concierge queue.
+
 - `patient can request and cancel an additional service`
   Source:
   `docs/requirements/03_product-backlog_ua.md:394`
@@ -507,6 +553,13 @@
   `docs/backlog/04_implementation-tasks_ua.md:285`
   Covers:
   patient can cancel an own still-pending portal concierge request before the care team starts processing or booking it.
+
+- `patient_sees_staff_processing_updates_for_portal_service_and_loses_cancel_right`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:394`
+  `docs/backlog/04_implementation-tasks_ua.md:285`
+  Covers:
+  a patient-portal concierge request flows into the staff concierge queue with `request_source = patient_portal`, staff can move it into active processing with booking metadata, the updated status and booking reference flow back into `/me/concierge-services`, and patient-side cancel becomes unavailable once the request is being handled.
 
 - `patient_can_message_assigned_staff_and_exchange_file`
   Source:
@@ -573,6 +626,20 @@
   Covers:
   browser-level secure chat flow can encrypt a file attachment for the active peer, submit the multipart E2E envelope through the real upload form, render the secure attachment chip back in the conversation and hit the encrypted download path.
 
+- `patient can use secure chat with assigned care team in browser E2E`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:213`
+  `docs/backlog/04_implementation-tasks_ua.md:295`
+  Covers:
+  browser-level patient portal secure chat can open the assigned care-team conversation, send an encrypted text update, upload an encrypted attachment with caption and download that secure attachment back through the same self-service conversation.
+
+- `patient portal chat clears unread state and only exposes allowed peers`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:213`
+  `docs/backlog/04_implementation-tasks_ua.md:295`
+  Covers:
+  browser-level patient portal chat marks unread incoming messages as read when the patient opens the assigned-care conversation, and the new-chat picker only exposes allowed care-team peers instead of unrelated staff users.
+
 - `patient_cannot_message_unassigned_staff`
   Source:
   `docs/requirements/03_product-backlog_ua.md:213`
@@ -587,6 +654,14 @@
   Covers:
   staff can access patient portal chat only when the patient is currently linked through an active assignment; unrelated staff remain blocked.
 
+- `sales_cannot_use_internal_chat_workspace_and_are_hidden_from_staff_peers`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:19`
+  `docs/backlog/02_rbac-matrix_ua.md:20`
+  `docs/backlog/02_rbac-matrix_ua.md:21`
+  Covers:
+  internal chat workspace excludes `sales` completely, keeps the allowed-peer picker free from sales users for operational staff, and leaves internal chat available only to the actual agency roles that may coordinate cases or finance.
+
 - `patient_can_submit_feedback_and_pm_gets_summary`
   Source:
   `docs/requirements/03_product-backlog_ua.md:398`
@@ -594,6 +669,13 @@
   `docs/backlog/04_implementation-tasks_ua.md:315`
   Covers:
   patient portal can submit an appointment-linked satisfaction survey with doctor, organization, service, ambience and value scores plus treatment-success and complication signals; assigned patient-facing staff get notified, and patient manager sees the resulting summary roll-up.
+
+- `portal_feedback_notifications_are_scoped_to_assigned_patient_roles`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:398`
+  `docs/backlog/04_implementation-tasks_ua.md:315`
+  Covers:
+  patient-portal feedback notifications reach only the assigned patient-facing roles that are supposed to act on them, and unrelated staff users do not get notification rows or feedback queue visibility for that patient.
 
 - `teamlead_and_concierge_only_see_relevant_feedback_rows`
   Source:
@@ -603,12 +685,42 @@
   Covers:
   feedback workspace stays role-scoped so teamlead sees interpreter-related rows only and concierge sees service-feedback rows only for assigned patients, while the richer quality metrics remain scoped to the same relevant slices.
 
+- `billing_sales_interpreter_and_it_admin_cannot_open_feedback_workspace`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:17`
+  `docs/backlog/02_rbac-matrix_ua.md:19`
+  `docs/backlog/02_rbac-matrix_ua.md:20`
+  `docs/backlog/02_rbac-matrix_ua.md:21`
+  Covers:
+  staff roles outside the actual feedback chain stay blocked from queue and summary routes instead of inheriting access through the generic staff shell or wide navigation defaults.
+
 - `review_writes_timeline_feedback_events`
   Source:
   `docs/backlog/03_kpi-catalog_ua.md:129`
   `docs/requirements/03_product-backlog_ua.md:398`
   Covers:
   staff review of patient feedback writes audit and patient-timeline events so satisfaction handling remains visible in the workspace chain.
+
+- `reviewed_portal_feedback_flows_back_into_patient_history`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:398`
+  `docs/backlog/04_implementation-tasks_ua.md:315`
+  Covers:
+  patient-portal feedback can be reviewed by staff, the reviewed status and follow-up note flow back into `/me/feedback`, and internal-only fields stay hidden from patient self-service history.
+
+- `patient can submit appointment-linked feedback in portal`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:398`
+  `docs/backlog/04_implementation-tasks_ua.md:315`
+  Covers:
+  browser-level patient portal can submit an appointment-linked satisfaction survey, immediately see the new submitted entry in the same feedback history, and keep the visit-bound context visible in self-service history.
+
+- `staff can review portal feedback in browser E2E`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:398`
+  `docs/backlog/03_kpi-catalog_ua.md:129`
+  Covers:
+  browser-level staff feedback workspace can open a submitted portal feedback row, save a review note through the review sheet and surface the resulting reviewed status plus follow-up note back in the queue card.
 
 - `patient_can_create_appointment_request_and_pm_can_review_queue`
   Source:
@@ -622,7 +734,14 @@
   `docs/backlog/04_implementation-tasks_ua.md:281`
   `docs/backlog/04_implementation-tasks_ua.md:283`
   Covers:
-  approved portal appointment request can be converted into a real appointment, and the patient sees the scheduled non-internal visit in the portal workspace.
+  portal appointment request moves through `requested -> approved -> converted`, disappears from the patient-manager requested queue after review, appears in the approved and then converted staff queue slices with review/conversion metadata, and the patient sees both the converted request history row and the scheduled non-internal visit in the portal workspace.
+
+- `rejected_request_stays_in_patient_history_and_never_creates_appointment`
+  Source:
+  `docs/backlog/04_implementation-tasks_ua.md:281`
+  `docs/backlog/04_implementation-tasks_ua.md:283`
+  Covers:
+  rejected portal appointment request leaves the requested queue, appears in the rejected patient-manager queue with review metadata, stays visible in the patient request history with the rejection note, and does not create a portal-visible appointment row.
 
 - `patient can submit an appointment request and see it in portal history`
   Source:
@@ -912,6 +1031,15 @@
   `docs/backlog/04_implementation-tasks_ua.md:123`
   Covers:
   appointment-linked task delegation and completion tracking.
+
+- `sales_billing_ceo_assistant_and_it_admin_cannot_open_appointments_workspace`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:14`
+  `docs/backlog/02_rbac-matrix_ua.md:19`
+  `docs/backlog/02_rbac-matrix_ua.md:20`
+  `docs/backlog/02_rbac-matrix_ua.md:21`
+  Covers:
+  staff roles outside the operational appointment chain stay blocked from the appointments workspace instead of inheriting access through shared navigation or generic staff shell routes.
 
 - `patient_manager_can_log_and_close_appointment_communication`
   Source:
