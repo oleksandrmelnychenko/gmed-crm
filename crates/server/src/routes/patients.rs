@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::access;
+use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::state::AppState;
 use gmed_domain::role::Role;
@@ -640,17 +641,16 @@ async fn get_patient(
                     updated_at: r.updated_at,
                 },
             );
-            let _ = sqlx::query(
-                "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'view_patient', 'patient', $2, $3)",
-            )
-            .bind(auth.user_id)
-            .bind(patient_uuid)
-            .bind(json!({
-                "role": auth.role,
-                "visible_fields": collect_visible_fields(&patient_json),
-            }))
-            .execute(&state.db)
-            .await;
+            state.audit_sender.try_send(audit::domain_event(
+                "view_patient",
+                Some(auth.user_id),
+                "patient",
+                Some(patient_uuid),
+                json!({
+                    "role": auth.role,
+                    "visible_fields": collect_visible_fields(&patient_json),
+                }),
+            ));
 
             Ok(Json(patient_json))
         }
@@ -769,15 +769,13 @@ async fn create_patient(
     )
     .await?;
 
-    let _ = sqlx::query!(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context)
-         VALUES ($1, 'create_patient', 'patient', $2, $3)",
-        auth.user_id,
-        row.id,
-        serde_json::json!({ "patient_id": row.patient_id })
-    )
-    .execute(&state.db)
-    .await;
+    state.audit_sender.try_send(audit::domain_event(
+        "create_patient",
+        Some(auth.user_id),
+        "patient",
+        Some(row.id),
+        serde_json::json!({ "patient_id": row.patient_id }),
+    ));
 
     tracing::info!(by = %auth.user_id, patient = %row.patient_id, "Patient created");
 
@@ -916,14 +914,13 @@ async fn update_patient(
 
     match result {
         Ok(_) => {
-            let _ = sqlx::query(
-                "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'update_patient', 'patient', $2, $3)",
-            )
-            .bind(auth.user_id)
-            .bind(patient_uuid)
-            .bind(audit_context)
-            .execute(&state.db)
-            .await;
+            state.audit_sender.try_send(audit::domain_event(
+                "update_patient",
+                Some(auth.user_id),
+                "patient",
+                Some(patient_uuid),
+                audit_context,
+            ));
             Json(serde_json::json!({"ok": true})).into_response()
         }
         Err(e) => {
@@ -1946,17 +1943,16 @@ async fn get_patient_recheck(
         return Err(err(StatusCode::NOT_FOUND, "Patient not found"));
     };
 
-    let _ = sqlx::query(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'view_patient_recheck', 'patient', $2, $3)",
-    )
-    .bind(auth.user_id)
-    .bind(patient_uuid)
-    .bind(json!({
-        "can_create_order": readiness.can_create_order,
-        "blocking_reasons": readiness.blocking_reasons.clone(),
-    }))
-    .execute(&state.db)
-    .await;
+    state.audit_sender.try_send(audit::domain_event(
+        "view_patient_recheck",
+        Some(auth.user_id),
+        "patient",
+        Some(patient_uuid),
+        json!({
+            "can_create_order": readiness.can_create_order,
+            "blocking_reasons": readiness.blocking_reasons.clone(),
+        }),
+    ));
 
     Ok(Json(readiness.payload))
 }
@@ -2122,17 +2118,16 @@ async fn get_patient_label(
         "generated_at": chrono::Utc::now().to_rfc3339(),
     });
 
-    let _ = sqlx::query(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'generate_patient_label', 'patient', $2, $3)",
-    )
-    .bind(auth.user_id)
-    .bind(patient_uuid)
-    .bind(json!({
-        "format": format.id,
-        "country_code": country_code,
-    }))
-    .execute(&state.db)
-    .await;
+    state.audit_sender.try_send(audit::domain_event(
+        "generate_patient_label",
+        Some(auth.user_id),
+        "patient",
+        Some(patient_uuid),
+        json!({
+            "format": format.id,
+            "country_code": country_code,
+        }),
+    ));
 
     Ok(Json(payload))
 }
@@ -2286,19 +2281,17 @@ async fn create_relation(
         )
     })?;
 
-    let _ = sqlx::query(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context)
-         VALUES ($1, 'create_patient_relation', 'patient', $2, $3)",
-    )
-    .bind(auth.user_id)
-    .bind(patient_uuid)
-    .bind(serde_json::json!({
-        "relation_id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
-        "relation_type": body.relation_type,
-        "related_patient_id": body.related_patient_id
-    }))
-    .execute(&state.db)
-    .await;
+    state.audit_sender.try_send(audit::domain_event(
+        "create_patient_relation",
+        Some(auth.user_id),
+        "patient",
+        Some(patient_uuid),
+        serde_json::json!({
+            "relation_id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
+            "relation_type": body.relation_type,
+            "related_patient_id": body.related_patient_id,
+        }),
+    ));
 
     Ok((StatusCode::CREATED, Json(build_relation_json(row))))
 }
@@ -2352,19 +2345,17 @@ async fn update_relation(
         return Err(err(StatusCode::NOT_FOUND, "Patient relation not found"));
     };
 
-    let _ = sqlx::query(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context)
-         VALUES ($1, 'update_patient_relation', 'patient', $2, $3)",
-    )
-    .bind(auth.user_id)
-    .bind(patient_uuid)
-    .bind(serde_json::json!({
-        "relation_id": relation_id,
-        "relation_type": body.relation_type,
-        "related_patient_id": body.related_patient_id
-    }))
-    .execute(&state.db)
-    .await;
+    state.audit_sender.try_send(audit::domain_event(
+        "update_patient_relation",
+        Some(auth.user_id),
+        "patient",
+        Some(patient_uuid),
+        serde_json::json!({
+            "relation_id": relation_id,
+            "relation_type": body.relation_type,
+            "related_patient_id": body.related_patient_id,
+        }),
+    ));
 
     Ok(Json(build_relation_json(row)))
 }
@@ -2394,15 +2385,13 @@ async fn delete_relation(
         return Err(err(StatusCode::NOT_FOUND, "Patient relation not found"));
     }
 
-    let _ = sqlx::query(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context)
-         VALUES ($1, 'delete_patient_relation', 'patient', $2, $3)",
-    )
-    .bind(auth.user_id)
-    .bind(patient_uuid)
-    .bind(serde_json::json!({ "relation_id": relation_id }))
-    .execute(&state.db)
-    .await;
+    state.audit_sender.try_send(audit::domain_event(
+        "delete_patient_relation",
+        Some(auth.user_id),
+        "patient",
+        Some(patient_uuid),
+        serde_json::json!({ "relation_id": relation_id }),
+    ));
 
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -2774,15 +2763,16 @@ async fn assign_patient(
         err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to assign patient")
     })?;
 
-    let _ = sqlx::query!(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context)
-         VALUES ($1, 'assign_patient', 'patient', $2, $3)",
-        auth.user_id,
-        patient_uuid,
-        serde_json::json!({ "assigned_to": body.user_id, "assigned_role": target_role })
-    )
-    .execute(&state.db)
-    .await;
+    state.audit_sender.try_send(audit::domain_event(
+        "assign_patient",
+        Some(auth.user_id),
+        "patient",
+        Some(patient_uuid),
+        serde_json::json!({
+            "assigned_to": body.user_id,
+            "assigned_role": target_role,
+        }),
+    ));
 
     tracing::info!(by = %auth.user_id, patient = %patient_uuid, to = %body.user_id, "Patient assigned");
 
@@ -3486,10 +3476,13 @@ async fn revoke_assignment(
     .await
     {
         Ok(r) if r.rows_affected() > 0 => {
-            let _ = sqlx::query!(
-                "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, 'revoke_assignment', 'patient', $2, $3)",
-                auth.user_id, patient_id, serde_json::json!({"revoked_user_id": body.user_id})
-            ).execute(&state.db).await;
+            state.audit_sender.try_send(audit::domain_event(
+                "revoke_assignment",
+                Some(auth.user_id),
+                "patient",
+                Some(patient_id),
+                serde_json::json!({ "revoked_user_id": body.user_id }),
+            ));
             tracing::info!(by = %auth.user_id, patient = %patient_id, revoked = %body.user_id, "Assignment revoked");
             Json(serde_json::json!({"ok": true})).into_response()
         }
@@ -3517,10 +3510,13 @@ async fn activate_patient(
     .await
     {
         Ok(r) if r.rows_affected() > 0 => {
-            let _ = sqlx::query!(
-                "INSERT INTO audit_log (user_id, action, entity_type, entity_id) VALUES ($1, 'activate_patient', 'patient', $2)",
-                auth.user_id, patient_id
-            ).execute(&state.db).await;
+            state.audit_sender.try_send(audit::domain_event(
+                "activate_patient",
+                Some(auth.user_id),
+                "patient",
+                Some(patient_id),
+                serde_json::json!({}),
+            ));
             tracing::info!(by = %auth.user_id, patient = %patient_id, "Patient activated");
             Json(serde_json::json!({"ok": true})).into_response()
         }
@@ -3551,10 +3547,13 @@ async fn deactivate_patient(
     .await
     {
         Ok(r) if r.rows_affected() > 0 => {
-            let _ = sqlx::query!(
-                "INSERT INTO audit_log (user_id, action, entity_type, entity_id) VALUES ($1, 'deactivate_patient', 'patient', $2)",
-                auth.user_id, patient_id
-            ).execute(&state.db).await;
+            state.audit_sender.try_send(audit::domain_event(
+                "deactivate_patient",
+                Some(auth.user_id),
+                "patient",
+                Some(patient_id),
+                serde_json::json!({}),
+            ));
             tracing::info!(by = %auth.user_id, patient = %patient_id, "Patient deactivated");
             Json(serde_json::json!({"ok": true})).into_response()
         }
