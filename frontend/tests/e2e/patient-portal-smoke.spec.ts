@@ -9,6 +9,34 @@ function json(route: Route, body: unknown, status = 200) {
 }
 
 async function installPatientPortalMocks(page: Page) {
+  let paymentProofUploadedAt: string | null = null;
+  const paymentProofTimestamp = "2026-04-10T09:15:00Z";
+
+  const buildPortalInvoice = () => ({
+    id: "00000000-0000-0000-0000-000000009501",
+    quote_id: "00000000-0000-0000-0000-000000009601",
+    quote_number: "QU-001",
+    order_id: "00000000-0000-0000-0000-000000009701",
+    order_number: "ORD-PORTAL-1",
+    patient_id: "00000000-0000-0000-0000-000000009001",
+    invoice_number: "INV-PORTAL-1",
+    invoice_type: "advance",
+    status: "sent",
+    issued_at: "2026-04-01T09:00:00Z",
+    due_date: "2026-04-15",
+    total_net: "1000.00",
+    total_vat: "0.00",
+    total_gross: "1000.00",
+    paid_amount: "0.00",
+    balance_due: "1000.00",
+    paid_at: null,
+    notes: "Please transfer within the due period.",
+    created_at: "2026-04-01T09:00:00Z",
+    updated_at: "2026-04-01T09:00:00Z",
+    payment_proof_count: paymentProofUploadedAt ? 1 : 0,
+    last_payment_proof_at: paymentProofUploadedAt,
+  });
+
   await page.route("**/auth/**", async (route) => {
     const url = new URL(route.request().url());
     const { pathname } = url;
@@ -184,58 +212,12 @@ async function installPatientPortalMocks(page: Page) {
     }
 
     if (path === "/me/invoices") {
-      return json(route, [
-        {
-          id: "00000000-0000-0000-0000-000000009501",
-          quote_id: "00000000-0000-0000-0000-000000009601",
-          quote_number: "QU-001",
-          order_id: "00000000-0000-0000-0000-000000009701",
-          order_number: "ORD-PORTAL-1",
-          patient_id: "00000000-0000-0000-0000-000000009001",
-          invoice_number: "INV-PORTAL-1",
-          invoice_type: "advance",
-          status: "sent",
-          issued_at: "2026-04-01T09:00:00Z",
-          due_date: "2026-04-15",
-          total_net: "1000.00",
-          total_vat: "0.00",
-          total_gross: "1000.00",
-          paid_amount: "0.00",
-          balance_due: "1000.00",
-          paid_at: null,
-          notes: "Please transfer within the due period.",
-          created_at: "2026-04-01T09:00:00Z",
-          updated_at: "2026-04-01T09:00:00Z",
-          payment_proof_count: 0,
-          last_payment_proof_at: null,
-        },
-      ]);
+      return json(route, [buildPortalInvoice()]);
     }
 
     if (path === "/me/invoices/00000000-0000-0000-0000-000000009501") {
       return json(route, {
-        id: "00000000-0000-0000-0000-000000009501",
-        quote_id: "00000000-0000-0000-0000-000000009601",
-        quote_number: "QU-001",
-        order_id: "00000000-0000-0000-0000-000000009701",
-        order_number: "ORD-PORTAL-1",
-        patient_id: "00000000-0000-0000-0000-000000009001",
-        invoice_number: "INV-PORTAL-1",
-        invoice_type: "advance",
-        status: "sent",
-        issued_at: "2026-04-01T09:00:00Z",
-        due_date: "2026-04-15",
-        total_net: "1000.00",
-        total_vat: "0.00",
-        total_gross: "1000.00",
-        paid_amount: "0.00",
-        balance_due: "1000.00",
-        paid_at: null,
-        notes: "Please transfer within the due period.",
-        created_at: "2026-04-01T09:00:00Z",
-        updated_at: "2026-04-01T09:00:00Z",
-        payment_proof_count: 0,
-        last_payment_proof_at: null,
+        ...buildPortalInvoice(),
         line_items: [
           {
             description: "Treatment package",
@@ -250,6 +232,11 @@ async function installPatientPortalMocks(page: Page) {
           },
         ],
       });
+    }
+
+    if (path === "/me/documents/upload" && route.request().method() === "POST") {
+      paymentProofUploadedAt = paymentProofTimestamp;
+      return json(route, { ok: true });
     }
 
     if (path === "/me/privacy-requests") {
@@ -319,6 +306,9 @@ async function installPatientPortalMocks(page: Page) {
 
 test.describe("patient portal smoke flows", () => {
   test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      window.localStorage.setItem("gmed_lang", "de");
+    });
     await installPatientPortalMocks(page);
     await page.goto("/login");
     await page.locator("#email").fill("patient@gmed.de");
@@ -341,5 +331,29 @@ test.describe("patient portal smoke flows", () => {
     await expect(page).toHaveURL(/\/invoices$/);
     await expect(page.getByRole("heading", { name: "INV-PORTAL-1" })).toBeVisible();
     await expect(page.getByText("Treatment package")).toBeVisible();
+  });
+
+  test("patient can upload payment proof from invoice detail", async ({ page }) => {
+    await page.goto("/invoices");
+    await expect(page).toHaveURL(/\/invoices$/);
+    await expect(
+      page.getByRole("button", { name: /Upload payment proof/i }),
+    ).toBeVisible();
+
+    await page.getByRole("button", { name: /Upload payment proof/i }).click();
+    await page
+      .locator("#invoice-payment-proof")
+      .setInputFiles({
+        name: "payment-proof.pdf",
+        mimeType: "application/pdf",
+        buffer: Buffer.from("payment-proof"),
+      });
+    await page.locator("#invoice-payment-proof-note").fill("Bank transfer sent.");
+    await page.getByRole("button", { name: /Send proof/i }).click();
+
+    await expect(
+      page.getByText("Payment proof uploaded for the billing team."),
+    ).toBeVisible();
+    await expect(page.getByText(/Uploaded 10 Apr 2026/i)).toBeVisible();
   });
 });
