@@ -171,6 +171,26 @@ export interface Translations {
   orders_subtitle: string;
   orders_patient: string;
   orders_phase: string;
+  orders_cost_pass_through_badge: string;
+  orders_treat_as_cost_pass_through: string;
+  orders_cost_pass_through_hint: string;
+  orders_auto_billed_from_interpreter_report: string;
+  orders_auto_billed_from_completed_appointment: string;
+  orders_supporting_document: string;
+  orders_open_linked_document: string;
+  orders_supporting_document_auto_link_hint: string;
+  orders_supporting_document_select_hint: string;
+  orders_supporting_document_pin_hint: string;
+  orders_billing_source: string;
+  orders_billing_source_interpreter_report: string;
+  orders_billing_source_completed_appointment: string;
+  orders_billing_source_manual: string;
+  orders_agency_service: string;
+  orders_not_catalog_linked: string;
+  orders_open_provider: string;
+  orders_unlinked: string;
+  orders_open_doctor_context: string;
+  orders_not_specified: string;
 
   cases_title: string;
   cases_subtitle: string;
@@ -267,6 +287,42 @@ export interface Translations {
   appointments_lineage_active_short: string;
   appointments_lineage_completed_short: string;
   appointments_lineage_cancelled_short: string;
+  appointments_today: string;
+  appointments_doctor_directed_followup_title: string;
+  appointments_doctor_directed_followup_subtitle: string;
+  appointments_directed_item_singular: string;
+  appointments_directed_item_plural: string;
+  appointments_reminder_trail: string;
+  appointments_task_trail: string;
+  appointments_add_reminder: string;
+  appointments_interpreter_report_title: string;
+  appointments_interpreter_report_subtitle: string;
+  appointments_report_submitted_prefix: string;
+  appointments_report_needs_interpreter_revision: string;
+  appointments_report_waiting_teamlead_review: string;
+  appointments_report_no_reviewer_recorded: string;
+  appointments_report_reviewer_notes: string;
+  appointments_report_billing_sync: string;
+  appointments_billing_sync_synced: string;
+  appointments_billing_sync_missing_catalog: string;
+  appointments_billing_sync_missing_order: string;
+  appointments_billing_sync_pending: string;
+  appointments_billing_sync_none: string;
+  appointments_timeline_appointment_created: string;
+  appointments_timeline_scheduled_slot: string;
+  appointments_timeline_interpreter_pending: string;
+  appointments_timeline_interpreter_assigned: string;
+  appointments_timeline_interpreter_accepted: string;
+  appointments_timeline_interpreter_declined: string;
+  appointments_timeline_interpreter_discussion: string;
+  appointments_timeline_checklist_completed: string;
+  appointments_timeline_checklist_pending: string;
+  appointments_timeline_external_response_logged: string;
+  appointments_timeline_external_communication_cancelled: string;
+  appointments_timeline_external_communication_closed: string;
+  appointments_timeline_interpreter_report_submitted: string;
+  appointments_timeline_interpreter_report_approved: string;
+  appointments_timeline_interpreter_report_rejected: string;
 
   nav_overview: string;
   nav_crm: string;
@@ -467,8 +523,29 @@ export interface Translations {
   dash_surgeries: string;
   dash_followups: string;
   dash_active: string;
-  cal_weekdays: readonly [string, string, string, string, string, string, string];
-  cal_months: readonly [string, string, string, string, string, string, string, string, string, string, string, string];
+  cal_weekdays: readonly [
+    string,
+    string,
+    string,
+    string,
+    string,
+    string,
+    string,
+  ];
+  cal_months: readonly [
+    string,
+    string,
+    string,
+    string,
+    string,
+    string,
+    string,
+    string,
+    string,
+    string,
+    string,
+    string,
+  ];
 
   // Patients extended
   patients_first_name: string;
@@ -520,6 +597,9 @@ export interface Translations {
   common_failed_create: string;
   common_failed_update: string;
   common_failed_assign: string;
+  common_today: string;
+  common_pending: string;
+  common_completed: string;
 
   field_name: string;
   field_birth_date: string;

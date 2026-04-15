@@ -92,7 +92,8 @@ export const ru: Translations = {
   providers_subtitle: "Управление клиниками, врачами и каталогом услуг",
   providers_new: "Новый провайдер",
   providers_detail: "Детали провайдера",
-  providers_select_hint: "Выберите провайдера для управления врачами, услугами и пациентами.",
+  providers_select_hint:
+    "Выберите провайдера для управления врачами, услугами и пациентами.",
   providers_type: "Тип",
   providers_type_medical: "Медицинский",
   providers_type_non_medical: "Немедицинский",
@@ -199,6 +200,9 @@ export const ru: Translations = {
   common_failed_create: "Ошибка создания",
   common_failed_update: "Ошибка обновления",
   common_failed_assign: "Ошибка назначения",
+  common_today: "Сегодня",
+  common_pending: "В ожидании",
+  common_completed: "Завершено",
 
   leads_title: "Лиды",
   leads_subtitle: "Управление лидами и запросами",
@@ -218,6 +222,32 @@ export const ru: Translations = {
   orders_subtitle: "Управление заказами и услугами",
   orders_patient: "Пациент",
   orders_phase: "Фаза",
+  orders_cost_pass_through_badge: "Транзитная позиция",
+  orders_treat_as_cost_pass_through: "Провести как транзитную позицию",
+  orders_cost_pass_through_hint:
+    "Позиция останется видимой для расчёта, но не будет включаться в агентскую маржу.",
+  orders_auto_billed_from_interpreter_report:
+    "Автоматически начислено по отчёту переводчика",
+  orders_auto_billed_from_completed_appointment:
+    "Автоматически начислено из завершённого приёма",
+  orders_supporting_document: "Подтверждающий документ",
+  orders_open_linked_document: "Открыть связанный документ",
+  orders_supporting_document_auto_link_hint:
+    "Привязать автоматически, если найден ровно один подходящий документ",
+  orders_supporting_document_select_hint:
+    "Привязать автоматически, если найден ровно один подходящий документ",
+  orders_supporting_document_pin_hint:
+    "Выберите конкретный чек или счёт провайдера, если для позиции подходит несколько файлов.",
+  orders_billing_source: "Источник начисления",
+  orders_billing_source_interpreter_report: "Отчёт переводчика",
+  orders_billing_source_completed_appointment: "Завершённый приём",
+  orders_billing_source_manual: "Вручную или через провайдера",
+  orders_agency_service: "Агентская услуга",
+  orders_not_catalog_linked: "Не связано с каталогом",
+  orders_open_provider: "Открыть провайдера",
+  orders_unlinked: "Не привязано",
+  orders_open_doctor_context: "Открыть контекст врача",
+  orders_not_specified: "Не указано",
 
   cases_title: "Кейсы",
   cases_subtitle: "Медицинские кейсы и анамнез",
@@ -278,8 +308,10 @@ export const ru: Translations = {
   appointments_scope_single: "Только этот приём",
   appointments_scope_following: "Этот и следующие",
   appointments_scope_series: "Вся серия",
-  appointments_scope_bulk_status_hint: "Изменение статуса можно применить к текущему приёму, к текущему и следующим или ко всей активной серии.",
-  appointments_scope_following_hint: "Этот и следующие создаёт новую хвостовую ветку серии от текущего приёма. Вся серия сохраняет ту же идентичность серии и сдвигает все активные приёмы вместе.",
+  appointments_scope_bulk_status_hint:
+    "Изменение статуса можно применить к текущему приёму, к текущему и следующим или ко всей активной серии.",
+  appointments_scope_following_hint:
+    "Этот и следующие создаёт новую хвостовую ветку серии от текущего приёма. Вся серия сохраняет ту же идентичность серии и сдвигает все активные приёмы вместе.",
   appointments_active_series_path: "Активный путь серии",
   appointments_current_occurrence: "Текущий",
   appointments_open_checklist: "открытый чеклист",
@@ -300,21 +332,72 @@ export const ru: Translations = {
   appointments_lineage_related: "Связанная серия",
   appointments_lineage_split_from_occurrence: "Отделено от приёма",
   appointments_lineage_previous_plan: "предыдущего плана повторений.",
-  appointments_lineage_tail_root: "Этот приём начинает хвостовую ветку серии, отделённую от приёма",
-  appointments_lineage_tail_member: "Этот приём относится к хвостовой ветке серии, которая начинается с приёма",
+  appointments_lineage_tail_root:
+    "Этот приём начинает хвостовую ветку серии, отделённую от приёма",
+  appointments_lineage_tail_member:
+    "Этот приём относится к хвостовой ветке серии, которая начинается с приёма",
   appointments_lineage_current_branch: "Текущая ветка",
   appointments_lineage_total_occurrences: "Всего приёмов",
   appointments_lineage_still_operational: "Ещё активны",
   appointments_lineage_completed_occurrences: "Завершены",
   appointments_lineage_related_branches: "Связанные ветки",
-  appointments_lineage_related_branches_meta: "связанные родительские/дочерние серии",
+  appointments_lineage_related_branches_meta:
+    "связанные родительские/дочерние серии",
   appointments_lineage_history: "История веток серии",
-  appointments_lineage_history_hint: "Отделённые ветки сохраняют собственные количества приёмов, диапазоны дат и статистику закрытия.",
+  appointments_lineage_history_hint:
+    "Отделённые ветки сохраняют собственные количества приёмов, диапазоны дат и статистику закрытия.",
   appointments_lineage_related_series: "связанных серий",
   appointments_lineage_total_short: "всего",
   appointments_lineage_active_short: "активны",
   appointments_lineage_completed_short: "завершены",
   appointments_lineage_cancelled_short: "отменены",
+  appointments_today: "Сегодня",
+  appointments_doctor_directed_followup_title: "Наблюдение по назначению врача",
+  appointments_doctor_directed_followup_subtitle:
+    "Отдельно фиксируйте следующие визиты, контрольные осмотры и назначения врача вне стандартного ритма 1 неделя / 1 месяц / 6 месяцев.",
+  appointments_directed_item_singular: "пункт наблюдения",
+  appointments_directed_item_plural: "пунктов наблюдения",
+  appointments_reminder_trail: "История напоминаний",
+  appointments_task_trail: "История задач",
+  appointments_add_reminder: "Добавить напоминание",
+  appointments_interpreter_report_title: "Отчёт переводчика",
+  appointments_interpreter_report_subtitle:
+    "Часы, текстовый отчёт и история согласования тимлидом.",
+  appointments_report_submitted_prefix: "Отправлено",
+  appointments_report_needs_interpreter_revision:
+    "Нужна доработка переводчиком",
+  appointments_report_waiting_teamlead_review: "Ожидает согласования тимлидом",
+  appointments_report_no_reviewer_recorded: "Проверяющий не указан",
+  appointments_report_reviewer_notes: "Комментарии проверяющего",
+  appointments_report_billing_sync: "Синхронизация с биллингом",
+  appointments_billing_sync_synced: "Автоматически перенесено в услуги заказа",
+  appointments_billing_sync_missing_catalog:
+    "Отсутствует запись каталога interpreter_hours",
+  appointments_billing_sync_missing_order: "Приём не привязан к заказу",
+  appointments_billing_sync_pending:
+    "Согласовано, синхронизация в биллинг ожидается",
+  appointments_billing_sync_none:
+    "Статус синхронизации в биллинг ещё не установлен",
+  appointments_timeline_appointment_created: "Приём создан",
+  appointments_timeline_scheduled_slot: "Приём запланирован",
+  appointments_timeline_interpreter_pending: "Переводчик ожидается",
+  appointments_timeline_interpreter_assigned: "Переводчик назначен",
+  appointments_timeline_interpreter_accepted: "Переводчик подтвердил",
+  appointments_timeline_interpreter_declined: "Переводчик отказался",
+  appointments_timeline_interpreter_discussion: "Переводчик уточняет детали",
+  appointments_timeline_checklist_completed: "Чек-лист завершён",
+  appointments_timeline_checklist_pending: "Чек-лист открыт",
+  appointments_timeline_external_response_logged: "Внешний ответ зафиксирован",
+  appointments_timeline_external_communication_cancelled:
+    "Внешняя коммуникация отменена",
+  appointments_timeline_external_communication_closed:
+    "Внешняя коммуникация закрыта",
+  appointments_timeline_interpreter_report_submitted:
+    "Отчёт переводчика отправлен",
+  appointments_timeline_interpreter_report_approved:
+    "Отчёт переводчика согласован",
+  appointments_timeline_interpreter_report_rejected:
+    "Отчёт переводчика отклонён",
 
   nav_overview: "ОБЗОР",
   nav_crm: "CRM",
@@ -340,12 +423,15 @@ export const ru: Translations = {
   settings_agency_address: "Адрес агентства",
   settings_agency_phone: "Телефон агентства",
   settings_agency_email: "Email агентства",
-  settings_agency_hint: "Эти данные используются на стикерах пациента и в печатных блоках пациента.",
+  settings_agency_hint:
+    "Эти данные используются на стикерах пациента и в печатных блоках пациента.",
   settings_document_requirements: "Обязательные документы",
-  settings_document_requirements_hint: "JSON-правила минимального пакета документов пациента для алертов о недостающих файлах.",
+  settings_document_requirements_hint:
+    "JSON-правила минимального пакета документов пациента для алертов о недостающих файлах.",
   settings_required_patient_documents: "Обязательные документы пациента (JSON)",
   settings_clinical_data: "Хранение клинических данных",
-  settings_clinical_data_hint: "Управляет сроком хранения медицинских кейсов и append-only истории анамнеза.",
+  settings_clinical_data_hint:
+    "Управляет сроком хранения медицинских кейсов и append-only истории анамнеза.",
   settings_clinical_retention_years: "Срок хранения медкейсов (лет)",
   settings_sessions: "Управление сессиями",
   settings_active_sessions: "Активные сессии",
@@ -424,7 +510,8 @@ export const ru: Translations = {
   compliance_subtitle: "Экспорт данных, анонимизация и управление согласиями",
   compliance_export: "Экспорт данных (Art. 15)",
   compliance_anonymize: "Анонимизировать (Art. 17)",
-  compliance_anonymize_confirm: "Данные пациента будут безвозвратно анонимизированы!",
+  compliance_anonymize_confirm:
+    "Данные пациента будут безвозвратно анонимизированы!",
   compliance_consents: "Панель согласий",
   compliance_granted: "Действующие",
   compliance_revoked: "Отозванные",
@@ -602,10 +689,13 @@ export const ru: Translations = {
   documents_share: "Поделиться",
   documents_delete: "Удалить",
   documents_delete_file: "Удалить файл",
-  documents_delete_file_description: "Контролируемо удалить сохранённый файл, отозвать активные шаринги и оставить запись документа как архивную историю.",
-  documents_delete_file_hint: "Это действие удаляет бинарный файл с диска, отзывает активные шаринги и навсегда отключает скачивание и предпросмотр. Метаданные и история версий остаются как audit trail.",
+  documents_delete_file_description:
+    "Контролируемо удалить сохранённый файл, отозвать активные шаринги и оставить запись документа как архивную историю.",
+  documents_delete_file_hint:
+    "Это действие удаляет бинарный файл с диска, отзывает активные шаринги и навсегда отключает скачивание и предпросмотр. Метаданные и история версий остаются как audit trail.",
   documents_delete_file_reason: "Причина удаления",
-  documents_delete_file_reason_placeholder: "Почему сохранённый файл нужно удалить?",
+  documents_delete_file_reason_placeholder:
+    "Почему сохранённый файл нужно удалить?",
   documents_delete_file_reason_required: "Нужно указать причину удаления.",
   documents_delete_file_confirm: "Удалить файл окончательно",
   documents_deleting: "Удаление…",
@@ -620,14 +710,17 @@ export const ru: Translations = {
   documents_source: "Источник",
   documents_size: "Размер",
   documents_generate_title: "Сгенерировать документ из шаблона",
-  documents_generate_description: "Создать структурированный документ для пациента, сохранить его в реестре и открыть печатную предпросмотрную версию.",
-  documents_generate_replace_warning: "Этот запуск архивирует текущий документ и сохранит новый файл как следующую версию.",
+  documents_generate_description:
+    "Создать структурированный документ для пациента, сохранить его в реестре и открыть печатную предпросмотрную версию.",
+  documents_generate_replace_warning:
+    "Этот запуск архивирует текущий документ и сохранит новый файл как следующую версию.",
   documents_select_template: "Выберите шаблон",
   documents_select_patient: "Выберите пациента",
   documents_patient_wide_context: "Использовать контекст всего пациента",
   documents_all_appointments_scope: "Все приёмы в scope",
   documents_text_blocks: "Переиспользуемые текстовые блоки",
-  documents_text_blocks_hint: "Они становятся стандартизированными подсказками или инструкционными секциями в сгенерированном документе.",
+  documents_text_blocks_hint:
+    "Они становятся стандартизированными подсказками или инструкционными секциями в сгенерированном документе.",
   documents_default_template_source: "По умолчанию: template:{id}",
   documents_generate_document: "Сгенерировать документ",
   documents_generating: "Генерация…",
@@ -635,28 +728,35 @@ export const ru: Translations = {
   documents_text_extraction: "Извлечение текста",
   documents_run_extraction: "Запустить извлечение",
   documents_extracted_text: "Извлечённый текст",
-  documents_no_extracted_text: "Извлечённый текст пока недоступен. Используйте извлечение для текстовых файлов или добавьте ручную транскрипцию в translation workspace.",
+  documents_no_extracted_text:
+    "Извлечённый текст пока недоступен. Используйте извлечение для текстовых файлов или добавьте ручную транскрипцию в translation workspace.",
   documents_translation_requests: "Запросы на перевод",
   documents_request_translation: "Запросить перевод",
-  documents_no_translation_requests: "Для этого документа ещё нет запросов на перевод.",
+  documents_no_translation_requests:
+    "Для этого документа ещё нет запросов на перевод.",
   documents_source_language: "Исходный язык",
   documents_use_extracted_text: "Подставить извлечённый текст",
   documents_save_workspace: "Сохранить workspace",
-  documents_translation_note_placeholder: "Scope, срок или примечания к доставке…",
+  documents_translation_note_placeholder:
+    "Scope, срок или примечания к доставке…",
   documents_source_text: "Исходный текст",
-  documents_source_text_placeholder: "Оригинальный извлечённый или вручную расшифрованный текст…",
+  documents_source_text_placeholder:
+    "Оригинальный извлечённый или вручную расшифрованный текст…",
   documents_translated_text: "Переведённый текст",
   documents_translated_text_placeholder: "Финальный переведённый текст…",
   documents_interpreter_review: "Проверка переводчика",
-  documents_interpreter_review_hint: "Проверьте загруженный переводчиком документ, завершите классификацию и переведите его в активный внутренний статус.",
+  documents_interpreter_review_hint:
+    "Проверьте загруженный переводчиком документ, завершите классификацию и переведите его в активный внутренний статус.",
   documents_mark_medical_data: "Пометить как медицинские данные",
   documents_save_metadata: "Сохранить метаданные",
   documents_patient_portal: "Портал пациента",
   documents_portal_eligible: "Доступен для портала",
   documents_not_portal_eligible: "Недоступен для портала",
   documents_active_portal_releases: "активных портальных релизов",
-  documents_portal_access_hint: "Доступ в портал предоставляется только пользователям портала, связанным с пациентом, и остаётся видимым только пока существует активный релиз.",
-  documents_link_patient_before_portal: "Сначала привяжите документ к пациенту, прежде чем выпускать его в портал.",
+  documents_portal_access_hint:
+    "Доступ в портал предоставляется только пользователям портала, связанным с пациентом, и остаётся видимым только пока существует активный релиз.",
+  documents_link_patient_before_portal:
+    "Сначала привяжите документ к пациенту, прежде чем выпускать его в портал.",
   documents_patient_portal_user: "Пользователь портала пациента",
   documents_confirmed: "Подтверждено",
   documents_waiting_confirmation: "Ожидает подтверждения",
@@ -665,23 +765,28 @@ export const ru: Translations = {
   documents_refresh_portal_release: "Обновить релиз в портал",
   documents_release_to_portal: "Выпустить в портал пациента",
   documents_revoke_portal_release: "Отозвать релиз портала",
-  documents_only_ceo_pm_portal: "Только CEO и patient manager могут публиковать документы в портале пациента.",
+  documents_only_ceo_pm_portal:
+    "Только CEO и patient manager могут публиковать документы в портале пациента.",
   documents_no_shares_yet: "Шаров пока нет.",
   documents_internal_user: "Внутренний пользователь",
   documents_provider_target: "Провайдер",
   documents_select_user: "Выберите пользователя",
   documents_select_provider: "Выберите провайдера",
   documents_share_message: "Сопроводительное сообщение",
-  documents_share_message_placeholder: "Короткий контекст для клиники, врача или service provider…",
-  documents_share_message_required: "Для шаринга провайдеру нужно сопроводительное сообщение.",
-  documents_detail_description: "Метаданные, контекст и история шаринга для выбранного файла.",
+  documents_share_message_placeholder:
+    "Короткий контекст для клиники, врача или service provider…",
+  documents_share_message_required:
+    "Для шаринга провайдеру нужно сопроводительное сообщение.",
+  documents_detail_description:
+    "Метаданные, контекст и история шаринга для выбранного файла.",
   documents_loading_document: "Загрузка документа…",
   documents_unknown_uploader: "Неизвестный загрузивший",
   documents_updated: "Обновлено",
   documents_version_chain: "Цепочка версий",
   documents_archived: "архивировано",
   documents_last_processed: "Последняя обработка {datetime}",
-  documents_no_extraction_run: "Для этого документа извлечение ещё не запускалось.",
+  documents_no_extraction_run:
+    "Для этого документа извлечение ещё не запускалось.",
   documents_unknown_requester: "Неизвестный запросивший",
   documents_translation_start: "Начать",
   documents_translation_complete: "Завершить",
@@ -689,14 +794,16 @@ export const ru: Translations = {
   documents_taxonomy_category: "Категория таксономии",
   documents_choose_category: "Выберите категорию",
   documents_review_notes: "Заметки проверки",
-  documents_release_internal_hint: "Релиз оставляет документ внутренним и переводит статус в `active`.",
+  documents_release_internal_hint:
+    "Релиз оставляет документ внутренним и переводит статус в `active`.",
   documents_release_reviewed_document: "Выпустить проверенный документ",
   documents_releasing: "Выпуск…",
   documents_portal_released_at: "Выпущено {datetime}",
   documents_portal_confirmed_by_patient: "подтверждено пациентом",
   documents_unknown_target: "Неизвестная цель",
   documents_shared_by: "Поделился {name}",
-  documents_sharing_selected: "Поделиться {count} выбранными документами одним действием.",
+  documents_sharing_selected:
+    "Поделиться {count} выбранными документами одним действием.",
   documents_require_confirmation: "Требовать подтверждение",
   documents_create_share: "Создать шаринг",
   documents_sharing: "Шаринг…",
@@ -704,20 +811,26 @@ export const ru: Translations = {
   documents_preview: "Предпросмотр",
   documents_released: "Выпущено",
   documents_revoke: "Отозвать",
-  documents_portal_trail_hint: "Релиз создаёт отдельный портальный след шаринга и сохраняет состояние подтверждения в audit flow.",
+  documents_portal_trail_hint:
+    "Релиз создаёт отдельный портальный след шаринга и сохраняет состояние подтверждения в audit flow.",
   documents_workspace_heading: "Рабочее пространство документов",
-  documents_workspace_intro: "Загружайте, классифицируйте, шарьте и отслеживайте файлы по пациентам, заказам и приёмам.",
+  documents_workspace_intro:
+    "Загружайте, классифицируйте, шарьте и отслеживайте файлы по пациентам, заказам и приёмам.",
   documents_refresh: "Обновить",
   documents_generate_from_template: "Сгенерировать из шаблона",
   documents_intake_queue: "Очередь intake документов",
-  documents_intake_interpreter_hint: "Загрузки переводчика и другие intake-файлы, которым ещё нужна таксономическая проверка.",
-  documents_intake_general_hint: "Неклассифицированные загрузки и портал-файлы, которым ещё нужна таксономическая проверка.",
+  documents_intake_interpreter_hint:
+    "Загрузки переводчика и другие intake-файлы, которым ещё нужна таксономическая проверка.",
+  documents_intake_general_hint:
+    "Неклассифицированные загрузки и портал-файлы, которым ещё нужна таксономическая проверка.",
   documents_pending: "в ожидании",
   documents_loading_intake_queue: "Загрузка очереди intake…",
-  documents_no_intake_pending: "Сейчас нет документов, ожидающих категоризации.",
+  documents_no_intake_pending:
+    "Сейчас нет документов, ожидающих категоризации.",
   documents_unlinked_document: "Непривязанный документ",
   documents_needs_review: "Требует проверки",
-  documents_no_auto_classification: "Нет уверенной автоклассификации. Откройте документ, классифицируйте и выпустите его вручную.",
+  documents_no_auto_classification:
+    "Нет уверенной автоклассификации. Откройте документ, классифицируйте и выпустите его вручную.",
   documents_open_document: "Открыть",
   documents_apply_and_release: "Применить и выпустить",
   documents_apply_suggestion: "Применить подсказку",
@@ -725,27 +838,39 @@ export const ru: Translations = {
   documents_loading_documents: "Загрузка документов…",
   documents_confidence: "Уверенность",
   documents_unclassified: "Без классификации",
-  documents_upload_interpreter_hint: "Загрузки переводчика сохраняются как внутренние draft-документы и отправляются на проверку тимлиду.",
-  documents_upload_teamlead_hint: "Эта загрузка сохраняется как внутренний документ. Здесь для teamlead-загрузок недоступны полные инструменты управления документом.",
-  documents_auto_classification_optional: "Необязательно. Оставьте пустым для автоклассификации.",
-  documents_popup_blocked: "Разрешите pop-up окна, чтобы открыть предпросмотр документа.",
+  documents_upload_interpreter_hint:
+    "Загрузки переводчика сохраняются как внутренние draft-документы и отправляются на проверку тимлиду.",
+  documents_upload_teamlead_hint:
+    "Эта загрузка сохраняется как внутренний документ. Здесь для teamlead-загрузок недоступны полные инструменты управления документом.",
+  documents_auto_classification_optional:
+    "Необязательно. Оставьте пустым для автоклассификации.",
+  documents_popup_blocked:
+    "Разрешите pop-up окна, чтобы открыть предпросмотр документа.",
   documents_failed_load_documents: "Не удалось загрузить документы.",
-  documents_failed_load_intake_queue: "Не удалось загрузить очередь intake документов.",
+  documents_failed_load_intake_queue:
+    "Не удалось загрузить очередь intake документов.",
   documents_failed_load_document: "Не удалось загрузить документ.",
   documents_file_required: "Файл обязателен.",
-  documents_link_context_required: "Привяжите документ к пациенту, заказу или приёму.",
-  documents_uploaded_internal_review: "Документ загружен для внутренней проверки.",
-  documents_uploaded_to_intake: "Документ загружен и добавлен в intake-очередь.",
+  documents_link_context_required:
+    "Привяжите документ к пациенту, заказу или приёму.",
+  documents_uploaded_internal_review:
+    "Документ загружен для внутренней проверки.",
+  documents_uploaded_to_intake:
+    "Документ загружен и добавлен в intake-очередь.",
   documents_uploaded: "Документ загружен.",
   documents_failed_upload: "Не удалось загрузить документ.",
-  documents_classification_applied_released: "Классификация применена, и загрузка переводчика выпущена.",
+  documents_classification_applied_released:
+    "Классификация применена, и загрузка переводчика выпущена.",
   documents_classification_applied: "Классификация применена.",
-  documents_failed_apply_classification: "Не удалось применить классификацию документа.",
-  documents_not_linked_template: "Этот тип документа не связан с генерируемым шаблоном.",
+  documents_failed_apply_classification:
+    "Не удалось применить классификацию документа.",
+  documents_not_linked_template:
+    "Этот тип документа не связан с генерируемым шаблоном.",
   documents_choose_template: "Выберите шаблон.",
   documents_patient_context_required: "Требуется контекст пациента.",
   documents_failed_generate: "Не удалось сгенерировать документ.",
-  documents_generated_version_preview: "Версия {version} сгенерирована и предпросмотр открыт.",
+  documents_generated_version_preview:
+    "Версия {version} сгенерирована и предпросмотр открыт.",
   documents_generated_version: "Версия {version} сгенерирована.",
   documents_preview_opened: "Предпросмотр документа открыт.",
   documents_failed_open_preview: "Не удалось открыть предпросмотр документа.",
@@ -755,13 +880,15 @@ export const ru: Translations = {
   documents_failed_extract: "Не удалось извлечь текст документа.",
   documents_translation_marked: "Запрос на перевод помечен как {status}.",
   documents_failed_update_translation: "Не удалось обновить запрос на перевод.",
-  documents_translation_workspace_saved: "Рабочее пространство перевода сохранено.",
+  documents_translation_workspace_saved:
+    "Рабочее пространство перевода сохранено.",
   documents_save_data_unavailable: "Данные документа недоступны.",
   documents_save_name_type_required: "Требуются имя документа и тип.",
   documents_save_forbidden: "Вы не можете обновить этот документ.",
   documents_save_type_required: "Тип документа обязателен.",
   documents_metadata_updated_notice: "Метаданные документа обновлены.",
-  documents_review_released_notice: "Загрузка переводчика проверена и выпущена.",
+  documents_review_released_notice:
+    "Загрузка переводчика проверена и выпущена.",
   documents_failed_save: "Не удалось сохранить.",
   documents_choose_user_target: "Выберите пользователя-получателя.",
   documents_choose_provider_target: "Выберите провайдера-получателя.",
@@ -771,13 +898,15 @@ export const ru: Translations = {
   documents_share_revoked_notice: "Шаринг отозван.",
   documents_share_confirmed_notice: "Шаринг подтверждён.",
   documents_portal_released_notice: "Документ выпущен в портал пациента.",
-  documents_failed_release_portal: "Не удалось выпустить документ в портал пациента.",
+  documents_failed_release_portal:
+    "Не удалось выпустить документ в портал пациента.",
   documents_portal_release_revoked_notice: "Релиз портала отозван.",
   documents_failed_revoke_portal: "Не удалось отозвать релиз портала.",
   documents_select_all_shown: "Выбрать все показанные",
   documents_clear_selection: "Очистить выбор",
   documents_select_bulk_share: "Выбрать для массового шаринга",
-  documents_no_documents_match: "Нет документов, подходящих под текущие фильтры.",
+  documents_no_documents_match:
+    "Нет документов, подходящих под текущие фильтры.",
   documents_shares_count: "Шарингов: {count}",
   documents_optional_order_link: "Необязательная привязка к заказу",
   documents_optional_appointment_link: "Необязательная привязка к приёму",

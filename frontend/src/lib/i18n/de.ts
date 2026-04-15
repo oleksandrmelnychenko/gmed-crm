@@ -92,7 +92,8 @@ export const de: Translations = {
   providers_subtitle: "Partnerkliniken, Ärzte und Leistungskatalog verwalten",
   providers_new: "Neuer Provider",
   providers_detail: "Provider-Details",
-  providers_select_hint: "Provider auswählen, um Ärzte, Leistungen und Patienten zu verwalten.",
+  providers_select_hint:
+    "Provider auswählen, um Ärzte, Leistungen und Patienten zu verwalten.",
   providers_type: "Typ",
   providers_type_medical: "Medizinisch",
   providers_type_non_medical: "Nicht-medizinisch",
@@ -199,6 +200,9 @@ export const de: Translations = {
   common_failed_create: "Fehler beim Erstellen",
   common_failed_update: "Fehler beim Aktualisieren",
   common_failed_assign: "Fehler bei der Zuweisung",
+  common_today: "Heute",
+  common_pending: "Ausstehend",
+  common_completed: "Abgeschlossen",
 
   leads_title: "Leads",
   leads_subtitle: "Leads und Anfragen verwalten",
@@ -218,6 +222,32 @@ export const de: Translations = {
   orders_subtitle: "Aufträge und Leistungen verwalten",
   orders_patient: "Patient",
   orders_phase: "Phase",
+  orders_cost_pass_through_badge: "Durchlaufposten",
+  orders_treat_as_cost_pass_through: "Als Durchlaufposten behandeln",
+  orders_cost_pass_through_hint:
+    "Die Position bleibt für die Abrechnung sichtbar, ohne in die agentureigene Marge einzugehen.",
+  orders_auto_billed_from_interpreter_report:
+    "Automatisch aus Dolmetscherbericht abgerechnet",
+  orders_auto_billed_from_completed_appointment:
+    "Automatisch aus abgeschlossenem Termin abgerechnet",
+  orders_supporting_document: "Belegdokument",
+  orders_open_linked_document: "Verknüpftes Dokument öffnen",
+  orders_supporting_document_auto_link_hint:
+    "Automatisch verknüpfen, wenn genau ein passendes Dokument vorhanden ist",
+  orders_supporting_document_select_hint:
+    "Automatisch verknüpfen, wenn genau ein passender Beleg vorhanden ist",
+  orders_supporting_document_pin_hint:
+    "Einen konkreten Beleg oder eine Provider-Rechnung fest zuordnen, wenn mehrere passende Dateien vorliegen.",
+  orders_billing_source: "Abrechnungsquelle",
+  orders_billing_source_interpreter_report: "Dolmetscherbericht",
+  orders_billing_source_completed_appointment: "Abgeschlossener Termin",
+  orders_billing_source_manual: "Manuell oder providerbasiert",
+  orders_agency_service: "Agenturleistung",
+  orders_not_catalog_linked: "Nicht mit Katalog verknüpft",
+  orders_open_provider: "Provider öffnen",
+  orders_unlinked: "Nicht verknüpft",
+  orders_open_doctor_context: "Arztkontext öffnen",
+  orders_not_specified: "Nicht angegeben",
 
   cases_title: "Fälle",
   cases_subtitle: "Medizinische Fälle und Anamnese",
@@ -278,8 +308,10 @@ export const de: Translations = {
   appointments_scope_single: "Nur dieser Termin",
   appointments_scope_following: "Dieser und folgende",
   appointments_scope_series: "Ganze Serie",
-  appointments_scope_bulk_status_hint: "Statusänderungen können auf diesen Termin, diesen und folgende oder die ganze aktive Serie angewendet werden.",
-  appointments_scope_following_hint: "Dieser und folgende startet ab dem aktuellen Termin eine neue Serienverzweigung. Ganze Serie behält dieselbe Serienidentität und verschiebt alle aktiven Termine gemeinsam.",
+  appointments_scope_bulk_status_hint:
+    "Statusänderungen können auf diesen Termin, diesen und folgende oder die ganze aktive Serie angewendet werden.",
+  appointments_scope_following_hint:
+    "Dieser und folgende startet ab dem aktuellen Termin eine neue Serienverzweigung. Ganze Serie behält dieselbe Serienidentität und verschiebt alle aktiven Termine gemeinsam.",
   appointments_active_series_path: "Aktiver Serienpfad",
   appointments_current_occurrence: "Aktuell",
   appointments_open_checklist: "offene Checkliste",
@@ -300,8 +332,10 @@ export const de: Translations = {
   appointments_lineage_related: "Verknüpfte Serie",
   appointments_lineage_split_from_occurrence: "Abgespalten ab Termin",
   appointments_lineage_previous_plan: "des vorherigen Wiederholungsplans.",
-  appointments_lineage_tail_root: "Dieser Termin startet die Serienverzweigung, die ab Termin",
-  appointments_lineage_tail_member: "Dieser Termin gehört zur Serienverzweigung, die ab Termin",
+  appointments_lineage_tail_root:
+    "Dieser Termin startet die Serienverzweigung, die ab Termin",
+  appointments_lineage_tail_member:
+    "Dieser Termin gehört zur Serienverzweigung, die ab Termin",
   appointments_lineage_current_branch: "Aktueller Zweig",
   appointments_lineage_total_occurrences: "Geplante Termine",
   appointments_lineage_still_operational: "Noch aktiv",
@@ -309,12 +343,61 @@ export const de: Translations = {
   appointments_lineage_related_branches: "Verknüpfte Zweige",
   appointments_lineage_related_branches_meta: "verknüpfte Vorfahr-/Kindserien",
   appointments_lineage_history: "Serienhistorie",
-  appointments_lineage_history_hint: "Abgespaltene Zweige behalten eigene Terminanzahlen, Datumsbereiche und Abschlussstände.",
+  appointments_lineage_history_hint:
+    "Abgespaltene Zweige behalten eigene Terminanzahlen, Datumsbereiche und Abschlussstände.",
   appointments_lineage_related_series: "verknüpfte Serien",
   appointments_lineage_total_short: "gesamt",
   appointments_lineage_active_short: "aktiv",
   appointments_lineage_completed_short: "abgeschlossen",
   appointments_lineage_cancelled_short: "abgesagt",
+  appointments_today: "Heute",
+  appointments_doctor_directed_followup_title: "Ärztlich angeordnete Nachsorge",
+  appointments_doctor_directed_followup_subtitle:
+    "Nächste Termine, Kontrolltermine und verordnete Maßnahmen getrennt vom Standardrhythmus 1 Woche / 1 Monat / 6 Monate erfassen.",
+  appointments_directed_item_singular: "Nachsorgepunkt",
+  appointments_directed_item_plural: "Nachsorgepunkte",
+  appointments_reminder_trail: "Erinnerungsverlauf",
+  appointments_task_trail: "Aufgabenverlauf",
+  appointments_add_reminder: "Erinnerung hinzufügen",
+  appointments_interpreter_report_title: "Dolmetscherbericht",
+  appointments_interpreter_report_subtitle:
+    "Stunden, Freitextbericht und Freigabeverlauf durch Teamlead.",
+  appointments_report_submitted_prefix: "Eingereicht",
+  appointments_report_needs_interpreter_revision:
+    "Überarbeitung durch Dolmetscher erforderlich",
+  appointments_report_waiting_teamlead_review:
+    "Wartet auf Freigabe durch Teamlead",
+  appointments_report_no_reviewer_recorded: "Kein Prüfer erfasst",
+  appointments_report_reviewer_notes: "Prüfnotizen",
+  appointments_report_billing_sync: "Billing-Sync",
+  appointments_billing_sync_synced:
+    "Automatisch in Auftragsleistungen übernommen",
+  appointments_billing_sync_missing_catalog:
+    "Katalogeintrag interpreter_hours fehlt",
+  appointments_billing_sync_missing_order:
+    "Termin ist keinem Auftrag zugeordnet",
+  appointments_billing_sync_pending: "Freigegeben, Billing-Sync ausstehend",
+  appointments_billing_sync_none: "Noch kein Billing-Sync-Status",
+  appointments_timeline_appointment_created: "Termin erstellt",
+  appointments_timeline_scheduled_slot: "Termin geplant",
+  appointments_timeline_interpreter_pending: "Dolmetscher ausstehend",
+  appointments_timeline_interpreter_assigned: "Dolmetscher zugewiesen",
+  appointments_timeline_interpreter_accepted: "Dolmetscher bestätigt",
+  appointments_timeline_interpreter_declined: "Dolmetscher abgelehnt",
+  appointments_timeline_interpreter_discussion: "Dolmetscher klärt Rückfragen",
+  appointments_timeline_checklist_completed: "Checkliste abgeschlossen",
+  appointments_timeline_checklist_pending: "Checkliste offen",
+  appointments_timeline_external_response_logged: "Externe Rückmeldung erfasst",
+  appointments_timeline_external_communication_cancelled:
+    "Externe Kommunikation abgebrochen",
+  appointments_timeline_external_communication_closed:
+    "Externe Kommunikation abgeschlossen",
+  appointments_timeline_interpreter_report_submitted:
+    "Dolmetscherbericht eingereicht",
+  appointments_timeline_interpreter_report_approved:
+    "Dolmetscherbericht freigegeben",
+  appointments_timeline_interpreter_report_rejected:
+    "Dolmetscherbericht abgelehnt",
 
   nav_overview: "ÜBERSICHT",
   nav_crm: "CRM",
@@ -340,12 +423,16 @@ export const de: Translations = {
   settings_agency_address: "Agenturadresse",
   settings_agency_phone: "Agenturtelefon",
   settings_agency_email: "Agentur-E-Mail",
-  settings_agency_hint: "Diese Angaben werden fur Patientenaufkleber und druckbare Patientenblöcke verwendet.",
+  settings_agency_hint:
+    "Diese Angaben werden fur Patientenaufkleber und druckbare Patientenblöcke verwendet.",
   settings_document_requirements: "Pflichtunterlagen",
-  settings_document_requirements_hint: "JSON-Regeln für den Mindestdokumentensatz pro Patient, der für Missing-Document-Alerts geprüft wird.",
-  settings_required_patient_documents: "Erforderliche Patientendokumente (JSON)",
+  settings_document_requirements_hint:
+    "JSON-Regeln für den Mindestdokumentensatz pro Patient, der für Missing-Document-Alerts geprüft wird.",
+  settings_required_patient_documents:
+    "Erforderliche Patientendokumente (JSON)",
   settings_clinical_data: "Klinische Aufbewahrung",
-  settings_clinical_data_hint: "Steuert die Aufbewahrungsfrist für medizinische Fälle und die append-only Anamnese-Historie.",
+  settings_clinical_data_hint:
+    "Steuert die Aufbewahrungsfrist für medizinische Fälle und die append-only Anamnese-Historie.",
   settings_clinical_retention_years: "Aufbewahrung medizinischer Fälle (Jahre)",
   settings_sessions: "Sitzungsverwaltung",
   settings_active_sessions: "Aktive Sitzungen",
@@ -421,10 +508,12 @@ export const de: Translations = {
   health_mfa_pending: "MFA ausstehend",
 
   compliance_title: "DSGVO / Compliance",
-  compliance_subtitle: "Datenexport, Anonymisierung und Einwilligungsverwaltung",
+  compliance_subtitle:
+    "Datenexport, Anonymisierung und Einwilligungsverwaltung",
   compliance_export: "Daten exportieren (Art. 15)",
   compliance_anonymize: "Anonymisieren (Art. 17)",
-  compliance_anonymize_confirm: "Patientendaten werden unwiderruflich anonymisiert!",
+  compliance_anonymize_confirm:
+    "Patientendaten werden unwiderruflich anonymisiert!",
   compliance_consents: "Einwilligungs-Dashboard",
   compliance_granted: "Aktiv erteilt",
   compliance_revoked: "Widerrufen",
@@ -602,10 +691,13 @@ export const de: Translations = {
   documents_share: "Teilen",
   documents_delete: "Löschen",
   documents_delete_file: "Datei löschen",
-  documents_delete_file_description: "Die gespeicherte Datei kontrolliert entfernen, aktive Freigaben widerrufen und die Dokumentzeile als archivierten Verlaufseintrag erhalten.",
-  documents_delete_file_hint: "Diese Aktion entfernt die Binärdatei vom Datenträger, widerruft aktive Shares und macht Download/Vorschau dauerhaft unzugänglich. Metadaten und Versionshistorie bleiben als Audit-Trail erhalten.",
+  documents_delete_file_description:
+    "Die gespeicherte Datei kontrolliert entfernen, aktive Freigaben widerrufen und die Dokumentzeile als archivierten Verlaufseintrag erhalten.",
+  documents_delete_file_hint:
+    "Diese Aktion entfernt die Binärdatei vom Datenträger, widerruft aktive Shares und macht Download/Vorschau dauerhaft unzugänglich. Metadaten und Versionshistorie bleiben als Audit-Trail erhalten.",
   documents_delete_file_reason: "Löschgrund",
-  documents_delete_file_reason_placeholder: "Warum wird die gespeicherte Datei entfernt?",
+  documents_delete_file_reason_placeholder:
+    "Warum wird die gespeicherte Datei entfernt?",
   documents_delete_file_reason_required: "Ein Löschgrund ist erforderlich.",
   documents_delete_file_confirm: "Datei endgültig löschen",
   documents_deleting: "Lösche…",
@@ -620,14 +712,17 @@ export const de: Translations = {
   documents_source: "Quelle",
   documents_size: "Größe",
   documents_generate_title: "Dokument aus Vorlage erstellen",
-  documents_generate_description: "Ein strukturiertes patientenbezogenes Dokument erstellen, im Register speichern und eine druckfertige Vorschau öffnen.",
-  documents_generate_replace_warning: "Dieser Lauf archiviert das aktuelle Dokument und speichert die neue Datei als nächste Version.",
+  documents_generate_description:
+    "Ein strukturiertes patientenbezogenes Dokument erstellen, im Register speichern und eine druckfertige Vorschau öffnen.",
+  documents_generate_replace_warning:
+    "Dieser Lauf archiviert das aktuelle Dokument und speichert die neue Datei als nächste Version.",
   documents_select_template: "Vorlage auswählen",
   documents_select_patient: "Patient auswählen",
   documents_patient_wide_context: "Patientenweiten Kontext verwenden",
   documents_all_appointments_scope: "Alle Termine im Geltungsbereich",
   documents_text_blocks: "Wiederverwendbare Textbausteine",
-  documents_text_blocks_hint: "Diese werden zu standardisierten Hinweis- oder Instruktionsabschnitten im generierten Dokument.",
+  documents_text_blocks_hint:
+    "Diese werden zu standardisierten Hinweis- oder Instruktionsabschnitten im generierten Dokument.",
   documents_default_template_source: "Standard: template:{id}",
   documents_generate_document: "Dokument erstellen",
   documents_generating: "Erstelle…",
@@ -635,28 +730,34 @@ export const de: Translations = {
   documents_text_extraction: "Textextraktion",
   documents_run_extraction: "Extraktion starten",
   documents_extracted_text: "Extrahierter Text",
-  documents_no_extracted_text: "Noch kein extrahierter Text verfügbar. Nutze die Extraktion für textbasierte Dateien oder ergänze eine manuelle Transkription im Übersetzungs-Workspace.",
+  documents_no_extracted_text:
+    "Noch kein extrahierter Text verfügbar. Nutze die Extraktion für textbasierte Dateien oder ergänze eine manuelle Transkription im Übersetzungs-Workspace.",
   documents_translation_requests: "Übersetzungsanfragen",
   documents_request_translation: "Übersetzung anfordern",
-  documents_no_translation_requests: "Für dieses Dokument sind noch keine Übersetzungsanfragen erfasst.",
+  documents_no_translation_requests:
+    "Für dieses Dokument sind noch keine Übersetzungsanfragen erfasst.",
   documents_source_language: "Ausgangssprache",
   documents_use_extracted_text: "Extrahierten Text übernehmen",
   documents_save_workspace: "Workspace speichern",
   documents_translation_note_placeholder: "Umfang, Frist oder Lieferhinweise…",
   documents_source_text: "Ausgangstext",
-  documents_source_text_placeholder: "Originaler extrahierter oder manuell transkribierter Text…",
+  documents_source_text_placeholder:
+    "Originaler extrahierter oder manuell transkribierter Text…",
   documents_translated_text: "Übersetzter Text",
   documents_translated_text_placeholder: "Finaler übersetzter Text…",
   documents_interpreter_review: "Dolmetscher-Review",
-  documents_interpreter_review_hint: "Das hochgeladene Dolmetscher-Dokument prüfen, vollständig klassifizieren und in den aktiven internen Status überführen.",
+  documents_interpreter_review_hint:
+    "Das hochgeladene Dolmetscher-Dokument prüfen, vollständig klassifizieren und in den aktiven internen Status überführen.",
   documents_mark_medical_data: "Als medizinische Daten markieren",
   documents_save_metadata: "Metadaten speichern",
   documents_patient_portal: "Patientenportal",
   documents_portal_eligible: "Portal-fähig",
   documents_not_portal_eligible: "Nicht portal-fähig",
   documents_active_portal_releases: "aktive Portalfreigaben",
-  documents_portal_access_hint: "Portalzugriff gilt nur für patientenverknüpfte Portalnutzer und bleibt nur sichtbar, solange eine aktive Freigabe existiert.",
-  documents_link_patient_before_portal: "Dokument zuerst mit einem Patienten verknüpfen, bevor es ins Portal freigegeben wird.",
+  documents_portal_access_hint:
+    "Portalzugriff gilt nur für patientenverknüpfte Portalnutzer und bleibt nur sichtbar, solange eine aktive Freigabe existiert.",
+  documents_link_patient_before_portal:
+    "Dokument zuerst mit einem Patienten verknüpfen, bevor es ins Portal freigegeben wird.",
   documents_patient_portal_user: "Portalnutzer des Patienten",
   documents_confirmed: "Bestätigt",
   documents_waiting_confirmation: "Wartet auf Bestätigung",
@@ -665,23 +766,28 @@ export const de: Translations = {
   documents_refresh_portal_release: "Portalfreigabe aktualisieren",
   documents_release_to_portal: "Ins Patientenportal freigeben",
   documents_revoke_portal_release: "Portalfreigabe widerrufen",
-  documents_only_ceo_pm_portal: "Nur CEO und Patientenmanager dürfen Dokumente ins Patientenportal veröffentlichen.",
+  documents_only_ceo_pm_portal:
+    "Nur CEO und Patientenmanager dürfen Dokumente ins Patientenportal veröffentlichen.",
   documents_no_shares_yet: "Noch keine Freigaben.",
   documents_internal_user: "Interner Benutzer",
   documents_provider_target: "Provider",
   documents_select_user: "Benutzer auswählen",
   documents_select_provider: "Provider auswählen",
   documents_share_message: "Begleitnachricht",
-  documents_share_message_placeholder: "Kurzer Kontext für Klinik, Arzt oder Service Provider…",
-  documents_share_message_required: "Provider-Freigaben benötigen eine Begleitnachricht.",
-  documents_detail_description: "Metadaten, Kontext und Freigabeverlauf für die ausgewählte Datei.",
+  documents_share_message_placeholder:
+    "Kurzer Kontext für Klinik, Arzt oder Service Provider…",
+  documents_share_message_required:
+    "Provider-Freigaben benötigen eine Begleitnachricht.",
+  documents_detail_description:
+    "Metadaten, Kontext und Freigabeverlauf für die ausgewählte Datei.",
   documents_loading_document: "Dokument wird geladen…",
   documents_unknown_uploader: "Unbekannter Uploader",
   documents_updated: "Aktualisiert",
   documents_version_chain: "Versionskette",
   documents_archived: "archiviert",
   documents_last_processed: "Zuletzt verarbeitet {datetime}",
-  documents_no_extraction_run: "Für dieses Dokument wurde noch keine Extraktion ausgeführt.",
+  documents_no_extraction_run:
+    "Für dieses Dokument wurde noch keine Extraktion ausgeführt.",
   documents_unknown_requester: "Unbekannter Anforderer",
   documents_translation_start: "Starten",
   documents_translation_complete: "Abschließen",
@@ -689,14 +795,16 @@ export const de: Translations = {
   documents_taxonomy_category: "Taxonomie-Kategorie",
   documents_choose_category: "Kategorie wählen",
   documents_review_notes: "Review-Notizen",
-  documents_release_internal_hint: "Die Freigabe hält das Dokument intern und setzt den Status auf `active`.",
+  documents_release_internal_hint:
+    "Die Freigabe hält das Dokument intern und setzt den Status auf `active`.",
   documents_release_reviewed_document: "Geprüftes Dokument freigeben",
   documents_releasing: "Freigabe läuft…",
   documents_portal_released_at: "Freigegeben {datetime}",
   documents_portal_confirmed_by_patient: "vom Patienten bestätigt",
   documents_unknown_target: "Unbekanntes Ziel",
   documents_shared_by: "Geteilt von {name}",
-  documents_sharing_selected: "{count} ausgewählte Dokumente in einem Schritt teilen.",
+  documents_sharing_selected:
+    "{count} ausgewählte Dokumente in einem Schritt teilen.",
   documents_require_confirmation: "Bestätigung anfordern",
   documents_create_share: "Freigabe erstellen",
   documents_sharing: "Teile…",
@@ -704,20 +812,26 @@ export const de: Translations = {
   documents_preview: "Vorschau",
   documents_released: "Freigegeben",
   documents_revoke: "Widerrufen",
-  documents_portal_trail_hint: "Die Freigabe erzeugt einen portalspezifischen Freigabeverlauf und hält den Bestätigungsstatus im Audit-Flow.",
+  documents_portal_trail_hint:
+    "Die Freigabe erzeugt einen portalspezifischen Freigabeverlauf und hält den Bestätigungsstatus im Audit-Flow.",
   documents_workspace_heading: "Dokumenten-Workspace",
-  documents_workspace_intro: "Dateien hochladen, klassifizieren, freigeben und gegen Patienten, Aufträge und Termine nachverfolgen.",
+  documents_workspace_intro:
+    "Dateien hochladen, klassifizieren, freigeben und gegen Patienten, Aufträge und Termine nachverfolgen.",
   documents_refresh: "Aktualisieren",
   documents_generate_from_template: "Aus Vorlage generieren",
   documents_intake_queue: "Dokumenten-Inbox",
-  documents_intake_interpreter_hint: "Dolmetscher-Uploads und andere Intake-Dateien, die noch eine Taxonomie-Prüfung brauchen.",
-  documents_intake_general_hint: "Unklassifizierte Uploads und Portaldateien, die noch eine Taxonomie-Prüfung brauchen.",
+  documents_intake_interpreter_hint:
+    "Dolmetscher-Uploads und andere Intake-Dateien, die noch eine Taxonomie-Prüfung brauchen.",
+  documents_intake_general_hint:
+    "Unklassifizierte Uploads und Portaldateien, die noch eine Taxonomie-Prüfung brauchen.",
   documents_pending: "ausstehend",
   documents_loading_intake_queue: "Intake-Inbox wird geladen…",
-  documents_no_intake_pending: "Keine Dokumente warten derzeit auf Kategorisierung.",
+  documents_no_intake_pending:
+    "Keine Dokumente warten derzeit auf Kategorisierung.",
   documents_unlinked_document: "Nicht verknüpftes Dokument",
   documents_needs_review: "Review erforderlich",
-  documents_no_auto_classification: "Keine sichere Auto-Klassifizierung. Dieses Dokument öffnen, manuell klassifizieren und freigeben.",
+  documents_no_auto_classification:
+    "Keine sichere Auto-Klassifizierung. Dieses Dokument öffnen, manuell klassifizieren und freigeben.",
   documents_open_document: "Öffnen",
   documents_apply_and_release: "Übernehmen und freigeben",
   documents_apply_suggestion: "Vorschlag übernehmen",
@@ -725,43 +839,60 @@ export const de: Translations = {
   documents_loading_documents: "Dokumente werden geladen…",
   documents_confidence: "Konfidenz",
   documents_unclassified: "Nicht klassifiziert",
-  documents_upload_interpreter_hint: "Dolmetscher-Uploads werden als interne Entwurfsdokumente gespeichert und an die Teamlead-Prüfung weitergeleitet.",
-  documents_upload_teamlead_hint: "Dieser Upload wird als internes Dokument gespeichert. Teamlead-Uploads zeigen hier keine vollständigen Dokumentverwaltungs-Steuerungen.",
-  documents_auto_classification_optional: "Optional. Leer lassen für Auto-Klassifizierung.",
-  documents_popup_blocked: "Pop-ups zulassen, um die Dokumentvorschau zu öffnen.",
+  documents_upload_interpreter_hint:
+    "Dolmetscher-Uploads werden als interne Entwurfsdokumente gespeichert und an die Teamlead-Prüfung weitergeleitet.",
+  documents_upload_teamlead_hint:
+    "Dieser Upload wird als internes Dokument gespeichert. Teamlead-Uploads zeigen hier keine vollständigen Dokumentverwaltungs-Steuerungen.",
+  documents_auto_classification_optional:
+    "Optional. Leer lassen für Auto-Klassifizierung.",
+  documents_popup_blocked:
+    "Pop-ups zulassen, um die Dokumentvorschau zu öffnen.",
   documents_failed_load_documents: "Dokumente konnten nicht geladen werden.",
-  documents_failed_load_intake_queue: "Dokumenten-Inbox konnte nicht geladen werden.",
+  documents_failed_load_intake_queue:
+    "Dokumenten-Inbox konnte nicht geladen werden.",
   documents_failed_load_document: "Dokument konnte nicht geladen werden.",
   documents_file_required: "Datei ist erforderlich.",
-  documents_link_context_required: "Dokument mit einem Patienten, Auftrag oder Termin verknüpfen.",
-  documents_uploaded_internal_review: "Dokument für interne Prüfung hochgeladen.",
-  documents_uploaded_to_intake: "Dokument hochgeladen und zur Intake-Inbox hinzugefügt.",
+  documents_link_context_required:
+    "Dokument mit einem Patienten, Auftrag oder Termin verknüpfen.",
+  documents_uploaded_internal_review:
+    "Dokument für interne Prüfung hochgeladen.",
+  documents_uploaded_to_intake:
+    "Dokument hochgeladen und zur Intake-Inbox hinzugefügt.",
   documents_uploaded: "Dokument hochgeladen.",
   documents_failed_upload: "Dokument konnte nicht hochgeladen werden.",
-  documents_classification_applied_released: "Klassifizierung übernommen und Dolmetscher-Upload freigegeben.",
+  documents_classification_applied_released:
+    "Klassifizierung übernommen und Dolmetscher-Upload freigegeben.",
   documents_classification_applied: "Klassifizierung übernommen.",
-  documents_failed_apply_classification: "Dokumentklassifizierung konnte nicht übernommen werden.",
-  documents_not_linked_template: "Dieser Dokumenttyp ist keiner generierten Vorlage zugeordnet.",
+  documents_failed_apply_classification:
+    "Dokumentklassifizierung konnte nicht übernommen werden.",
+  documents_not_linked_template:
+    "Dieser Dokumenttyp ist keiner generierten Vorlage zugeordnet.",
   documents_choose_template: "Vorlage auswählen.",
   documents_patient_context_required: "Patientenkontext ist erforderlich.",
   documents_failed_generate: "Dokument konnte nicht generiert werden.",
-  documents_generated_version_preview: "Version {version} erzeugt und Vorschau geöffnet.",
+  documents_generated_version_preview:
+    "Version {version} erzeugt und Vorschau geöffnet.",
   documents_generated_version: "Version {version} erzeugt.",
   documents_preview_opened: "Dokumentvorschau geöffnet.",
-  documents_failed_open_preview: "Dokumentvorschau konnte nicht geöffnet werden.",
+  documents_failed_open_preview:
+    "Dokumentvorschau konnte nicht geöffnet werden.",
   documents_translation_created: "Übersetzungsanfrage erstellt.",
-  documents_failed_create_translation: "Übersetzungsanfrage konnte nicht erstellt werden.",
+  documents_failed_create_translation:
+    "Übersetzungsanfrage konnte nicht erstellt werden.",
   documents_extraction_updated: "Textextraktion aktualisiert.",
   documents_failed_extract: "Dokumenttext konnte nicht extrahiert werden.",
   documents_translation_marked: "Übersetzungsanfrage als {status} markiert.",
-  documents_failed_update_translation: "Übersetzungsanfrage konnte nicht aktualisiert werden.",
+  documents_failed_update_translation:
+    "Übersetzungsanfrage konnte nicht aktualisiert werden.",
   documents_translation_workspace_saved: "Übersetzungs-Workspace gespeichert.",
   documents_save_data_unavailable: "Dokumentdaten sind nicht verfügbar.",
-  documents_save_name_type_required: "Dokumentenname und Typ sind erforderlich.",
+  documents_save_name_type_required:
+    "Dokumentenname und Typ sind erforderlich.",
   documents_save_forbidden: "Dieses Dokument kann nicht aktualisiert werden.",
   documents_save_type_required: "Dokumenttyp ist erforderlich.",
   documents_metadata_updated_notice: "Dokument-Metadaten aktualisiert.",
-  documents_review_released_notice: "Dolmetscher-Upload geprüft und freigegeben.",
+  documents_review_released_notice:
+    "Dolmetscher-Upload geprüft und freigegeben.",
   documents_failed_save: "Speichern fehlgeschlagen.",
   documents_choose_user_target: "Benutzerziel auswählen.",
   documents_choose_provider_target: "Provider-Ziel auswählen.",
@@ -771,13 +902,16 @@ export const de: Translations = {
   documents_share_revoked_notice: "Freigabe widerrufen.",
   documents_share_confirmed_notice: "Freigabe bestätigt.",
   documents_portal_released_notice: "Dokument ins Patientenportal freigegeben.",
-  documents_failed_release_portal: "Dokument konnte nicht ins Patientenportal freigegeben werden.",
+  documents_failed_release_portal:
+    "Dokument konnte nicht ins Patientenportal freigegeben werden.",
   documents_portal_release_revoked_notice: "Portalfreigabe widerrufen.",
-  documents_failed_revoke_portal: "Portalfreigabe konnte nicht widerrufen werden.",
+  documents_failed_revoke_portal:
+    "Portalfreigabe konnte nicht widerrufen werden.",
   documents_select_all_shown: "Alle angezeigten auswählen",
   documents_clear_selection: "Auswahl aufheben",
   documents_select_bulk_share: "Für Sammelfreigabe auswählen",
-  documents_no_documents_match: "Keine Dokumente entsprechen den aktuellen Filtern.",
+  documents_no_documents_match:
+    "Keine Dokumente entsprechen den aktuellen Filtern.",
   documents_shares_count: "{count} Freigaben",
   documents_optional_order_link: "Optionaler Auftragslink",
   documents_optional_appointment_link: "Optionaler Terminlink",

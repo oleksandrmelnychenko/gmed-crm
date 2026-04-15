@@ -605,7 +605,12 @@ const ORDER_PHASES: OrderPhase[] = [
   "closure",
   "followup",
 ];
-const ORDER_STATUSES: OrderStatus[] = ["active", "paused", "completed", "cancelled"];
+const ORDER_STATUSES: OrderStatus[] = [
+  "active",
+  "paused",
+  "completed",
+  "cancelled",
+];
 const EXTERNAL_INVOICE_STATUSES: ExternalInvoiceStatus[] = [
   "expected",
   "received",
@@ -763,8 +768,12 @@ function orderProcessGatesToForm(
     debtStatus: processGates.debt_management?.status ?? "review_required",
     debtNote: processGates.debt_management?.note ?? "",
     debtOwnerUserId: processGates.debt_management?.owner_user_id ?? "",
-    debtNextReviewAt: toDateTimeInputValue(processGates.debt_management?.next_review_at),
-    debtLastContactAt: toDateTimeInputValue(processGates.debt_management?.last_contact_at),
+    debtNextReviewAt: toDateTimeInputValue(
+      processGates.debt_management?.next_review_at,
+    ),
+    debtLastContactAt: toDateTimeInputValue(
+      processGates.debt_management?.last_contact_at,
+    ),
     debtResolutionNote: processGates.debt_management?.resolution_note ?? "",
     billingReleaseStatus: processGates.billing_release_status,
     billingReleaseNote: processGates.billing_release_note ?? "",
@@ -811,7 +820,8 @@ function orderFollowupToForm(
     followup1wStatus: followup.followup_1w_status,
     followup1mStatus: followup.followup_1m_status,
     followup6mStatus: followup.followup_6m_status,
-    packageEndDate: followup.package_end_date ?? followup.suggested_package_end_date ?? "",
+    packageEndDate:
+      followup.package_end_date ?? followup.suggested_package_end_date ?? "",
     packageEndStatus: followup.package_end_status,
     resultsHandoffStatus: followup.results_handoff_status,
     followupSummary: followup.followup_summary ?? "",
@@ -942,7 +952,9 @@ function formatNumber(value: unknown) {
     if (typeof value === "string") return value;
     return "0";
   }
-  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(parsed);
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(
+    parsed,
+  );
 }
 
 function formatCurrency(value: unknown, currency = "EUR") {
@@ -991,7 +1003,10 @@ function inputDateTimeToApiValue(value: string) {
 }
 
 function patientLabel(patient: PatientOption) {
-  const name = [patient.first_name, patient.last_name].filter(Boolean).join(" ").trim();
+  const name = [patient.first_name, patient.last_name]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
   return `${name || "Patient"} (${patient.patient_id})`;
 }
 
@@ -1017,7 +1032,9 @@ function StatCard({ label, value, description, icon }: StatCardProps) {
           <div className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">
             {label}
           </div>
-          <div className="text-2xl font-semibold tracking-tight text-slate-900">{value}</div>
+          <div className="text-2xl font-semibold tracking-tight text-slate-900">
+            {value}
+          </div>
         </div>
         <div className="rounded-xl border border-slate-200 bg-slate-50 p-2 text-slate-600">
           {icon}
@@ -1028,13 +1045,28 @@ function StatCard({ label, value, description, icon }: StatCardProps) {
   );
 }
 
-function SectionCard({ title, description, action, children, className }: SectionCardProps) {
+function SectionCard({
+  title,
+  description,
+  action,
+  children,
+  className,
+}: SectionCardProps) {
   return (
-    <section className={cn("rounded-2xl border border-slate-200 bg-white shadow-sm", className)}>
+    <section
+      className={cn(
+        "rounded-2xl border border-slate-200 bg-white shadow-sm",
+        className,
+      )}
+    >
       <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
         <div>
-          <h2 className="text-sm font-semibold tracking-[0.02em] text-slate-900">{title}</h2>
-          {description ? <p className="mt-1 text-sm text-slate-500">{description}</p> : null}
+          <h2 className="text-sm font-semibold tracking-[0.02em] text-slate-900">
+            {title}
+          </h2>
+          {description ? (
+            <p className="mt-1 text-sm text-slate-500">{description}</p>
+          ) : null}
         </div>
         {action}
       </div>
@@ -1089,8 +1121,12 @@ export function OrdersPage() {
 
   const [patients, setPatients] = useState<PatientOption[]>([]);
   const [providers, setProviders] = useState<ProviderOption[]>([]);
-  const [providerDoctors, setProviderDoctors] = useState<Record<string, DoctorOption[]>>({});
-  const [orderDocuments, setOrderDocuments] = useState<SupportingDocumentOption[]>([]);
+  const [providerDoctors, setProviderDoctors] = useState<
+    Record<string, DoctorOption[]>
+  >({});
+  const [orderDocuments, setOrderDocuments] = useState<
+    SupportingDocumentOption[]
+  >([]);
 
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [orderDetail, setOrderDetail] = useState<OrderDetail | null>(null);
@@ -1104,59 +1140,73 @@ export function OrdersPage() {
   const [phaseDraft, setPhaseDraft] = useState("");
   const [phaseSaving, setPhaseSaving] = useState(false);
   const [phaseError, setPhaseError] = useState<string | null>(null);
-  const [approvingLeistungId, setApprovingLeistungId] = useState<string | null>(null);
+  const [approvingLeistungId, setApprovingLeistungId] = useState<string | null>(
+    null,
+  );
   const [workflowBusy, setWorkflowBusy] = useState(false);
   const [workflowForm, setWorkflowForm] = useState<WorkflowChecklistFormState>(
-    blankWorkflowChecklistForm
+    blankWorkflowChecklistForm,
   );
   const [processGateBusy, setProcessGateBusy] = useState(false);
   const [processGateError, setProcessGateError] = useState<string | null>(null);
-  const [processGateForm, setProcessGateForm] = useState<OrderProcessGateFormState>(
-    blankOrderProcessGateForm
-  );
+  const [processGateForm, setProcessGateForm] =
+    useState<OrderProcessGateFormState>(blankOrderProcessGateForm);
   const [debtQueue, setDebtQueue] = useState<OrderDebtQueueItem[]>([]);
   const [debtQueueLoading, setDebtQueueLoading] = useState(false);
   const [debtQueueError, setDebtQueueError] = useState<string | null>(null);
   const [planningBusy, setPlanningBusy] = useState(false);
   const [planningError, setPlanningError] = useState<string | null>(null);
   const [planningForm, setPlanningForm] = useState<OrderPlanningFormState>(
-    blankOrderPlanningForm
+    blankOrderPlanningForm,
   );
   const [executionBusy, setExecutionBusy] = useState(false);
   const [executionError, setExecutionError] = useState<string | null>(null);
   const [executionForm, setExecutionForm] = useState<OrderExecutionFormState>(
-    blankOrderExecutionForm
+    blankOrderExecutionForm,
   );
   const [followupBusy, setFollowupBusy] = useState(false);
   const [followupError, setFollowupError] = useState<string | null>(null);
   const [followupForm, setFollowupForm] = useState<OrderFollowupFormState>(
-    blankOrderFollowupForm
+    blankOrderFollowupForm,
   );
 
   const [createOpen, setCreateOpen] = useState(false);
-  const [createForm, setCreateForm] = useState<CreateOrderFormState>(blankCreateOrderForm);
+  const [createForm, setCreateForm] =
+    useState<CreateOrderFormState>(blankCreateOrderForm);
   const [createSaving, setCreateSaving] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
-  const [createRecheck, setCreateRecheck] = useState<PatientOrderRecheck | null>(null);
+  const [createRecheck, setCreateRecheck] =
+    useState<PatientOrderRecheck | null>(null);
   const [createRecheckLoading, setCreateRecheckLoading] = useState(false);
-  const [createRecheckError, setCreateRecheckError] = useState<string | null>(null);
+  const [createRecheckError, setCreateRecheckError] = useState<string | null>(
+    null,
+  );
 
   const [leistungOpen, setLeistungOpen] = useState(false);
-  const [leistungForm, setLeistungForm] = useState<LeistungFormState>(blankLeistungForm);
+  const [leistungForm, setLeistungForm] =
+    useState<LeistungFormState>(blankLeistungForm);
   const [leistungSaving, setLeistungSaving] = useState(false);
   const [leistungError, setLeistungError] = useState<string | null>(null);
   const [externalInvoiceForm, setExternalInvoiceForm] =
     useState<ExternalInvoiceFormState>(blankExternalInvoiceForm);
   const [externalInvoiceSaving, setExternalInvoiceSaving] = useState(false);
-  const [externalInvoiceError, setExternalInvoiceError] = useState<string | null>(null);
-  const [externalInvoiceUpdatingId, setExternalInvoiceUpdatingId] = useState<string | null>(null);
+  const [externalInvoiceError, setExternalInvoiceError] = useState<
+    string | null
+  >(null);
+  const [externalInvoiceUpdatingId, setExternalInvoiceUpdatingId] = useState<
+    string | null
+  >(null);
 
   const filterDoctorOptions = useMemo(
-    () => (filters.providerId ? (providerDoctors[filters.providerId] ?? []) : []),
+    () =>
+      filters.providerId ? (providerDoctors[filters.providerId] ?? []) : [],
     [filters.providerId, providerDoctors],
   );
   const leistungDoctorOptions = useMemo(
-    () => (leistungForm.providerId ? (providerDoctors[leistungForm.providerId] ?? []) : []),
+    () =>
+      leistungForm.providerId
+        ? (providerDoctors[leistungForm.providerId] ?? [])
+        : [],
     [leistungForm.providerId, providerDoctors],
   );
   const supportingDocumentOptions = useMemo(
@@ -1224,19 +1274,21 @@ export function OrdersPage() {
   }, [workflowChecklist]);
   const nextLifecycleTransition = useMemo(
     () => orderDetail?.lifecycle?.allowed_transitions?.[0] ?? null,
-    [orderDetail?.lifecycle]
+    [orderDetail?.lifecycle],
   );
   const activeWorkflowAssignments = useMemo(
     () =>
       workflowAssignments.filter(
-        (item) => !item.revoked_at && item.user_active
+        (item) => !item.revoked_at && item.user_active,
       ),
-    [workflowAssignments]
+    [workflowAssignments],
   );
   const debtOwnerOptions = useMemo(() => {
     const items = [...activeWorkflowAssignments];
-    const currentOwnerId = orderDetail?.process_gates?.debt_management?.owner_user_id;
-    const currentOwnerName = orderDetail?.process_gates?.debt_management?.owner_name;
+    const currentOwnerId =
+      orderDetail?.process_gates?.debt_management?.owner_user_id;
+    const currentOwnerName =
+      orderDetail?.process_gates?.debt_management?.owner_name;
     if (
       currentOwnerId &&
       !items.some((item) => item.user_id === currentOwnerId)
@@ -1255,7 +1307,10 @@ export function OrdersPage() {
     orderDetail?.process_gates?.debt_management?.owner_name,
     orderDetail?.process_gates?.debt_management?.owner_user_id,
   ]);
-  const canManageDebt = user?.role === "patient_manager" || user?.role === "billing" || user?.role === "ceo";
+  const canManageDebt =
+    user?.role === "patient_manager" ||
+    user?.role === "billing" ||
+    user?.role === "ceo";
 
   function syncQuery(next: Record<string, string | null>) {
     const params = new URLSearchParams(searchParams);
@@ -1281,7 +1336,9 @@ export function OrdersPage() {
       const cached = providerDoctors[providerId];
       if (cached) return cached;
 
-      const detail = await apiFetch<ProviderDetailResponse>(`/providers/${providerId}`);
+      const detail = await apiFetch<ProviderDetailResponse>(
+        `/providers/${providerId}`,
+      );
       const doctors = detail.doctors ?? [];
       setProviderDoctors((current) => ({
         ...current,
@@ -1295,7 +1352,8 @@ export function OrdersPage() {
   useEffect(() => {
     if (workflowForm.ownerUserId) return;
     const preferredAssignee =
-      activeWorkflowAssignments.find((item) => item.user_id === user?.id)?.user_id ??
+      activeWorkflowAssignments.find((item) => item.user_id === user?.id)
+        ?.user_id ??
       activeWorkflowAssignments[0]?.user_id ??
       "";
     if (!preferredAssignee) return;
@@ -1425,7 +1483,9 @@ export function OrdersPage() {
         if (cancelled) return;
         setCreateRecheck(null);
         setCreateRecheckError(
-          error instanceof Error ? error.message : "Failed to load patient re-check",
+          error instanceof Error
+            ? error.message
+            : "Failed to load patient re-check",
         );
       } finally {
         if (!cancelled) {
@@ -1465,7 +1525,9 @@ export function OrdersPage() {
         setOrders(response);
       } catch (error) {
         if (cancelled) return;
-        setListError(error instanceof Error ? error.message : "Failed to load orders");
+        setListError(
+          error instanceof Error ? error.message : "Failed to load orders",
+        );
         setOrders([]);
       } finally {
         if (!cancelled) {
@@ -1503,14 +1565,18 @@ export function OrdersPage() {
 
     async function loadDebtQueue() {
       try {
-        const response = await apiFetch<OrderDebtQueueItem[]>("/orders/debt-management");
+        const response = await apiFetch<OrderDebtQueueItem[]>(
+          "/orders/debt-management",
+        );
         if (cancelled) return;
         setDebtQueue(response);
       } catch (error) {
         if (cancelled) return;
         setDebtQueue([]);
         setDebtQueueError(
-          error instanceof Error ? error.message : "Failed to load debt-management queue",
+          error instanceof Error
+            ? error.message
+            : "Failed to load debt-management queue",
         );
       } finally {
         if (!cancelled) {
@@ -1528,14 +1594,20 @@ export function OrdersPage() {
   useEffect(() => {
     if (!filters.providerId) return;
     void ensureProviderDoctors(filters.providerId).catch(() => {
-      setProviderDoctors((current) => ({ ...current, [filters.providerId]: [] }));
+      setProviderDoctors((current) => ({
+        ...current,
+        [filters.providerId]: [],
+      }));
     });
   }, [ensureProviderDoctors, filters.providerId]);
 
   useEffect(() => {
     if (!leistungForm.providerId) return;
     void ensureProviderDoctors(leistungForm.providerId).catch(() => {
-      setProviderDoctors((current) => ({ ...current, [leistungForm.providerId]: [] }));
+      setProviderDoctors((current) => ({
+        ...current,
+        [leistungForm.providerId]: [],
+      }));
     });
   }, [ensureProviderDoctors, leistungForm.providerId]);
 
@@ -1565,15 +1637,15 @@ export function OrdersPage() {
       try {
         const [detail, documents, workflow] = await Promise.all([
           apiFetch<OrderDetail>(`/orders/${selectedOrderId}`),
-          apiFetch<SupportingDocumentOption[]>(`/documents?order_id=${selectedOrderId}`).catch(
-            () => [],
-          ),
+          apiFetch<SupportingDocumentOption[]>(
+            `/documents?order_id=${selectedOrderId}`,
+          ).catch(() => []),
           apiFetch<WorkflowChecklistResponse>(
-            `/orders/${selectedOrderId}/workflow-checklist`
+            `/orders/${selectedOrderId}/workflow-checklist`,
           ).catch(() => null),
         ]);
         const assignments = await apiFetch<PatientAssignmentOption[]>(
-          `/patients/${detail.patient_id}/assignments`
+          `/patients/${detail.patient_id}/assignments`,
         ).catch(() => []);
         if (cancelled) return;
         setOrderDetail(detail);
@@ -1602,7 +1674,9 @@ export function OrdersPage() {
         setExecutionError(null);
         setFollowupForm(blankOrderFollowupForm());
         setFollowupError(null);
-        setDetailError(error instanceof Error ? error.message : "Failed to load order");
+        setDetailError(
+          error instanceof Error ? error.message : "Failed to load order",
+        );
       } finally {
         if (!cancelled) {
           setDetailLoading(false);
@@ -1632,7 +1706,8 @@ export function OrdersPage() {
     }
     if (createRecheck?.requires_recheck && !createRecheck.can_create_order) {
       setCreateError(
-        createRecheck?.blocking_reasons?.[0] ?? "Existing customer re-check is incomplete",
+        createRecheck?.blocking_reasons?.[0] ??
+          "Existing customer re-check is incomplete",
       );
       return;
     }
@@ -1653,7 +1728,9 @@ export function OrdersPage() {
       openOrder(created.id);
       triggerReload();
     } catch (error) {
-      setCreateError(error instanceof Error ? error.message : "Failed to create order");
+      setCreateError(
+        error instanceof Error ? error.message : "Failed to create order",
+      );
     } finally {
       setCreateSaving(false);
     }
@@ -1668,7 +1745,7 @@ export function OrdersPage() {
       phaseDraft !== orderDetail.lifecycle.next_stage
     ) {
       setPhaseError(
-        `Only the next lifecycle phase is allowed: ${orderDetail.lifecycle.next_stage}`
+        `Only the next lifecycle phase is allowed: ${orderDetail.lifecycle.next_stage}`,
       );
       return;
     }
@@ -1682,7 +1759,9 @@ export function OrdersPage() {
       });
       triggerReload();
     } catch (error) {
-      setPhaseError(error instanceof Error ? error.message : "Failed to update phase");
+      setPhaseError(
+        error instanceof Error ? error.message : "Failed to update phase",
+      );
     } finally {
       setPhaseSaving(false);
     }
@@ -1690,7 +1769,8 @@ export function OrdersPage() {
 
   async function handleAdvancePhase() {
     if (!orderDetail) return;
-    const phase = orderDetail.lifecycle?.next_stage ?? nextPhase(orderDetail.phase);
+    const phase =
+      orderDetail.lifecycle?.next_stage ?? nextPhase(orderDetail.phase);
     if (!phase) return;
     setPhaseDraft(phase);
     await apiFetch(`/orders/${orderDetail.id}/phase`, {
@@ -1703,7 +1783,9 @@ export function OrdersPage() {
       })
       .catch((error: unknown) => {
         setPhaseDraft(orderDetail.phase);
-        setPhaseError(error instanceof Error ? error.message : "Failed to advance phase");
+        setPhaseError(
+          error instanceof Error ? error.message : "Failed to advance phase",
+        );
       });
   }
 
@@ -1719,15 +1801,21 @@ export function OrdersPage() {
           status: processGateForm.debtStatus,
           note: optString(processGateForm.debtNote),
           owner_user_id: processGateForm.debtOwnerUserId || null,
-          next_review_at: inputDateTimeToApiValue(processGateForm.debtNextReviewAt),
-          last_contact_at: inputDateTimeToApiValue(processGateForm.debtLastContactAt),
+          next_review_at: inputDateTimeToApiValue(
+            processGateForm.debtNextReviewAt,
+          ),
+          last_contact_at: inputDateTimeToApiValue(
+            processGateForm.debtLastContactAt,
+          ),
           resolution_note: optString(processGateForm.debtResolutionNote),
         }),
       });
       triggerReload();
     } catch (error) {
       setProcessGateError(
-        error instanceof Error ? error.message : "Failed to update debt-management workflow",
+        error instanceof Error
+          ? error.message
+          : "Failed to update debt-management workflow",
       );
     } finally {
       setProcessGateBusy(false);
@@ -1750,7 +1838,9 @@ export function OrdersPage() {
       triggerReload();
     } catch (error) {
       setProcessGateError(
-        error instanceof Error ? error.message : "Failed to update billing release"
+        error instanceof Error
+          ? error.message
+          : "Failed to update billing release",
       );
     } finally {
       setProcessGateBusy(false);
@@ -1773,7 +1863,9 @@ export function OrdersPage() {
       triggerReload();
     } catch (error) {
       setProcessGateError(
-        error instanceof Error ? error.message : "Failed to update package coverage"
+        error instanceof Error
+          ? error.message
+          : "Failed to update package coverage",
       );
     } finally {
       setProcessGateBusy(false);
@@ -1802,7 +1894,9 @@ export function OrdersPage() {
       triggerReload();
     } catch (error) {
       setPlanningError(
-        error instanceof Error ? error.message : "Failed to update planning/preparation",
+        error instanceof Error
+          ? error.message
+          : "Failed to update planning/preparation",
       );
     } finally {
       setPlanningBusy(false);
@@ -1830,7 +1924,9 @@ export function OrdersPage() {
       triggerReload();
     } catch (error) {
       setExecutionError(
-        error instanceof Error ? error.message : "Failed to update execution flow",
+        error instanceof Error
+          ? error.message
+          : "Failed to update execution flow",
       );
     } finally {
       setExecutionBusy(false);
@@ -1859,7 +1955,9 @@ export function OrdersPage() {
       triggerReload();
     } catch (error) {
       setFollowupError(
-        error instanceof Error ? error.message : "Failed to update follow-up flow",
+        error instanceof Error
+          ? error.message
+          : "Failed to update follow-up flow",
       );
     } finally {
       setFollowupBusy(false);
@@ -1915,7 +2013,9 @@ export function OrdersPage() {
       resetLeistungDialog(false);
       triggerReload();
     } catch (error) {
-      setLeistungError(error instanceof Error ? error.message : "Failed to add Leistung");
+      setLeistungError(
+        error instanceof Error ? error.message : "Failed to add Leistung",
+      );
     } finally {
       setLeistungSaving(false);
     }
@@ -1926,18 +2026,25 @@ export function OrdersPage() {
 
     setApprovingLeistungId(leistungId);
     try {
-      await apiFetch(`/orders/${selectedOrderId}/leistungen/${leistungId}/approve`, {
-        method: "POST",
-      });
+      await apiFetch(
+        `/orders/${selectedOrderId}/leistungen/${leistungId}/approve`,
+        {
+          method: "POST",
+        },
+      );
       triggerReload();
     } catch (error) {
-      setDetailError(error instanceof Error ? error.message : "Failed to approve Leistung");
+      setDetailError(
+        error instanceof Error ? error.message : "Failed to approve Leistung",
+      );
     } finally {
       setApprovingLeistungId(null);
     }
   }
 
-  async function handleCreateExternalInvoice(event: FormEvent<HTMLFormElement>) {
+  async function handleCreateExternalInvoice(
+    event: FormEvent<HTMLFormElement>,
+  ) {
     event.preventDefault();
     if (!selectedOrderId) {
       setExternalInvoiceError("Select an order first");
@@ -1950,17 +2057,25 @@ export function OrdersPage() {
 
     const amountNet = Number(externalInvoiceForm.amountNet.replace(",", "."));
     const amountVat = Number(externalInvoiceForm.amountVat.replace(",", "."));
-    const amountGross = Number(externalInvoiceForm.amountGross.replace(",", "."));
+    const amountGross = Number(
+      externalInvoiceForm.amountGross.replace(",", "."),
+    );
 
     if (!Number.isFinite(amountGross) || amountGross < 0) {
       setExternalInvoiceError("Gross amount must be numeric");
       return;
     }
-    if (externalInvoiceForm.amountNet.trim() && (!Number.isFinite(amountNet) || amountNet < 0)) {
+    if (
+      externalInvoiceForm.amountNet.trim() &&
+      (!Number.isFinite(amountNet) || amountNet < 0)
+    ) {
       setExternalInvoiceError("Net amount must be numeric");
       return;
     }
-    if (externalInvoiceForm.amountVat.trim() && (!Number.isFinite(amountVat) || amountVat < 0)) {
+    if (
+      externalInvoiceForm.amountVat.trim() &&
+      (!Number.isFinite(amountVat) || amountVat < 0)
+    ) {
       setExternalInvoiceError("VAT amount must be numeric");
       return;
     }
@@ -1972,7 +2087,8 @@ export function OrdersPage() {
         method: "POST",
         body: JSON.stringify({
           provider_id: optString(externalInvoiceForm.providerId),
-          external_invoice_number: externalInvoiceForm.externalInvoiceNumber.trim(),
+          external_invoice_number:
+            externalInvoiceForm.externalInvoiceNumber.trim(),
           invoice_date: optString(externalInvoiceForm.invoiceDate),
           due_date: optString(externalInvoiceForm.dueDate),
           amount_net: externalInvoiceForm.amountNet.trim() ? amountNet : 0,
@@ -1987,7 +2103,9 @@ export function OrdersPage() {
       triggerReload();
     } catch (error) {
       setExternalInvoiceError(
-        error instanceof Error ? error.message : "Failed to create external invoice",
+        error instanceof Error
+          ? error.message
+          : "Failed to create external invoice",
       );
     } finally {
       setExternalInvoiceSaving(false);
@@ -2003,14 +2121,19 @@ export function OrdersPage() {
     setExternalInvoiceUpdatingId(externalInvoiceId);
     setDetailError(null);
     try {
-      await apiFetch(`/orders/${selectedOrderId}/external-invoices/${externalInvoiceId}/update`, {
-        method: "POST",
-        body: JSON.stringify({ status }),
-      });
+      await apiFetch(
+        `/orders/${selectedOrderId}/external-invoices/${externalInvoiceId}/update`,
+        {
+          method: "POST",
+          body: JSON.stringify({ status }),
+        },
+      );
       triggerReload();
     } catch (error) {
       setDetailError(
-        error instanceof Error ? error.message : "Failed to update external invoice",
+        error instanceof Error
+          ? error.message
+          : "Failed to update external invoice",
       );
     } finally {
       setExternalInvoiceUpdatingId(null);
@@ -2045,7 +2168,9 @@ export function OrdersPage() {
       triggerReload();
     } catch (error) {
       setDetailError(
-        error instanceof Error ? error.message : "Failed to create checklist item"
+        error instanceof Error
+          ? error.message
+          : "Failed to create checklist item",
       );
     } finally {
       setWorkflowBusy(false);
@@ -2058,13 +2183,18 @@ export function OrdersPage() {
     setWorkflowBusy(true);
     setDetailError(null);
     try {
-      await apiFetch(`/orders/${selectedOrderId}/workflow-checklist/${itemId}/complete`, {
-        method: "POST",
-      });
+      await apiFetch(
+        `/orders/${selectedOrderId}/workflow-checklist/${itemId}/complete`,
+        {
+          method: "POST",
+        },
+      );
       triggerReload();
     } catch (error) {
       setDetailError(
-        error instanceof Error ? error.message : "Failed to complete checklist item"
+        error instanceof Error
+          ? error.message
+          : "Failed to complete checklist item",
       );
     } finally {
       setWorkflowBusy(false);
@@ -2073,10 +2203,7 @@ export function OrdersPage() {
 
   if (!permissions.canViewPage) {
     return (
-      <EmptyState
-        title={tx.orders_title}
-        description={tx.orders_subtitle}
-      />
+      <EmptyState title={tx.orders_title} description={tx.orders_subtitle} />
     );
   }
 
@@ -2090,7 +2217,9 @@ export function OrdersPage() {
           <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">
             {t.orders_title}
           </h1>
-          <p className="mt-2 max-w-3xl text-sm text-slate-500">{t.orders_subtitle}</p>
+          <p className="mt-2 max-w-3xl text-sm text-slate-500">
+            {t.orders_subtitle}
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" onClick={triggerReload}>
@@ -2168,19 +2297,26 @@ export function OrdersPage() {
                       <div className="mt-2 text-sm font-semibold text-slate-950">
                         {item.patient_name}
                       </div>
-                      <div className="mt-1 text-xs text-slate-500">{item.patient_code}</div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        {item.patient_code}
+                      </div>
                     </div>
-                    <Badge variant="outline" className="rounded-full border-amber-200 bg-amber-50 text-amber-700">
+                    <Badge
+                      variant="outline"
+                      className="rounded-full border-amber-200 bg-amber-50 text-amber-700"
+                    >
                       {item.effective_status}
                     </Badge>
                   </div>
                   <div className="mt-4 space-y-2 text-sm text-slate-600">
                     <div>{item.blocking_reason ?? "Open debt workflow"}</div>
                     <div>
-                      {item.overdue_invoice_count} overdue / {formatCurrency(item.outstanding_balance)}
+                      {item.overdue_invoice_count} overdue /{" "}
+                      {formatCurrency(item.outstanding_balance)}
                     </div>
                     <div>
-                      Owner: {item.owner_name ?? "Unassigned"} / Review {formatDateTime(item.next_review_at)}
+                      Owner: {item.owner_name ?? "Unassigned"} / Review{" "}
+                      {formatDateTime(item.next_review_at)}
                     </div>
                   </div>
                 </button>
@@ -2190,10 +2326,7 @@ export function OrdersPage() {
         </SectionCard>
       ) : null}
 
-      <SectionCard
-        title={tx.common_search}
-        description={tx.orders_subtitle}
-      >
+      <SectionCard title={tx.common_search} description={tx.orders_subtitle}>
         <div className="grid gap-4 xl:grid-cols-6">
           <div className="xl:col-span-2">
             <Label htmlFor="orders-search">{t.common_search}</Label>
@@ -2203,7 +2336,10 @@ export function OrdersPage() {
                 id="orders-search"
                 value={filters.search}
                 onChange={(event) =>
-                  setFilters((current) => ({ ...current, search: event.target.value }))
+                  setFilters((current) => ({
+                    ...current,
+                    search: event.target.value,
+                  }))
                 }
                 placeholder={t.search_placeholder}
                 className="pl-9"
@@ -2215,7 +2351,10 @@ export function OrdersPage() {
             <select
               value={filters.phase}
               onChange={(event) =>
-                setFilters((current) => ({ ...current, phase: event.target.value }))
+                setFilters((current) => ({
+                  ...current,
+                  phase: event.target.value,
+                }))
               }
               className={`mt-1 ${selectClassName}`}
             >
@@ -2232,7 +2371,10 @@ export function OrdersPage() {
             <select
               value={filters.status}
               onChange={(event) =>
-                setFilters((current) => ({ ...current, status: event.target.value }))
+                setFilters((current) => ({
+                  ...current,
+                  status: event.target.value,
+                }))
               }
               className={`mt-1 ${selectClassName}`}
             >
@@ -2316,7 +2458,12 @@ export function OrdersPage() {
               variant="outline"
               onClick={() => {
                 setFilters(DEFAULT_FILTERS);
-                syncQuery({ patient: null, provider: null, doctor: null, order: null });
+                syncQuery({
+                  patient: null,
+                  provider: null,
+                  doctor: null,
+                  order: null,
+                });
               }}
             >
               Reset filters
@@ -2373,18 +2520,26 @@ export function OrdersPage() {
                     <h2 className="mt-2 text-lg font-semibold text-slate-950">
                       {order.patient_name}
                     </h2>
-                    <p className="mt-1 text-sm text-slate-500">{order.patient_pid}</p>
+                    <p className="mt-1 text-sm text-slate-500">
+                      {order.patient_pid}
+                    </p>
                   </div>
                   <ChevronRight className="mt-1 size-4 text-slate-400" />
                 </div>
 
                 <div className="mt-4 flex flex-wrap gap-2">
-                  <Badge variant="outline" className={cn("rounded-full", phaseClassName(order.phase))}>
+                  <Badge
+                    variant="outline"
+                    className={cn("rounded-full", phaseClassName(order.phase))}
+                  >
                     {order.phase}
                   </Badge>
                   <Badge
                     variant="outline"
-                    className={cn("rounded-full", statusClassName(order.status))}
+                    className={cn(
+                      "rounded-full",
+                      statusClassName(order.status),
+                    )}
                   >
                     {order.status}
                   </Badge>
@@ -2436,10 +2591,13 @@ export function OrdersPage() {
         >
           <SheetHeader className="border-b border-slate-200 px-6 py-5">
             <SheetTitle>
-              {orderDetail ? `${orderDetail.order_number} / ${orderDetail.patient_name}` : tx.orders_title}
+              {orderDetail
+                ? `${orderDetail.order_number} / ${orderDetail.patient_name}`
+                : tx.orders_title}
             </SheetTitle>
             <SheetDescription>
-              Full operational view for the current order, including phase control and provider-linked Leistungen.
+              Full operational view for the current order, including phase
+              control and provider-linked Leistungen.
             </SheetDescription>
           </SheetHeader>
 
@@ -2465,12 +2623,21 @@ export function OrdersPage() {
                   description={tx.orders_subtitle}
                   action={
                     <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant="outline" className={cn("rounded-full", phaseClassName(orderDetail.phase))}>
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "rounded-full",
+                          phaseClassName(orderDetail.phase),
+                        )}
+                      >
                         {orderDetail.phase}
                       </Badge>
                       <Badge
                         variant="outline"
-                        className={cn("rounded-full", statusClassName(orderDetail.status))}
+                        className={cn(
+                          "rounded-full",
+                          statusClassName(orderDetail.status),
+                        )}
                       >
                         {orderDetail.status}
                       </Badge>
@@ -2503,7 +2670,9 @@ export function OrdersPage() {
                     <DetailField
                       label={tx.contracts_signed}
                       value={`${orderDetail.signed_patient ? tx.contracts_signed : tx.mfa_pending} / ${
-                        orderDetail.signed_agency ? tx.contracts_signed : tx.mfa_pending
+                        orderDetail.signed_agency
+                          ? tx.contracts_signed
+                          : tx.mfa_pending
                       }`}
                     />
                     <DetailField
@@ -2534,7 +2703,9 @@ export function OrdersPage() {
                       type="button"
                       variant="outline"
                       className="rounded-2xl"
-                      onClick={() => staffGo(`/patients?patient=${orderDetail.patient_id}`)}
+                      onClick={() =>
+                        staffGo(`/patients?patient=${orderDetail.patient_id}`)
+                      }
                     >
                       Patient
                     </Button>
@@ -2542,7 +2713,9 @@ export function OrdersPage() {
                       type="button"
                       variant="outline"
                       className="rounded-2xl"
-                      onClick={() => staffGo(`/cases?patient=${orderDetail.patient_id}`)}
+                      onClick={() =>
+                        staffGo(`/cases?patient=${orderDetail.patient_id}`)
+                      }
                     >
                       Cases
                     </Button>
@@ -2550,7 +2723,11 @@ export function OrdersPage() {
                       type="button"
                       variant="outline"
                       className="rounded-2xl"
-                      onClick={() => staffGo(`/appointments?patient=${orderDetail.patient_id}`)}
+                      onClick={() =>
+                        staffGo(
+                          `/appointments?patient=${orderDetail.patient_id}`,
+                        )
+                      }
                     >
                       Appointments
                     </Button>
@@ -2558,7 +2735,11 @@ export function OrdersPage() {
                       type="button"
                       variant="outline"
                       className="rounded-2xl"
-                      onClick={() => staffGo(`/contracts?order=${orderDetail.id}&patient=${orderDetail.patient_id}&tab=quotes`)}
+                      onClick={() =>
+                        staffGo(
+                          `/contracts?order=${orderDetail.id}&patient=${orderDetail.patient_id}&tab=quotes`,
+                        )
+                      }
                     >
                       Contracts
                     </Button>
@@ -2566,7 +2747,11 @@ export function OrdersPage() {
                       type="button"
                       variant="outline"
                       className="rounded-2xl"
-                      onClick={() => staffGo(`/invoices?order=${orderDetail.id}&patient=${orderDetail.patient_id}`)}
+                      onClick={() =>
+                        staffGo(
+                          `/invoices?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
+                        )
+                      }
                     >
                       Invoices
                     </Button>
@@ -2574,7 +2759,11 @@ export function OrdersPage() {
                       type="button"
                       variant="outline"
                       className="rounded-2xl"
-                      onClick={() => staffGo(`/documents?order=${orderDetail.id}&patient=${orderDetail.patient_id}`)}
+                      onClick={() =>
+                        staffGo(
+                          `/documents?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
+                        )
+                      }
                     >
                       Documents
                     </Button>
@@ -2597,18 +2786,22 @@ export function OrdersPage() {
                                 "rounded-full",
                                 orderDetail.process_gates.execution_ready
                                   ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                  : "border-rose-200 bg-rose-50 text-rose-700"
+                                  : "border-rose-200 bg-rose-50 text-rose-700",
                               )}
                             >
-                              {orderDetail.process_gates.execution_ready ? "ready" : "blocked"}
+                              {orderDetail.process_gates.execution_ready
+                                ? "ready"
+                                : "blocked"}
                             </Badge>
                           }
                         />
                         <DetailField
                           label="Debt hold"
                           value={
-                            orderDetail.process_gates.debt_management?.blocking_reason
-                              ? orderDetail.process_gates.debt_management.blocking_reason
+                            orderDetail.process_gates.debt_management
+                              ?.blocking_reason
+                              ? orderDetail.process_gates.debt_management
+                                  .blocking_reason
                               : orderDetail.process_gates.debt_hold
                                 ? `${orderDetail.process_gates.overdue_invoice_count} overdue invoice(s)`
                                 : "No overdue debt"
@@ -2617,20 +2810,27 @@ export function OrdersPage() {
                         <DetailField
                           label="Debt workflow"
                           value={
-                            orderDetail.process_gates.debt_management?.effective_status ?? "not_required"
+                            orderDetail.process_gates.debt_management
+                              ?.effective_status ?? "not_required"
                           }
                         />
                         <DetailField
                           label="Billing release"
-                          value={orderDetail.process_gates.billing_release_status}
+                          value={
+                            orderDetail.process_gates.billing_release_status
+                          }
                         />
                         <DetailField
                           label="Package coverage"
-                          value={orderDetail.process_gates.package_coverage_status}
+                          value={
+                            orderDetail.process_gates.package_coverage_status
+                          }
                         />
                         <DetailField
                           label="Outstanding balance"
-                          value={formatCurrency(orderDetail.process_gates.outstanding_balance)}
+                          value={formatCurrency(
+                            orderDetail.process_gates.outstanding_balance,
+                          )}
                         />
                       </div>
 
@@ -2638,9 +2838,11 @@ export function OrdersPage() {
                         <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
                           <div className="font-medium">Blocking reasons</div>
                           <ul className="mt-2 space-y-1">
-                            {orderDetail.process_gates.blocking_reasons.map((reason) => (
-                              <li key={reason}>• {reason}</li>
-                            ))}
+                            {orderDetail.process_gates.blocking_reasons.map(
+                              (reason) => (
+                                <li key={reason}>• {reason}</li>
+                              ),
+                            )}
                           </ul>
                         </div>
                       ) : null}
@@ -2658,7 +2860,8 @@ export function OrdersPage() {
                               Debt management
                             </div>
                             <div className="mt-1 text-sm text-slate-500">
-                              Track the active debt workflow, assign ownership and set the next review checkpoint.
+                              Track the active debt workflow, assign ownership
+                              and set the next review checkpoint.
                             </div>
                             <div className="mt-4 grid gap-3">
                               <select
@@ -2696,7 +2899,10 @@ export function OrdersPage() {
                               >
                                 <option value="">Keep current owner</option>
                                 {debtOwnerOptions.map((item) => (
-                                  <option key={item.user_id} value={item.user_id}>
+                                  <option
+                                    key={item.user_id}
+                                    value={item.user_id}
+                                  >
                                     {item.user_name} · {item.user_role}
                                   </option>
                                 ))}
@@ -2747,22 +2953,38 @@ export function OrdersPage() {
                               />
                               <div className="grid gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-3 text-xs text-slate-500">
                                 <div>
-                                  Owner: {orderDetail.process_gates.debt_management?.owner_name ?? "Not assigned"}
+                                  Owner:{" "}
+                                  {orderDetail.process_gates.debt_management
+                                    ?.owner_name ?? "Not assigned"}
                                 </div>
                                 <div>
-                                  Last contact: {formatDateTime(orderDetail.process_gates.debt_management?.last_contact_at)}
+                                  Last contact:{" "}
+                                  {formatDateTime(
+                                    orderDetail.process_gates.debt_management
+                                      ?.last_contact_at,
+                                  )}
                                 </div>
                                 <div>
-                                  Next review: {formatDateTime(orderDetail.process_gates.debt_management?.next_review_at)}
+                                  Next review:{" "}
+                                  {formatDateTime(
+                                    orderDetail.process_gates.debt_management
+                                      ?.next_review_at,
+                                  )}
                                 </div>
                                 <div>
-                                  Resolved: {formatDateTime(orderDetail.process_gates.debt_management?.resolved_at)}
+                                  Resolved:{" "}
+                                  {formatDateTime(
+                                    orderDetail.process_gates.debt_management
+                                      ?.resolved_at,
+                                  )}
                                 </div>
                               </div>
                               <div className="flex justify-end">
                                 <Button
                                   type="button"
-                                  onClick={() => void handleSaveDebtManagement()}
+                                  onClick={() =>
+                                    void handleSaveDebtManagement()
+                                  }
                                   disabled={processGateBusy}
                                 >
                                   {processGateBusy ? (
@@ -2781,7 +3003,8 @@ export function OrdersPage() {
                               Billing release
                             </div>
                             <div className="mt-1 text-sm text-slate-500">
-                              Abrechnung decides whether execution may continue outside package coverage.
+                              Abrechnung decides whether execution may continue
+                              outside package coverage.
                             </div>
                             <div className="mt-4 space-y-3">
                               <select
@@ -2812,7 +3035,9 @@ export function OrdersPage() {
                               <div className="flex justify-end">
                                 <Button
                                   type="button"
-                                  onClick={() => void handleSaveBillingRelease()}
+                                  onClick={() =>
+                                    void handleSaveBillingRelease()
+                                  }
                                   disabled={processGateBusy}
                                 >
                                   {processGateBusy ? (
@@ -2825,13 +3050,15 @@ export function OrdersPage() {
                           </div>
                         ) : null}
 
-                        {user?.role === "patient_manager" || user?.role === "ceo" ? (
+                        {user?.role === "patient_manager" ||
+                        user?.role === "ceo" ? (
                           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                             <div className="text-sm font-semibold text-slate-900">
                               Package coverage
                             </div>
                             <div className="mt-1 text-sm text-slate-500">
-                              Existing-package coverage can unblock repeat work without a separate billing release.
+                              Existing-package coverage can unblock repeat work
+                              without a separate billing release.
                             </div>
                             <div className="mt-4 space-y-3">
                               <select
@@ -2862,7 +3089,9 @@ export function OrdersPage() {
                               <div className="flex justify-end">
                                 <Button
                                   type="button"
-                                  onClick={() => void handleSavePackageCoverage()}
+                                  onClick={() =>
+                                    void handleSavePackageCoverage()
+                                  }
                                   disabled={processGateBusy}
                                 >
                                   {processGateBusy ? (
@@ -2906,7 +3135,10 @@ export function OrdersPage() {
                         />
                         <DetailField
                           label="Treatment plan"
-                          value={orderDetail.planning_preparation.treatment_plan_status}
+                          value={
+                            orderDetail.planning_preparation
+                              .treatment_plan_status
+                          }
                         />
                         <DetailField
                           label="Medical bookings"
@@ -2914,7 +3146,10 @@ export function OrdersPage() {
                         />
                         <DetailField
                           label="Preparation documents"
-                          value={orderDetail.planning_preparation.preparation_documents_status}
+                          value={
+                            orderDetail.planning_preparation
+                              .preparation_documents_status
+                          }
                         />
                       </div>
 
@@ -2922,7 +3157,8 @@ export function OrdersPage() {
                         <DetailField
                           label="Non-medical flow"
                           value={
-                            orderDetail.planning_preparation.non_medical_required
+                            orderDetail.planning_preparation
+                              .non_medical_required
                               ? `${orderDetail.planning_preparation.non_medical_confirmed}/${orderDetail.planning_preparation.non_medical_total} confirmed`
                               : "Not required"
                           }
@@ -2930,39 +3166,50 @@ export function OrdersPage() {
                         <DetailField
                           label="Interpreter"
                           value={
-                            orderDetail.planning_preparation.interpreter_required
+                            orderDetail.planning_preparation
+                              .interpreter_required
                               ? `${orderDetail.planning_preparation.interpreter_assigned} assigned / ${orderDetail.planning_preparation.interpreter_confirmed} accepted`
                               : "Not required"
                           }
                         />
                         <DetailField
                           label="Interpreter briefing"
-                          value={orderDetail.planning_preparation.interpreter_briefing_status}
+                          value={
+                            orderDetail.planning_preparation
+                              .interpreter_briefing_status
+                          }
                         />
                         <DetailField
                           label="Latest milestone"
                           value={
                             orderDetail.planning_preparation.plan_finalized_at
                               ? `Plan ${formatDateTime(
-                                  orderDetail.planning_preparation.plan_finalized_at,
+                                  orderDetail.planning_preparation
+                                    .plan_finalized_at,
                                 )}`
                               : "No planning milestone yet"
                           }
                         />
                       </div>
 
-                      {orderDetail.planning_preparation.blocking_reasons.length > 0 ? (
+                      {orderDetail.planning_preparation.blocking_reasons
+                        .length > 0 ? (
                         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                          <div className="font-medium">Execution blockers from planning</div>
+                          <div className="font-medium">
+                            Execution blockers from planning
+                          </div>
                           <ul className="mt-2 space-y-1">
-                            {orderDetail.planning_preparation.blocking_reasons.map((reason) => (
-                              <li key={reason}>• {reason}</li>
-                            ))}
+                            {orderDetail.planning_preparation.blocking_reasons.map(
+                              (reason) => (
+                                <li key={reason}>• {reason}</li>
+                              ),
+                            )}
                           </ul>
                         </div>
                       ) : (
                         <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-                          Planning and preparation requirements are complete for execution.
+                          Planning and preparation requirements are complete for
+                          execution.
                         </div>
                       )}
 
@@ -2972,15 +3219,17 @@ export function OrdersPage() {
                         </div>
                       ) : null}
 
-                      {user?.role === "patient_manager" || user?.role === "ceo" ? (
+                      {user?.role === "patient_manager" ||
+                      user?.role === "ceo" ? (
                         <div className="grid gap-4 xl:grid-cols-2">
                           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                             <div className="text-sm font-semibold text-slate-900">
                               Planning controls
                             </div>
                             <div className="mt-1 text-sm text-slate-500">
-                              Lock the treatment plan, declare if non-medical services or
-                              interpreter support are still required, and mark prep documents.
+                              Lock the treatment plan, declare if non-medical
+                              services or interpreter support are still
+                              required, and mark prep documents.
                             </div>
                             <div className="mt-4 space-y-3">
                               <select
@@ -3032,8 +3281,10 @@ export function OrdersPage() {
                                     setPlanningForm((current) => ({
                                       ...current,
                                       interpreterRequired: event.target.checked,
-                                      interpreterBriefingStatus: event.target.checked
-                                        ? current.interpreterBriefingStatus === "not_needed"
+                                      interpreterBriefingStatus: event.target
+                                        .checked
+                                        ? current.interpreterBriefingStatus ===
+                                          "not_needed"
                                           ? "pending"
                                           : current.interpreterBriefingStatus
                                         : "not_needed",
@@ -3047,34 +3298,46 @@ export function OrdersPage() {
                                 onChange={(event) =>
                                   setPlanningForm((current) => ({
                                     ...current,
-                                    preparationDocumentsStatus: event.target.value,
+                                    preparationDocumentsStatus:
+                                      event.target.value,
                                   }))
                                 }
                                 className={selectClassName}
                               >
-                                <option value="pending">documents pending</option>
+                                <option value="pending">
+                                  documents pending
+                                </option>
                                 <option value="sent">documents sent</option>
-                                <option value="not_required">documents not required</option>
+                                <option value="not_required">
+                                  documents not required
+                                </option>
                               </select>
                               <select
                                 value={planningForm.interpreterBriefingStatus}
                                 onChange={(event) =>
                                   setPlanningForm((current) => ({
                                     ...current,
-                                    interpreterBriefingStatus: event.target.value,
+                                    interpreterBriefingStatus:
+                                      event.target.value,
                                   }))
                                 }
                                 className={selectClassName}
                                 disabled={!planningForm.interpreterRequired}
                               >
                                 <option value="not_needed">not needed</option>
-                                <option value="pending">briefing pending</option>
-                                <option value="completed">briefing completed</option>
+                                <option value="pending">
+                                  briefing pending
+                                </option>
+                                <option value="completed">
+                                  briefing completed
+                                </option>
                               </select>
                               <div className="flex justify-end">
                                 <Button
                                   type="button"
-                                  onClick={() => void handleSavePlanningPreparation()}
+                                  onClick={() =>
+                                    void handleSavePlanningPreparation()
+                                  }
                                   disabled={planningBusy}
                                 >
                                   {planningBusy ? (
@@ -3091,8 +3354,9 @@ export function OrdersPage() {
                               Operational handoff
                             </div>
                             <div className="mt-1 text-sm text-slate-500">
-                              Use the linked workspaces to confirm medical slots, non-medical
-                              services, interpreter assignment and preparation documents.
+                              Use the linked workspaces to confirm medical
+                              slots, non-medical services, interpreter
+                              assignment and preparation documents.
                             </div>
                             <div className="mt-4 grid gap-3">
                               <Button
@@ -3100,7 +3364,9 @@ export function OrdersPage() {
                                 variant="outline"
                                 className="justify-start rounded-xl"
                                 onClick={() =>
-                                  staffGo(`/appointments?order=${orderDetail.id}&patient=${orderDetail.patient_id}`)
+                                  staffGo(
+                                    `/appointments?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
+                                  )
                                 }
                               >
                                 Medical and non-medical appointments
@@ -3110,7 +3376,9 @@ export function OrdersPage() {
                                 variant="outline"
                                 className="justify-start rounded-xl"
                                 onClick={() =>
-                                  staffGo(`/documents?order=${orderDetail.id}&patient=${orderDetail.patient_id}`)
+                                  staffGo(
+                                    `/documents?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
+                                  )
                                 }
                               >
                                 Preparation documents
@@ -3120,14 +3388,20 @@ export function OrdersPage() {
                                 variant="outline"
                                 className="justify-start rounded-xl"
                                 onClick={() =>
-                                  staffGo(`/appointments?order=${orderDetail.id}&patient=${orderDetail.patient_id}`)
+                                  staffGo(
+                                    `/appointments?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
+                                  )
                                 }
                               >
                                 Interpreter assignment and briefing
                               </Button>
-                              {orderDetail.planning_preparation.treatment_plan_note ? (
+                              {orderDetail.planning_preparation
+                                .treatment_plan_note ? (
                                 <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
-                                  {orderDetail.planning_preparation.treatment_plan_note}
+                                  {
+                                    orderDetail.planning_preparation
+                                      .treatment_plan_note
+                                  }
                                 </div>
                               ) : null}
                             </div>
@@ -3157,7 +3431,9 @@ export function OrdersPage() {
                                   : "border-amber-200 bg-amber-50 text-amber-700",
                               )}
                             >
-                              {orderDetail.execution_flow.closure_ready ? "ready" : "blocked"}
+                              {orderDetail.execution_flow.closure_ready
+                                ? "ready"
+                                : "blocked"}
                             </Badge>
                           }
                         />
@@ -3171,7 +3447,10 @@ export function OrdersPage() {
                         />
                         <DetailField
                           label="Open execution checklist"
-                          value={String(orderDetail.execution_flow.open_execution_checklist_count)}
+                          value={String(
+                            orderDetail.execution_flow
+                              .open_execution_checklist_count,
+                          )}
                         />
                       </div>
 
@@ -3198,22 +3477,30 @@ export function OrdersPage() {
                         />
                         <DetailField
                           label="Execution documents"
-                          value={String(orderDetail.execution_flow.execution_documents)}
+                          value={String(
+                            orderDetail.execution_flow.execution_documents,
+                          )}
                         />
                       </div>
 
-                      {orderDetail.execution_flow.blocking_reasons.length > 0 ? (
+                      {orderDetail.execution_flow.blocking_reasons.length >
+                      0 ? (
                         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                          <div className="font-medium">Closure blockers from execution</div>
+                          <div className="font-medium">
+                            Closure blockers from execution
+                          </div>
                           <ul className="mt-2 space-y-1">
-                            {orderDetail.execution_flow.blocking_reasons.map((reason) => (
-                              <li key={reason}>• {reason}</li>
-                            ))}
+                            {orderDetail.execution_flow.blocking_reasons.map(
+                              (reason) => (
+                                <li key={reason}>• {reason}</li>
+                              ),
+                            )}
                           </ul>
                         </div>
                       ) : (
                         <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-                          Execution evidence and operational handoff are complete for closure.
+                          Execution evidence and operational handoff are
+                          complete for closure.
                         </div>
                       )}
 
@@ -3229,7 +3516,8 @@ export function OrdersPage() {
                             Execution controls
                           </div>
                           <div className="mt-1 text-sm text-slate-500">
-                            Confirm arrival, delivered scope and whether execution deviations are resolved.
+                            Confirm arrival, delivered scope and whether
+                            execution deviations are resolved.
                           </div>
                           <div className="mt-4 space-y-3">
                             <select
@@ -3257,9 +3545,15 @@ export function OrdersPage() {
                               className={selectClassName}
                             >
                               <option value="pending">medical pending</option>
-                              <option value="in_progress">medical in progress</option>
-                              <option value="completed">medical completed</option>
-                              <option value="not_required">medical not required</option>
+                              <option value="in_progress">
+                                medical in progress
+                              </option>
+                              <option value="completed">
+                                medical completed
+                              </option>
+                              <option value="not_required">
+                                medical not required
+                              </option>
                             </select>
                             <select
                               value={executionForm.nonMedicalExecutionStatus}
@@ -3270,12 +3564,22 @@ export function OrdersPage() {
                                 }))
                               }
                               className={selectClassName}
-                              disabled={!orderDetail.execution_flow.non_medical_required}
+                              disabled={
+                                !orderDetail.execution_flow.non_medical_required
+                              }
                             >
-                              <option value="not_required">non-medical not required</option>
-                              <option value="pending">non-medical pending</option>
-                              <option value="in_progress">non-medical in progress</option>
-                              <option value="completed">non-medical completed</option>
+                              <option value="not_required">
+                                non-medical not required
+                              </option>
+                              <option value="pending">
+                                non-medical pending
+                              </option>
+                              <option value="in_progress">
+                                non-medical in progress
+                              </option>
+                              <option value="completed">
+                                non-medical completed
+                              </option>
                             </select>
                             <select
                               value={executionForm.interpreterServiceStatus}
@@ -3286,12 +3590,22 @@ export function OrdersPage() {
                                 }))
                               }
                               className={selectClassName}
-                              disabled={!orderDetail.execution_flow.interpreter_required}
+                              disabled={
+                                !orderDetail.execution_flow.interpreter_required
+                              }
                             >
-                              <option value="not_required">interpreter not required</option>
-                              <option value="pending">interpreter pending</option>
-                              <option value="in_progress">interpreter in progress</option>
-                              <option value="completed">interpreter completed</option>
+                              <option value="not_required">
+                                interpreter not required
+                              </option>
+                              <option value="pending">
+                                interpreter pending
+                              </option>
+                              <option value="in_progress">
+                                interpreter in progress
+                              </option>
+                              <option value="completed">
+                                interpreter completed
+                              </option>
                             </select>
                             <select
                               value={executionForm.issueStatus}
@@ -3304,7 +3618,9 @@ export function OrdersPage() {
                               className={selectClassName}
                             >
                               <option value="pending">issues pending</option>
-                              <option value="monitoring">issues under monitoring</option>
+                              <option value="monitoring">
+                                issues under monitoring
+                              </option>
                               <option value="resolved">issues resolved</option>
                               <option value="not_required">no issues</option>
                             </select>
@@ -3350,24 +3666,34 @@ export function OrdersPage() {
                             Execution evidence
                           </div>
                           <div className="mt-1 text-sm text-slate-500">
-                            Use linked workspaces to close the remaining operational trail.
+                            Use linked workspaces to close the remaining
+                            operational trail.
                           </div>
                           <div className="mt-4 grid gap-3">
                             <DetailField
                               label="Arrival recorded"
-                              value={formatDateTime(orderDetail.execution_flow.arrival_recorded_at)}
+                              value={formatDateTime(
+                                orderDetail.execution_flow.arrival_recorded_at,
+                              )}
                             />
                             <DetailField
                               label="Medical completed"
-                              value={formatDateTime(orderDetail.execution_flow.medical_completed_at)}
+                              value={formatDateTime(
+                                orderDetail.execution_flow.medical_completed_at,
+                              )}
                             />
                             <DetailField
                               label="Non-medical completed"
-                              value={formatDateTime(orderDetail.execution_flow.non_medical_completed_at)}
+                              value={formatDateTime(
+                                orderDetail.execution_flow
+                                  .non_medical_completed_at,
+                              )}
                             />
                             <DetailField
                               label="Issues resolved"
-                              value={formatDateTime(orderDetail.execution_flow.issues_resolved_at)}
+                              value={formatDateTime(
+                                orderDetail.execution_flow.issues_resolved_at,
+                              )}
                             />
                             <div className="flex flex-wrap gap-3 pt-2">
                               <Button
@@ -3375,7 +3701,9 @@ export function OrdersPage() {
                                 variant="outline"
                                 className="rounded-xl"
                                 onClick={() =>
-                                  staffGo(`/appointments?order=${orderDetail.id}&patient=${orderDetail.patient_id}`)
+                                  staffGo(
+                                    `/appointments?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
+                                  )
                                 }
                               >
                                 Appointments
@@ -3385,7 +3713,9 @@ export function OrdersPage() {
                                 variant="outline"
                                 className="rounded-xl"
                                 onClick={() =>
-                                  staffGo(`/documents?order=${orderDetail.id}&patient=${orderDetail.patient_id}`)
+                                  staffGo(
+                                    `/documents?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
+                                  )
                                 }
                               >
                                 Documents
@@ -3395,7 +3725,9 @@ export function OrdersPage() {
                                 variant="outline"
                                 className="rounded-xl"
                                 onClick={() =>
-                                  staffGo(`/providers?patient=${orderDetail.patient_id}`)
+                                  staffGo(
+                                    `/providers?patient=${orderDetail.patient_id}`,
+                                  )
                                 }
                               >
                                 Providers
@@ -3427,13 +3759,17 @@ export function OrdersPage() {
                                   : "border-amber-200 bg-amber-50 text-amber-700",
                               )}
                             >
-                              {orderDetail.followup_flow.followup_ready ? "ready" : "blocked"}
+                              {orderDetail.followup_flow.followup_ready
+                                ? "ready"
+                                : "blocked"}
                             </Badge>
                           }
                         />
                         <DetailField
                           label="Results handoff"
-                          value={orderDetail.followup_flow.results_handoff_status}
+                          value={
+                            orderDetail.followup_flow.results_handoff_status
+                          }
                         />
                         <DetailField
                           label="Follow-up activity"
@@ -3441,14 +3777,18 @@ export function OrdersPage() {
                         />
                         <DetailField
                           label="Portal releases"
-                          value={String(orderDetail.followup_flow.results_portal_shares)}
+                          value={String(
+                            orderDetail.followup_flow.results_portal_shares,
+                          )}
                         />
                       </div>
 
                       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                         <DetailField
                           label="Doctor-directed"
-                          value={orderDetail.followup_flow.doctor_followup_status}
+                          value={
+                            orderDetail.followup_flow.doctor_followup_status
+                          }
                         />
                         <DetailField
                           label="1w / 1m / 6m"
@@ -3460,29 +3800,37 @@ export function OrdersPage() {
                             orderDetail.followup_flow.package_end_required
                               ? `${orderDetail.followup_flow.package_end_status} · ${formatDateOnly(
                                   orderDetail.followup_flow.package_end_date ??
-                                    orderDetail.followup_flow.suggested_package_end_date,
+                                    orderDetail.followup_flow
+                                      .suggested_package_end_date,
                                 )}`
                               : "Not required"
                           }
                         />
                         <DetailField
                           label="Closure anchor"
-                          value={formatDateTime(orderDetail.followup_flow.closure_anchor_at)}
+                          value={formatDateTime(
+                            orderDetail.followup_flow.closure_anchor_at,
+                          )}
                         />
                       </div>
 
                       {orderDetail.followup_flow.blocking_reasons.length > 0 ? (
                         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                          <div className="font-medium">Follow-up launch blockers</div>
+                          <div className="font-medium">
+                            Follow-up launch blockers
+                          </div>
                           <ul className="mt-2 space-y-1">
-                            {orderDetail.followup_flow.blocking_reasons.map((reason) => (
-                              <li key={reason}>• {reason}</li>
-                            ))}
+                            {orderDetail.followup_flow.blocking_reasons.map(
+                              (reason) => (
+                                <li key={reason}>• {reason}</li>
+                              ),
+                            )}
                           </ul>
                         </div>
                       ) : (
                         <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-                          Follow-up milestones and handoff are launched for the post-care phase.
+                          Follow-up milestones and handoff are launched for the
+                          post-care phase.
                         </div>
                       )}
 
@@ -3498,7 +3846,8 @@ export function OrdersPage() {
                             Follow-up controls
                           </div>
                           <div className="mt-1 text-sm text-slate-500">
-                            Mark which milestones are required and whether the final handoff to the patient is complete.
+                            Mark which milestones are required and whether the
+                            final handoff to the patient is complete.
                           </div>
                           <div className="mt-4 space-y-3">
                             <select
@@ -3511,10 +3860,18 @@ export function OrdersPage() {
                               }
                               className={selectClassName}
                             >
-                              <option value="not_required">doctor follow-up not required</option>
-                              <option value="pending">doctor follow-up pending</option>
-                              <option value="scheduled">doctor follow-up scheduled</option>
-                              <option value="completed">doctor follow-up completed</option>
+                              <option value="not_required">
+                                doctor follow-up not required
+                              </option>
+                              <option value="pending">
+                                doctor follow-up pending
+                              </option>
+                              <option value="scheduled">
+                                doctor follow-up scheduled
+                              </option>
+                              <option value="completed">
+                                doctor follow-up completed
+                              </option>
                             </select>
                             <div className="grid gap-3 md:grid-cols-3">
                               <select
@@ -3530,7 +3887,9 @@ export function OrdersPage() {
                                 <option value="pending">1w pending</option>
                                 <option value="scheduled">1w scheduled</option>
                                 <option value="completed">1w completed</option>
-                                <option value="not_required">1w not required</option>
+                                <option value="not_required">
+                                  1w not required
+                                </option>
                               </select>
                               <select
                                 value={followupForm.followup1mStatus}
@@ -3545,7 +3904,9 @@ export function OrdersPage() {
                                 <option value="pending">1m pending</option>
                                 <option value="scheduled">1m scheduled</option>
                                 <option value="completed">1m completed</option>
-                                <option value="not_required">1m not required</option>
+                                <option value="not_required">
+                                  1m not required
+                                </option>
                               </select>
                               <select
                                 value={followupForm.followup6mStatus}
@@ -3560,7 +3921,9 @@ export function OrdersPage() {
                                 <option value="pending">6m pending</option>
                                 <option value="scheduled">6m scheduled</option>
                                 <option value="completed">6m completed</option>
-                                <option value="not_required">6m not required</option>
+                                <option value="not_required">
+                                  6m not required
+                                </option>
                               </select>
                             </div>
                             <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px]">
@@ -3585,10 +3948,18 @@ export function OrdersPage() {
                                 }
                                 className={selectClassName}
                               >
-                                <option value="not_required">package-end not required</option>
-                                <option value="pending">package-end pending</option>
-                                <option value="scheduled">package-end scheduled</option>
-                                <option value="completed">package-end completed</option>
+                                <option value="not_required">
+                                  package-end not required
+                                </option>
+                                <option value="pending">
+                                  package-end pending
+                                </option>
+                                <option value="scheduled">
+                                  package-end scheduled
+                                </option>
+                                <option value="completed">
+                                  package-end completed
+                                </option>
                               </select>
                             </div>
                             <select
@@ -3601,9 +3972,15 @@ export function OrdersPage() {
                               }
                               className={selectClassName}
                             >
-                              <option value="pending">results handoff pending</option>
-                              <option value="completed">results handoff completed</option>
-                              <option value="not_required">results handoff not required</option>
+                              <option value="pending">
+                                results handoff pending
+                              </option>
+                              <option value="completed">
+                                results handoff completed
+                              </option>
+                              <option value="not_required">
+                                results handoff not required
+                              </option>
                             </select>
                             <textarea
                               value={followupForm.followupSummary}
@@ -3636,24 +4013,37 @@ export function OrdersPage() {
                             Recommended milestone anchors
                           </div>
                           <div className="mt-1 text-sm text-slate-500">
-                            Existing appointment presets and portal visibility read from these order-level milestones.
+                            Existing appointment presets and portal visibility
+                            read from these order-level milestones.
                           </div>
                           <div className="mt-4 grid gap-3">
                             <DetailField
                               label="1-week target"
-                              value={formatDateTime(orderDetail.followup_flow.recommended_followup_1w_at)}
+                              value={formatDateTime(
+                                orderDetail.followup_flow
+                                  .recommended_followup_1w_at,
+                              )}
                             />
                             <DetailField
                               label="1-month target"
-                              value={formatDateTime(orderDetail.followup_flow.recommended_followup_1m_at)}
+                              value={formatDateTime(
+                                orderDetail.followup_flow
+                                  .recommended_followup_1m_at,
+                              )}
                             />
                             <DetailField
                               label="6-month target"
-                              value={formatDateTime(orderDetail.followup_flow.recommended_followup_6m_at)}
+                              value={formatDateTime(
+                                orderDetail.followup_flow
+                                  .recommended_followup_6m_at,
+                              )}
                             />
                             <DetailField
                               label="Package-end outreach"
-                              value={formatDateOnly(orderDetail.followup_flow.recommended_package_end_followup_at)}
+                              value={formatDateOnly(
+                                orderDetail.followup_flow
+                                  .recommended_package_end_followup_at,
+                              )}
                             />
                             <div className="flex flex-wrap gap-3 pt-2">
                               <Button
@@ -3661,7 +4051,9 @@ export function OrdersPage() {
                                 variant="outline"
                                 className="rounded-xl"
                                 onClick={() =>
-                                  staffGo(`/appointments?order=${orderDetail.id}&patient=${orderDetail.patient_id}`)
+                                  staffGo(
+                                    `/appointments?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
+                                  )
                                 }
                               >
                                 Appointments
@@ -3671,7 +4063,9 @@ export function OrdersPage() {
                                 variant="outline"
                                 className="rounded-xl"
                                 onClick={() =>
-                                  staffGo(`/documents?order=${orderDetail.id}&patient=${orderDetail.patient_id}`)
+                                  staffGo(
+                                    `/documents?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
+                                  )
                                 }
                               >
                                 Documents
@@ -3698,7 +4092,8 @@ export function OrdersPage() {
                   title={tx.orders_phase}
                   description="Lifecycle transitions are sequential and recorded in workflow history."
                   action={
-                    permissions.canManagePhase && orderDetail.lifecycle?.next_stage ? (
+                    permissions.canManagePhase &&
+                    orderDetail.lifecycle?.next_stage ? (
                       <Button
                         variant="outline"
                         onClick={() => void handleAdvancePhase()}
@@ -3714,26 +4109,28 @@ export function OrdersPage() {
                     <div className="flex flex-wrap gap-2">
                       {ORDER_PHASES.map((phase) => {
                         const isCurrent = orderDetail.phase === phase;
-                        const isNext = orderDetail.lifecycle?.next_stage === phase;
+                        const isNext =
+                          orderDetail.lifecycle?.next_stage === phase;
                         const disabled =
-                          !permissions.canManagePhase || (!isCurrent && !isNext);
+                          !permissions.canManagePhase ||
+                          (!isCurrent && !isNext);
                         return (
-                        <button
-                          key={phase}
-                          type="button"
-                          disabled={disabled}
-                          onClick={() => setPhaseDraft(phase)}
-                          className={cn(
-                            "rounded-full border px-3 py-2 text-sm transition",
-                            phaseDraft === phase
-                              ? phaseClassName(phase)
-                              : "border-slate-200 bg-white text-slate-600 hover:border-slate-300",
-                            disabled && "cursor-not-allowed opacity-60",
-                          )}
-                        >
-                          {phase}
-                          {isCurrent ? " (current)" : isNext ? " (next)" : ""}
-                        </button>
+                          <button
+                            key={phase}
+                            type="button"
+                            disabled={disabled}
+                            onClick={() => setPhaseDraft(phase)}
+                            className={cn(
+                              "rounded-full border px-3 py-2 text-sm transition",
+                              phaseDraft === phase
+                                ? phaseClassName(phase)
+                                : "border-slate-200 bg-white text-slate-600 hover:border-slate-300",
+                              disabled && "cursor-not-allowed opacity-60",
+                            )}
+                          >
+                            {phase}
+                            {isCurrent ? " (current)" : isNext ? " (next)" : ""}
+                          </button>
                         );
                       })}
                     </div>
@@ -3746,11 +4143,14 @@ export function OrdersPage() {
                             !phaseDraft ||
                             phaseDraft === orderDetail.phase ||
                             (orderDetail.lifecycle?.next_stage != null &&
-                              phaseDraft !== orderDetail.lifecycle.next_stage) ||
+                              phaseDraft !==
+                                orderDetail.lifecycle.next_stage) ||
                             Boolean(nextLifecycleTransition?.blocked)
                           }
                         >
-                          {phaseSaving ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
+                          {phaseSaving ? (
+                            <LoaderCircle className="mr-2 size-4 animate-spin" />
+                          ) : null}
                           Save phase
                         </Button>
                       ) : (
@@ -3765,10 +4165,12 @@ export function OrdersPage() {
                   </div>
                   {orderDetail.lifecycle?.stage_entered_at ? (
                     <p className="mt-4 text-sm text-slate-600">
-                      Current phase entered {formatDateTime(orderDetail.lifecycle.stage_entered_at)}.
+                      Current phase entered{" "}
+                      {formatDateTime(orderDetail.lifecycle.stage_entered_at)}.
                     </p>
                   ) : null}
-                  {nextLifecycleTransition?.blocked && nextLifecycleTransition.reasons.length > 0 ? (
+                  {nextLifecycleTransition?.blocked &&
+                  nextLifecycleTransition.reasons.length > 0 ? (
                     <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
                       <div className="font-medium">
                         {nextLifecycleTransition.phase} is blocked
@@ -3808,7 +4210,9 @@ export function OrdersPage() {
                             </span>
                           </div>
                           {event.note ? (
-                            <p className="mt-2 text-sm text-slate-600">{event.note}</p>
+                            <p className="mt-2 text-sm text-slate-600">
+                              {event.note}
+                            </p>
                           ) : null}
                         </div>
                       ))}
@@ -3855,11 +4259,18 @@ export function OrdersPage() {
                                     {group.label}
                                   </p>
                                   <p className="mt-1 text-sm text-slate-600">
-                                    {group.items.filter((item) => !item.is_completed).length} open /{" "}
-                                    {group.items.length} total
+                                    {
+                                      group.items.filter(
+                                        (item) => !item.is_completed,
+                                      ).length
+                                    }{" "}
+                                    open / {group.items.length} total
                                   </p>
                                 </div>
-                                <Badge variant="outline" className="rounded-full border-slate-200 bg-white text-slate-700">
+                                <Badge
+                                  variant="outline"
+                                  className="rounded-full border-slate-200 bg-white text-slate-700"
+                                >
                                   {group.items.length} items
                                 </Badge>
                               </div>
@@ -3871,7 +4282,7 @@ export function OrdersPage() {
                                       "rounded-2xl border px-4 py-4",
                                       item.is_completed
                                         ? "border-emerald-200 bg-emerald-50/70"
-                                        : "border-slate-200 bg-white"
+                                        : "border-slate-200 bg-white",
                                     )}
                                   >
                                     <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -3884,7 +4295,7 @@ export function OrdersPage() {
                                             variant="outline"
                                             className={cn(
                                               "rounded-full text-[10px]",
-                                              priorityBadgeClass(item.priority)
+                                              priorityBadgeClass(item.priority),
                                             )}
                                           >
                                             {item.priority}
@@ -3895,12 +4306,16 @@ export function OrdersPage() {
                                               "rounded-full text-[10px]",
                                               item.is_completed
                                                 ? "border-emerald-200 bg-emerald-100 text-emerald-800"
-                                                : statusClassName(item.linked_task_status ?? "open")
+                                                : statusClassName(
+                                                    item.linked_task_status ??
+                                                      "open",
+                                                  ),
                                             )}
                                           >
                                             {item.is_completed
                                               ? "completed"
-                                              : item.linked_task_status ?? "open"}
+                                              : (item.linked_task_status ??
+                                                "open")}
                                           </Badge>
                                         </div>
                                         <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-500">
@@ -3915,7 +4330,10 @@ export function OrdersPage() {
                                           </span>
                                           {item.completed_at ? (
                                             <span>
-                                              Completed: {formatDateTime(item.completed_at)}
+                                              Completed:{" "}
+                                              {formatDateTime(
+                                                item.completed_at,
+                                              )}
                                             </span>
                                           ) : null}
                                         </div>
@@ -3927,7 +4345,9 @@ export function OrdersPage() {
                                           className="rounded-xl"
                                           disabled={workflowBusy}
                                           onClick={() =>
-                                            void handleCompleteWorkflowItem(item.id)
+                                            void handleCompleteWorkflowItem(
+                                              item.id,
+                                            )
                                           }
                                         >
                                           Complete
@@ -3949,7 +4369,9 @@ export function OrdersPage() {
                         >
                           <div className="grid gap-4 md:grid-cols-2">
                             <div className="space-y-2 md:col-span-2">
-                              <Label htmlFor="order-workflow-item">Checklist item</Label>
+                              <Label htmlFor="order-workflow-item">
+                                Checklist item
+                              </Label>
                               <Input
                                 id="order-workflow-item"
                                 value={workflowForm.itemText}
@@ -3964,7 +4386,9 @@ export function OrdersPage() {
                               />
                             </div>
                             <div className="space-y-2">
-                              <Label htmlFor="order-workflow-owner">Owner</Label>
+                              <Label htmlFor="order-workflow-owner">
+                                Owner
+                              </Label>
                               <select
                                 id="order-workflow-owner"
                                 className={selectClassName}
@@ -3978,14 +4402,19 @@ export function OrdersPage() {
                               >
                                 <option value="">Current user</option>
                                 {activeWorkflowAssignments.map((item) => (
-                                  <option key={item.user_id} value={item.user_id}>
+                                  <option
+                                    key={item.user_id}
+                                    value={item.user_id}
+                                  >
                                     {item.user_name} · {item.user_role}
                                   </option>
                                 ))}
                               </select>
                             </div>
                             <div className="space-y-2">
-                              <Label htmlFor="order-workflow-priority">Priority</Label>
+                              <Label htmlFor="order-workflow-priority">
+                                Priority
+                              </Label>
                               <select
                                 id="order-workflow-priority"
                                 className={selectClassName}
@@ -3997,11 +4426,13 @@ export function OrdersPage() {
                                   }))
                                 }
                               >
-                                {["low", "normal", "high", "urgent"].map((priority) => (
-                                  <option key={priority} value={priority}>
-                                    {priority}
-                                  </option>
-                                ))}
+                                {["low", "normal", "high", "urgent"].map(
+                                  (priority) => (
+                                    <option key={priority} value={priority}>
+                                      {priority}
+                                    </option>
+                                  ),
+                                )}
                               </select>
                             </div>
                             <div className="space-y-2">
@@ -4023,7 +4454,9 @@ export function OrdersPage() {
                           <div className="mt-4 flex justify-end">
                             <Button
                               type="submit"
-                              disabled={workflowBusy || !workflowForm.itemText.trim()}
+                              disabled={
+                                workflowBusy || !workflowForm.itemText.trim()
+                              }
                             >
                               {workflowBusy ? (
                                 <LoaderCircle className="mr-2 size-4 animate-spin" />
@@ -4109,7 +4542,10 @@ export function OrdersPage() {
                                 </div>
                                 <Badge
                                   variant="outline"
-                                  className={cn("rounded-full", statusClassName(leistung.status))}
+                                  className={cn(
+                                    "rounded-full",
+                                    statusClassName(leistung.status),
+                                  )}
                                 >
                                   {leistung.status}
                                 </Badge>
@@ -4118,7 +4554,7 @@ export function OrdersPage() {
                                     variant="outline"
                                     className="rounded-full border-violet-200 bg-violet-100 text-violet-700"
                                   >
-                                    Cost pass-through
+                                    {t.orders_cost_pass_through_badge}
                                   </Badge>
                                 ) : null}
                                 {leistung.source_interpreter_report_id ? (
@@ -4126,7 +4562,9 @@ export function OrdersPage() {
                                     variant="outline"
                                     className="rounded-full border-emerald-200 bg-emerald-100 text-emerald-700"
                                   >
-                                    Auto-billed from interpreter report
+                                    {
+                                      t.orders_auto_billed_from_interpreter_report
+                                    }
                                   </Badge>
                                 ) : null}
                                 {leistung.source_medical_appointment_id ? (
@@ -4134,10 +4572,13 @@ export function OrdersPage() {
                                     variant="outline"
                                     className="rounded-full border-amber-200 bg-amber-100 text-amber-700"
                                   >
-                                    Auto-billed from completed appointment
+                                    {
+                                      t.orders_auto_billed_from_completed_appointment
+                                    }
                                   </Badge>
                                 ) : null}
-                                {leistung.agency_service_name || leistung.agency_service_key ? (
+                                {leistung.agency_service_name ||
+                                leistung.agency_service_key ? (
                                   <Badge
                                     variant="outline"
                                     className="rounded-full border-sky-200 bg-sky-100 text-sky-700"
@@ -4157,20 +4598,25 @@ export function OrdersPage() {
                                         type="button"
                                         className="text-left font-medium text-sky-700 hover:text-sky-800"
                                         onClick={() =>
-                                          staffGo(`/providers?provider=${leistung.provider_id}`)
+                                          staffGo(
+                                            `/providers?provider=${leistung.provider_id}`,
+                                          )
                                         }
                                       >
-                                        {leistung.provider_name || "Open provider"}
+                                        {leistung.provider_name ||
+                                          t.orders_open_provider}
                                       </button>
                                     ) : (
-                                      leistung.provider_name || "Unlinked"
+                                      leistung.provider_name ||
+                                      t.orders_unlinked
                                     )
                                   }
                                 />
                                 <DetailField
                                   label={t.common_doctor}
                                   value={
-                                    leistung.provider_id && leistung.doctor_id ? (
+                                    leistung.provider_id &&
+                                    leistung.doctor_id ? (
                                       <button
                                         type="button"
                                         className="text-left font-medium text-sky-700 hover:text-sky-800"
@@ -4180,10 +4626,12 @@ export function OrdersPage() {
                                           )
                                         }
                                       >
-                                        {leistung.doctor_name || "Open doctor context"}
+                                        {leistung.doctor_name ||
+                                          t.orders_open_doctor_context}
                                       </button>
                                     ) : (
-                                      leistung.doctor_name || "Not specified"
+                                      leistung.doctor_name ||
+                                      t.orders_not_specified
                                     )
                                   }
                                 />
@@ -4193,7 +4641,10 @@ export function OrdersPage() {
                                 />
                                 <DetailField
                                   label={tx.invoices_amount}
-                                  value={formatCurrency(leistung.unit_price, leistung.currency)}
+                                  value={formatCurrency(
+                                    leistung.unit_price,
+                                    leistung.currency,
+                                  )}
                                 />
                                 <DetailField
                                   label={t.providers_service_price}
@@ -4202,8 +4653,10 @@ export function OrdersPage() {
                                 <DetailField
                                   label={tx.invoices_total}
                                   value={formatCurrency(
-                                    (numberFromUnknown(leistung.quantity) ?? 0) *
-                                      (numberFromUnknown(leistung.unit_price) ?? 0),
+                                    (numberFromUnknown(leistung.quantity) ??
+                                      0) *
+                                      (numberFromUnknown(leistung.unit_price) ??
+                                        0),
                                     leistung.currency,
                                   )}
                                 />
@@ -4216,7 +4669,7 @@ export function OrdersPage() {
                                   value={formatDateTime(leistung.approved_at)}
                                 />
                                 <DetailField
-                                  label="Supporting document"
+                                  label={t.orders_supporting_document}
                                   value={
                                     leistung.external_document_id ? (
                                       <button
@@ -4230,31 +4683,31 @@ export function OrdersPage() {
                                       >
                                         {leistung.external_document_auto_name ||
                                           leistung.external_document_filename ||
-                                          "Open linked document"}
+                                          t.orders_open_linked_document}
                                       </button>
                                     ) : leistung.is_cost_passthrough ? (
-                                      "Auto-link if exactly one receipt or invoice document exists"
+                                      t.orders_supporting_document_auto_link_hint
                                     ) : (
-                                      "Not linked"
+                                      t.orders_unlinked
                                     )
                                   }
                                 />
                                 <DetailField
-                                  label="Billing source"
+                                  label={t.orders_billing_source}
                                   value={
                                     leistung.source_interpreter_report_id
-                                      ? `Interpreter report ${leistung.source_interpreter_report_id}`
+                                      ? `${t.orders_billing_source_interpreter_report} ${leistung.source_interpreter_report_id}`
                                       : leistung.source_medical_appointment_id
-                                        ? `Completed appointment ${leistung.source_medical_appointment_id}`
-                                      : "Manual or provider-linked"
+                                        ? `${t.orders_billing_source_completed_appointment} ${leistung.source_medical_appointment_id}`
+                                        : t.orders_billing_source_manual
                                   }
                                 />
                                 <DetailField
-                                  label="Agency service"
+                                  label={t.orders_agency_service}
                                   value={
                                     leistung.agency_service_name ||
                                     leistung.agency_service_key ||
-                                    "Not catalog-linked"
+                                    t.orders_not_catalog_linked
                                   }
                                 />
                               </div>
@@ -4267,9 +4720,12 @@ export function OrdersPage() {
                             </div>
 
                             <div className="flex shrink-0 items-start">
-                              {permissions.canApproveLeistung && leistung.status === "delivered" ? (
+                              {permissions.canApproveLeistung &&
+                              leistung.status === "delivered" ? (
                                 <Button
-                                  onClick={() => void handleApproveLeistung(leistung.id)}
+                                  onClick={() =>
+                                    void handleApproveLeistung(leistung.id)
+                                  }
                                   disabled={approvingLeistungId === leistung.id}
                                 >
                                   {approvingLeistungId === leistung.id ? (
@@ -4331,7 +4787,8 @@ export function OrdersPage() {
                               Register external invoice
                             </h3>
                             <p className="mt-1 text-sm text-slate-500">
-                              Use this for inbound clinic or partner invoices that need deadline tracking.
+                              Use this for inbound clinic or partner invoices
+                              that need deadline tracking.
                             </p>
                           </div>
                         </div>
@@ -4448,7 +4905,8 @@ export function OrdersPage() {
                               onChange={(event) =>
                                 setExternalInvoiceForm((current) => ({
                                   ...current,
-                                  status: event.target.value as ExternalInvoiceStatus,
+                                  status: event.target
+                                    .value as ExternalInvoiceStatus,
                                 }))
                               }
                               className={`mt-1 ${selectClassName}`}
@@ -4475,7 +4933,10 @@ export function OrdersPage() {
                           </div>
                         </div>
                         <div className="mt-4 flex justify-end">
-                          <Button type="submit" disabled={externalInvoiceSaving}>
+                          <Button
+                            type="submit"
+                            disabled={externalInvoiceSaving}
+                          >
                             {externalInvoiceSaving ? (
                               <LoaderCircle className="mr-2 size-4 animate-spin" />
                             ) : (
@@ -4494,98 +4955,159 @@ export function OrdersPage() {
                       />
                     ) : (
                       <div className="space-y-3">
-                        {(orderDetail.external_invoices ?? []).map((invoice) => (
-                          <div
-                            key={invoice.id}
-                            className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
-                          >
-                            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                              <div className="space-y-3">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <div className="text-base font-semibold text-slate-950">
-                                    {invoice.external_invoice_number}
-                                  </div>
-                                  <Badge
-                                    variant="outline"
-                                    className={cn("rounded-full", statusClassName(invoice.status))}
-                                  >
-                                    {invoice.status}
-                                  </Badge>
-                                  {invoice.provider_name ? (
+                        {(orderDetail.external_invoices ?? []).map(
+                          (invoice) => (
+                            <div
+                              key={invoice.id}
+                              className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                            >
+                              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                                <div className="space-y-3">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <div className="text-base font-semibold text-slate-950">
+                                      {invoice.external_invoice_number}
+                                    </div>
                                     <Badge
                                       variant="outline"
-                                      className="rounded-full border-sky-200 bg-sky-50 text-sky-700"
+                                      className={cn(
+                                        "rounded-full",
+                                        statusClassName(invoice.status),
+                                      )}
                                     >
-                                      {invoice.provider_name}
+                                      {invoice.status}
                                     </Badge>
+                                    {invoice.provider_name ? (
+                                      <Badge
+                                        variant="outline"
+                                        className="rounded-full border-sky-200 bg-sky-50 text-sky-700"
+                                      >
+                                        {invoice.provider_name}
+                                      </Badge>
+                                    ) : null}
+                                  </div>
+                                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                                    <DetailField
+                                      label="Invoice date"
+                                      value={formatDate(invoice.invoice_date)}
+                                    />
+                                    <DetailField
+                                      label="Due date"
+                                      value={formatDate(invoice.due_date)}
+                                    />
+                                    <DetailField
+                                      label="Net"
+                                      value={formatCurrency(
+                                        invoice.amount_net,
+                                        invoice.currency,
+                                      )}
+                                    />
+                                    <DetailField
+                                      label="VAT"
+                                      value={formatCurrency(
+                                        invoice.amount_vat,
+                                        invoice.currency,
+                                      )}
+                                    />
+                                    <DetailField
+                                      label="Gross"
+                                      value={formatCurrency(
+                                        invoice.amount_gross,
+                                        invoice.currency,
+                                      )}
+                                    />
+                                    <DetailField
+                                      label="Received"
+                                      value={formatDateTime(
+                                        invoice.received_at,
+                                      )}
+                                    />
+                                    <DetailField
+                                      label="Paid"
+                                      value={formatDateTime(invoice.paid_at)}
+                                    />
+                                    <DetailField
+                                      label="Last update"
+                                      value={formatDateTime(invoice.updated_at)}
+                                    />
+                                  </div>
+                                  {invoice.notes ? (
+                                    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+                                      {invoice.notes}
+                                    </div>
                                   ) : null}
                                 </div>
-                                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                                  <DetailField label="Invoice date" value={formatDate(invoice.invoice_date)} />
-                                  <DetailField label="Due date" value={formatDate(invoice.due_date)} />
-                                  <DetailField label="Net" value={formatCurrency(invoice.amount_net, invoice.currency)} />
-                                  <DetailField label="VAT" value={formatCurrency(invoice.amount_vat, invoice.currency)} />
-                                  <DetailField label="Gross" value={formatCurrency(invoice.amount_gross, invoice.currency)} />
-                                  <DetailField label="Received" value={formatDateTime(invoice.received_at)} />
-                                  <DetailField label="Paid" value={formatDateTime(invoice.paid_at)} />
-                                  <DetailField label="Last update" value={formatDateTime(invoice.updated_at)} />
-                                </div>
-                                {invoice.notes ? (
-                                  <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
-                                    {invoice.notes}
+
+                                {permissions.canManageExternalInvoices ? (
+                                  <div className="flex shrink-0 flex-wrap gap-2">
+                                    {invoice.status !== "approved" ? (
+                                      <Button
+                                        variant="outline"
+                                        onClick={() =>
+                                          void handleUpdateExternalInvoiceStatus(
+                                            invoice.id,
+                                            "approved",
+                                          )
+                                        }
+                                        disabled={
+                                          externalInvoiceUpdatingId ===
+                                          invoice.id
+                                        }
+                                      >
+                                        {externalInvoiceUpdatingId ===
+                                        invoice.id ? (
+                                          <LoaderCircle className="mr-2 size-4 animate-spin" />
+                                        ) : null}
+                                        Mark approved
+                                      </Button>
+                                    ) : null}
+                                    {invoice.status !== "paid" ? (
+                                      <Button
+                                        variant="outline"
+                                        onClick={() =>
+                                          void handleUpdateExternalInvoiceStatus(
+                                            invoice.id,
+                                            "paid",
+                                          )
+                                        }
+                                        disabled={
+                                          externalInvoiceUpdatingId ===
+                                          invoice.id
+                                        }
+                                      >
+                                        {externalInvoiceUpdatingId ===
+                                        invoice.id ? (
+                                          <LoaderCircle className="mr-2 size-4 animate-spin" />
+                                        ) : null}
+                                        Mark paid
+                                      </Button>
+                                    ) : null}
+                                    {invoice.status !== "cancelled" ? (
+                                      <Button
+                                        variant="outline"
+                                        onClick={() =>
+                                          void handleUpdateExternalInvoiceStatus(
+                                            invoice.id,
+                                            "cancelled",
+                                          )
+                                        }
+                                        disabled={
+                                          externalInvoiceUpdatingId ===
+                                          invoice.id
+                                        }
+                                      >
+                                        {externalInvoiceUpdatingId ===
+                                        invoice.id ? (
+                                          <LoaderCircle className="mr-2 size-4 animate-spin" />
+                                        ) : null}
+                                        Cancel
+                                      </Button>
+                                    ) : null}
                                   </div>
                                 ) : null}
                               </div>
-
-                              {permissions.canManageExternalInvoices ? (
-                                <div className="flex shrink-0 flex-wrap gap-2">
-                                  {invoice.status !== "approved" ? (
-                                    <Button
-                                      variant="outline"
-                                      onClick={() =>
-                                        void handleUpdateExternalInvoiceStatus(invoice.id, "approved")
-                                      }
-                                      disabled={externalInvoiceUpdatingId === invoice.id}
-                                    >
-                                      {externalInvoiceUpdatingId === invoice.id ? (
-                                        <LoaderCircle className="mr-2 size-4 animate-spin" />
-                                      ) : null}
-                                      Mark approved
-                                    </Button>
-                                  ) : null}
-                                  {invoice.status !== "paid" ? (
-                                    <Button
-                                      variant="outline"
-                                      onClick={() =>
-                                        void handleUpdateExternalInvoiceStatus(invoice.id, "paid")
-                                      }
-                                      disabled={externalInvoiceUpdatingId === invoice.id}
-                                    >
-                                      {externalInvoiceUpdatingId === invoice.id ? (
-                                        <LoaderCircle className="mr-2 size-4 animate-spin" />
-                                      ) : null}
-                                      Mark paid
-                                    </Button>
-                                  ) : null}
-                                  {invoice.status !== "cancelled" ? (
-                                    <Button
-                                      variant="outline"
-                                      onClick={() =>
-                                        void handleUpdateExternalInvoiceStatus(invoice.id, "cancelled")
-                                      }
-                                      disabled={externalInvoiceUpdatingId === invoice.id}
-                                    >
-                                      {externalInvoiceUpdatingId === invoice.id ? (
-                                        <LoaderCircle className="mr-2 size-4 animate-spin" />
-                                      ) : null}
-                                      Cancel
-                                    </Button>
-                                  ) : null}
-                                </div>
-                              ) : null}
                             </div>
-                          </div>
-                        ))}
+                          ),
+                        )}
                       </div>
                     )}
                   </div>
@@ -4640,8 +5162,8 @@ export function OrdersPage() {
                       Existing customer re-check
                     </div>
                     <p className="text-xs text-slate-500">
-                      Validate base data, compliance, identity, document pack, contract
-                      status and debt hold before creating a new order.
+                      Validate base data, compliance, identity, document pack,
+                      contract status and debt hold before creating a new order.
                     </p>
                   </div>
                   {createRecheck ? (
@@ -4649,7 +5171,8 @@ export function OrdersPage() {
                       variant="outline"
                       className={cn(
                         "rounded-full",
-                        !createRecheck.requires_recheck || createRecheck.can_create_order
+                        !createRecheck.requires_recheck ||
+                          createRecheck.can_create_order
                           ? "border-emerald-200 bg-emerald-50 text-emerald-700"
                           : "border-amber-200 bg-amber-50 text-amber-700",
                       )}
@@ -4686,10 +5209,15 @@ export function OrdersPage() {
                             className="rounded-xl border border-white/80 bg-white px-3 py-2 shadow-sm"
                           >
                             <div className="flex items-center justify-between gap-2">
-                              <span className="text-sm text-slate-700">{check.label}</span>
+                              <span className="text-sm text-slate-700">
+                                {check.label}
+                              </span>
                               <Badge
                                 variant="outline"
-                                className={cn("rounded-full", recheckBadgeClass(check.passed))}
+                                className={cn(
+                                  "rounded-full",
+                                  recheckBadgeClass(check.passed),
+                                )}
                               >
                                 {check.passed ? "OK" : "Needs update"}
                               </Badge>
@@ -4714,7 +5242,8 @@ export function OrdersPage() {
                       </div>
                     ) : null}
 
-                    {createRecheck.requires_recheck && createRecheck.blocking_reasons.length ? (
+                    {createRecheck.requires_recheck &&
+                    createRecheck.blocking_reasons.length ? (
                       <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800">
                         <div className="font-medium">Blocking reasons</div>
                         <ul className="mt-2 list-disc space-y-1 pl-5">
@@ -4725,8 +5254,8 @@ export function OrdersPage() {
                       </div>
                     ) : createRecheck.requires_recheck ? (
                       <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-sm text-emerald-800">
-                        Existing customer re-check is complete. The patient can move into a new
-                        order.
+                        Existing customer re-check is complete. The patient can
+                        move into a new order.
                       </div>
                     ) : null}
 
@@ -4741,21 +5270,35 @@ export function OrdersPage() {
                               : "No existing-customer document check required yet"}
                         </div>
                         <div>
-                          {createRecheck.requires_recheck && createRecheck.debt_hold
+                          {createRecheck.requires_recheck &&
+                          createRecheck.debt_hold
                             ? `${createRecheck.overdue_invoice_count} overdue invoice(s) keep the patient on debt hold`
                             : createRecheck.requires_recheck
                               ? "No overdue debt detected"
                               : "Debt-management hold is checked when prior customer history exists"}
                         </div>
-                        {createRecheck.requires_recheck && createRecheck.outstanding_balance ? (
+                        {createRecheck.requires_recheck &&
+                        createRecheck.outstanding_balance ? (
                           <div>
-                            Outstanding balance: {formatCurrency(createRecheck.outstanding_balance)}
+                            Outstanding balance:{" "}
+                            {formatCurrency(createRecheck.outstanding_balance)}
                           </div>
                         ) : null}
-                        {createRecheck.requires_recheck && createRecheck.debt_management?.latest_workflow ? (
+                        {createRecheck.requires_recheck &&
+                        createRecheck.debt_management?.latest_workflow ? (
                           <div>
-                            Latest debt workflow: {createRecheck.debt_management.latest_workflow.order_number} / {createRecheck.debt_management.latest_workflow.effective_status}
-                            {createRecheck.debt_management.latest_workflow.owner_name
+                            Latest debt workflow:{" "}
+                            {
+                              createRecheck.debt_management.latest_workflow
+                                .order_number
+                            }{" "}
+                            /{" "}
+                            {
+                              createRecheck.debt_management.latest_workflow
+                                .effective_status
+                            }
+                            {createRecheck.debt_management.latest_workflow
+                              .owner_name
                               ? ` / ${createRecheck.debt_management.latest_workflow.owner_name}`
                               : ""}
                           </div>
@@ -4763,8 +5306,11 @@ export function OrdersPage() {
                         {createRecheck.latest_framework_contract ? (
                           <div>
                             Latest framework contract:{" "}
-                            {createRecheck.latest_framework_contract.contract_number} (
-                            {createRecheck.latest_framework_contract.status})
+                            {
+                              createRecheck.latest_framework_contract
+                                .contract_number
+                            }{" "}
+                            ({createRecheck.latest_framework_contract.status})
                           </div>
                         ) : (
                           <div>No framework contract recorded yet</div>
@@ -4774,7 +5320,9 @@ export function OrdersPage() {
                         type="button"
                         variant="outline"
                         className="rounded-xl"
-                        onClick={() => staffGo(`/patients?patient=${createForm.patientId}`)}
+                        onClick={() =>
+                          staffGo(`/patients?patient=${createForm.patientId}`)
+                        }
                       >
                         Open patient profile
                       </Button>
@@ -4800,7 +5348,11 @@ export function OrdersPage() {
             </div>
 
             <div className="flex items-center justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => resetCreateDialog(false)}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => resetCreateDialog(false)}
+              >
                 {t.common_cancel}
               </Button>
               <Button
@@ -4808,13 +5360,17 @@ export function OrdersPage() {
                 disabled={
                   createSaving ||
                   createRecheckLoading ||
-                  (!!createForm.patientId && !createRecheck && !createRecheckLoading) ||
+                  (!!createForm.patientId &&
+                    !createRecheck &&
+                    !createRecheckLoading) ||
                   (!!createForm.patientId &&
                     createRecheck?.requires_recheck === true &&
                     !createRecheck.can_create_order)
                 }
               >
-                {createSaving ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
+                {createSaving ? (
+                  <LoaderCircle className="mr-2 size-4 animate-spin" />
+                ) : null}
                 {t.common_save}
               </Button>
             </div>
@@ -4925,7 +5481,9 @@ export function OrdersPage() {
                   {providers.map((provider) => (
                     <option key={provider.id} value={provider.id}>
                       {provider.name}
-                      {provider.address_city ? ` (${provider.address_city})` : ""}
+                      {provider.address_city
+                        ? ` (${provider.address_city})`
+                        : ""}
                     </option>
                   ))}
                 </select>
@@ -4971,9 +5529,11 @@ export function OrdersPage() {
                   className="mt-1 size-4 rounded border-slate-300"
                 />
                 <span>
-                  <div className="text-sm font-medium text-slate-900">Treat as cost pass-through</div>
+                  <div className="text-sm font-medium text-slate-900">
+                    {t.orders_treat_as_cost_pass_through}
+                  </div>
                   <div className="mt-1 text-sm text-slate-500">
-                    Keep the line item visible for billing without merging it into agency-owned margin logic.
+                    {t.orders_cost_pass_through_hint}
                   </div>
                 </span>
               </label>
@@ -4981,7 +5541,7 @@ export function OrdersPage() {
 
             {leistungForm.isCostPassthrough ? (
               <div>
-                <Label>Supporting document</Label>
+                <Label>{t.orders_supporting_document}</Label>
                 <select
                   value={leistungForm.externalDocumentId}
                   onChange={(event) =>
@@ -4992,28 +5552,39 @@ export function OrdersPage() {
                   }
                   className={`mt-1 ${selectClassName}`}
                 >
-                  <option value="">Auto-link if there is exactly one matching document</option>
+                  <option value="">
+                    {t.orders_supporting_document_select_hint}
+                  </option>
                   {supportingDocumentOptions.map((document) => (
                     <option key={document.id} value={document.id}>
-                      {document.auto_name || document.original_filename || document.id}
+                      {document.auto_name ||
+                        document.original_filename ||
+                        document.id}
                       {document.art ? ` · ${document.art}` : ""}
-                      {document.original_filename ? ` · ${document.original_filename}` : ""}
+                      {document.original_filename
+                        ? ` · ${document.original_filename}`
+                        : ""}
                     </option>
                   ))}
                 </select>
                 <p className="mt-2 text-xs text-slate-500">
-                  Pin a specific receipt or provider invoice when the order has more than one
-                  candidate file.
+                  {t.orders_supporting_document_pin_hint}
                 </p>
               </div>
             ) : null}
 
             <div className="flex items-center justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => resetLeistungDialog(false)}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => resetLeistungDialog(false)}
+              >
                 {t.common_cancel}
               </Button>
               <Button type="submit" disabled={leistungSaving}>
-                {leistungSaving ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
+                {leistungSaving ? (
+                  <LoaderCircle className="mr-2 size-4 animate-spin" />
+                ) : null}
                 {t.common_save}
               </Button>
             </div>

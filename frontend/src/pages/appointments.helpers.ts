@@ -1,3 +1,5 @@
+import type { Translations } from "@/lib/i18n";
+
 export type AppointmentTimelineKind =
   | "workflow"
   | "interpreter"
@@ -31,7 +33,9 @@ export type InterpreterMobileAgendaItem = {
   interpreter_response?: string | null;
 };
 
-export type InterpreterMobileAgendaSection<T extends InterpreterMobileAgendaItem> = {
+export type InterpreterMobileAgendaSection<
+  T extends InterpreterMobileAgendaItem,
+> = {
   date: string;
   label: string;
   itemCount: number;
@@ -149,10 +153,16 @@ function kindFromTitle(title: string): AppointmentTimelineKind {
   ) {
     return "followup";
   }
-  if (title.startsWith(INCOMING_DATA_PREFIX) || title.startsWith(INCOMING_DATA_CHECKLIST_PREFIX)) {
+  if (
+    title.startsWith(INCOMING_DATA_PREFIX) ||
+    title.startsWith(INCOMING_DATA_CHECKLIST_PREFIX)
+  ) {
     return "clinical";
   }
-  if (title.startsWith(EXTERNAL_HANDOFF_PREFIX) || title.startsWith(FINDINGS_CHECKLIST_PREFIX)) {
+  if (
+    title.startsWith(EXTERNAL_HANDOFF_PREFIX) ||
+    title.startsWith(FINDINGS_CHECKLIST_PREFIX)
+  ) {
     return "workflow";
   }
   if (title.startsWith(BILLING_HANDOFF_PREFIX)) {
@@ -175,7 +185,7 @@ function toneFromTaskStatus(status: string): AppointmentTimelineTone {
 }
 
 function toneFromCommunicationStatus(
-  status: TimelineCommunicationEntry["status"]
+  status: TimelineCommunicationEntry["status"],
 ): AppointmentTimelineTone {
   switch (status) {
     case "answered":
@@ -201,8 +211,12 @@ function communicationTargetLabel(entry: TimelineCommunicationEntry) {
   }
 }
 
-function formatInterpreterMobileAgendaDateLabel(date: string, todayDate: string) {
-  if (date === todayDate) return "Today";
+function formatInterpreterMobileAgendaDateLabel(
+  date: string,
+  todayDate: string,
+  todayLabel = "Today",
+) {
+  if (date === todayDate) return todayLabel;
   try {
     return new Intl.DateTimeFormat("en-GB", {
       weekday: "long",
@@ -225,7 +239,11 @@ export function shouldUseInterpreterMobileAgenda(
 
 export function buildInterpreterMobileAgendaSections<
   T extends InterpreterMobileAgendaItem,
->(items: T[], todayDate: string): InterpreterMobileAgendaSection<T>[] {
+>(
+  items: T[],
+  todayDate: string,
+  todayLabel = "Today",
+): InterpreterMobileAgendaSection<T>[] {
   const grouped = new Map<string, T[]>();
   const sorted = items
     .filter((item) => item.status !== "cancelled")
@@ -246,7 +264,7 @@ export function buildInterpreterMobileAgendaSections<
 
   return [...grouped.entries()].map(([date, groupItems]) => ({
     date,
-    label: formatInterpreterMobileAgendaDateLabel(date, todayDate),
+    label: formatInterpreterMobileAgendaDateLabel(date, todayDate, todayLabel),
     itemCount: groupItems.length,
     pendingResponseCount: groupItems.filter(
       (item) => item.interpreter_response === "pending",
@@ -275,15 +293,64 @@ export function buildAppointmentTimelineEvents(args: {
   services: TimelineServiceEntry[];
   report: TimelineReportSummary | null;
   communications: TimelineCommunicationEntry[];
+  labels?: Pick<
+    Translations,
+    | "appointments_timeline_appointment_created"
+    | "appointments_timeline_scheduled_slot"
+    | "appointments_timeline_interpreter_pending"
+    | "appointments_timeline_interpreter_assigned"
+    | "appointments_timeline_interpreter_accepted"
+    | "appointments_timeline_interpreter_declined"
+    | "appointments_timeline_interpreter_discussion"
+    | "appointments_timeline_checklist_completed"
+    | "appointments_timeline_checklist_pending"
+    | "appointments_timeline_external_response_logged"
+    | "appointments_timeline_external_communication_cancelled"
+    | "appointments_timeline_external_communication_closed"
+    | "appointments_timeline_interpreter_report_submitted"
+    | "appointments_timeline_interpreter_report_approved"
+    | "appointments_timeline_interpreter_report_rejected"
+  >;
 }) {
-  const { detail, checklist, reminders, tasks, services, report, communications } = args;
+  const {
+    detail,
+    checklist,
+    reminders,
+    tasks,
+    services,
+    report,
+    communications,
+  } = args;
   if (!detail) return [] as AppointmentTimelineEvent[];
+  const labels = {
+    appointments_timeline_appointment_created: "Appointment created",
+    appointments_timeline_scheduled_slot: "Scheduled slot",
+    appointments_timeline_interpreter_pending: "Interpreter pending",
+    appointments_timeline_interpreter_assigned: "Interpreter assigned",
+    appointments_timeline_interpreter_accepted: "Interpreter accepted",
+    appointments_timeline_interpreter_declined: "Interpreter declined",
+    appointments_timeline_interpreter_discussion: "Interpreter in discussion",
+    appointments_timeline_checklist_completed: "Checklist completed",
+    appointments_timeline_checklist_pending: "Checklist pending",
+    appointments_timeline_external_response_logged: "External response logged",
+    appointments_timeline_external_communication_cancelled:
+      "External communication cancelled",
+    appointments_timeline_external_communication_closed:
+      "External communication closed",
+    appointments_timeline_interpreter_report_submitted:
+      "Interpreter report submitted",
+    appointments_timeline_interpreter_report_approved:
+      "Interpreter report approved",
+    appointments_timeline_interpreter_report_rejected:
+      "Interpreter report rejected",
+    ...args.labels,
+  };
 
   const events: AppointmentTimelineEvent[] = [
     {
       id: `created:${detail.id}`,
       occurredAt: detail.created_at,
-      title: "Appointment created",
+      title: labels.appointments_timeline_appointment_created,
       detail: `${detail.patient_pid} · ${detail.title}`,
       kind: "workflow",
       tone: "info",
@@ -291,7 +358,7 @@ export function buildAppointmentTimelineEvents(args: {
     {
       id: `slot:${detail.id}`,
       occurredAt: `${detail.date}T${detail.time_start ?? "09:00"}`,
-      title: "Scheduled slot",
+      title: labels.appointments_timeline_scheduled_slot,
       detail: [
         buildSlotLabel(detail),
         detail.provider_name ? `Clinic: ${detail.provider_name}` : "",
@@ -308,10 +375,18 @@ export function buildAppointmentTimelineEvents(args: {
     events.push({
       id: `interpreter:${detail.id}`,
       occurredAt: `${detail.date}T${detail.time_start ?? "09:00"}`,
-      title: detail.interpreter_name
-        ? `Interpreter ${detail.interpreter_response || "assigned"}`
-        : "Interpreter pending",
-      detail: [detail.interpreter_name, detail.interpreter_response].filter(Boolean).join(" · "),
+      title: !detail.interpreter_name
+        ? labels.appointments_timeline_interpreter_pending
+        : detail.interpreter_response === "accepted"
+          ? labels.appointments_timeline_interpreter_accepted
+          : detail.interpreter_response === "declined"
+            ? labels.appointments_timeline_interpreter_declined
+            : detail.interpreter_response === "discussion"
+              ? labels.appointments_timeline_interpreter_discussion
+              : labels.appointments_timeline_interpreter_assigned,
+      detail: [detail.interpreter_name, detail.interpreter_response]
+        .filter(Boolean)
+        .join(" · "),
       kind: "interpreter",
       tone:
         detail.interpreter_response === "accepted"
@@ -328,7 +403,9 @@ export function buildAppointmentTimelineEvents(args: {
     events.push({
       id: `checklist:${item.id}`,
       occurredAt: item.completed_at ?? detail.created_at,
-      title: item.is_completed ? "Checklist completed" : "Checklist pending",
+      title: item.is_completed
+        ? labels.appointments_timeline_checklist_completed
+        : labels.appointments_timeline_checklist_pending,
       detail: item.item_text,
       kind: kindFromTitle(item.item_text),
       tone: item.is_completed ? "success" : "warning",
@@ -340,7 +417,9 @@ export function buildAppointmentTimelineEvents(args: {
       id: `reminder:${item.id}`,
       occurredAt: item.completed_at ?? item.remind_at,
       title: item.title,
-      detail: [item.user_name, item.description ?? ""].filter(Boolean).join(" · "),
+      detail: [item.user_name, item.description ?? ""]
+        .filter(Boolean)
+        .join(" · "),
       kind: kindFromTitle(item.title),
       tone: item.is_completed ? "success" : "info",
     });
@@ -351,7 +430,11 @@ export function buildAppointmentTimelineEvents(args: {
       id: `task:${task.id}`,
       occurredAt: task.completed_at ?? task.due_date ?? task.created_at,
       title: task.title,
-      detail: [task.assigned_to_name, task.assigned_to_role, task.description ?? ""]
+      detail: [
+        task.assigned_to_name,
+        task.assigned_to_role,
+        task.description ?? "",
+      ]
         .filter(Boolean)
         .join(" · "),
       kind: kindFromTitle(task.title),
@@ -362,9 +445,12 @@ export function buildAppointmentTimelineEvents(args: {
   for (const service of services) {
     events.push({
       id: `service:${service.id}`,
-      occurredAt: service.completed_at ?? service.starts_at ?? service.created_at,
+      occurredAt:
+        service.completed_at ?? service.starts_at ?? service.created_at,
       title: service.title,
-      detail: [service.assigned_concierge_name, service.status].filter(Boolean).join(" · "),
+      detail: [service.assigned_concierge_name, service.status]
+        .filter(Boolean)
+        .join(" · "),
       kind: "concierge",
       tone: service.status === "completed" ? "success" : "info",
     });
@@ -391,8 +477,12 @@ export function buildAppointmentTimelineEvents(args: {
       events.push({
         id: `communication:${item.id}:answered`,
         occurredAt: item.responded_at,
-        title: "External response logged",
-        detail: [communicationTargetLabel(item), item.created_by_name, item.message ?? ""]
+        title: labels.appointments_timeline_external_response_logged,
+        detail: [
+          communicationTargetLabel(item),
+          item.created_by_name,
+          item.message ?? "",
+        ]
           .filter(Boolean)
           .join(" · "),
         kind: "communication",
@@ -406,9 +496,11 @@ export function buildAppointmentTimelineEvents(args: {
         occurredAt: item.closed_at,
         title:
           item.status === "cancelled"
-            ? "External communication cancelled"
-            : "External communication closed",
-        detail: [communicationTargetLabel(item), item.created_by_name].filter(Boolean).join(" · "),
+            ? labels.appointments_timeline_external_communication_cancelled
+            : labels.appointments_timeline_external_communication_closed,
+        detail: [communicationTargetLabel(item), item.created_by_name]
+          .filter(Boolean)
+          .join(" · "),
         kind: "communication",
         tone: item.status === "cancelled" ? "danger" : "success",
       });
@@ -419,7 +511,7 @@ export function buildAppointmentTimelineEvents(args: {
     events.push({
       id: `report:${report.id}:submitted`,
       occurredAt: report.created_at,
-      title: "Interpreter report submitted",
+      title: labels.appointments_timeline_interpreter_report_submitted,
       detail: `${report.interpreter_name} · ${report.hours}h`,
       kind: "interpreter",
       tone: report.approval_status === "approved" ? "success" : "info",
@@ -431,9 +523,11 @@ export function buildAppointmentTimelineEvents(args: {
         occurredAt: report.approved_at ?? report.created_at,
         title:
           report.approval_status === "approved"
-            ? "Interpreter report approved"
-            : "Interpreter report rejected",
-        detail: [report.approved_by_name, report.notes ?? ""].filter(Boolean).join(" · "),
+            ? labels.appointments_timeline_interpreter_report_approved
+            : labels.appointments_timeline_interpreter_report_rejected,
+        detail: [report.approved_by_name, report.notes ?? ""]
+          .filter(Boolean)
+          .join(" · "),
         kind: "interpreter",
         tone: report.approval_status === "approved" ? "success" : "danger",
       });

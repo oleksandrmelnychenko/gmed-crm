@@ -129,22 +129,34 @@ test.describe("staff appointments live workflows", () => {
 
     const doctorFollowUpSection = page
       .locator("section")
-      .filter({ hasText: "Doctor-directed follow-up" })
+      .filter({ hasText: "Ärztlich angeordnete Nachsorge" })
       .first();
-    await doctorFollowUpSection
-      .getByPlaceholder(/Titel|Title/i)
-      .fill("Live E2E doctor follow-up");
-    await doctorFollowUpSection
+    const doctorFollowUpForm = doctorFollowUpSection.locator("form").first();
+    await doctorFollowUpForm
       .locator("select")
       .first()
-      .selectOption(scenario.credentials.pm.user_id);
-    await doctorFollowUpSection
-      .getByLabel(/Fällig am|Due at/i)
+      .selectOption({ index: 1 });
+    await doctorFollowUpForm
+      .locator('input[type="datetime-local"]')
+      .first()
       .fill(futureLocalDateTime(3));
-    await doctorFollowUpSection
-      .getByLabel(/Notizen|Notes/i)
+    await doctorFollowUpForm
+      .locator("textarea")
+      .first()
       .fill("Coordinate the directed follow-up with the patient.");
-    await doctorFollowUpSection
+    await doctorFollowUpForm
+      .locator("input")
+      .first()
+      .fill("Live E2E doctor follow-up");
+    await expect(doctorFollowUpForm.locator("input").first()).toHaveValue(
+      "Live E2E doctor follow-up",
+    );
+    await expect(
+      doctorFollowUpForm.getByRole("button", {
+        name: "Create doctor follow-up",
+      }),
+    ).toBeEnabled();
+    await doctorFollowUpForm
       .getByRole("button", { name: "Create doctor follow-up" })
       .click();
     await expect(
@@ -266,7 +278,9 @@ test.describe("staff appointments live workflows", () => {
       page.getByText("Organisation der Behandlung").first(),
     ).toBeVisible();
     await expect(
-      page.getByText("Auto-billed from completed appointment").first(),
+      page
+        .getByText("Automatisch aus abgeschlossenem Termin abgerechnet")
+        .first(),
     ).toBeVisible();
   });
 
@@ -495,7 +509,7 @@ test.describe("staff appointments live workflows", () => {
 
     await page.goto(`/orders?order=${scenario.order.id}`);
     await expect(
-      page.getByText("Auto-billed from interpreter report"),
+      page.getByText("Automatisch aus Dolmetscherbericht abgerechnet"),
     ).toBeVisible();
     await expect(page.getByText("Interpreter hours").first()).toBeVisible();
     await expect(

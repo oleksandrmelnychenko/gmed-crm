@@ -923,7 +923,9 @@ function buildFollowUpVisitForm(
     timeStart: start ? start.slice(11, 16) : "",
     timeEnd: end ? end.slice(11, 16) : "",
     location: detail.location ?? "",
-    category: detail.category ? `${detail.category} ${followUpLabel}` : followUpLabel,
+    category: detail.category
+      ? `${detail.category} ${followUpLabel}`
+      : followUpLabel,
     notes: detail.followup_notes ?? detail.notes ?? "",
     repeatEnabled: false,
     repeatFrequency: "weekly",
@@ -1132,7 +1134,10 @@ function roleLabel(role?: string | null) {
     : "";
 }
 
-function appointmentTypeLabel(type: AppointmentKind, tr?: Record<string, string>) {
+function appointmentTypeLabel(
+  type: AppointmentKind,
+  tr?: Record<string, string>,
+) {
   if (type === "non_medical") return tr?.role_concierge ?? "Concierge";
   if (type === "internal") return tr?.common_provider ?? "Internal";
   return tr?.common_doctor ?? "Medical";
@@ -1210,18 +1215,21 @@ function reportApprovalBadgeClass(status: string) {
   }
 }
 
-function interpreterReportBillingSyncLabel(status: string | null | undefined) {
+function interpreterReportBillingSyncLabel(
+  status: string | null | undefined,
+  t: Translations,
+) {
   switch (status) {
     case "synced":
-      return "Auto-billed into order services";
+      return t.appointments_billing_sync_synced;
     case "missing_catalog":
-      return "Missing interpreter_hours catalog entry";
+      return t.appointments_billing_sync_missing_catalog;
     case "missing_order":
-      return "Appointment is not linked to an order";
+      return t.appointments_billing_sync_missing_order;
     case "pending_sync":
-      return "Approved, waiting for billing sync";
+      return t.appointments_billing_sync_pending;
     default:
-      return "No billing sync state yet";
+      return t.appointments_billing_sync_none;
   }
 }
 
@@ -1482,13 +1490,19 @@ function operationalScopeReason(
           ? (tr?.common_active ?? "Completed slot")
           : (tr?.role_interpreter ?? "Assigned interpreter slot");
     case "concierge_flow":
-      return item.provider_name || (tr?.role_concierge ?? "Non-medical service flow");
+      return (
+        item.provider_name || (tr?.role_concierge ?? "Non-medical service flow")
+      );
     case "blocked_medical":
       return userRole === "concierge"
         ? (tr?.common_inactive ?? "Medical slot shown as blocked")
         : (tr?.common_inactive ?? "Blocked slot");
     case "all":
-      return item.owner_name || item.provider_name || (tr?.appointments_title ?? "Appointment");
+      return (
+        item.owner_name ||
+        item.provider_name ||
+        (tr?.appointments_title ?? "Appointment")
+      );
   }
 }
 
@@ -1740,16 +1754,21 @@ function recurringStatusTargetsForScope(
     return items.filter((item) => item.id === detail.id);
   }
   if (scope === "following") {
-    return items.filter((item) => item.recurrence_index >= detail.recurrence_index);
+    return items.filter(
+      (item) => item.recurrence_index >= detail.recurrence_index,
+    );
   }
   return items;
 }
 
-function recurringOccurrenceLabel(item: {
-  date: string;
-  recurrence_index: number;
-  open_checklist_count: number;
-}, t: Translations | Record<string, string>) {
+function recurringOccurrenceLabel(
+  item: {
+    date: string;
+    recurrence_index: number;
+    open_checklist_count: number;
+  },
+  t: Translations | Record<string, string>,
+) {
   const checklistLabel =
     item.open_checklist_count === 1
       ? t.appointments_open_checklist
@@ -1789,7 +1808,8 @@ function currentRecurringLineageHistory(detail: AppointmentDetail) {
   return (
     detail.recurring_lineage_history.find(
       (item) =>
-        item.relation === "current" || item.series_id === detail.recurrence_series_id,
+        item.relation === "current" ||
+        item.series_id === detail.recurrence_series_id,
     ) ?? null
   );
 }
@@ -2403,9 +2423,7 @@ function StaffAppointmentsPage() {
     (item) => !["completed", "cancelled"].includes(item.status),
   );
   const billingReadinessWarnings = [
-    detail?.interpreter_id && !interpreterReportReady
-      ? tr.common_error
-      : "",
+    detail?.interpreter_id && !interpreterReportReady ? tr.common_error : "",
     detail?.type === "non_medical" && serviceInFlightCount > 0
       ? `${serviceInFlightCount} concierge service(s) are still operationally open.`
       : "",
@@ -2415,9 +2433,7 @@ function StaffAppointmentsPage() {
     settledConciergeServices.length === 0
       ? tr.common_not_set
       : "",
-    billingStaff.length === 0
-      ? tr.common_not_set
-      : "",
+    billingStaff.length === 0 ? tr.common_not_set : "",
   ].filter(Boolean);
   const showReportReviewActions = Boolean(
     (permissions.canApproveReport || permissions.canRejectReport) &&
@@ -2445,9 +2461,7 @@ function StaffAppointmentsPage() {
       ? `${openIncomingDataChecklistCount} incoming data item(s) still need triage.`
       : "",
     openTaskCount > 0 ? `${openTaskCount} operational task(s) still open.` : "",
-    !interpreterReportReady && detail?.interpreter_id
-      ? tr.common_error
-      : "",
+    !interpreterReportReady && detail?.interpreter_id ? tr.common_error : "",
     detail?.type === "non_medical" && serviceInFlightCount > 0
       ? `${serviceInFlightCount} concierge service(s) are still in progress.`
       : "",
@@ -2460,6 +2474,38 @@ function StaffAppointmentsPage() {
     services: detailServices,
     report: detailReport,
     communications: detailCommunications,
+    labels: {
+      appointments_timeline_appointment_created:
+        t.appointments_timeline_appointment_created,
+      appointments_timeline_scheduled_slot:
+        t.appointments_timeline_scheduled_slot,
+      appointments_timeline_interpreter_pending:
+        t.appointments_timeline_interpreter_pending,
+      appointments_timeline_interpreter_assigned:
+        t.appointments_timeline_interpreter_assigned,
+      appointments_timeline_interpreter_accepted:
+        t.appointments_timeline_interpreter_accepted,
+      appointments_timeline_interpreter_declined:
+        t.appointments_timeline_interpreter_declined,
+      appointments_timeline_interpreter_discussion:
+        t.appointments_timeline_interpreter_discussion,
+      appointments_timeline_checklist_completed:
+        t.appointments_timeline_checklist_completed,
+      appointments_timeline_checklist_pending:
+        t.appointments_timeline_checklist_pending,
+      appointments_timeline_external_response_logged:
+        t.appointments_timeline_external_response_logged,
+      appointments_timeline_external_communication_cancelled:
+        t.appointments_timeline_external_communication_cancelled,
+      appointments_timeline_external_communication_closed:
+        t.appointments_timeline_external_communication_closed,
+      appointments_timeline_interpreter_report_submitted:
+        t.appointments_timeline_interpreter_report_submitted,
+      appointments_timeline_interpreter_report_approved:
+        t.appointments_timeline_interpreter_report_approved,
+      appointments_timeline_interpreter_report_rejected:
+        t.appointments_timeline_interpreter_report_rejected,
+    },
   });
   const visibleTimelineEvents =
     timelineFilter === "all"
@@ -2469,9 +2515,9 @@ function StaffAppointmentsPage() {
     ? (attentionIndex.get(detail.id) ?? null)
     : null;
   const activeCalendarQuickActionItem = calendarQuickActionMenu
-    ? appointments.find(
+    ? (appointments.find(
         (item) => item.id === calendarQuickActionMenu.appointmentId,
-      ) ?? null
+      ) ?? null)
     : null;
   const detailLineageText = detail ? recurrenceLineageText(detail, t) : "";
   const detailLineageBadge = detail ? recurrenceLineageBadge(detail, t) : "";
@@ -2674,9 +2720,7 @@ function StaffAppointmentsPage() {
         setAppointments([]);
         setAttentionItems([]);
         setAppointmentsError(
-          error instanceof Error
-            ? error.message
-            : tr.common_failed_load,
+          error instanceof Error ? error.message : tr.common_failed_load,
         );
       } finally {
         if (active) setAppointmentsLoading(false);
@@ -2984,7 +3028,11 @@ function StaffAppointmentsPage() {
           "";
         setFollowUpAssigneeId(followUpDefaultAssignee);
         setFollowUpVisitForm(
-          buildFollowUpVisitForm(appointmentDetail, followUpDefaultAssignee, tr.phase_followup),
+          buildFollowUpVisitForm(
+            appointmentDetail,
+            followUpDefaultAssignee,
+            tr.phase_followup,
+          ),
         );
         setFollowUpVisitError("");
         setDoctorFollowUpForm(
@@ -2996,7 +3044,10 @@ function StaffAppointmentsPage() {
           ),
         );
         setPackageEndFollowUpForm(
-          blankPackageEndFollowUpForm(followUpDefaultAssignee, tr.appointments_new ?? ""),
+          blankPackageEndFollowUpForm(
+            followUpDefaultAssignee,
+            tr.appointments_new ?? "",
+          ),
         );
         setExternalHandoffForm(
           blankExternalHandoffForm(
@@ -3096,11 +3147,8 @@ function StaffAppointmentsPage() {
           category: appointmentDetail.category ?? "",
           notes: appointmentDetail.notes ?? "",
           repeatEnabled: Boolean(appointmentDetail.recurrence_frequency),
-          repeatFrequency:
-            appointmentDetail.recurrence_frequency ?? "weekly",
-          repeatInterval: String(
-            appointmentDetail.recurrence_interval ?? 1,
-          ),
+          repeatFrequency: appointmentDetail.recurrence_frequency ?? "weekly",
+          repeatInterval: String(appointmentDetail.recurrence_interval ?? 1),
           repeatCount: appointmentDetail.recurrence_count
             ? String(appointmentDetail.recurrence_count)
             : "",
@@ -3197,10 +3245,11 @@ function StaffAppointmentsPage() {
     isMobile,
   );
   const mobileAgendaSections = useInterpreterMobileAgenda
-    ? buildInterpreterMobileAgendaSections(scopedAppointments, todayDate).slice(
-        0,
-        8,
-      )
+    ? buildInterpreterMobileAgendaSections(
+        scopedAppointments,
+        todayDate,
+        t.appointments_today,
+      ).slice(0, 8)
     : [];
   const mobileAgendaPendingCount = scopedAppointments.filter(
     (item) =>
@@ -3407,7 +3456,9 @@ function StaffAppointmentsPage() {
             }
             aria-controls={`appointment-quick-actions-${arg.event.id}`}
             className="absolute top-1 right-1 inline-flex size-6 items-center justify-center rounded-full border border-slate-300/80 bg-white/90 text-slate-600 shadow-sm transition hover:bg-white hover:text-slate-950"
-            onClick={(event) => openCalendarQuickActionLayer(event, arg.event.id)}
+            onClick={(event) =>
+              openCalendarQuickActionLayer(event, arg.event.id)
+            }
           >
             <MoreHorizontal className="size-3.5" />
           </button>
@@ -3450,12 +3501,12 @@ function StaffAppointmentsPage() {
               className="rounded-full border border-slate-300 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-700"
               onClick={(event) => {
                 event.preventDefault();
-                  event.stopPropagation();
-                  void performStatusChange(arg.event.id, "completed");
-                }}
-              >
-                {t.dash_completed}
-              </button>
+                event.stopPropagation();
+                void performStatusChange(arg.event.id, "completed");
+              }}
+            >
+              {t.dash_completed}
+            </button>
             {props.recurrenceFrequency ? (
               <button
                 type="button"
@@ -3484,7 +3535,9 @@ function StaffAppointmentsPage() {
     setCreateBusy(true);
     setCreateError("");
     try {
-      const repeatInterval = parsePositiveIntegerInput(createForm.repeatInterval);
+      const repeatInterval = parsePositiveIntegerInput(
+        createForm.repeatInterval,
+      );
       const repeatCount = parsePositiveIntegerInput(createForm.repeatCount);
       if (createForm.repeatEnabled) {
         if (!repeatInterval) {
@@ -3610,9 +3663,7 @@ function StaffAppointmentsPage() {
     } catch (error) {
       info.revert();
       setAppointmentsError(
-        error instanceof Error
-          ? error.message
-          : tr.common_failed_update,
+        error instanceof Error ? error.message : tr.common_failed_update,
       );
     }
   }
@@ -3708,7 +3759,8 @@ function StaffAppointmentsPage() {
     setEditError("");
     try {
       const applyRecurrenceRule =
-        Boolean(detail.recurrence_frequency) && editRecurrenceScope !== "single";
+        Boolean(detail.recurrence_frequency) &&
+        editRecurrenceScope !== "single";
       const repeatInterval = parsePositiveIntegerInput(editForm.repeatInterval);
       const repeatCount = parsePositiveIntegerInput(editForm.repeatCount);
       if (applyRecurrenceRule) {
@@ -4057,9 +4109,7 @@ function StaffAppointmentsPage() {
       refreshDetail();
     } catch (error) {
       setDetailError(
-        error instanceof Error
-          ? error.message
-          : tr.common_failed_create,
+        error instanceof Error ? error.message : tr.common_failed_create,
       );
     } finally {
       setServiceBusy(false);
@@ -4108,9 +4158,7 @@ function StaffAppointmentsPage() {
       refreshDetail();
     } catch (error) {
       setDetailError(
-        error instanceof Error
-          ? error.message
-          : tr.common_failed_update,
+        error instanceof Error ? error.message : tr.common_failed_update,
       );
     } finally {
       setActionBusy("");
@@ -4209,9 +4257,7 @@ function StaffAppointmentsPage() {
       refreshDetail();
     } catch (error) {
       setDetailError(
-        error instanceof Error
-          ? error.message
-          : tr.common_failed_create,
+        error instanceof Error ? error.message : tr.common_failed_create,
       );
     } finally {
       setFollowUpBusy(false);
@@ -4251,9 +4297,7 @@ function StaffAppointmentsPage() {
       refreshDetail();
     } catch (error) {
       setDetailError(
-        error instanceof Error
-          ? error.message
-          : tr.common_failed_create,
+        error instanceof Error ? error.message : tr.common_failed_create,
       );
     } finally {
       setDoctorFollowUpBusy(false);
@@ -4299,14 +4343,15 @@ function StaffAppointmentsPage() {
         taskPriority: packageEndFollowUpForm.taskPriority,
       });
       setPackageEndFollowUpForm(
-        blankPackageEndFollowUpForm(packageEndFollowUpForm.assigneeId, tr.appointments_new ?? ""),
+        blankPackageEndFollowUpForm(
+          packageEndFollowUpForm.assigneeId,
+          tr.appointments_new ?? "",
+        ),
       );
       refreshDetail();
     } catch (error) {
       setDetailError(
-        error instanceof Error
-          ? error.message
-          : tr.common_failed_create,
+        error instanceof Error ? error.message : tr.common_failed_create,
       );
     } finally {
       setPackageEndFollowUpBusy(false);
@@ -4428,9 +4473,7 @@ function StaffAppointmentsPage() {
       refreshDetail();
     } catch (error) {
       setDetailError(
-        error instanceof Error
-          ? error.message
-          : tr.common_failed_create,
+        error instanceof Error ? error.message : tr.common_failed_create,
       );
     } finally {
       setExternalHandoffBusy(false);
@@ -4454,9 +4497,7 @@ function StaffAppointmentsPage() {
       refreshDetail();
     } catch (error) {
       setDetailError(
-        error instanceof Error
-          ? error.message
-          : tr.common_failed_update,
+        error instanceof Error ? error.message : tr.common_failed_update,
       );
     } finally {
       setActionBusy("");
@@ -4534,9 +4575,7 @@ function StaffAppointmentsPage() {
       refreshDetail();
     } catch (error) {
       setDetailError(
-        error instanceof Error
-          ? error.message
-          : tr.common_failed_create,
+        error instanceof Error ? error.message : tr.common_failed_create,
       );
     } finally {
       setBillingHandoffBusy(false);
@@ -4556,9 +4595,7 @@ function StaffAppointmentsPage() {
       detail.provider_name ? `Clinic: ${detail.provider_name}` : "",
       detail.doctor_name ? `Doctor: ${detail.doctor_name}` : "",
       findingsFollowUpForm.translationRequired ? "{tr.common_loading}" : "",
-      findingsFollowUpForm.sendToPatient
-        ? tr.common_error
-        : "",
+      findingsFollowUpForm.sendToPatient ? tr.common_error : "",
       findingsFollowUpForm.notes.trim() || "",
     ].filter(Boolean);
 
@@ -4588,9 +4625,7 @@ function StaffAppointmentsPage() {
       detail.doctor_name ? `Doctor: ${detail.doctor_name}` : "",
       `Appointment: ${detail.patient_pid} · ${detail.title} · ${slotLabel(detail)}`,
       findingsFollowUpForm.translationRequired ? "{tr.common_loading}" : "",
-      findingsFollowUpForm.sendToPatient
-        ? tr.common_error
-        : "",
+      findingsFollowUpForm.sendToPatient ? tr.common_error : "",
       findingsFollowUpForm.notes.trim() || "",
     ].filter(Boolean);
 
@@ -4628,9 +4663,7 @@ function StaffAppointmentsPage() {
       refreshDetail();
     } catch (error) {
       setDetailError(
-        error instanceof Error
-          ? error.message
-          : tr.common_failed_create,
+        error instanceof Error ? error.message : tr.common_failed_create,
       );
     } finally {
       setFindingsFollowUpBusy(false);
@@ -4648,9 +4681,7 @@ function StaffAppointmentsPage() {
       `Incoming data intake: ${detail.patient_pid} · ${detail.title}`,
       `Source: ${incomingDataSourceLabel(incomingDataForm.source)}`,
       `Category: ${incomingDataCategoryLabel(incomingDataForm.category)}`,
-      incomingDataForm.requiresCaseUpdate
-        ? tr.common_error
-        : "",
+      incomingDataForm.requiresCaseUpdate ? tr.common_error : "",
       incomingDataForm.requiresPatientFollowUp ? "{tr.appointments_title}" : "",
       incomingDataForm.notes.trim() || "",
     ].filter(Boolean);
@@ -4677,12 +4708,8 @@ function StaffAppointmentsPage() {
       `Appointment: ${detail.patient_pid} · ${detail.title} · ${slotLabel(detail)}`,
       `Source: ${incomingDataSourceLabel(incomingDataForm.source)}`,
       `Category: ${incomingDataCategoryLabel(incomingDataForm.category)}`,
-      incomingDataForm.requiresCaseUpdate
-        ? tr.common_error
-        : "",
-      incomingDataForm.requiresPatientFollowUp
-        ? tr.common_error
-        : "",
+      incomingDataForm.requiresCaseUpdate ? tr.common_error : "",
+      incomingDataForm.requiresPatientFollowUp ? tr.common_error : "",
       incomingDataForm.notes.trim() || "",
     ].filter(Boolean);
 
@@ -4719,9 +4746,7 @@ function StaffAppointmentsPage() {
       refreshDetail();
     } catch (error) {
       setDetailError(
-        error instanceof Error
-          ? error.message
-          : tr.common_failed_create,
+        error instanceof Error ? error.message : tr.common_failed_create,
       );
     } finally {
       setIncomingDataBusy(false);
@@ -4826,7 +4851,11 @@ function StaffAppointmentsPage() {
       );
       refreshAppointments();
       setFollowUpVisitForm(
-        buildFollowUpVisitForm(detail, followUpVisitForm.reminderUserId, tr.phase_followup),
+        buildFollowUpVisitForm(
+          detail,
+          followUpVisitForm.reminderUserId,
+          tr.phase_followup,
+        ),
       );
       if (result.id) {
         openDetailSheet(result.id);
@@ -4835,9 +4864,7 @@ function StaffAppointmentsPage() {
       }
     } catch (error) {
       setFollowUpVisitError(
-        error instanceof Error
-          ? error.message
-          : tr.common_failed_create,
+        error instanceof Error ? error.message : tr.common_failed_create,
       );
     } finally {
       setFollowUpVisitBusy(false);
@@ -4901,9 +4928,7 @@ function StaffAppointmentsPage() {
         refreshDetail();
       } else {
         setDetailError(
-          error instanceof Error
-            ? error.message
-            : tr.common_failed_update,
+          error instanceof Error ? error.message : tr.common_failed_update,
         );
       }
     } finally {
@@ -5110,7 +5135,8 @@ function StaffAppointmentsPage() {
                 <div className="flex flex-wrap items-center gap-2">
                   <QuickScopeButton
                     active={
-                      filters.dateFrom === todayDate && filters.dateTo === todayDate
+                      filters.dateFrom === todayDate &&
+                      filters.dateTo === todayDate
                     }
                     onClick={applyTodayScope}
                   >
@@ -5118,7 +5144,8 @@ function StaffAppointmentsPage() {
                   </QuickScopeButton>
                   <QuickScopeButton
                     active={
-                      filters.dateFrom === weekStart && filters.dateTo === weekEnd
+                      filters.dateFrom === weekStart &&
+                      filters.dateTo === weekEnd
                     }
                     onClick={applyWeekScope}
                   >
@@ -5193,527 +5220,561 @@ function StaffAppointmentsPage() {
             )}
           </div>
         ) : (
-        <div className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
-          <aside className="space-y-6">
-            <section className={sectionCardClass("p-5")}>
-              <div className="mb-4 flex items-center justify-between">
-                <div>
-                  <h2 className="text-sm font-semibold text-slate-950">
-                    {t.common_search}
-                  </h2>
-                  <p className="text-xs text-muted-foreground">
-                    Narrow the calendar to the exact operational slice.
-                  </p>
+          <div className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
+            <aside className="space-y-6">
+              <section className={sectionCardClass("p-5")}>
+                <div className="mb-4 flex items-center justify-between">
+                  <div>
+                    <h2 className="text-sm font-semibold text-slate-950">
+                      {t.common_search}
+                    </h2>
+                    <p className="text-xs text-muted-foreground">
+                      Narrow the calendar to the exact operational slice.
+                    </p>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setOperationalScope("all");
+                      setFilters(DEFAULT_FILTERS);
+                      syncQuery({
+                        patient: null,
+                        provider: null,
+                        doctor: null,
+                        appointment: null,
+                      });
+                    }}
+                  >
+                    Reset
+                  </Button>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setOperationalScope("all");
-                    setFilters(DEFAULT_FILTERS);
-                    syncQuery({
-                      patient: null,
-                      provider: null,
-                      doctor: null,
-                      appointment: null,
-                    });
-                  }}
-                >
-                  Reset
-                </Button>
-              </div>
-              <div className="space-y-4">
-                <Field label={t.common_search}>
-                  <Input
-                    value={filters.search}
-                    onChange={(event) =>
-                      setFilters((current) => ({
-                        ...current,
-                        search: event.target.value,
-                      }))
-                    }
-                    placeholder={tr.common_search}
-                    className="h-10 rounded-xl bg-slate-50"
-                  />
-                </Field>
-                <Field label={t.appointments_type}>
-                  <select
-                    value={filters.appointmentType}
-                    onChange={(event) =>
-                      setFilters((current) => ({
-                        ...current,
-                        appointmentType: event.target.value,
-                      }))
-                    }
-                    className={selectClassName}
-                  >
-                    <option value="">{t.providers_all}</option>
-                    {TYPE_OPTIONS.map((value) => (
-                      <option key={value} value={value}>
-                        {appointmentTypeLabel(value, tr)}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label="Care path">
-                  <select
-                    value={filters.carePathKind}
-                    onChange={(event) =>
-                      setFilters((current) => ({
-                        ...current,
-                        carePathKind: event.target.value,
-                      }))
-                    }
-                    className={selectClassName}
-                  >
-                    <option value="">{t.providers_all}</option>
-                    {CARE_PATH_KIND_OPTIONS.map((value) => (
-                      <option key={value} value={value}>
-                        {carePathKindLabel(value)}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label={t.users_status}>
-                  <select
-                    value={filters.status}
-                    onChange={(event) =>
-                      setFilters((current) => ({
-                        ...current,
-                        status: event.target.value,
-                      }))
-                    }
-                    className={selectClassName}
-                  >
-                    <option value="">{t.providers_all}</option>
-                    {STATUS_OPTIONS.map((value) => (
-                      <option key={value} value={value}>
-                        {statusLabel(value)}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label={t.orders_patient}>
-                  <select
-                    value={filters.patientId}
-                    onChange={(event) => {
-                      const patientId = event.target.value;
-                      setFilters((current) => ({ ...current, patientId }));
-                      syncQuery({ patient: patientId || null });
-                    }}
-                    className={selectClassName}
-                  >
-                    <option value="">{tr.providers_all}</option>
-                    {patients.map((patient) => (
-                      <option key={patient.id} value={patient.id}>
-                        {patient.patient_id} · {patientName(patient)}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label={t.common_provider}>
-                  <select
-                    value={filters.providerId}
-                    onChange={(event) => {
-                      const providerId = event.target.value;
-                      setFilters((current) => ({
-                        ...current,
-                        providerId,
-                        doctorId: "",
-                      }));
-                      syncQuery({ provider: providerId || null, doctor: null });
-                    }}
-                    className={selectClassName}
-                  >
-                    <option value="">{tr.providers_all}</option>
-                    {providers.map((provider) => (
-                      <option key={provider.id} value={provider.id}>
-                        {provider.name}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label={t.common_doctor}>
-                  <select
-                    value={filters.doctorId}
-                    onChange={(event) => {
-                      const doctorId = event.target.value;
-                      setFilters((current) => ({ ...current, doctorId }));
-                      syncQuery({ doctor: doctorId || null });
-                    }}
-                    className={selectClassName}
-                    disabled={!filters.providerId}
-                  >
-                    <option value="">{t.providers_all}</option>
-                    {filterDoctors.map((doctor) => (
-                      <option key={doctor.id} value={doctor.id}>
-                        {doctorLabel(doctor)}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label={t.patients_assign_owner}>
-                  <select
-                    value={filters.ownerUserId}
-                    onChange={(event) =>
-                      setFilters((current) => ({
-                        ...current,
-                        ownerUserId: event.target.value,
-                      }))
-                    }
-                    className={selectClassName}
-                  >
-                    <option value="">{tr.providers_all}</option>
-                    {staff.map((member) => (
-                      <option key={member.id} value={member.id}>
-                        {member.name} · {roleLabel(member.role)}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label={t.common_doctor}>
-                  <select
-                    value={filters.interpreterId}
-                    onChange={(event) =>
-                      setFilters((current) => ({
-                        ...current,
-                        interpreterId: event.target.value,
-                      }))
-                    }
-                    className={selectClassName}
-                  >
-                    <option value="">{t.providers_all}</option>
-                    {interpreters.map((member) => (
-                      <option key={member.id} value={member.id}>
-                        {member.name} · {roleLabel(member.role)}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-1">
-                  <Field label={tr.providers_service_valid_from}>
+                <div className="space-y-4">
+                  <Field label={t.common_search}>
                     <Input
-                      type="date"
-                      value={filters.dateFrom}
+                      value={filters.search}
                       onChange={(event) =>
                         setFilters((current) => ({
                           ...current,
-                          dateFrom: event.target.value,
+                          search: event.target.value,
                         }))
                       }
+                      placeholder={tr.common_search}
                       className="h-10 rounded-xl bg-slate-50"
                     />
                   </Field>
-                  <Field label={tr.providers_service_valid_to}>
-                    <Input
-                      type="date"
-                      value={filters.dateTo}
+                  <Field label={t.appointments_type}>
+                    <select
+                      value={filters.appointmentType}
                       onChange={(event) =>
                         setFilters((current) => ({
                           ...current,
-                          dateTo: event.target.value,
+                          appointmentType: event.target.value,
                         }))
                       }
-                      className="h-10 rounded-xl bg-slate-50"
-                    />
-                  </Field>
-                </div>
-              </div>
-            </section>
-
-            <section className={sectionCardClass("p-5")}>
-              <div className="mb-4 flex items-center justify-between">
-                <div>
-                  <h2 className="text-sm font-semibold text-slate-950">
-                    {t.appointments_title}
-                  </h2>
-                  <p className="text-xs text-muted-foreground">
-                    {operationalScope === "all"
-                      ? tr.appointments_title
-                      : tr.appointments_title}
-                  </p>
-                </div>
-                {appointmentsLoading || metadataLoading ? (
-                  <LoaderCircle className="size-4 animate-spin text-muted-foreground" />
-                ) : null}
-              </div>
-              <div className="space-y-3">
-                {queueAppointments.length === 0 ? (
-                  <EmptyState text={tr.common_not_set} />
-                ) : (
-                  queueAppointments.map((item) => (
-                    <div
-                      key={item.id}
-                      className="rounded-2xl border border-slate-200/80 bg-slate-50/80 px-4 py-3 transition hover:border-sky-200 hover:bg-white"
+                      className={selectClassName}
                     >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <button
-                            type="button"
-                            onClick={() => openDetailSheet(item.id)}
-                            className="truncate text-left text-sm font-semibold text-slate-950 hover:text-sky-700"
+                      <option value="">{t.providers_all}</option>
+                      {TYPE_OPTIONS.map((value) => (
+                        <option key={value} value={value}>
+                          {appointmentTypeLabel(value, tr)}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="Care path">
+                    <select
+                      value={filters.carePathKind}
+                      onChange={(event) =>
+                        setFilters((current) => ({
+                          ...current,
+                          carePathKind: event.target.value,
+                        }))
+                      }
+                      className={selectClassName}
+                    >
+                      <option value="">{t.providers_all}</option>
+                      {CARE_PATH_KIND_OPTIONS.map((value) => (
+                        <option key={value} value={value}>
+                          {carePathKindLabel(value)}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label={t.users_status}>
+                    <select
+                      value={filters.status}
+                      onChange={(event) =>
+                        setFilters((current) => ({
+                          ...current,
+                          status: event.target.value,
+                        }))
+                      }
+                      className={selectClassName}
+                    >
+                      <option value="">{t.providers_all}</option>
+                      {STATUS_OPTIONS.map((value) => (
+                        <option key={value} value={value}>
+                          {statusLabel(value)}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label={t.orders_patient}>
+                    <select
+                      value={filters.patientId}
+                      onChange={(event) => {
+                        const patientId = event.target.value;
+                        setFilters((current) => ({ ...current, patientId }));
+                        syncQuery({ patient: patientId || null });
+                      }}
+                      className={selectClassName}
+                    >
+                      <option value="">{tr.providers_all}</option>
+                      {patients.map((patient) => (
+                        <option key={patient.id} value={patient.id}>
+                          {patient.patient_id} · {patientName(patient)}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label={t.common_provider}>
+                    <select
+                      value={filters.providerId}
+                      onChange={(event) => {
+                        const providerId = event.target.value;
+                        setFilters((current) => ({
+                          ...current,
+                          providerId,
+                          doctorId: "",
+                        }));
+                        syncQuery({
+                          provider: providerId || null,
+                          doctor: null,
+                        });
+                      }}
+                      className={selectClassName}
+                    >
+                      <option value="">{tr.providers_all}</option>
+                      {providers.map((provider) => (
+                        <option key={provider.id} value={provider.id}>
+                          {provider.name}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label={t.common_doctor}>
+                    <select
+                      value={filters.doctorId}
+                      onChange={(event) => {
+                        const doctorId = event.target.value;
+                        setFilters((current) => ({ ...current, doctorId }));
+                        syncQuery({ doctor: doctorId || null });
+                      }}
+                      className={selectClassName}
+                      disabled={!filters.providerId}
+                    >
+                      <option value="">{t.providers_all}</option>
+                      {filterDoctors.map((doctor) => (
+                        <option key={doctor.id} value={doctor.id}>
+                          {doctorLabel(doctor)}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label={t.patients_assign_owner}>
+                    <select
+                      value={filters.ownerUserId}
+                      onChange={(event) =>
+                        setFilters((current) => ({
+                          ...current,
+                          ownerUserId: event.target.value,
+                        }))
+                      }
+                      className={selectClassName}
+                    >
+                      <option value="">{tr.providers_all}</option>
+                      {staff.map((member) => (
+                        <option key={member.id} value={member.id}>
+                          {member.name} · {roleLabel(member.role)}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label={t.common_doctor}>
+                    <select
+                      value={filters.interpreterId}
+                      onChange={(event) =>
+                        setFilters((current) => ({
+                          ...current,
+                          interpreterId: event.target.value,
+                        }))
+                      }
+                      className={selectClassName}
+                    >
+                      <option value="">{t.providers_all}</option>
+                      {interpreters.map((member) => (
+                        <option key={member.id} value={member.id}>
+                          {member.name} · {roleLabel(member.role)}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-1">
+                    <Field label={tr.providers_service_valid_from}>
+                      <Input
+                        type="date"
+                        value={filters.dateFrom}
+                        onChange={(event) =>
+                          setFilters((current) => ({
+                            ...current,
+                            dateFrom: event.target.value,
+                          }))
+                        }
+                        className="h-10 rounded-xl bg-slate-50"
+                      />
+                    </Field>
+                    <Field label={tr.providers_service_valid_to}>
+                      <Input
+                        type="date"
+                        value={filters.dateTo}
+                        onChange={(event) =>
+                          setFilters((current) => ({
+                            ...current,
+                            dateTo: event.target.value,
+                          }))
+                        }
+                        className="h-10 rounded-xl bg-slate-50"
+                      />
+                    </Field>
+                  </div>
+                </div>
+              </section>
+
+              <section className={sectionCardClass("p-5")}>
+                <div className="mb-4 flex items-center justify-between">
+                  <div>
+                    <h2 className="text-sm font-semibold text-slate-950">
+                      {t.appointments_title}
+                    </h2>
+                    <p className="text-xs text-muted-foreground">
+                      {operationalScope === "all"
+                        ? tr.appointments_title
+                        : tr.appointments_title}
+                    </p>
+                  </div>
+                  {appointmentsLoading || metadataLoading ? (
+                    <LoaderCircle className="size-4 animate-spin text-muted-foreground" />
+                  ) : null}
+                </div>
+                <div className="space-y-3">
+                  {queueAppointments.length === 0 ? (
+                    <EmptyState text={tr.common_not_set} />
+                  ) : (
+                    queueAppointments.map((item) => (
+                      <div
+                        key={item.id}
+                        className="rounded-2xl border border-slate-200/80 bg-slate-50/80 px-4 py-3 transition hover:border-sky-200 hover:bg-white"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <button
+                              type="button"
+                              onClick={() => openDetailSheet(item.id)}
+                              className="truncate text-left text-sm font-semibold text-slate-950 hover:text-sky-700"
+                            >
+                              {item.title}
+                            </button>
+                            <p className="truncate text-xs text-slate-500">
+                              {item.patient_pid} · {item.patient_name}
+                            </p>
+                          </div>
+                          <span
+                            className={cn(
+                              "rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em]",
+                              statusBadgeClass(item.status),
+                            )}
                           >
-                            {item.title}
-                          </button>
-                          <p className="truncate text-xs text-slate-500">
-                            {item.patient_pid} · {item.patient_name}
-                          </p>
-                        </div>
-                        <span
-                          className={cn(
-                            "rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em]",
-                            statusBadgeClass(item.status),
-                          )}
-                        >
-                          {statusLabel(item.status)}
-                        </span>
-                      </div>
-                      <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-slate-500">
-                        <span className="inline-flex items-center gap-1">
-                          <Clock3 className="size-3.5" />
-                          {slotLabel(item)}
-                        </span>
-                        {item.provider_name ? (
-                          <span className="inline-flex items-center gap-1">
-                            <Stethoscope className="size-3.5" />
-                            {item.provider_name}
+                            {statusLabel(item.status)}
                           </span>
-                        ) : null}
-                      </div>
-                      <p className="mt-3 truncate text-xs font-medium text-slate-500">
-                        {operationalScopeReason(
-                          item,
-                          operationalScope,
-                          user?.role,
-                          attentionIndex,
-                          tr,
-                        )}
-                      </p>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          className="rounded-2xl"
-                          onClick={() => openDetailSheet(item.id)}
-                        >
-                          {t.providers_open}
-                        </Button>
-                        {permissions.canManageStatus &&
-                        item.status !== "confirmed" &&
-                        item.status !== "completed" &&
-                        item.status !== "cancelled" ? (
+                        </div>
+                        <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-slate-500">
+                          <span className="inline-flex items-center gap-1">
+                            <Clock3 className="size-3.5" />
+                            {slotLabel(item)}
+                          </span>
+                          {item.provider_name ? (
+                            <span className="inline-flex items-center gap-1">
+                              <Stethoscope className="size-3.5" />
+                              {item.provider_name}
+                            </span>
+                          ) : null}
+                        </div>
+                        <p className="mt-3 truncate text-xs font-medium text-slate-500">
+                          {operationalScopeReason(
+                            item,
+                            operationalScope,
+                            user?.role,
+                            attentionIndex,
+                            tr,
+                          )}
+                        </p>
+                        <div className="mt-3 flex flex-wrap gap-2">
                           <Button
                             type="button"
                             size="sm"
                             variant="outline"
                             className="rounded-2xl"
-                            disabled={Boolean(actionBusy)}
-                            onClick={() =>
-                              void performStatusChange(item.id, "confirmed")
-                            }
+                            onClick={() => openDetailSheet(item.id)}
                           >
-                            {actionBusy ===
-                            statusActionKey(item.id, "confirmed") ? (
-                              <LoaderCircle className="size-4 animate-spin" />
-                            ) : null}
-                            {t.common_confirm}
+                            {t.providers_open}
                           </Button>
-                        ) : null}
-                        {permissions.canManageStatus &&
-                        item.status !== "completed" &&
-                        item.status !== "cancelled" ? (
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="rounded-2xl"
-                            disabled={Boolean(actionBusy)}
-                            onClick={() =>
-                              void performStatusChange(item.id, "completed")
-                            }
-                          >
-                            {actionBusy ===
-                            statusActionKey(item.id, "completed") ? (
-                              <LoaderCircle className="size-4 animate-spin" />
-                            ) : null}
-                            {t.dash_completed}
-                          </Button>
-                        ) : null}
-                        {permissions.canManageStatus &&
-                        item.recurrence_frequency &&
-                        item.status !== "completed" &&
-                        item.status !== "cancelled" ? (
-                          <>
+                          {permissions.canManageStatus &&
+                          item.status !== "confirmed" &&
+                          item.status !== "completed" &&
+                          item.status !== "cancelled" ? (
                             <Button
                               type="button"
                               size="sm"
                               variant="outline"
-                              className="rounded-2xl border-rose-200 text-rose-700 hover:bg-rose-50"
+                              className="rounded-2xl"
                               disabled={Boolean(actionBusy)}
                               onClick={() =>
-                                void performStatusChange(
+                                void performStatusChange(item.id, "confirmed")
+                              }
+                            >
+                              {actionBusy ===
+                              statusActionKey(item.id, "confirmed") ? (
+                                <LoaderCircle className="size-4 animate-spin" />
+                              ) : null}
+                              {t.common_confirm}
+                            </Button>
+                          ) : null}
+                          {permissions.canManageStatus &&
+                          item.status !== "completed" &&
+                          item.status !== "cancelled" ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="rounded-2xl"
+                              disabled={Boolean(actionBusy)}
+                              onClick={() =>
+                                void performStatusChange(item.id, "completed")
+                              }
+                            >
+                              {actionBusy ===
+                              statusActionKey(item.id, "completed") ? (
+                                <LoaderCircle className="size-4 animate-spin" />
+                              ) : null}
+                              {t.dash_completed}
+                            </Button>
+                          ) : null}
+                          {permissions.canManageStatus &&
+                          item.recurrence_frequency &&
+                          item.status !== "completed" &&
+                          item.status !== "cancelled" ? (
+                            <>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="rounded-2xl border-rose-200 text-rose-700 hover:bg-rose-50"
+                                disabled={Boolean(actionBusy)}
+                                onClick={() =>
+                                  void performStatusChange(
+                                    item.id,
+                                    "cancelled",
+                                    "following",
+                                  )
+                                }
+                              >
+                                {actionBusy ===
+                                statusActionKey(
                                   item.id,
                                   "cancelled",
                                   "following",
-                                )
-                              }
-                            >
-                              {actionBusy ===
-                              statusActionKey(
-                                item.id,
-                                "cancelled",
-                                "following",
-                              ) ? (
-                                <LoaderCircle className="size-4 animate-spin" />
-                              ) : null}
-                              {t.appointments_cancel_this_and_following}
-                            </Button>
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              className="rounded-2xl border-rose-200 text-rose-700 hover:bg-rose-50"
-                              disabled={Boolean(actionBusy)}
-                              onClick={() =>
-                                void performStatusChange(
+                                ) ? (
+                                  <LoaderCircle className="size-4 animate-spin" />
+                                ) : null}
+                                {t.appointments_cancel_this_and_following}
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="rounded-2xl border-rose-200 text-rose-700 hover:bg-rose-50"
+                                disabled={Boolean(actionBusy)}
+                                onClick={() =>
+                                  void performStatusChange(
+                                    item.id,
+                                    "cancelled",
+                                    "series",
+                                  )
+                                }
+                              >
+                                {actionBusy ===
+                                statusActionKey(
                                   item.id,
                                   "cancelled",
                                   "series",
-                                )
-                              }
-                            >
-                              {actionBusy ===
-                              statusActionKey(item.id, "cancelled", "series") ? (
-                                <LoaderCircle className="size-4 animate-spin" />
-                              ) : null}
-                              {t.appointments_cancel_whole_series}
-                            </Button>
-                          </>
-                        ) : null}
+                                ) ? (
+                                  <LoaderCircle className="size-4 animate-spin" />
+                                ) : null}
+                                {t.appointments_cancel_whole_series}
+                              </Button>
+                            </>
+                          ) : null}
+                        </div>
                       </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </section>
-          </aside>
-
-          <section className={sectionCardClass("overflow-hidden p-4 md:p-5")}>
-            <div className="mb-4">
-              <h2 className="text-sm font-semibold text-slate-950">
-                {t.appointments_title}
-              </h2>
-              <p className="text-xs text-muted-foreground">
-                Drag to reschedule when your role allows it. Click a slot to
-                open the full workflow.
-              </p>
-            </div>
-            <div className="appointments-calendar-shell">
-              <FullCalendar
-                ref={calendarRef}
-                plugins={[
-                  dayGridPlugin,
-                  timeGridPlugin,
-                  listPlugin,
-                  interactionPlugin,
-                ]}
-                initialView={calendarView}
-                initialDate={calendarDate}
-                headerToolbar={{
-                  left: "prev,next today",
-                  center: "title",
-                  right: "dayGridMonth,timeGridWeek,timeGridDay,listWeek",
-                }}
-                buttonText={{
-                  today: tr.dash_patients_today ?? "Today",
-                  month: tr.dash_this_month ?? "Month",
-                  week: tr.dash_this_week ?? "Week",
-                  day: tr.appointments_date ?? "Day",
-                  list: tr.providers_all ?? "List",
-                }}
-                height="auto"
-                firstDay={1}
-                slotMinTime="06:00:00"
-                slotMaxTime="22:00:00"
-                dayMaxEvents={3}
-                nowIndicator
-                editable={permissions.canEditSchedule}
-                eventStartEditable={permissions.canEditSchedule}
-                eventDurationEditable={permissions.canEditSchedule}
-                eventResizableFromStart={permissions.canEditSchedule}
-                dateClick={handleCalendarDateClick}
-                eventClick={handleEventClick}
-                eventDrop={handleInlineReschedule}
-                eventResize={handleInlineReschedule}
-                eventContent={renderCalendarEventContent}
-                datesSet={handleDatesSet}
-                events={scopedAppointments.map((item) =>
-                  toCalendarEvent(item, permissions.canEditSchedule),
-                )}
-              />
-            </div>
-            {calendarQuickActionMenu && activeCalendarQuickActionItem ? (
-              <div
-                ref={calendarQuickActionMenuRef}
-                id={`appointment-quick-actions-${activeCalendarQuickActionItem.id}`}
-                role="menu"
-                tabIndex={-1}
-                aria-label={t.appointments_quick_actions}
-                className="fixed z-50 w-56 rounded-2xl border border-slate-200 bg-white p-2 shadow-[0_24px_60px_rgba(15,23,42,0.18)]"
-                style={{
-                  top: `${calendarQuickActionMenu.top}px`,
-                  left: `${calendarQuickActionMenu.left}px`,
-                }}
-              >
-                <div className="border-b border-slate-200 px-2 pb-2">
-                  <p className="truncate text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                    {t.appointments_quick_actions}
-                  </p>
-                  <p className="mt-1 truncate text-sm font-semibold text-slate-950">
-                    {activeCalendarQuickActionItem.title}
-                  </p>
-                  <p className="truncate text-xs text-slate-500">
-                    {activeCalendarQuickActionItem.patient_pid} ·{" "}
-                    {activeCalendarQuickActionItem.patient_name}
-                  </p>
+                    ))
+                  )}
                 </div>
-                <div className="mt-2 space-y-1">
-                  {activeCalendarQuickActionItem.recurrence_frequency ? (
-                    <label className="block rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                      <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                        {t.appointments_scope_apply_status}
-                      </span>
-                      <select
-                        value={calendarQuickActionScope}
-                        onChange={(event) =>
-                          setCalendarQuickActionScope(
-                            event.target.value as AppointmentRecurringActionScope,
+              </section>
+            </aside>
+
+            <section className={sectionCardClass("overflow-hidden p-4 md:p-5")}>
+              <div className="mb-4">
+                <h2 className="text-sm font-semibold text-slate-950">
+                  {t.appointments_title}
+                </h2>
+                <p className="text-xs text-muted-foreground">
+                  Drag to reschedule when your role allows it. Click a slot to
+                  open the full workflow.
+                </p>
+              </div>
+              <div className="appointments-calendar-shell">
+                <FullCalendar
+                  ref={calendarRef}
+                  plugins={[
+                    dayGridPlugin,
+                    timeGridPlugin,
+                    listPlugin,
+                    interactionPlugin,
+                  ]}
+                  initialView={calendarView}
+                  initialDate={calendarDate}
+                  headerToolbar={{
+                    left: "prev,next today",
+                    center: "title",
+                    right: "dayGridMonth,timeGridWeek,timeGridDay,listWeek",
+                  }}
+                  buttonText={{
+                    today: tr.dash_patients_today ?? "Today",
+                    month: tr.dash_this_month ?? "Month",
+                    week: tr.dash_this_week ?? "Week",
+                    day: tr.appointments_date ?? "Day",
+                    list: tr.providers_all ?? "List",
+                  }}
+                  height="auto"
+                  firstDay={1}
+                  slotMinTime="06:00:00"
+                  slotMaxTime="22:00:00"
+                  dayMaxEvents={3}
+                  nowIndicator
+                  editable={permissions.canEditSchedule}
+                  eventStartEditable={permissions.canEditSchedule}
+                  eventDurationEditable={permissions.canEditSchedule}
+                  eventResizableFromStart={permissions.canEditSchedule}
+                  dateClick={handleCalendarDateClick}
+                  eventClick={handleEventClick}
+                  eventDrop={handleInlineReschedule}
+                  eventResize={handleInlineReschedule}
+                  eventContent={renderCalendarEventContent}
+                  datesSet={handleDatesSet}
+                  events={scopedAppointments.map((item) =>
+                    toCalendarEvent(item, permissions.canEditSchedule),
+                  )}
+                />
+              </div>
+              {calendarQuickActionMenu && activeCalendarQuickActionItem ? (
+                <div
+                  ref={calendarQuickActionMenuRef}
+                  id={`appointment-quick-actions-${activeCalendarQuickActionItem.id}`}
+                  role="menu"
+                  tabIndex={-1}
+                  aria-label={t.appointments_quick_actions}
+                  className="fixed z-50 w-56 rounded-2xl border border-slate-200 bg-white p-2 shadow-[0_24px_60px_rgba(15,23,42,0.18)]"
+                  style={{
+                    top: `${calendarQuickActionMenu.top}px`,
+                    left: `${calendarQuickActionMenu.left}px`,
+                  }}
+                >
+                  <div className="border-b border-slate-200 px-2 pb-2">
+                    <p className="truncate text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                      {t.appointments_quick_actions}
+                    </p>
+                    <p className="mt-1 truncate text-sm font-semibold text-slate-950">
+                      {activeCalendarQuickActionItem.title}
+                    </p>
+                    <p className="truncate text-xs text-slate-500">
+                      {activeCalendarQuickActionItem.patient_pid} ·{" "}
+                      {activeCalendarQuickActionItem.patient_name}
+                    </p>
+                  </div>
+                  <div className="mt-2 space-y-1">
+                    {activeCalendarQuickActionItem.recurrence_frequency ? (
+                      <label className="block rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                        <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                          {t.appointments_scope_apply_status}
+                        </span>
+                        <select
+                          value={calendarQuickActionScope}
+                          onChange={(event) =>
+                            setCalendarQuickActionScope(
+                              event.target
+                                .value as AppointmentRecurringActionScope,
+                            )
+                          }
+                          className="mt-2 h-9 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900"
+                        >
+                          <option value="single">
+                            {t.appointments_scope_single}
+                          </option>
+                          <option value="following">
+                            {t.appointments_scope_following}
+                          </option>
+                          <option value="series">
+                            {t.appointments_scope_series}
+                          </option>
+                        </select>
+                      </label>
+                    ) : null}
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100 hover:text-slate-950"
+                      onClick={() =>
+                        openDetailSheet(activeCalendarQuickActionItem.id)
+                      }
+                    >
+                      <span>{t.appointments_open_detail}</span>
+                    </button>
+                    {activeCalendarQuickActionItem.status !== "confirmed" ? (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={Boolean(actionBusy)}
+                        onClick={() =>
+                          void performStatusChange(
+                            activeCalendarQuickActionItem.id,
+                            "confirmed",
+                            activeCalendarQuickActionScope,
                           )
                         }
-                        className="mt-2 h-9 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900"
                       >
-                        <option value="single">
-                          {t.appointments_scope_single}
-                        </option>
-                        <option value="following">
-                          {t.appointments_scope_following}
-                        </option>
-                        <option value="series">
-                          {t.appointments_scope_series}
-                        </option>
-                      </select>
-                    </label>
-                  ) : null}
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100 hover:text-slate-950"
-                    onClick={() => openDetailSheet(activeCalendarQuickActionItem.id)}
-                  >
-                    <span>{t.appointments_open_detail}</span>
-                  </button>
-                  {activeCalendarQuickActionItem.status !== "confirmed" ? (
+                        <span>{t.common_confirm}</span>
+                        {actionBusy ===
+                        statusActionKey(
+                          activeCalendarQuickActionItem.id,
+                          "confirmed",
+                          activeCalendarQuickActionScope,
+                        ) ? (
+                          <LoaderCircle className="size-4 animate-spin" />
+                        ) : null}
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       role="menuitem"
@@ -5722,81 +5783,57 @@ function StaffAppointmentsPage() {
                       onClick={() =>
                         void performStatusChange(
                           activeCalendarQuickActionItem.id,
-                          "confirmed",
+                          "completed",
                           activeCalendarQuickActionScope,
                         )
                       }
                     >
-                      <span>{t.common_confirm}</span>
+                      <span>{t.dash_completed}</span>
                       {actionBusy ===
                       statusActionKey(
-                        activeCalendarQuickActionItem.id,
-                        "confirmed",
-                        activeCalendarQuickActionScope,
-                      ) ? (
-                        <LoaderCircle className="size-4 animate-spin" />
-                      ) : null}
-                    </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
-                    disabled={Boolean(actionBusy)}
-                    onClick={() =>
-                      void performStatusChange(
                         activeCalendarQuickActionItem.id,
                         "completed",
                         activeCalendarQuickActionScope,
-                      )
-                    }
-                  >
-                    <span>{t.dash_completed}</span>
-                    {actionBusy ===
-                    statusActionKey(
-                      activeCalendarQuickActionItem.id,
-                      "completed",
-                      activeCalendarQuickActionScope,
-                    ) ? (
-                      <LoaderCircle className="size-4 animate-spin" />
-                    ) : null}
-                  </button>
-                  {activeCalendarQuickActionItem.recurrence_frequency ? (
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
-                      disabled={Boolean(actionBusy)}
-                      onClick={() =>
-                        void performStatusChange(
-                          activeCalendarQuickActionItem.id,
-                          "cancelled",
-                          activeCalendarQuickActionScope,
-                        )
-                      }
-                    >
-                      <span>
-                        {activeCalendarQuickActionScope === "following"
-                          ? t.appointments_cancel_this_and_following
-                          : activeCalendarQuickActionScope === "series"
-                            ? t.appointments_cancel_whole_series
-                            : statusLabel("cancelled")}
-                      </span>
-                      {actionBusy ===
-                      statusActionKey(
-                        activeCalendarQuickActionItem.id,
-                        "cancelled",
-                        activeCalendarQuickActionScope,
                       ) ? (
                         <LoaderCircle className="size-4 animate-spin" />
                       ) : null}
                     </button>
-                  ) : null}
+                    {activeCalendarQuickActionItem.recurrence_frequency ? (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={Boolean(actionBusy)}
+                        onClick={() =>
+                          void performStatusChange(
+                            activeCalendarQuickActionItem.id,
+                            "cancelled",
+                            activeCalendarQuickActionScope,
+                          )
+                        }
+                      >
+                        <span>
+                          {activeCalendarQuickActionScope === "following"
+                            ? t.appointments_cancel_this_and_following
+                            : activeCalendarQuickActionScope === "series"
+                              ? t.appointments_cancel_whole_series
+                              : statusLabel("cancelled")}
+                        </span>
+                        {actionBusy ===
+                        statusActionKey(
+                          activeCalendarQuickActionItem.id,
+                          "cancelled",
+                          activeCalendarQuickActionScope,
+                        ) ? (
+                          <LoaderCircle className="size-4 animate-spin" />
+                        ) : null}
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
-              </div>
-            ) : null}
-          </section>
-        </div>
+              ) : null}
+            </section>
+          </div>
         )}
       </div>
 
@@ -5869,7 +5906,8 @@ function StaffAppointmentsPage() {
                     onChange={(event) =>
                       setCreateForm((current) => ({
                         ...current,
-                        carePathKind: event.target.value as AppointmentCarePathKind,
+                        carePathKind: event.target
+                          .value as AppointmentCarePathKind,
                       }))
                     }
                     className={selectClassName}
@@ -5975,8 +6013,8 @@ function StaffAppointmentsPage() {
                         onChange={(event) =>
                           setCreateForm((current) => ({
                             ...current,
-                            repeatFrequency:
-                              event.target.value as AppointmentRecurrenceFrequency,
+                            repeatFrequency: event.target
+                              .value as AppointmentRecurrenceFrequency,
                           }))
                         }
                         className={selectClassName}
@@ -6208,7 +6246,9 @@ function StaffAppointmentsPage() {
             setReminderForm(blankReminderForm());
             setDoctorFollowUpForm(blankDoctorFollowUpForm());
             setDoctorFollowUpBusy(false);
-            setPackageEndFollowUpForm(blankPackageEndFollowUpForm("", tr.appointments_new ?? ""));
+            setPackageEndFollowUpForm(
+              blankPackageEndFollowUpForm("", tr.appointments_new ?? ""),
+            );
             setPackageEndFollowUpBusy(false);
             setExternalHandoffForm(blankExternalHandoffForm());
             setExternalHandoffBusy(false);
@@ -6288,8 +6328,8 @@ function StaffAppointmentsPage() {
                     </span>
                     {detail.recurrence_frequency ? (
                       <span className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-sky-700">
-                        {recurrenceFrequencyLabel(detail.recurrence_frequency)}
-                        {" "}series
+                        {recurrenceFrequencyLabel(detail.recurrence_frequency)}{" "}
+                        series
                       </span>
                     ) : null}
                     {detailLineageBadge ? (
@@ -6334,7 +6374,8 @@ function StaffAppointmentsPage() {
                     <div className="mt-4 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
                       {t.appointments_recurring_series}:{" "}
                       {t.appointments_occurrence.toLowerCase()}{" "}
-                      {detail.recurrence_index + 1}/{detail.recurrence_series_size}.{" "}
+                      {detail.recurrence_index + 1}/
+                      {detail.recurrence_series_size}.{" "}
                       {recurrenceCadenceLabel(detail)}
                       {detail.recurrence_until
                         ? ` ${t.appointments_until} ${detail.recurrence_until}.`
@@ -6377,7 +6418,9 @@ function StaffAppointmentsPage() {
                               {t.dash_completed}
                             </p>
                             <p className="mt-1 text-lg font-semibold text-sky-950">
-                              {detailCurrentLineageHistory.completed_occurrences}
+                              {
+                                detailCurrentLineageHistory.completed_occurrences
+                              }
                             </p>
                             <p className="text-[11px] text-sky-800">
                               {t.appointments_lineage_completed_occurrences}
@@ -6475,7 +6518,9 @@ function StaffAppointmentsPage() {
                                     <button
                                       type="button"
                                       className="rounded-full border border-sky-300 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-sky-900 transition hover:bg-sky-100"
-                                      onClick={() => openDetailSheet(item.series_id)}
+                                      onClick={() =>
+                                        openDetailSheet(item.series_id)
+                                      }
                                     >
                                       {t.appointments_open_branch_root}
                                     </button>
@@ -6483,16 +6528,20 @@ function StaffAppointmentsPage() {
                                 </div>
                                 <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-sky-900">
                                   <span className="rounded-full border border-sky-200 bg-white px-2 py-0.5">
-                                    {item.total_occurrences} {t.appointments_lineage_total_short}
+                                    {item.total_occurrences}{" "}
+                                    {t.appointments_lineage_total_short}
                                   </span>
                                   <span className="rounded-full border border-sky-200 bg-white px-2 py-0.5">
-                                    {item.active_occurrences} {t.appointments_lineage_active_short}
+                                    {item.active_occurrences}{" "}
+                                    {t.appointments_lineage_active_short}
                                   </span>
                                   <span className="rounded-full border border-sky-200 bg-white px-2 py-0.5">
-                                    {item.completed_occurrences} {t.appointments_lineage_completed_short}
+                                    {item.completed_occurrences}{" "}
+                                    {t.appointments_lineage_completed_short}
                                   </span>
                                   <span className="rounded-full border border-sky-200 bg-white px-2 py-0.5">
-                                    {item.cancelled_occurrences} {t.appointments_lineage_cancelled_short}
+                                    {item.cancelled_occurrences}{" "}
+                                    {t.appointments_lineage_cancelled_short}
                                   </span>
                                 </div>
                               </div>
@@ -7036,14 +7085,16 @@ function StaffAppointmentsPage() {
                                 current
                                   ? {
                                       ...current,
-                                      carePathKind:
-                                        event.target.value as AppointmentCarePathKind,
+                                      carePathKind: event.target
+                                        .value as AppointmentCarePathKind,
                                     }
                                   : current,
                               )
                             }
                             className={selectClassName}
-                            disabled={followUpVisitForm.appointmentType !== "medical"}
+                            disabled={
+                              followUpVisitForm.appointmentType !== "medical"
+                            }
                           >
                             {CARE_PATH_KIND_OPTIONS.map((value) => (
                               <option key={value} value={value}>
@@ -7206,30 +7257,27 @@ function StaffAppointmentsPage() {
                     <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                       <div>
                         <h3 className="text-sm font-semibold text-slate-950">
-                          Doctor-directed follow-up
+                          {t.appointments_doctor_directed_followup_title}
                         </h3>
                         <p className="text-xs text-slate-500">
-                          Capture next visits, control checks and
-                          prescription-driven actions separately from the
-                          standard 1 week / 1 month / 6 months cadence.
+                          {t.appointments_doctor_directed_followup_subtitle}
                         </p>
                       </div>
                       <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
                         {doctorDirectedReminders.length +
                           doctorDirectedTasks.length}{" "}
-                        directed item
                         {doctorDirectedReminders.length +
                           doctorDirectedTasks.length ===
                         1
-                          ? ""
-                          : "s"}
+                          ? t.appointments_directed_item_singular
+                          : t.appointments_directed_item_plural}
                       </span>
                     </div>
                     <div className="mt-4 grid gap-4 xl:grid-cols-2">
                       <div className="space-y-3">
                         <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
                           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                            Reminder trail
+                            {t.appointments_reminder_trail}
                           </p>
                           <div className="mt-3 space-y-3">
                             {doctorDirectedReminders.length === 0 ? (
@@ -7255,12 +7303,12 @@ function StaffAppointmentsPage() {
                                     </div>
                                     {item.is_completed ? (
                                       <span className="text-xs font-medium text-emerald-700">
-                                        Completed{" "}
+                                        {t.common_completed}{" "}
                                         {formatDateTimeLabel(item.completed_at)}
                                       </span>
                                     ) : (
                                       <span className="text-xs font-medium text-amber-700">
-                                        Pending
+                                        {t.common_pending}
                                       </span>
                                     )}
                                   </div>
@@ -7276,7 +7324,7 @@ function StaffAppointmentsPage() {
                         </div>
                         <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
                           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                            Task trail
+                            {t.appointments_task_trail}
                           </p>
                           <div className="mt-3 space-y-3">
                             {doctorDirectedTasks.length === 0 ? (
@@ -9133,7 +9181,9 @@ function StaffAppointmentsPage() {
                           <Banner tone="warning">
                             Completing this scope is currently blocked by{" "}
                             {completionScopeBlockers.length} occurrence
-                            {completionScopeBlockers.length === 1 ? "" : "s"}:{" "}
+                            {completionScopeBlockers.length === 1
+                              ? ""
+                              : "s"}:{" "}
                             {completionScopeBlockers
                               .map((item) => recurringOccurrenceLabel(item, t))
                               .join("; ")}
@@ -9178,8 +9228,8 @@ function StaffAppointmentsPage() {
                               current
                                 ? {
                                     ...current,
-                                    carePathKind:
-                                      event.target.value as AppointmentCarePathKind,
+                                    carePathKind: event.target
+                                      .value as AppointmentCarePathKind,
                                   }
                                 : current,
                             )
@@ -9357,7 +9407,8 @@ function StaffAppointmentsPage() {
                               value={editRecurrenceScope}
                               onChange={(event) =>
                                 setEditRecurrenceScope(
-                                  event.target.value as AppointmentRecurringActionScope,
+                                  event.target
+                                    .value as AppointmentRecurringActionScope,
                                 )
                               }
                               className={selectClassName}
@@ -9385,9 +9436,8 @@ function StaffAppointmentsPage() {
                                     current
                                       ? {
                                           ...current,
-                                          repeatFrequency:
-                                            event.target
-                                              .value as AppointmentRecurrenceFrequency,
+                                          repeatFrequency: event.target
+                                            .value as AppointmentRecurrenceFrequency,
                                         }
                                       : current,
                                   )
@@ -9460,8 +9510,12 @@ function StaffAppointmentsPage() {
                           </div>
                           <p className="mt-3 text-xs text-sky-800">
                             Recurrence rule edits only apply when you target
-                            <span className="font-semibold"> this and following</span>
-                            {" "}or the <span className="font-semibold">whole series</span>.
+                            <span className="font-semibold">
+                              {" "}
+                              this and following
+                            </span>{" "}
+                            or the{" "}
+                            <span className="font-semibold">whole series</span>.
                             Single-occurrence updates keep the current slot
                             detached from rule changes.
                           </p>
@@ -9585,7 +9639,7 @@ function StaffAppointmentsPage() {
                             </div>
                             {item.is_completed ? (
                               <span className="text-xs font-medium text-emerald-700">
-                                Completed{" "}
+                                {t.common_completed}{" "}
                                 {formatDateTimeLabel(item.completed_at)}
                               </span>
                             ) : (
@@ -9789,7 +9843,7 @@ function StaffAppointmentsPage() {
                             {reminderBusy ? (
                               <LoaderCircle className="size-4 animate-spin" />
                             ) : null}
-                            Add reminder
+                            {t.appointments_add_reminder}
                           </Button>
                         </div>
                       </form>
@@ -9801,10 +9855,10 @@ function StaffAppointmentsPage() {
                     <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                       <div>
                         <h3 className="text-sm font-semibold text-slate-950">
-                          Interpreter report
+                          {t.appointments_interpreter_report_title}
                         </h3>
                         <p className="text-xs text-slate-500">
-                          Hours, free-text report and teamlead approval trail.
+                          {t.appointments_interpreter_report_subtitle}
                         </p>
                       </div>
                       {detailReport ? (
@@ -9827,7 +9881,7 @@ function StaffAppointmentsPage() {
                           <ContextCard
                             label={t.common_doctor}
                             value={detailReport.interpreter_name}
-                            meta={`Submitted ${formatDateTimeLabel(detailReport.created_at)}`}
+                            meta={`${t.appointments_report_submitted_prefix} ${formatDateTimeLabel(detailReport.created_at)}`}
                           />
                           <ContextCard
                             label={t.appointments_time}
@@ -9836,10 +9890,11 @@ function StaffAppointmentsPage() {
                               detailReport.approval_status === "approved"
                                 ? interpreterReportBillingSyncLabel(
                                     detailReport.billing_sync_status,
+                                    t,
                                   )
                                 : detailReport.approval_status === "rejected"
-                                  ? "Needs interpreter revision"
-                                  : "Waiting for teamlead review"
+                                  ? t.appointments_report_needs_interpreter_revision
+                                  : t.appointments_report_waiting_teamlead_review
                             }
                           />
                           <ContextCard
@@ -9847,8 +9902,8 @@ function StaffAppointmentsPage() {
                             value={
                               detailReport.approved_by_name ??
                               (detailReport.approval_status === "pending"
-                                ? "Pending"
-                                : "No reviewer recorded")
+                                ? t.common_pending
+                                : t.appointments_report_no_reviewer_recorded)
                             }
                             meta={reportReviewMeta}
                           />
@@ -9862,7 +9917,9 @@ function StaffAppointmentsPage() {
                                 : "warning"
                             }
                           >
-                            <span className="font-medium">Reviewer notes:</span>{" "}
+                            <span className="font-medium">
+                              {t.appointments_report_reviewer_notes}:
+                            </span>{" "}
                             {detailReport.notes}
                           </Banner>
                         ) : null}
@@ -9876,16 +9933,20 @@ function StaffAppointmentsPage() {
                               ),
                             )}
                           >
-                            <div className="font-medium">Billing sync</div>
+                            <div className="font-medium">
+                              {t.appointments_report_billing_sync}
+                            </div>
                             <div className="mt-1">
                               {interpreterReportBillingSyncLabel(
                                 detailReport.billing_sync_status,
+                                t,
                               )}
                             </div>
                             <div className="mt-1 text-xs opacity-80">
                               {detailReport.billing_service_key ? (
                                 <span>
-                                  Catalog key: {detailReport.billing_service_key}
+                                  Catalog key:{" "}
+                                  {detailReport.billing_service_key}
                                 </span>
                               ) : null}
                               {detailReport.billing_service_key &&
