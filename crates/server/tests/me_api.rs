@@ -167,14 +167,24 @@ fn auth_header_for(user_id: Uuid, role: &str) -> String {
 }
 
 async fn seed_user(pool: &PgPool, tag: &str, role: &str) -> Uuid {
+    seed_user_with_email(
+        pool,
+        &format!("{tag}-{role}@example.com"),
+        &format!("{role} {tag}"),
+        role,
+    )
+    .await
+}
+
+async fn seed_user_with_email(pool: &PgPool, email: &str, name: &str, role: &str) -> Uuid {
     sqlx::query_scalar(
         r#"INSERT INTO users (email, password_hash, name, role)
            VALUES ($1, $2, $3, $4)
            RETURNING id"#,
     )
-    .bind(format!("{tag}-{role}@example.com"))
+    .bind(email)
     .bind("test-password-hash")
-    .bind(format!("{role} {tag}"))
+    .bind(name)
     .bind(role)
     .fetch_one(pool)
     .await
@@ -182,16 +192,26 @@ async fn seed_user(pool: &PgPool, tag: &str, role: &str) -> Uuid {
 }
 
 async fn seed_patient(pool: &PgPool, created_by: Uuid, tag: &str) -> Uuid {
+    seed_patient_with_email(pool, created_by, tag, None).await
+}
+
+async fn seed_patient_with_email(
+    pool: &PgPool,
+    created_by: Uuid,
+    tag: &str,
+    email: Option<&str>,
+) -> Uuid {
     sqlx::query_scalar(
         r#"INSERT INTO patients (
-                patient_id, first_name, last_name, birth_date, gender, created_by
+                patient_id, first_name, last_name, birth_date, gender, email, created_by
            ) VALUES (
-                $1, $2, $3, '1990-01-01', 'diverse', $4
+                $1, $2, $3, '1990-01-01', 'diverse', $4, $5
            ) RETURNING id"#,
     )
     .bind(format!("PT-{tag}"))
     .bind(format!("First {tag}"))
     .bind(format!("Last {tag}"))
+    .bind(email)
     .bind(created_by)
     .fetch_one(pool)
     .await
@@ -902,6 +922,68 @@ async fn patient_can_request_additional_service_and_assigned_staff_get_notificat
     .await
     .unwrap();
     assert_eq!(pm_notifications, 1);
+}
+
+#[tokio::test]
+async fn patient_portal_service_request_recovers_patient_link_from_matching_email() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("me-concierge-email-link");
+    let portal_email = format!("{tag}-patient@example.com");
+    let patient_id = seed_patient_with_email(&pool, admin_id, &tag, Some(&portal_email)).await;
+    let patient_user_id =
+        seed_user_with_email(&pool, &portal_email, &format!("patient {tag}"), "patient").await;
+    let patient_manager_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    let concierge_id = seed_user(&pool, &format!("{tag}-concierge"), "concierge").await;
+
+    seed_patient_assignment(&pool, patient_id, patient_manager_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, concierge_id, admin_id).await;
+
+    let patient_bearer = auth_header_for(patient_user_id, "patient");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/me/concierge-services",
+        &patient_bearer,
+        Some(json!({
+            "service_kind": "chauffeur",
+            "title": "Evening transfer",
+            "starts_at": "2026-04-18T18:00:00Z",
+            "service_notes": "Hotel to clinic transfer"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(body["service_kind"], "chauffeur");
+    assert_eq!(body["request_source"], "patient_portal");
+
+    let restored_assignment_count: i64 = sqlx::query_scalar(
+        r#"SELECT count(*)
+           FROM patient_assignments
+           WHERE patient_id = $1
+             AND user_id = $2
+             AND revoked_at IS NULL"#,
+    )
+    .bind(patient_id)
+    .bind(patient_user_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(restored_assignment_count, 1);
+
+    let (status, items) = json_request(
+        &app,
+        "GET",
+        "/api/v1/me/concierge-services",
+        &patient_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(items.as_array().map(Vec::len), Some(1));
 }
 
 #[tokio::test]

@@ -1878,41 +1878,7 @@ async fn resolve_linked_patient_id_for_user(
     state: &AppState,
     user_id: Uuid,
 ) -> Result<Option<Uuid>, axum::response::Response> {
-    let rows = sqlx::query(
-        r#"SELECT patient_id
-           FROM patient_assignments
-           WHERE user_id = $1
-             AND revoked_at IS NULL
-           ORDER BY assigned_at DESC
-           LIMIT 2"#,
-    )
-    .bind(user_id)
-    .fetch_all(&state.db)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, user_id = %user_id, "resolve linked patient for chat");
-        err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to validate linked patient",
-        )
-    })?;
-
-    if rows.is_empty() {
-        return Ok(None);
-    }
-
-    if rows.len() > 1 {
-        return Err(err(
-            StatusCode::CONFLICT,
-            "Patient account is linked to multiple patient records",
-        ));
-    }
-
-    Ok(Some(
-        rows[0]
-            .try_get::<Uuid, _>("patient_id")
-            .unwrap_or_else(|_| Uuid::nil()),
-    ))
+    crate::routes::me::resolve_linked_patient_id(state, user_id).await
 }
 
 async fn load_active_peer(

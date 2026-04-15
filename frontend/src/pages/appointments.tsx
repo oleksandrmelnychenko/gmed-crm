@@ -1151,6 +1151,7 @@ function runtimeLocale() {
 }
 
 function appointmentText(de: string, ru: string, _en: string) {
+  void _en;
   return getLang() === "ru" ? ru : de;
 }
 
@@ -2624,17 +2625,43 @@ function StaffAppointmentsPage() {
     (item) => !["completed", "cancelled"].includes(item.status),
   );
   const billingReadinessWarnings = [
-    detail?.interpreter_id && !interpreterReportReady ? tr.common_error : "",
+    detail?.interpreter_id && !interpreterReportReady
+      ? detailReport
+        ? appointmentText(
+            "Der Dolmetscherbericht wartet noch auf Genehmigung.",
+            "Отчёт переводчика ещё ждёт согласования.",
+            "Interpreter report is still pending approval.",
+          )
+        : appointmentText(
+            "Für diesen Termin wurde noch kein Dolmetscherbericht eingereicht.",
+            "Для этого приёма отчёт переводчика ещё не отправлен.",
+            "No interpreter report has been submitted for this appointment yet.",
+          )
+      : "",
     detail?.type === "non_medical" && serviceInFlightCount > 0
-      ? `${serviceInFlightCount} concierge service(s) are still operationally open.`
+      ? appointmentText(
+          `${serviceInFlightCount} Concierge-Service(s) sind operativ noch offen.`,
+          `${serviceInFlightCount} concierge-услуг(и) ещё операционно открыты.`,
+          `${serviceInFlightCount} concierge service(s) are still operationally open.`,
+        )
       : "",
     detail?.type === "non_medical" &&
     detailServices.length > 0 &&
     readyConciergeServices.length === 0 &&
     settledConciergeServices.length === 0
-      ? tr.common_not_set
+      ? appointmentText(
+          "Noch keine Concierge-Leistung ist für die Abrechnung freigegeben.",
+          "Ни одна concierge-услуга ещё не готова к биллингу.",
+          "No concierge service is ready for billing yet.",
+        )
       : "",
-    billingStaff.length === 0 ? tr.common_not_set : "",
+    billingStaff.length === 0
+      ? appointmentText(
+          "Kein Billing-Team ist für die Übergabe verfügbar.",
+          "Для передачи не найден ни один сотрудник биллинга.",
+          "No billing staff is available for handoff.",
+        )
+      : "",
   ].filter(Boolean);
   const showReportReviewActions = Boolean(
     (permissions.canApproveReport || permissions.canRejectReport) &&
@@ -2644,9 +2671,17 @@ function StaffAppointmentsPage() {
   const reportReviewMeta = !detailReport
     ? ""
     : detailReport.approval_status === "approved"
-      ? `Approved ${formatDateTimeLabel(detailReport.approved_at)}`
+      ? appointmentText(
+          `Genehmigt ${formatDateTimeLabel(detailReport.approved_at)}`,
+          `Одобрено ${formatDateTimeLabel(detailReport.approved_at)}`,
+          `Approved ${formatDateTimeLabel(detailReport.approved_at)}`,
+        )
       : detailReport.approval_status === "rejected"
-        ? `Returned ${formatDateTimeLabel(detailReport.approved_at)}`
+        ? appointmentText(
+            `Zurückgewiesen ${formatDateTimeLabel(detailReport.approved_at)}`,
+            `Возвращено ${formatDateTimeLabel(detailReport.approved_at)}`,
+            `Returned ${formatDateTimeLabel(detailReport.approved_at)}`,
+          )
         : tr.mfa_pending;
   const openFindingsChecklistCount = findingsChecklist.filter(
     (item) => !item.is_completed,
@@ -2656,15 +2691,33 @@ function StaffAppointmentsPage() {
   ).length;
   const completionWarnings = [
     openChecklistCount > 0
-      ? `${openChecklistCount} checklist item(s) still open.`
+      ? appointmentText(
+          `${openChecklistCount} Checklisten-Einträge noch offen.`,
+          `${openChecklistCount} пункт(ов) чек-листа ещё открыты.`,
+          `${openChecklistCount} checklist item(s) still open.`,
+        )
       : "",
     openIncomingDataChecklistCount > 0
-      ? `${openIncomingDataChecklistCount} incoming data item(s) still need triage.`
+      ? appointmentText(
+          `${openIncomingDataChecklistCount} eingehende Daten brauchen noch Triage.`,
+          `${openIncomingDataChecklistCount} пункт(ов) входящих данных требуют сортировки.`,
+          `${openIncomingDataChecklistCount} incoming data item(s) still need triage.`,
+        )
       : "",
-    openTaskCount > 0 ? `${openTaskCount} operational task(s) still open.` : "",
+    openTaskCount > 0
+      ? appointmentText(
+          `${openTaskCount} operative Aufgabe(n) noch offen.`,
+          `${openTaskCount} операционных задач(и) ещё открыты.`,
+          `${openTaskCount} operational task(s) still open.`,
+        )
+      : "",
     !interpreterReportReady && detail?.interpreter_id ? tr.common_error : "",
     detail?.type === "non_medical" && serviceInFlightCount > 0
-      ? `${serviceInFlightCount} concierge service(s) are still in progress.`
+      ? appointmentText(
+          `${serviceInFlightCount} Concierge-Service(s) laufen noch.`,
+          `${serviceInFlightCount} concierge-услуг(и) ещё в работе.`,
+          `${serviceInFlightCount} concierge service(s) are still in progress.`,
+        )
       : "",
   ].filter(Boolean);
   const timelineEvents = buildAppointmentTimelineEvents({
@@ -3748,12 +3801,22 @@ function StaffAppointmentsPage() {
       const repeatCount = parsePositiveIntegerInput(createForm.repeatCount);
       if (createForm.repeatEnabled) {
         if (!repeatInterval) {
-          setCreateError("Repeat interval must be a positive number.");
+          setCreateError(
+            appointmentText(
+              "Das Wiederholungsintervall muss eine positive Zahl sein.",
+              "Интервал повторения должен быть положительным числом.",
+              "Repeat interval must be a positive number.",
+            ),
+          );
           return;
         }
         if (!repeatCount && !createForm.repeatUntil) {
           setCreateError(
-            "Set either total occurrences or a repeat-until date for recurring appointments.",
+            appointmentText(
+              "Setzen Sie entweder eine Gesamtzahl an Wiederholungen oder ein End-Datum für die Serie.",
+              "Укажите либо общее количество повторений, либо дату окончания серии.",
+              "Set either total occurrences or a repeat-until date for recurring appointments.",
+            ),
           );
           return;
         }
@@ -3965,19 +4028,29 @@ function StaffAppointmentsPage() {
     setEditBusy(true);
     setEditError("");
     try {
+      const canUpdateRecurrenceRule = Boolean(detail.recurrence_series_id);
       const applyRecurrenceRule =
-        Boolean(detail.recurrence_frequency) &&
-        editRecurrenceScope !== "single";
+        canUpdateRecurrenceRule && editRecurrenceScope !== "single";
       const repeatInterval = parsePositiveIntegerInput(editForm.repeatInterval);
       const repeatCount = parsePositiveIntegerInput(editForm.repeatCount);
       if (applyRecurrenceRule) {
         if (!repeatInterval) {
-          setEditError("Repeat interval must be a positive number.");
+          setEditError(
+            appointmentText(
+              "Das Wiederholungsintervall muss eine positive Zahl sein.",
+              "Интервал повторения должен быть положительным числом.",
+              "Repeat interval must be a positive number.",
+            ),
+          );
           return;
         }
         if (!repeatCount && !editForm.repeatUntil) {
           setEditError(
-            "Set either total occurrences or a repeat-until date for recurring updates.",
+            appointmentText(
+              "Setzen Sie entweder eine Gesamtzahl an Wiederholungen oder ein End-Datum für die Aktualisierung der Serie.",
+              "Укажите либо общее количество повторений, либо дату окончания для обновления серии.",
+              "Set either total occurrences or a repeat-until date for recurring updates.",
+            ),
           );
           return;
         }
@@ -4010,7 +4083,7 @@ function StaffAppointmentsPage() {
             applyRecurrenceRule && editForm.repeatUntil
               ? editForm.repeatUntil
               : null,
-          recurrence_scope: detail.recurrence_frequency
+          recurrence_scope: canUpdateRecurrenceRule
             ? editRecurrenceScope
             : "single",
         }),
@@ -5160,17 +5233,26 @@ function StaffAppointmentsPage() {
             <div className="max-w-3xl space-y-3">
               <div className="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-white/85 px-3 py-1 text-xs font-medium tracking-[0.16em] text-sky-700 uppercase">
                 <CalendarClock className="size-3.5" />
-                Appointment Control
+                {appointmentText(
+                  "Termin-Steuerung",
+                  "Управление приёмами",
+                  "Appointment Control",
+                )}
               </div>
               <div className="space-y-2">
                 <h1 className="text-3xl font-semibold tracking-tight text-slate-950">
-                  Calendar, scheduling and operational follow-up in one
-                  workspace.
+                  {appointmentText(
+                    "Kalender, Planung und operative Nachverfolgung in einem Workspace.",
+                    "Календарь, планирование и операционный follow-up в одном рабочем пространстве.",
+                    "Calendar, scheduling and operational follow-up in one workspace.",
+                  )}
                 </h1>
                 <p className="max-w-2xl text-sm leading-6 text-slate-600">
-                  Manage medical slots, concierge bookings, interpreter handoff,
-                  checklist execution and reporting without leaving the
-                  appointment flow.
+                  {appointmentText(
+                    "Medizinische Slots, Concierge-Buchungen, Dolmetscher-Übergabe, Checklisten-Ausführung und Berichte verwalten, ohne den Termin-Flow zu verlassen.",
+                    "Управляйте медицинскими слотами, concierge-бронированиями, передачей переводчикам, исполнением чек-листов и отчётами, не выходя из потока приёмов.",
+                    "Manage medical slots, concierge bookings, interpreter handoff, checklist execution and reporting without leaving the appointment flow.",
+                  )}
                 </p>
               </div>
             </div>
@@ -5181,7 +5263,11 @@ function StaffAppointmentsPage() {
                 onClick={refreshAppointments}
               >
                 <RefreshCw className="size-4" />
-                Refresh
+                {appointmentText(
+                  "Aktualisieren",
+                  "Обновить",
+                  "Refresh",
+                )}
               </Button>
               {permissions.canCreate ? (
                 <Button
@@ -5189,7 +5275,7 @@ function StaffAppointmentsPage() {
                   onClick={() => openCreateSheetFromDate()}
                 >
                   <Plus className="size-4" />
-                  New appointment
+                  {t.appointments_new}
                 </Button>
               ) : null}
             </div>
@@ -5233,7 +5319,7 @@ function StaffAppointmentsPage() {
               }
               onClick={applyTodayScope}
             >
-              Today
+              {t.appointments_today}
             </QuickScopeButton>
             <QuickScopeButton
               active={
@@ -5241,31 +5327,31 @@ function StaffAppointmentsPage() {
               }
               onClick={applyWeekScope}
             >
-              This week
+              {t.dash_this_week}
             </QuickScopeButton>
             <QuickScopeButton
               active={mineFilterActive}
               onClick={applyMineScope}
             >
-              Mine
+              {appointmentText("Meine", "Мои", "Mine")}
             </QuickScopeButton>
             <QuickScopeButton
               active={filters.appointmentType === "medical"}
               onClick={() => applyTypeScope("medical")}
             >
-              Medical
+              {appointmentText("Medizinisch", "Медицинские", "Medical")}
             </QuickScopeButton>
             <QuickScopeButton
               active={filters.appointmentType === "non_medical"}
               onClick={() => applyTypeScope("non_medical")}
             >
-              Concierge
+              {appointmentText("Concierge", "Concierge", "Concierge")}
             </QuickScopeButton>
             <QuickScopeButton
               active={filters.appointmentType === "internal"}
               onClick={() => applyTypeScope("internal")}
             >
-              Internal
+              {appointmentText("Intern", "Внутренние", "Internal")}
             </QuickScopeButton>
             <Button
               variant="ghost"
@@ -5273,7 +5359,11 @@ function StaffAppointmentsPage() {
               className="rounded-full px-3"
               onClick={resetQuickScopes}
             >
-              Reset scope
+              {appointmentText(
+                "Filter zurücksetzen",
+                "Сбросить фильтры",
+                "Reset scope",
+              )}
             </Button>
           </div>
           {scopeOptions.length > 1 ? (
@@ -5347,7 +5437,7 @@ function StaffAppointmentsPage() {
                     }
                     onClick={applyTodayScope}
                   >
-                    Today
+                    {t.appointments_today}
                   </QuickScopeButton>
                   <QuickScopeButton
                     active={
@@ -5356,13 +5446,13 @@ function StaffAppointmentsPage() {
                     }
                     onClick={applyWeekScope}
                   >
-                    This week
+                    {t.dash_this_week}
                   </QuickScopeButton>
                   <QuickScopeButton
                     active={mineFilterActive}
                     onClick={applyMineScope}
                   >
-                    Mine
+                    {appointmentText("Meine", "Мои", "Mine")}
                   </QuickScopeButton>
                   {scopeOptions.length > 1
                     ? scopeOptions.map((option) => (
@@ -5381,7 +5471,11 @@ function StaffAppointmentsPage() {
                     className="rounded-full px-3"
                     onClick={resetQuickScopes}
                   >
-                    Reset
+                    {appointmentText(
+                      "Zurücksetzen",
+                      "Сбросить",
+                      "Reset",
+                    )}
                   </Button>
                 </div>
               </div>
@@ -5389,7 +5483,13 @@ function StaffAppointmentsPage() {
 
             {mobileAgendaSections.length === 0 ? (
               <section className={sectionCardClass("p-5")}>
-                <EmptyState text="No appointments in the current mobile scope." />
+                <EmptyState
+                  text={appointmentText(
+                    "Keine Termine im aktuellen mobilen Bereich.",
+                    "Нет приёмов в текущем мобильном диапазоне.",
+                    "No appointments in the current mobile scope.",
+                  )}
+                />
               </section>
             ) : (
               mobileAgendaSections.map((section) => (
@@ -5436,7 +5536,11 @@ function StaffAppointmentsPage() {
                       {t.common_search}
                     </h2>
                     <p className="text-xs text-muted-foreground">
-                      Narrow the calendar to the exact operational slice.
+                      {appointmentText(
+                        "Kalender auf den exakten operativen Ausschnitt eingrenzen.",
+                        "Сузьте календарь до точного операционного среза.",
+                        "Narrow the calendar to the exact operational slice.",
+                      )}
                     </p>
                   </div>
                   <Button
@@ -5453,7 +5557,11 @@ function StaffAppointmentsPage() {
                       });
                     }}
                   >
-                    Reset
+                    {appointmentText(
+                      "Zurücksetzen",
+                      "Сбросить",
+                      "Reset",
+                    )}
                   </Button>
                 </div>
                 <div className="space-y-4">
@@ -5608,7 +5716,7 @@ function StaffAppointmentsPage() {
                       ))}
                     </select>
                   </Field>
-                  <Field label={t.common_doctor}>
+                  <Field label={t.role_interpreter}>
                     <select
                       value={filters.interpreterId}
                       onChange={(event) =>
@@ -6157,10 +6265,16 @@ function StaffAppointmentsPage() {
                     className="h-10 rounded-xl bg-slate-50"
                   />
                 </Field>
-                <Field label={t.appointments_time}>
-                  <Input
-                    type="time"
-                    value={createForm.timeStart}
+                        <Field
+                          label={appointmentText(
+                            "Beginn",
+                            "Время начала",
+                            "Start time",
+                          )}
+                        >
+                          <Input
+                            type="time"
+                            value={createForm.timeStart}
                     onChange={(event) =>
                       setCreateForm((current) => ({
                         ...current,
@@ -6170,10 +6284,16 @@ function StaffAppointmentsPage() {
                     className="h-10 rounded-xl bg-slate-50"
                   />
                 </Field>
-                <Field label={t.appointments_time}>
-                  <Input
-                    type="time"
-                    value={createForm.timeEnd}
+                        <Field
+                          label={appointmentText(
+                            "Ende",
+                            "Время окончания",
+                            "End time",
+                          )}
+                        >
+                          <Input
+                            type="time"
+                            value={createForm.timeEnd}
                     onChange={(event) =>
                       setCreateForm((current) => ({
                         ...current,
@@ -6204,17 +6324,30 @@ function StaffAppointmentsPage() {
                   />
                   <span>
                     <span className="block font-medium text-slate-900">
-                      Repeat this appointment
+                      {appointmentText(
+                        "Diesen Termin wiederholen",
+                        "Повторять этот приём",
+                        "Repeat this appointment",
+                      )}
                     </span>
                     <span className="block text-xs text-slate-500">
-                      Create a recurring series from the current date and time
-                      slot.
+                      {appointmentText(
+                        "Eine wiederkehrende Serie aus dem aktuellen Datum und Zeitslot erstellen.",
+                        "Создайте повторяющуюся серию из текущей даты и слота.",
+                        "Create a recurring series from the current date and time slot.",
+                      )}
                     </span>
                   </span>
                 </label>
                 {createForm.repeatEnabled ? (
                   <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                    <Field label="Frequency">
+                    <Field
+                      label={appointmentText(
+                        "Frequenz",
+                        "Частота",
+                        "Frequency",
+                      )}
+                    >
                       <select
                         value={createForm.repeatFrequency}
                         onChange={(event) =>
@@ -6233,7 +6366,9 @@ function StaffAppointmentsPage() {
                         ))}
                       </select>
                     </Field>
-                    <Field label="Every">
+                    <Field
+                      label={appointmentText("Alle", "Каждый", "Every")}
+                    >
                       <Input
                         type="number"
                         min="1"
@@ -6350,7 +6485,7 @@ function StaffAppointmentsPage() {
                     ))}
                   </select>
                 </Field>
-                <Field label={t.common_doctor}>
+                <Field label={t.role_interpreter}>
                   <select
                     value={createForm.interpreterId}
                     onChange={(event) =>
@@ -6498,15 +6633,22 @@ function StaffAppointmentsPage() {
           <SheetHeader className="border-b border-border/70 pb-4">
             <SheetTitle>{tr.appointments_title}</SheetTitle>
             <SheetDescription>
-              Review context, reschedule, manage interpreter flow and close the
-              operational loop from one sheet.
+              {appointmentText(
+                "Kontext prüfen, umplanen, Dolmetscher-Flow verwalten und den operativen Kreis aus einem Sheet schließen.",
+                "Проверяйте контекст, переносите, управляйте потоком переводчика и закрывайте операционный цикл в одном окне.",
+                "Review context, reschedule, manage interpreter flow and close the operational loop from one sheet.",
+              )}
             </SheetDescription>
           </SheetHeader>
           <div className="flex-1 overflow-y-auto px-4 pb-6">
             {detailLoading ? (
               <div className="flex min-h-[320px] items-center justify-center text-muted-foreground">
                 <LoaderCircle className="mr-2 size-4 animate-spin" />
-                Loading appointment
+                {appointmentText(
+                  "Termin wird geladen",
+                  "Загрузка приёма",
+                  "Loading appointment",
+                )}
               </div>
             ) : detailError ? (
               <div className="pt-5">
@@ -6540,7 +6682,7 @@ function StaffAppointmentsPage() {
                     {detail.recurrence_frequency ? (
                       <span className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-sky-700">
                         {recurrenceFrequencyLabel(detail.recurrence_frequency)}{" "}
-                        series
+                        {appointmentText("Serie", "серия", "series")}
                       </span>
                     ) : null}
                     {detailLineageBadge ? (
@@ -6550,7 +6692,8 @@ function StaffAppointmentsPage() {
                     ) : null}
                     {detail.interpreter_response ? (
                       <span className="rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
-                        Interpreter {responseLabel(detail.interpreter_response)}
+                        {tr.role_interpreter}{" "}
+                        {responseLabel(detail.interpreter_response)}
                       </span>
                     ) : null}
                   </div>
@@ -6577,8 +6720,11 @@ function StaffAppointmentsPage() {
                   </div>
                   {detail.is_blocked ? (
                     <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-                      Concierge view is intentionally limited for medical slots.
-                      Clinical notes and provider specifics stay hidden here.
+                      {appointmentText(
+                        "Die Concierge-Ansicht ist für medizinische Slots bewusst eingeschränkt. Klinische Notizen und Anbieter-Details bleiben hier verborgen.",
+                        "Представление concierge намеренно ограничено для медицинских слотов. Клинические заметки и детали поставщика здесь скрыты.",
+                        "Concierge view is intentionally limited for medical slots. Clinical notes and provider specifics stay hidden here.",
+                      )}
                     </div>
                   ) : null}
                   {!detail.is_blocked && detail.recurrence_frequency ? (
@@ -6783,7 +6929,7 @@ function StaffAppointmentsPage() {
                       }
                     />
                     <ContextCard
-                      label={t.common_doctor}
+                      label={t.role_interpreter}
                       value={detail.interpreter_name || tr.common_not_set}
                       meta={
                         detail.interpreter_response
@@ -6809,13 +6955,26 @@ function StaffAppointmentsPage() {
                           {t.common_error}
                         </h3>
                         <p className="text-xs text-slate-500">
-                          This appointment still has unresolved operational
-                          follow-up.
+                          {appointmentText(
+                            "Dieser Termin hat noch offene operative Nachverfolgung.",
+                            "У этого приёма ещё есть незакрытый операционный follow-up.",
+                            "This appointment still has unresolved operational follow-up.",
+                          )}
                         </p>
                       </div>
                       <span className="rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-rose-700">
-                        {detailAttention.attention_score} issue
-                        {detailAttention.attention_score === 1 ? "" : "s"}
+                        {detailAttention.attention_score}{" "}
+                        {appointmentText(
+                          detailAttention.attention_score === 1
+                            ? "Problem"
+                            : "Probleme",
+                          detailAttention.attention_score === 1
+                            ? "проблема"
+                            : "проблем(ы)",
+                          detailAttention.attention_score === 1
+                            ? "issue"
+                            : "issues",
+                        )}
                       </span>
                     </div>
                     <div className="mt-4 space-y-3">
@@ -6830,7 +6989,11 @@ function StaffAppointmentsPage() {
                     </div>
                     {detailAttention.next_due_at ? (
                       <p className="mt-4 text-xs text-slate-500">
-                        Next due checkpoint:{" "}
+                        {appointmentText(
+                          "Nächster Fälligkeitspunkt:",
+                          "Следующий срок:",
+                          "Next due checkpoint:",
+                        )}{" "}
                         {formatDateTimeLabel(detailAttention.next_due_at)}
                       </p>
                     ) : null}
@@ -6849,7 +7012,7 @@ function StaffAppointmentsPage() {
                         staffGo(`/patients?patient=${detail.patient_id}`)
                       }
                     >
-                      Patient
+                      {appointmentText("Patient", "Пациент", "Patient")}
                     </Button>
                     {detail.order_id ? (
                       <Button
@@ -6860,7 +7023,7 @@ function StaffAppointmentsPage() {
                           staffGo(`/orders?order=${detail.order_id}`)
                         }
                       >
-                        Order
+                        {appointmentText("Auftrag", "Заказ", "Order")}
                       </Button>
                     ) : null}
                     {detail.provider_id ? (
@@ -6872,7 +7035,7 @@ function StaffAppointmentsPage() {
                           staffGo(`/providers?provider=${detail.provider_id}`)
                         }
                       >
-                        Clinic
+                        {appointmentText("Klinik", "Клиника", "Clinic")}
                       </Button>
                     ) : null}
                     <Button
@@ -6885,7 +7048,7 @@ function StaffAppointmentsPage() {
                         )
                       }
                     >
-                      Documents
+                      {t.nav_my_documents}
                     </Button>
                     <Button
                       type="button"
@@ -6895,7 +7058,7 @@ function StaffAppointmentsPage() {
                         staffGo(`/cases?patient=${detail.patient_id}`)
                       }
                     >
-                      Cases
+                      {t.cases_title}
                     </Button>
                   </div>
                 </section>
@@ -6906,14 +7069,26 @@ function StaffAppointmentsPage() {
                         {t.appointments_title}
                       </h3>
                       <p className="text-xs text-slate-500">
-                        Unified event trail across scheduling, interpreter
-                        handling, follow-up, concierge work and operational
-                        execution.
+                        {appointmentText(
+                          "Einheitlicher Ereignisverlauf über Planung, Dolmetscher-Handhabung, Nachverfolgung, Concierge-Arbeit und operative Ausführung.",
+                          "Единый журнал событий по планированию, работе с переводчиками, follow-up, concierge и операционному исполнению.",
+                          "Unified event trail across scheduling, interpreter handling, follow-up, concierge work and operational execution.",
+                        )}
                       </p>
                     </div>
                     <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
-                      {visibleTimelineEvents.length} event
-                      {visibleTimelineEvents.length === 1 ? "" : "s"}
+                      {visibleTimelineEvents.length}{" "}
+                      {appointmentText(
+                        visibleTimelineEvents.length === 1
+                          ? "Ereignis"
+                          : "Ereignisse",
+                        visibleTimelineEvents.length === 1
+                          ? "событие"
+                          : "событий",
+                        visibleTimelineEvents.length === 1
+                          ? "event"
+                          : "events",
+                      )}
                     </span>
                   </div>
                   <div className="mt-4 flex flex-wrap gap-2">
@@ -6944,13 +7119,34 @@ function StaffAppointmentsPage() {
                         onClick={() => setTimelineFilter(filter)}
                       >
                         {filter === "all"
-                          ? "All"
+                          ? appointmentText("Alle", "Все", "All")
                           : filter === "followup"
                             ? t.phase_followup
                             : filter === "communication"
-                              ? "Communication"
-                              : filter.charAt(0).toUpperCase() +
-                                filter.slice(1)}
+                              ? appointmentText(
+                                  "Kommunikation",
+                                  "Коммуникация",
+                                  "Communication",
+                                )
+                              : filter === "workflow"
+                                ? appointmentText(
+                                    "Workflow",
+                                    "Процесс",
+                                    "Workflow",
+                                  )
+                                : filter === "interpreter"
+                                  ? tr.role_interpreter
+                                  : filter === "clinical"
+                                    ? appointmentText(
+                                        "Klinisch",
+                                        "Клинические",
+                                        "Clinical",
+                                      )
+                                    : appointmentText(
+                                        "Concierge",
+                                        "Concierge",
+                                        "Concierge",
+                                      )}
                       </Button>
                     ))}
                   </div>
@@ -6996,16 +7192,33 @@ function StaffAppointmentsPage() {
                     <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                       <div>
                         <h3 className="text-sm font-semibold text-slate-950">
-                          Handoff and follow-up
+                          {appointmentText(
+                            "Übergabe und Nachverfolgung",
+                            "Передача и follow-up",
+                            "Handoff and follow-up",
+                          )}
                         </h3>
                         <p className="text-xs text-slate-500">
-                          Coordinate the assigned team and schedule post-care
-                          follow-up from the appointment itself.
+                          {appointmentText(
+                            "Koordinieren Sie das zugewiesene Team und planen Sie die Nachsorge direkt am Termin.",
+                            "Координируйте назначенную команду и планируйте нахождение после приёма прямо из карточки.",
+                            "Coordinate the assigned team and schedule post-care follow-up from the appointment itself.",
+                          )}
                         </p>
                       </div>
                       <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
-                        {handoffStakeholders.length} stakeholder
-                        {handoffStakeholders.length === 1 ? "" : "s"}
+                        {handoffStakeholders.length}{" "}
+                        {appointmentText(
+                          handoffStakeholders.length === 1
+                            ? "Beteiligter"
+                            : "Beteiligte",
+                          handoffStakeholders.length === 1
+                            ? "участник"
+                            : "участников",
+                          handoffStakeholders.length === 1
+                            ? "stakeholder"
+                            : "stakeholders",
+                        )}
                       </span>
                     </div>
                     <div className="mt-4 space-y-3">
@@ -7044,7 +7257,11 @@ function StaffAppointmentsPage() {
                               className="rounded-2xl"
                               onClick={() => openAppointmentChat(peer)}
                             >
-                              Open chat
+                              {appointmentText(
+                                "Chat öffnen",
+                                "Открыть чат",
+                                "Open chat",
+                              )}
                             </Button>
                           </div>
                         ))
@@ -7096,11 +7313,18 @@ function StaffAppointmentsPage() {
                     <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                       <div>
                         <h3 className="text-sm font-semibold text-slate-950">
-                          Follow-up visit planning
+                          {appointmentText(
+                            "Planung der Folgevisite",
+                            "Планирование повторного визита",
+                            "Follow-up visit planning",
+                          )}
                         </h3>
                         <p className="text-xs text-slate-500">
-                          Schedule the next control visit or examination
-                          directly from the current appointment context.
+                          {appointmentText(
+                            "Den nächsten Kontroll- oder Untersuchungstermin direkt aus dem aktuellen Kontext planen.",
+                            "Планируйте следующий контрольный визит или обследование прямо из текущего контекста.",
+                            "Schedule the next control visit or examination directly from the current appointment context.",
+                          )}
                         </p>
                       </div>
                       <div className="flex flex-wrap gap-2">
@@ -7157,7 +7381,13 @@ function StaffAppointmentsPage() {
                             required
                           />
                         </Field>
-                        <Field label={t.appointments_time}>
+                        <Field
+                          label={appointmentText(
+                            "Beginn",
+                            "Время начала",
+                            "Start time",
+                          )}
+                        >
                           <Input
                             type="time"
                             value={followUpVisitForm.timeStart}
@@ -7174,7 +7404,13 @@ function StaffAppointmentsPage() {
                             className="h-10 rounded-xl bg-slate-50"
                           />
                         </Field>
-                        <Field label={t.appointments_time}>
+                        <Field
+                          label={appointmentText(
+                            "Ende",
+                            "Время окончания",
+                            "End time",
+                          )}
+                        >
                           <Input
                             type="time"
                             value={followUpVisitForm.timeEnd}
@@ -7263,7 +7499,7 @@ function StaffAppointmentsPage() {
                             ))}
                           </select>
                         </Field>
-                        <Field label={t.common_doctor}>
+                        <Field label={t.role_interpreter}>
                           <select
                             value={followUpVisitForm.interpreterId}
                             onChange={(event) =>
@@ -7696,7 +7932,11 @@ function StaffAppointmentsPage() {
                               {doctorFollowUpBusy ? (
                                 <LoaderCircle className="size-4 animate-spin" />
                               ) : null}
-                              Create doctor follow-up
+                              {appointmentText(
+                                "Arzt-Nachverfolgung anlegen",
+                                "Создать follow-up врача",
+                                "Create doctor follow-up",
+                              )}
                             </Button>
                           </div>
                         </form>
@@ -7715,19 +7955,33 @@ function StaffAppointmentsPage() {
                     <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                       <div>
                         <h3 className="text-sm font-semibold text-slate-950">
-                          Incoming unprocessed medical data
+                          {appointmentText(
+                            "Eingehende unverarbeitete medizinische Daten",
+                            "Входящие необработанные медицинские данные",
+                            "Incoming unprocessed medical data",
+                          )}
                         </h3>
                         <p className="text-xs text-slate-500">
-                          Capture incoming updates from patients, doctors,
-                          interpreters or clinics that still need triage,
-                          categorization and case update.
+                          {appointmentText(
+                            "Eingehende Updates von Patienten, Ärzten, Dolmetschern oder Kliniken erfassen, die noch Triage, Kategorisierung und Fall-Update benötigen.",
+                            "Фиксируйте входящие обновления от пациентов, врачей, переводчиков или клиник, которым ещё нужны сортировка, категоризация и обновление кейса.",
+                            "Capture incoming updates from patients, doctors, interpreters or clinics that still need triage, categorization and case update.",
+                          )}
                         </p>
                       </div>
                       <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
                         {openIncomingDataChecklistCount === 0 &&
                         incomingDataChecklist.length > 0
-                          ? "Intake clear"
-                          : `${openIncomingDataChecklistCount} open`}
+                          ? appointmentText(
+                              "Eingang sauber",
+                              "Входящие обработаны",
+                              "Intake clear",
+                            )
+                          : appointmentText(
+                              `${openIncomingDataChecklistCount} offen`,
+                              `${openIncomingDataChecklistCount} открыто`,
+                              `${openIncomingDataChecklistCount} open`,
+                            )}
                       </span>
                     </div>
                     <div className="mt-4 grid gap-4 md:grid-cols-3">
@@ -7735,13 +7989,29 @@ function StaffAppointmentsPage() {
                         label={t.cases_status}
                         value={
                           incomingDataChecklist.length === 0
-                            ? "Not started"
-                            : `${incomingDataChecklist.length} item(s)`
+                            ? appointmentText(
+                                "Nicht begonnen",
+                                "Не начато",
+                                "Not started",
+                              )
+                            : appointmentText(
+                                `${incomingDataChecklist.length} Einträge`,
+                                `${incomingDataChecklist.length} пункт(ов)`,
+                                `${incomingDataChecklist.length} item(s)`,
+                              )
                         }
                         meta={
                           incomingDataChecklist.length === 0
-                            ? "No intake checklist yet."
-                            : `${openIncomingDataChecklistCount} item(s) still open.`
+                            ? appointmentText(
+                                "Noch keine Eingangs-Checkliste.",
+                                "Чек-лист входящих данных ещё не создан.",
+                                "No intake checklist yet.",
+                              )
+                            : appointmentText(
+                                `${openIncomingDataChecklistCount} Einträge noch offen.`,
+                                `${openIncomingDataChecklistCount} пункт(ов) ещё открыты.`,
+                                `${openIncomingDataChecklistCount} item(s) still open.`,
+                              )
                         }
                       />
                       <ContextCard
@@ -7751,7 +8021,11 @@ function StaffAppointmentsPage() {
                             ? "0"
                             : String(incomingDataReminders.length)
                         }
-                        meta="Deadline control for data triage and processing."
+                        meta={appointmentText(
+                          "Fristenkontrolle für Daten-Triage und -Verarbeitung.",
+                          "Контроль сроков сортировки и обработки данных.",
+                          "Deadline control for data triage and processing.",
+                        )}
                       />
                       <ContextCard
                         label={t.cases_title}
@@ -7760,14 +8034,22 @@ function StaffAppointmentsPage() {
                             ? "0"
                             : String(incomingDataTasks.length)
                         }
-                        meta="Operational ownership for categorization and case updates."
+                        meta={appointmentText(
+                          "Operative Verantwortung für Kategorisierung und Fall-Updates.",
+                          "Операционная ответственность за категоризацию и обновления кейсов.",
+                          "Operational ownership for categorization and case updates.",
+                        )}
                       />
                     </div>
                     <div className="mt-4 grid gap-4 xl:grid-cols-2">
                       <div className="space-y-4">
                         <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
                           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                            Intake checklist
+                            {appointmentText(
+                              "Eingangs-Checkliste",
+                              "Чек-лист входящих",
+                              "Intake checklist",
+                            )}
                           </p>
                           <div className="mt-3 space-y-3">
                             {incomingDataChecklist.length === 0 ? (
@@ -7791,7 +8073,11 @@ function StaffAppointmentsPage() {
                                   </div>
                                   {item.is_completed ? (
                                     <span className="text-xs font-medium text-emerald-700">
-                                      Completed{" "}
+                                      {appointmentText(
+                                        "Abgeschlossen",
+                                        "Завершено",
+                                        "Completed",
+                                      )}{" "}
                                       {formatDateTimeLabel(item.completed_at)}
                                     </span>
                                   ) : (
@@ -7808,7 +8094,11 @@ function StaffAppointmentsPage() {
                                       {actionBusy === `check:${item.id}` ? (
                                         <LoaderCircle className="size-4 animate-spin" />
                                       ) : null}
-                                      Complete
+                                      {appointmentText(
+                                        "Abschließen",
+                                        "Завершить",
+                                        "Complete",
+                                      )}
                                     </Button>
                                   )}
                                 </div>
@@ -7818,7 +8108,11 @@ function StaffAppointmentsPage() {
                         </div>
                         <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
                           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                            Reminder and task trail
+                            {appointmentText(
+                              "Erinnerungen und Aufgaben",
+                              "Напоминания и задачи",
+                              "Reminder and task trail",
+                            )}
                           </p>
                           <div className="mt-3 space-y-3">
                             {incomingDataReminders.length === 0 &&
@@ -7929,7 +8223,11 @@ function StaffAppointmentsPage() {
                               className={selectClassName}
                             >
                               <option value="medical_update">
-                                Medical update
+                                {appointmentText(
+                                  "Medizinisches Update",
+                                  "Медицинское обновление",
+                                  "Medical update",
+                                )}
                               </option>
                               <option value="diagnosis">
                                 {tr.cases_preconditions}
@@ -7947,7 +8245,11 @@ function StaffAppointmentsPage() {
                                 {tr.documents_title}
                               </option>
                               <option value="recommendation">
-                                Recommendation
+                                {appointmentText(
+                                  "Empfehlung",
+                                  "Рекомендация",
+                                  "Recommendation",
+                                )}
                               </option>
                               <option value="risk_flag">
                                 {tr.common_error}
@@ -8079,7 +8381,11 @@ function StaffAppointmentsPage() {
                             disabled={!incomingDataForm.assigneeId}
                             onClick={openIncomingDataChatDraft}
                           >
-                            Open internal chat draft
+                            {appointmentText(
+                              "Internen Chat-Entwurf öffnen",
+                              "Открыть черновик внутреннего чата",
+                              "Open internal chat draft",
+                            )}
                           </Button>
                           <Button
                             type="submit"
@@ -8093,7 +8399,11 @@ function StaffAppointmentsPage() {
                             {incomingDataBusy ? (
                               <LoaderCircle className="size-4 animate-spin" />
                             ) : null}
-                            Start intake flow
+                            {appointmentText(
+                              "Eingangs-Flow starten",
+                              "Запустить поток входящих",
+                              "Start intake flow",
+                            )}
                           </Button>
                         </div>
                       </form>
@@ -8107,20 +8417,36 @@ function StaffAppointmentsPage() {
                     <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                       <div>
                         <h3 className="text-sm font-semibold text-slate-950">
-                          Package-end follow-up
+                          {appointmentText(
+                            "Paket-Ende Nachverfolgung",
+                            "Follow-up по окончанию пакета",
+                            "Package-end follow-up",
+                          )}
                         </h3>
                         <p className="text-xs text-slate-500">
-                          Schedule the required reminder one month before the
-                          linked package or order window ends.
+                          {appointmentText(
+                            "Erforderliche Erinnerung einen Monat vor Ablauf des verknüpften Pakets oder Auftragsfensters planen.",
+                            "Запланируйте обязательное напоминание за месяц до окончания связанного пакета или окна заказа.",
+                            "Schedule the required reminder one month before the linked package or order window ends.",
+                          )}
                         </p>
                       </div>
                       <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
                         {packageEndReminders.length + packageEndTasks.length}{" "}
-                        package item
-                        {packageEndReminders.length + packageEndTasks.length ===
-                        1
-                          ? ""
-                          : "s"}
+                        {appointmentText(
+                          packageEndReminders.length + packageEndTasks.length ===
+                            1
+                            ? "Paket-Element"
+                            : "Paket-Elemente",
+                          packageEndReminders.length + packageEndTasks.length ===
+                            1
+                            ? "элемент пакета"
+                            : "элементов пакета",
+                          packageEndReminders.length + packageEndTasks.length ===
+                            1
+                            ? "package item"
+                            : "package items",
+                        )}
                       </span>
                     </div>
                     <div className="mt-4 grid gap-4 xl:grid-cols-2">
@@ -8314,7 +8640,11 @@ function StaffAppointmentsPage() {
                               {packageEndFollowUpBusy ? (
                                 <LoaderCircle className="size-4 animate-spin" />
                               ) : null}
-                              Schedule package reminder
+                              {appointmentText(
+                                "Paket-Erinnerung planen",
+                                "Запланировать напоминание о пакете",
+                                "Schedule package reminder",
+                              )}
                             </Button>
                           </div>
                         </form>
@@ -8329,16 +8659,33 @@ function StaffAppointmentsPage() {
                     <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                       <div>
                         <h3 className="text-sm font-semibold text-slate-950">
-                          Clinic and doctor handoff trail
+                          {appointmentText(
+                            "Klinik- und Arzt-Übergabeverlauf",
+                            "Передача клиник и врачей",
+                            "Clinic and doctor handoff trail",
+                          )}
                         </h3>
                         <p className="text-xs text-slate-500">
-                          External communication log for clinics, doctors and
-                          service providers, plus linked internal follow-up.
+                          {appointmentText(
+                            "Externe Kommunikationsprotokolle für Kliniken, Ärzte und Dienstleister sowie verknüpfte interne Nachverfolgung.",
+                            "Журнал внешней коммуникации с клиниками, врачами и поставщиками услуг, а также связанный внутренний follow-up.",
+                            "External communication log for clinics, doctors and service providers, plus linked internal follow-up.",
+                          )}
                         </p>
                       </div>
                       <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
-                        {externalCommunicationEntries.length} communication
-                        {externalCommunicationEntries.length === 1 ? "" : "s"}
+                        {externalCommunicationEntries.length}{" "}
+                        {appointmentText(
+                          externalCommunicationEntries.length === 1
+                            ? "Kommunikation"
+                            : "Kommunikationen",
+                          externalCommunicationEntries.length === 1
+                            ? "коммуникация"
+                            : "коммуникаций",
+                          externalCommunicationEntries.length === 1
+                            ? "communication"
+                            : "communications",
+                        )}
                       </span>
                     </div>
                     <div className="mt-4 grid gap-4 xl:grid-cols-2">
@@ -8361,7 +8708,7 @@ function StaffAppointmentsPage() {
                                     </p>
                                     <p className="mt-1 text-xs text-slate-500">
                                       {item.created_by_name} · {item.direction}{" "}
-                                      via{" "}
+                                      {appointmentText("via", "через", "via")}{" "}
                                       {communicationChannelLabel(item.channel)}{" "}
                                       ·{" "}
                                       {communicationTargetLabel(
@@ -8372,7 +8719,7 @@ function StaffAppointmentsPage() {
                                         ? ` · ${item.contact_name}`
                                         : ""}
                                       {item.due_at
-                                        ? ` · due ${formatDateTimeLabel(item.due_at)}`
+                                        ? ` · ${appointmentText("fällig", "срок", "due")} ${formatDateTimeLabel(item.due_at)}`
                                         : ""}
                                     </p>
                                   </div>
@@ -8417,7 +8764,11 @@ function StaffAppointmentsPage() {
                                         `communication:${item.id}:answered` ? (
                                           <LoaderCircle className="size-4 animate-spin" />
                                         ) : null}
-                                        Mark answered
+                                        {appointmentText(
+                                          "Als beantwortet markieren",
+                                          "Отметить как отвеченное",
+                                          "Mark answered",
+                                        )}
                                       </Button>
                                     ) : null}
                                     {item.status !== "closed" &&
@@ -8442,7 +8793,11 @@ function StaffAppointmentsPage() {
                                         `communication:${item.id}:closed` ? (
                                           <LoaderCircle className="size-4 animate-spin" />
                                         ) : null}
-                                        Close
+                                        {appointmentText(
+                                          "Schließen",
+                                          "Закрыть",
+                                          "Close",
+                                        )}
                                       </Button>
                                     ) : null}
                                     {item.status !== "cancelled" ? (
@@ -8466,7 +8821,11 @@ function StaffAppointmentsPage() {
                                         `communication:${item.id}:cancelled` ? (
                                           <LoaderCircle className="size-4 animate-spin" />
                                         ) : null}
-                                        Cancel
+                                        {appointmentText(
+                                          "Stornieren",
+                                          "Отменить",
+                                          "Cancel",
+                                        )}
                                       </Button>
                                     ) : null}
                                   </div>
@@ -8478,7 +8837,11 @@ function StaffAppointmentsPage() {
                               externalHandoffTasks.length > 0) ? (
                               <div className="rounded-2xl border border-dashed border-slate-200 bg-white/70 p-4">
                                 <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                                  Internal follow-up trail
+                                  {appointmentText(
+                                    "Interner Follow-up-Verlauf",
+                                    "Внутренний журнал follow-up",
+                                    "Internal follow-up trail",
+                                  )}
                                 </p>
                                 <div className="mt-3 space-y-3">
                                   {externalHandoffReminders.map((item) => (
@@ -8561,19 +8924,27 @@ function StaffAppointmentsPage() {
                                   value="clinic"
                                   disabled={!detail.provider_id}
                                 >
-                                  Clinic
+                                  {appointmentText(
+                                    "Klinik",
+                                    "Клиника",
+                                    "Clinic",
+                                  )}
                                 </option>
                                 <option
                                   value="service_provider"
                                   disabled={!detail.provider_id}
                                 >
-                                  Service provider
+                                  {appointmentText(
+                                    "Dienstleister",
+                                    "Поставщик услуг",
+                                    "Service provider",
+                                  )}
                                 </option>
                                 <option
                                   value="doctor"
                                   disabled={!detail.doctor_id}
                                 >
-                                  Doctor
+                                  {appointmentText("Arzt", "Врач", "Doctor")}
                                 </option>
                               </select>
                             </Field>
@@ -8726,8 +9097,11 @@ function StaffAppointmentsPage() {
                                 className="mt-0.5 size-4 rounded border-slate-300 text-slate-950"
                               />
                               <span>
-                                Mirror this communication as an internal task
-                                when assignee and due date are set.
+                                {appointmentText(
+                                  "Diese Kommunikation als interne Aufgabe spiegeln, wenn Zuweisung und Fälligkeit gesetzt sind.",
+                                  "Отразить эту коммуникацию как внутреннюю задачу, когда указаны исполнитель и срок.",
+                                  "Mirror this communication as an internal task when assignee and due date are set.",
+                                )}
                               </span>
                             </label>
                             <Field label={tr.appointments_title_col}>
@@ -8758,7 +9132,11 @@ function StaffAppointmentsPage() {
                               disabled={!externalHandoffForm.assigneeId}
                               onClick={openExternalHandoffChatDraft}
                             >
-                              Open internal chat draft
+                              {appointmentText(
+                                "Internen Chat-Entwurf öffnen",
+                                "Открыть черновик внутреннего чата",
+                                "Open internal chat draft",
+                              )}
                             </Button>
                             <Button
                               type="submit"
@@ -8771,7 +9149,11 @@ function StaffAppointmentsPage() {
                               {externalHandoffBusy ? (
                                 <LoaderCircle className="size-4 animate-spin" />
                               ) : null}
-                              Log communication
+                              {appointmentText(
+                                "Kommunikation protokollieren",
+                                "Зафиксировать коммуникацию",
+                                "Log communication",
+                              )}
                             </Button>
                           </div>
                         </form>
@@ -8787,18 +9169,33 @@ function StaffAppointmentsPage() {
                     <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                       <div>
                         <h3 className="text-sm font-semibold text-slate-950">
-                          Arztbrief and written findings
+                          {appointmentText(
+                            "Arztbrief und schriftliche Befunde",
+                            "Arztbrief и письменные заключения",
+                            "Arztbrief and written findings",
+                          )}
                         </h3>
                         <p className="text-xs text-slate-500">
-                          Track missing findings, translation needs and patient
-                          dispatch from the appointment itself.
+                          {appointmentText(
+                            "Fehlende Befunde, Übersetzungsbedarf und Patienten-Versand direkt am Termin verfolgen.",
+                            "Отслеживайте отсутствующие заключения, потребность в переводе и отправку пациенту прямо из карточки приёма.",
+                            "Track missing findings, translation needs and patient dispatch from the appointment itself.",
+                          )}
                         </p>
                       </div>
                       <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
                         {openFindingsChecklistCount === 0 &&
                         findingsChecklist.length > 0
-                          ? "Follow-up ready"
-                          : `${openFindingsChecklistCount} open`}
+                          ? appointmentText(
+                              "Nachverfolgung bereit",
+                              "Готово к follow-up",
+                              "Follow-up ready",
+                            )
+                          : appointmentText(
+                              `${openFindingsChecklistCount} offen`,
+                              `${openFindingsChecklistCount} открыто`,
+                              `${openFindingsChecklistCount} open`,
+                            )}
                       </span>
                     </div>
                     <div className="mt-4 grid gap-4 md:grid-cols-3">
@@ -8806,13 +9203,29 @@ function StaffAppointmentsPage() {
                         label={t.cases_status}
                         value={
                           findingsChecklist.length === 0
-                            ? "Not started"
-                            : `${findingsChecklist.length} item(s)`
+                            ? appointmentText(
+                                "Nicht begonnen",
+                                "Не начато",
+                                "Not started",
+                              )
+                            : appointmentText(
+                                `${findingsChecklist.length} Einträge`,
+                                `${findingsChecklist.length} пункт(ов)`,
+                                `${findingsChecklist.length} item(s)`,
+                              )
                         }
                         meta={
                           findingsChecklist.length === 0
-                            ? "No document follow-up checklist yet."
-                            : `${openFindingsChecklistCount} item(s) still open.`
+                            ? appointmentText(
+                                "Noch keine Dokumenten-Nachverfolgung.",
+                                "Чек-лист по документам ещё не создан.",
+                                "No document follow-up checklist yet.",
+                              )
+                            : appointmentText(
+                                `${openFindingsChecklistCount} Einträge noch offen.`,
+                                `${openFindingsChecklistCount} пункт(ов) ещё открыты.`,
+                                `${openFindingsChecklistCount} item(s) still open.`,
+                              )
                         }
                       />
                       <ContextCard
@@ -8822,7 +9235,11 @@ function StaffAppointmentsPage() {
                             ? "0"
                             : String(findingsReminders.length)
                         }
-                        meta="Timing control for missing findings and document handling."
+                        meta={appointmentText(
+                          "Zeitsteuerung für fehlende Befunde und Dokumentenbearbeitung.",
+                          "Контроль сроков по недостающим заключениям и документам.",
+                          "Timing control for missing findings and document handling.",
+                        )}
                       />
                       <ContextCard
                         label={t.cases_title}
@@ -8831,14 +9248,22 @@ function StaffAppointmentsPage() {
                             ? "0"
                             : String(findingsTasks.length)
                         }
-                        meta="Operational ownership for requesting, translating or sending findings."
+                        meta={appointmentText(
+                          "Operative Verantwortung für Anforderung, Übersetzung und Versand der Befunde.",
+                          "Операционная ответственность за запрос, перевод и отправку заключений.",
+                          "Operational ownership for requesting, translating or sending findings.",
+                        )}
                       />
                     </div>
                     <div className="mt-4 grid gap-4 xl:grid-cols-2">
                       <div className="space-y-4">
                         <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
                           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                            Checklist trail
+                            {appointmentText(
+                              "Checklisten-Verlauf",
+                              "История чек-листа",
+                              "Checklist trail",
+                            )}
                           </p>
                           <div className="mt-3 space-y-3">
                             {findingsChecklist.length === 0 ? (
@@ -8862,7 +9287,11 @@ function StaffAppointmentsPage() {
                                   </div>
                                   {item.is_completed ? (
                                     <span className="text-xs font-medium text-emerald-700">
-                                      Completed{" "}
+                                      {appointmentText(
+                                        "Abgeschlossen",
+                                        "Завершено",
+                                        "Completed",
+                                      )}{" "}
                                       {formatDateTimeLabel(item.completed_at)}
                                     </span>
                                   ) : (
@@ -8879,7 +9308,11 @@ function StaffAppointmentsPage() {
                                       {actionBusy === `check:${item.id}` ? (
                                         <LoaderCircle className="size-4 animate-spin" />
                                       ) : null}
-                                      Complete
+                                      {appointmentText(
+                                        "Abschließen",
+                                        "Завершить",
+                                        "Complete",
+                                      )}
                                     </Button>
                                   )}
                                 </div>
@@ -8889,7 +9322,11 @@ function StaffAppointmentsPage() {
                         </div>
                         <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
                           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                            Reminder and task trail
+                            {appointmentText(
+                              "Erinnerungen und Aufgaben",
+                              "Напоминания и задачи",
+                              "Reminder and task trail",
+                            )}
                           </p>
                           <div className="mt-3 space-y-3">
                             {findingsReminders.length === 0 &&
@@ -8974,10 +9411,18 @@ function StaffAppointmentsPage() {
                               >
                                 <option value="arztbrief">Arztbrief</option>
                                 <option value="written_findings">
-                                  Written findings
+                                  {appointmentText(
+                                    "Schriftliche Befunde",
+                                    "Письменные заключения",
+                                    "Written findings",
+                                  )}
                                 </option>
                                 <option value="both">
-                                  Arztbrief + written findings
+                                  {appointmentText(
+                                    "Arztbrief + schriftliche Befunde",
+                                    "Arztbrief + письменные заключения",
+                                    "Arztbrief + written findings",
+                                  )}
                                 </option>
                               </select>
                             </Field>
@@ -9109,7 +9554,11 @@ function StaffAppointmentsPage() {
                               disabled={!findingsFollowUpForm.assigneeId}
                               onClick={openFindingsFollowUpChatDraft}
                             >
-                              Open internal chat draft
+                              {appointmentText(
+                                "Internen Chat-Entwurf öffnen",
+                                "Открыть черновик внутреннего чата",
+                                "Open internal chat draft",
+                              )}
                             </Button>
                             <Button
                               type="submit"
@@ -9123,7 +9572,11 @@ function StaffAppointmentsPage() {
                               {findingsFollowUpBusy ? (
                                 <LoaderCircle className="size-4 animate-spin" />
                               ) : null}
-                              Start findings follow-up
+                              {appointmentText(
+                                "Befund-Nachverfolgung starten",
+                                "Начать follow-up заключений",
+                                "Start findings follow-up",
+                              )}
                             </Button>
                           </div>
                         </form>
@@ -9136,17 +9589,27 @@ function StaffAppointmentsPage() {
                     <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                       <div>
                         <h3 className="text-sm font-semibold text-slate-950">
-                          Completion readiness
+                          {appointmentText(
+                            "Abschluss-Bereitschaft",
+                            "Готовность к закрытию",
+                            "Completion readiness",
+                          )}
                         </h3>
                         <p className="text-xs text-slate-500">
-                          Review operational blockers before closing the
-                          appointment and launching standard post-care
-                          follow-up.
+                          {appointmentText(
+                            "Operative Blocker prüfen, bevor der Termin geschlossen und die Standard-Nachsorge gestartet wird.",
+                            "Проверьте операционные блокеры перед закрытием приёма и запуском стандартного follow-up.",
+                            "Review operational blockers before closing the appointment and launching standard post-care follow-up.",
+                          )}
                         </p>
                       </div>
                       <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
                         {detail.status === "completed"
-                          ? "Completed"
+                          ? appointmentText(
+                              "Abgeschlossen",
+                              "Завершено",
+                              "Completed",
+                            )
                           : statusLabel(detail.status)}
                       </span>
                     </div>
@@ -9155,26 +9618,50 @@ function StaffAppointmentsPage() {
                         label={t.cases_status}
                         value={
                           openChecklistCount === 0
-                            ? "Ready"
-                            : `${openChecklistCount} open`
+                            ? appointmentText("Bereit", "Готово", "Ready")
+                            : appointmentText(
+                                `${openChecklistCount} offen`,
+                                `${openChecklistCount} открыто`,
+                                `${openChecklistCount} open`,
+                              )
                         }
                         meta={
                           openChecklistCount === 0
-                            ? "No pending checklist items."
-                            : "Finish outstanding preparation or follow-up steps."
+                            ? appointmentText(
+                                "Keine offenen Checklisten-Einträge.",
+                                "Нет ожидающих пунктов чек-листа.",
+                                "No pending checklist items.",
+                              )
+                            : appointmentText(
+                                "Offene Vorbereitungs- oder Nachverfolgungsschritte abschließen.",
+                                "Завершите оставшиеся шаги подготовки или follow-up.",
+                                "Finish outstanding preparation or follow-up steps.",
+                              )
                         }
                       />
                       <ContextCard
                         label={t.cases_title}
                         value={
                           openTaskCount === 0
-                            ? "Ready"
-                            : `${openTaskCount} open`
+                            ? appointmentText("Bereit", "Готово", "Ready")
+                            : appointmentText(
+                                `${openTaskCount} offen`,
+                                `${openTaskCount} открыто`,
+                                `${openTaskCount} open`,
+                              )
                         }
                         meta={
                           openTaskCount === 0
-                            ? "No open operational tasks."
-                            : "Resolve active PM, interpreter or concierge tasks."
+                            ? appointmentText(
+                                "Keine offenen operativen Aufgaben.",
+                                "Нет открытых операционных задач.",
+                                "No open operational tasks.",
+                              )
+                            : appointmentText(
+                                "Aktive PM-, Dolmetscher- oder Concierge-Aufgaben auflösen.",
+                                "Решите активные задачи PM, переводчика или concierge.",
+                                "Resolve active PM, interpreter or concierge tasks.",
+                              )
                         }
                       />
                       <ContextCard
@@ -9490,7 +9977,13 @@ function StaffAppointmentsPage() {
                             className="h-10 rounded-xl bg-slate-50"
                           />
                         </Field>
-                        <Field label={t.appointments_time}>
+                        <Field
+                          label={appointmentText(
+                            "Beginn",
+                            "Время начала",
+                            "Start time",
+                          )}
+                        >
                           <Input
                             type="time"
                             value={editForm.timeStart}
@@ -9507,7 +10000,13 @@ function StaffAppointmentsPage() {
                             className="h-10 rounded-xl bg-slate-50"
                           />
                         </Field>
-                        <Field label={t.appointments_time}>
+                        <Field
+                          label={appointmentText(
+                            "Ende",
+                            "Время окончания",
+                            "End time",
+                          )}
+                        >
                           <Input
                             type="time"
                             value={editForm.timeEnd}
@@ -9594,7 +10093,7 @@ function StaffAppointmentsPage() {
                             ))}
                           </select>
                         </Field>
-                        <Field label={t.common_doctor}>
+                        <Field label={t.role_interpreter}>
                           <select
                             value={editForm.interpreterId}
                             onChange={(event) =>
@@ -9631,7 +10130,8 @@ function StaffAppointmentsPage() {
                           className="h-10 rounded-xl bg-slate-50"
                         />
                       </Field>
-                      {detail.recurrence_frequency ? (
+                      {detail.recurrence_frequency &&
+                      detail.recurrence_series_id ? (
                         <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3">
                           <Field label={t.appointments_scope_apply_schedule}>
                             <select
@@ -9744,15 +10244,11 @@ function StaffAppointmentsPage() {
                             </Field>
                           </div>
                           <p className="mt-3 text-xs text-sky-800">
-                            Recurrence rule edits only apply when you target
-                            <span className="font-semibold">
-                              {" "}
-                              this and following
-                            </span>{" "}
-                            or the{" "}
-                            <span className="font-semibold">whole series</span>.
-                            Single-occurrence updates keep the current slot
-                            detached from rule changes.
+                            {appointmentText(
+                              "Änderungen an der Wiederholungsregel gelten nur, wenn Sie „diesen und folgende“ oder „gesamte Serie“ auswählen. Änderungen an einem einzelnen Termin lassen den aktuellen Slot unberührt von der Regel.",
+                              "Изменения правила повторений применяются только при выборе «этот и последующие» или «всю серию». Изменение единичного приёма оставляет слот отвязанным от правила.",
+                              "Recurrence rule edits only apply when you target 'this and following' or the 'whole series'. Single-occurrence updates keep the current slot detached from rule changes.",
+                            )}
                           </p>
                         </div>
                       ) : null}
@@ -9782,7 +10278,7 @@ function StaffAppointmentsPage() {
                       onSubmit={handleAssignInterpreter}
                       className="mt-4 grid gap-4 md:grid-cols-[minmax(0,1fr)_auto]"
                     >
-                      <Field label={t.common_doctor}>
+                      <Field label={t.role_interpreter}>
                         <select
                           value={editForm?.interpreterId ?? ""}
                           onChange={(event) =>
@@ -9816,7 +10312,11 @@ function StaffAppointmentsPage() {
                           {actionBusy === "assign" ? (
                             <LoaderCircle className="size-4 animate-spin" />
                           ) : null}
-                          Assign interpreter
+                          {appointmentText(
+                            "Dolmetscher zuweisen",
+                            "Назначить переводчика",
+                            "Assign interpreter",
+                          )}
                         </Button>
                       </div>
                     </form>
@@ -9942,7 +10442,11 @@ function StaffAppointmentsPage() {
                           {checklistBusy ? (
                             <LoaderCircle className="size-4 animate-spin" />
                           ) : null}
-                          Add checklist item
+                          {appointmentText(
+                            "Checklisten-Element hinzufügen",
+                            "Добавить пункт чек-листа",
+                            "Add checklist item",
+                          )}
                         </Button>
                       </div>
                     </form>
@@ -9978,7 +10482,11 @@ function StaffAppointmentsPage() {
                             </div>
                             {item.is_completed ? (
                               <span className="text-xs font-medium text-emerald-700">
-                                Completed{" "}
+                                {appointmentText(
+                                  "Abgeschlossen",
+                                  "Завершено",
+                                  "Completed",
+                                )}{" "}
                                 {formatDateTimeLabel(item.completed_at)}
                               </span>
                             ) : (
@@ -10114,7 +10622,7 @@ function StaffAppointmentsPage() {
                       <div className="mt-4 space-y-4">
                         <div className="grid gap-3 xl:grid-cols-3">
                           <ContextCard
-                            label={t.common_doctor}
+                            label={t.role_interpreter}
                             value={detailReport.interpreter_name}
                             meta={`${t.appointments_report_submitted_prefix} ${formatDateTimeLabel(detailReport.created_at)}`}
                           />
@@ -10204,7 +10712,11 @@ function StaffAppointmentsPage() {
                             </p>
                           ) : (
                             <p className="text-sm text-slate-500">
-                              No free-text report submitted.
+                              {appointmentText(
+                                "Kein Freitext-Bericht eingereicht.",
+                                "Свободный текст отчёта не подан.",
+                                "No free-text report submitted.",
+                              )}
                             </p>
                           )}
                         </div>
@@ -10223,9 +10735,11 @@ function StaffAppointmentsPage() {
                         {canResubmitRejectedReport ? (
                           <div className="md:col-span-2">
                             <Banner tone="warning">
-                              The latest report was returned. Update the hours
-                              or report text and resubmit it for teamlead
-                              approval.
+                              {appointmentText(
+                                "Der letzte Bericht wurde zurückgewiesen. Stunden oder Berichtstext aktualisieren und zur Teamlead-Genehmigung erneut einreichen.",
+                                "Последний отчёт был возвращён. Обновите часы или текст отчёта и повторно отправьте на утверждение тимлидеру.",
+                                "The latest report was returned. Update the hours or report text and resubmit it for teamlead approval.",
+                              )}
                             </Banner>
                           </div>
                         ) : null}
@@ -10272,7 +10786,11 @@ function StaffAppointmentsPage() {
                               <LoaderCircle className="size-4 animate-spin" />
                             ) : null}
                             {canResubmitRejectedReport
-                              ? "Resubmit report"
+                              ? appointmentText(
+                                  "Bericht erneut einreichen",
+                                  "Повторно отправить отчёт",
+                                  "Resubmit report",
+                                )
                               : t.common_save}
                           </Button>
                         </div>
@@ -10303,7 +10821,11 @@ function StaffAppointmentsPage() {
                               {actionBusy === "report-reject" ? (
                                 <LoaderCircle className="size-4 animate-spin" />
                               ) : null}
-                              Return for revision
+                              {appointmentText(
+                                "Zur Überarbeitung zurückgeben",
+                                "Вернуть на доработку",
+                                "Return for revision",
+                              )}
                             </Button>
                           ) : null}
                           {permissions.canApproveReport ? (
@@ -10315,7 +10837,11 @@ function StaffAppointmentsPage() {
                               {actionBusy === "report-approve" ? (
                                 <LoaderCircle className="size-4 animate-spin" />
                               ) : null}
-                              Approve hours and report
+                              {appointmentText(
+                                "Stunden und Bericht genehmigen",
+                                "Утвердить часы и отчёт",
+                                "Approve hours and report",
+                              )}
                             </Button>
                           ) : null}
                         </div>
@@ -10328,15 +10854,27 @@ function StaffAppointmentsPage() {
                     <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                       <div>
                         <h3 className="text-sm font-semibold text-slate-950">
-                          Operational tasks
+                          {appointmentText(
+                            "Operative Aufgaben",
+                            "Операционные задачи",
+                            "Operational tasks",
+                          )}
                         </h3>
                         <p className="text-xs text-slate-500">
-                          Appointment-linked follow-up for PM, teamlead,
-                          interpreter and concierge.
+                          {appointmentText(
+                            "Mit dem Termin verknüpfte Nachverfolgung für PM, Teamlead, Dolmetscher und Concierge.",
+                            "Связанный с приёмом follow-up для PM, тимлида, переводчика и concierge.",
+                            "Appointment-linked follow-up for PM, teamlead, interpreter and concierge.",
+                          )}
                         </p>
                       </div>
                       <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
-                        {detailTasks.length} linked
+                        {detailTasks.length}{" "}
+                        {appointmentText(
+                          "verknüpft",
+                          "связано",
+                          "linked",
+                        )}
                       </span>
                     </div>
                     <div className="mt-4 space-y-3">
@@ -10513,7 +11051,11 @@ function StaffAppointmentsPage() {
                             {taskBusy ? (
                               <LoaderCircle className="size-4 animate-spin" />
                             ) : null}
-                            Add task
+                            {appointmentText(
+                              "Aufgabe hinzufügen",
+                              "Добавить задачу",
+                              "Add task",
+                            )}
                           </Button>
                         </div>
                       </form>
@@ -10525,16 +11067,31 @@ function StaffAppointmentsPage() {
                     <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                       <div>
                         <h3 className="text-sm font-semibold text-slate-950">
-                          Concierge and VIP services
+                          {appointmentText(
+                            "Concierge- und VIP-Leistungen",
+                            "Concierge и VIP услуги",
+                            "Concierge and VIP services",
+                          )}
                         </h3>
                         <p className="text-xs text-slate-500">
-                          Travel, transfer and VIP execution linked to this
-                          appointment.
+                          {appointmentText(
+                            "Reise-, Transfer- und VIP-Ausführung, verknüpft mit diesem Termin.",
+                            "Поездки, трансферы и VIP-исполнение, связанные с этим приёмом.",
+                            "Travel, transfer and VIP execution linked to this appointment.",
+                          )}
                         </p>
                       </div>
                       <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
-                        {detailServices.length} service
-                        {detailServices.length === 1 ? "" : "s"}
+                        {detailServices.length}{" "}
+                        {appointmentText(
+                          detailServices.length === 1
+                            ? "Leistung"
+                            : "Leistungen",
+                          detailServices.length === 1
+                            ? "услуга"
+                            : "услуг(и)",
+                          detailServices.length === 1 ? "service" : "services",
+                        )}
                       </span>
                     </div>
                     <div className="mt-4 space-y-4">
@@ -10582,14 +11139,22 @@ function StaffAppointmentsPage() {
                                   </div>
                                   <div className="text-xs text-slate-500 xl:text-right">
                                     <div>
-                                      Estimate{" "}
+                                      {appointmentText(
+                                        "Schätzung",
+                                        "Оценка",
+                                        "Estimate",
+                                      )}{" "}
                                       {formatMoneyLabel(
                                         service.cost_estimate,
                                         draft.currency || service.currency,
                                       )}
                                     </div>
                                     <div>
-                                      Actual{" "}
+                                      {appointmentText(
+                                        "Tatsächlich",
+                                        "Фактически",
+                                        "Actual",
+                                      )}{" "}
                                       {formatMoneyLabel(
                                         draft.actualCost || service.actual_cost,
                                         draft.currency || service.currency,
@@ -10621,7 +11186,13 @@ function StaffAppointmentsPage() {
                                           }
                                           className={selectClassName}
                                         >
-                                          <option value="">No provider</option>
+                                          <option value="">
+                                            {appointmentText(
+                                              "Kein Anbieter",
+                                              "Без поставщика",
+                                              "No provider",
+                                            )}
+                                          </option>
                                           {nonMedicalProviders.map(
                                             (provider) => (
                                               <option
@@ -10645,7 +11216,13 @@ function StaffAppointmentsPage() {
                                           }
                                           className={selectClassName}
                                         >
-                                          <option value="">No concierge</option>
+                                          <option value="">
+                                            {appointmentText(
+                                              "Kein Concierge",
+                                              "Без concierge",
+                                              "No concierge",
+                                            )}
+                                          </option>
                                           {conciergeStaff.map((member) => (
                                             <option
                                               key={member.id}
@@ -10831,7 +11408,11 @@ function StaffAppointmentsPage() {
                                     {actionBusy === `service:${service.id}` ? (
                                       <LoaderCircle className="size-4 animate-spin" />
                                     ) : null}
-                                    Save service
+                                    {appointmentText(
+                                      "Leistung speichern",
+                                      "Сохранить услугу",
+                                      "Save service",
+                                    )}
                                   </Button>
                                 </div>
                               </div>
@@ -10887,7 +11468,13 @@ function StaffAppointmentsPage() {
                             }
                             className={selectClassName}
                           >
-                            <option value="">No provider</option>
+                            <option value="">
+                              {appointmentText(
+                                "Kein Anbieter",
+                                "Без поставщика",
+                                "No provider",
+                              )}
+                            </option>
                             {nonMedicalProviders.map((provider) => (
                               <option key={provider.id} value={provider.id}>
                                 {provider.name}
@@ -10906,7 +11493,13 @@ function StaffAppointmentsPage() {
                             }
                             className={selectClassName}
                           >
-                            <option value="">No concierge</option>
+                            <option value="">
+                              {appointmentText(
+                                "Kein Concierge",
+                                "Без concierge",
+                                "No concierge",
+                              )}
+                            </option>
                             {conciergeStaff.map((member) => (
                               <option key={member.id} value={member.id}>
                                 {member.name}
@@ -11014,7 +11607,11 @@ function StaffAppointmentsPage() {
                             {serviceBusy ? (
                               <LoaderCircle className="size-4 animate-spin" />
                             ) : null}
-                            Add service
+                            {appointmentText(
+                              "Leistung hinzufügen",
+                              "Добавить услугу",
+                              "Add service",
+                            )}
                           </Button>
                         </div>
                       </form>
@@ -11151,7 +11748,13 @@ function StaffAppointmentsPage() {
                         </div>
                         <div className="mt-3 space-y-3">
                           {billingHandoffReminders.length === 0 ? (
-                            <EmptyState text={tr.common_not_set} />
+                            <EmptyState
+                              text={appointmentText(
+                                "Noch keine Billing-Erinnerungen verknüpft.",
+                                "Напоминания для биллинга ещё не привязаны.",
+                                "No billing reminders are linked yet.",
+                              )}
+                            />
                           ) : (
                             billingHandoffReminders.map((item) => (
                               <div
@@ -11192,7 +11795,13 @@ function StaffAppointmentsPage() {
                         </div>
                         <div className="mt-3 space-y-3">
                           {billingHandoffTasks.length === 0 ? (
-                            <EmptyState text={tr.common_not_set} />
+                            <EmptyState
+                              text={appointmentText(
+                                "Noch keine Billing-Aufgaben verknüpft.",
+                                "Задачи биллинга ещё не привязаны.",
+                                "No billing tasks are linked yet.",
+                              )}
+                            />
                           ) : (
                             billingHandoffTasks.map((task) => (
                               <div
@@ -11363,7 +11972,11 @@ function StaffAppointmentsPage() {
                               }
                               className="size-4 rounded border-slate-300"
                             />
-                            Mirror this billing handoff as a task
+                            {appointmentText(
+                              "Diese Abrechnungs-Übergabe als Aufgabe spiegeln",
+                              "Отразить эту передачу в биллинг как задачу",
+                              "Mirror this billing handoff as a task",
+                            )}
                           </label>
                           <div className="flex flex-wrap justify-end gap-3">
                             <Button
@@ -11373,7 +11986,11 @@ function StaffAppointmentsPage() {
                               disabled={!billingHandoffForm.assigneeId}
                               onClick={openBillingHandoffChatDraft}
                             >
-                              Open billing chat draft
+                              {appointmentText(
+                                "Abrechnungs-Chat-Entwurf öffnen",
+                                "Открыть черновик чата биллинга",
+                                "Open billing chat draft",
+                              )}
                             </Button>
                             <Button
                               type="submit"
@@ -11388,7 +12005,11 @@ function StaffAppointmentsPage() {
                               {billingHandoffBusy ? (
                                 <LoaderCircle className="size-4 animate-spin" />
                               ) : null}
-                              Create billing handoff
+                              {appointmentText(
+                                "Abrechnungs-Übergabe erstellen",
+                                "Создать передачу в биллинг",
+                                "Create billing handoff",
+                              )}
                             </Button>
                           </div>
                         </div>
@@ -11417,7 +12038,11 @@ function StaffAppointmentsPage() {
               </div>
             ) : (
               <div className="flex min-h-[320px] items-center justify-center text-muted-foreground">
-                Select an appointment from the calendar or list.
+                {appointmentText(
+                  "Wählen Sie einen Termin aus dem Kalender oder der Liste.",
+                  "Выберите приём из календаря или списка.",
+                  "Select an appointment from the calendar or list.",
+                )}
               </div>
             )}
           </div>
@@ -11512,7 +12137,11 @@ function MobileAgendaCard({
     item.provider_name ||
     item.location ||
     item.owner_name ||
-    "Operational slot";
+    appointmentText(
+      "Operativer Slot",
+      "Операционный слот",
+      "Operational slot",
+    );
 
   return (
     <div className="rounded-[1.5rem] border border-slate-200/80 bg-slate-50/85 p-4 shadow-sm">
@@ -11557,7 +12186,12 @@ function MobileAgendaCard({
       <div className="mt-3 flex flex-wrap gap-2">
         {item.interpreter_response ? (
           <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-sky-700">
-            Interpreter {responseLabel(item.interpreter_response)}
+            {appointmentText(
+              "Dolmetscher",
+              "Переводчик",
+              "Interpreter",
+            )}{" "}
+            {responseLabel(item.interpreter_response)}
           </span>
         ) : null}
         {item.recurrence_frequency ? (
@@ -11580,7 +12214,7 @@ function MobileAgendaCard({
           className="rounded-2xl"
           onClick={onOpen}
         >
-          Open
+          {appointmentText("Öffnen", "Открыть", "Open")}
         </Button>
       </div>
     </div>

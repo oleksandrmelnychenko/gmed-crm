@@ -1104,7 +1104,9 @@ test.describe("staff smoke flows", () => {
     });
     await installStaffApiMocks(page);
     await loginAsStaff(page, "admin@gmed.de");
-    await expect(page.getByRole("button", { name: /Open calendar/i })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /Kalender öffnen|Open calendar/i }),
+    ).toBeVisible();
   });
 
   test("staff can open dashboard, patients, appointments, documents and invoices", async ({
@@ -1191,9 +1193,14 @@ test.describe("staff smoke flows", () => {
     );
     await dialog.getByLabel("Dateiname").first().fill("Behandlungsplan April");
 
-    await dialog.locator("form").evaluate((formElement) => {
-      (formElement as HTMLFormElement).requestSubmit();
+    const submitButton = dialog.getByRole("button", {
+      name: /Dokument erstellen|Сгенерировать документ/i,
     });
+    await submitButton.scrollIntoViewIfNeeded();
+    const previewPromise = page.waitForEvent("popup").catch(() => null);
+    await submitButton.click();
+    const previewPage = await previewPromise;
+    await previewPage?.close();
 
     await expect(
       page

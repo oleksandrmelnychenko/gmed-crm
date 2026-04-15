@@ -1658,7 +1658,7 @@ export function ContractsPage() {
           <TabsContent value="contracts">
             <div className="space-y-5">
               <SectionCard
-                title={text.quotesTab}
+                title={text.contractsTab}
                 description={t.contracts_subtitle}
               >
                 <div className="grid gap-3 lg:grid-cols-[minmax(0,1.4fr)_minmax(220px,1fr)_minmax(180px,0.8fr)_auto]">
@@ -1790,7 +1790,7 @@ export function ContractsPage() {
           <TabsContent value="quotes">
             <div className="space-y-5">
               <SectionCard
-                title={t.contracts_title}
+                title={text.quotesTab}
                 description={t.contracts_subtitle}
               >
                 <div className="grid gap-3 lg:grid-cols-[minmax(0,1.2fr)_minmax(220px,1fr)_minmax(220px,1fr)_minmax(180px,0.8fr)_auto]">
