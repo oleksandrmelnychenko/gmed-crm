@@ -395,11 +395,106 @@ function runtimeTranslations() {
   return translateCatalog(getLang());
 }
 
+function runtimeLocale() {
+  return getLang() === "ru" ? "ru-RU" : "de-DE";
+}
+
+function formatRoleLabel(role?: string | null) {
+  const tr = runtimeTranslations();
+  if (!role) return getLang() === "ru" ? "пользователь" : "Benutzer";
+  const translated = tr[`role_${role}` as keyof typeof tr];
+  return typeof translated === "string" ? translated : role.replaceAll("_", " ");
+}
+
+function formatLanguageLabel(language?: string | null) {
+  const normalized = normalizeTemplateLanguage(language) ?? language?.trim().toLowerCase();
+  const isRu = getLang() === "ru";
+  switch (normalized) {
+    case "de":
+      return isRu ? "Немецкий" : "Deutsch";
+    case "en":
+      return isRu ? "Английский" : "Englisch";
+    case "uk":
+      return isRu ? "Украинский" : "Ukrainisch";
+    case "ru":
+      return isRu ? "Русский" : "Russisch";
+    default:
+      return language ? language.toUpperCase() : runtimeTranslations().common_not_set;
+  }
+}
+
+function formatSensitivityLabel(value?: string | null) {
+  const normalized = value?.trim().toLowerCase();
+  const isRu = getLang() === "ru";
+  switch (normalized) {
+    case "general":
+      return isRu ? "Общие данные" : "Allgemeine Daten";
+    case "patient identity":
+    case "patient_identity":
+      return isRu ? "Данные пациента" : "Patientendaten";
+    case "medical":
+      return isRu ? "Медицинские данные" : "Medizinische Daten";
+    case "financial":
+      return isRu ? "Финансовые данные" : "Finanzdaten";
+    case "internal":
+      return isRu ? "Внутренние данные" : "Interne Daten";
+    case "service":
+      return isRu ? "Сервисные данные" : "Servicedaten";
+    default:
+      return value?.replaceAll("_", " ") ?? runtimeTranslations().common_not_set;
+  }
+}
+
+function formatShareChannelLabel(channel?: string | null) {
+  const normalized = channel?.trim().toLowerCase();
+  const isRu = getLang() === "ru";
+  switch (normalized) {
+    case "email":
+      return isRu ? "Эл. почта" : "E-Mail";
+    case "phone":
+      return isRu ? "Телефон" : "Telefon";
+    case "portal":
+    case "patient_portal":
+      return isRu ? "Портал пациента" : "Patientenportal";
+    case "postal_mail":
+      return isRu ? "Почта" : "Postversand";
+    case "fax":
+      return isRu ? "Факс" : "Fax";
+    case "whatsapp":
+      return "WhatsApp";
+    case "other":
+      return isRu ? "Другой канал" : "Anderer Kanal";
+    default:
+      return channel?.replaceAll("_", " ") ?? runtimeTranslations().common_not_set;
+  }
+}
+
+function formatExtractionMethodLabel(method?: string | null) {
+  const normalized = method?.trim().toLowerCase();
+  const isRu = getLang() === "ru";
+  switch (normalized) {
+    case "html_text":
+      return isRu ? "HTML-текст" : "HTML-Text";
+    case "pdf_text":
+      return isRu ? "PDF-текст" : "PDF-Text";
+    case "text_utf8":
+      return isRu ? "UTF-8 текст" : "UTF-8-Text";
+    case "windows_ocr":
+      return isRu ? "OCR Windows" : "Windows-OCR";
+    case "tesseract_cli":
+      return "Tesseract OCR";
+    case "ocr_unavailable":
+      return isRu ? "OCR недоступен" : "OCR nicht verfügbar";
+    default:
+      return method?.replaceAll("_", " ") ?? runtimeTranslations().common_not_set;
+  }
+}
+
 function formatDateTime(value?: string | null) {
   const tr = runtimeTranslations();
   if (!value) return tr.common_not_set;
   try {
-    return new Intl.DateTimeFormat("en-GB", {
+    return new Intl.DateTimeFormat(runtimeLocale(), {
       day: "2-digit",
       month: "short",
       year: "numeric",
@@ -415,7 +510,7 @@ function formatDate(value?: string | null) {
   const tr = runtimeTranslations();
   if (!value) return tr.common_not_set;
   try {
-    return new Intl.DateTimeFormat("en-GB", {
+    return new Intl.DateTimeFormat(runtimeLocale(), {
       day: "2-digit",
       month: "short",
       year: "numeric",
@@ -730,8 +825,60 @@ export function DocumentsPage() {
 
 function StaffDocumentsPage() {
   const { user } = useAuth();
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const [searchParams, setSearchParams] = useSearchParams();
+  const text =
+    lang === "de"
+      ? {
+          allPatients: "Alle Patienten",
+          allStatuses: "Alle Status",
+          allVisibility: "Alle Sichtbarkeiten",
+          allCategories: "Alle Kategorien",
+          resetFilters: "Filter zurücksetzen",
+          selectedDocuments: (count: number) =>
+            `${count} Dokument${count === 1 ? "" : "e"} ausgewählt`,
+          current: "aktuell",
+          historical: "historisch",
+          needsCategorization: "Kategorisierung erforderlich",
+          suggested: (art: string, category: string) =>
+            `Vorgeschlagen: ${art} · ${category}`,
+          suggestedClassification: "Vorgeschlagene Klassifikation:",
+          newVersion: "Neue Version",
+          pidFallback: "PID",
+          uploadDescription:
+            "Datei jetzt speichern und klassifizieren oder die Triage in der Intake-Queue abschließen lassen.",
+          completedAt: (value: string) => ` · abgeschlossen ${value}`,
+          revokedBadge: "Widerrufen",
+          translatedByWorkspace: (name: string) => ` · Workspace ${name}`,
+          noAccessTitle: "Dokumentenbereich",
+          noAccessText: "Diese Rolle hat keinen Zugriff auf Dokumenten-Workflows.",
+          versionOf: (current: number, total: number) => `v${current} von ${total}`,
+        }
+      : {
+          allPatients: "Все пациенты",
+          allStatuses: "Все статусы",
+          allVisibility: "Все уровни видимости",
+          allCategories: "Все категории",
+          resetFilters: "Сбросить фильтры",
+          selectedDocuments: (count: number) =>
+            `${count} документ${count === 1 ? "" : count < 5 ? "а" : "ов"} выбрано`,
+          current: "текущая",
+          historical: "историческая",
+          needsCategorization: "Требуется категоризация",
+          suggested: (art: string, category: string) =>
+            `Предложено: ${art} · ${category}`,
+          suggestedClassification: "Предлагаемая классификация:",
+          newVersion: "Новая версия",
+          pidFallback: "PID",
+          uploadDescription:
+            "Сохраните и классифицируйте файл сейчас или дайте intake-queue завершить триаж.",
+          completedAt: (value: string) => ` · завершено ${value}`,
+          revokedBadge: "Отозвано",
+          translatedByWorkspace: (name: string) => ` · workspace ${name}`,
+          noAccessTitle: "Раздел документов",
+          noAccessText: "У этой роли нет доступа к документным workflow.",
+          versionOf: (current: number, total: number) => `v${current} из ${total}`,
+        };
   const documentsFailedLoadDocumentsText = t.documents_failed_load_documents;
   const documentsFailedLoadIntakeQueueText = t.documents_failed_load_intake_queue;
   const documentsFailedLoadDocumentText = t.documents_failed_load_document;
@@ -1988,10 +2135,10 @@ function StaffDocumentsPage() {
     return (
       <section className="rounded-[2rem] border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-3xl font-semibold tracking-tight text-slate-950">
-          Documents workspace
+          {text.noAccessTitle}
         </h1>
         <p className="mt-3 text-sm text-slate-500">
-          This role cannot access document workflows.
+          {text.noAccessText}
         </p>
       </section>
     );
@@ -2039,7 +2186,7 @@ function StaffDocumentsPage() {
                 onClick={() => setUploadOpen(true)}
               >
                 <FolderPlus className="size-4" />
-                Upload
+                {t.documents_upload}
               </Button>
             ) : null}
           </div>
@@ -2105,8 +2252,10 @@ function StaffDocumentsPage() {
                   {item.classification_suggestion ? (
                     <div className="mt-3 rounded-2xl border border-sky-200 bg-sky-50 px-3 py-3 text-sm text-sky-900">
                       <p className="font-medium">
-                        Suggested: {item.classification_suggestion.art} ·{" "}
-                        {item.classification_suggestion.category}
+                        {text.suggested(
+                          item.classification_suggestion.art,
+                          item.classification_suggestion.category,
+                        )}
                       </p>
                       <p className="mt-1 text-xs uppercase tracking-[0.14em] text-sky-700">
                         {item.classification_suggestion.confidence}{" "}
@@ -2185,7 +2334,7 @@ function StaffDocumentsPage() {
             }
             className={selectClassName}
           >
-            <option value="">All patients</option>
+            <option value="">{text.allPatients}</option>
             {patients.map((patient) => (
               <option key={patient.id} value={patient.id}>
                 {patientOptionLabel(patient)}
@@ -2202,7 +2351,7 @@ function StaffDocumentsPage() {
             }
             className={selectClassName}
           >
-            <option value="">All statuses</option>
+            <option value="">{text.allStatuses}</option>
             {STATUS_OPTIONS.map((status) => (
               <option key={status} value={status}>
                 {formatDocumentStatusLabel(status, t)}
@@ -2219,7 +2368,7 @@ function StaffDocumentsPage() {
             }
             className={selectClassName}
           >
-            <option value="">All visibility</option>
+            <option value="">{text.allVisibility}</option>
             {VISIBILITY_OPTIONS.map((value) => (
               <option key={value} value={value}>
                 {formatVisibilityLabel(value, t)}
@@ -2295,7 +2444,7 @@ function StaffDocumentsPage() {
             }
             className={selectClassName}
             >
-              <option value="">All categories</option>
+              <option value="">{text.allCategories}</option>
               {categories.map((category) => (
                 <option key={category.key} value={category.key}>
                   {category.label}
@@ -2344,7 +2493,7 @@ function StaffDocumentsPage() {
               })
             }
           >
-            Reset filters
+            {text.resetFilters}
           </Button>
         </div>
         <datalist id="documents-art-options">
@@ -2354,10 +2503,7 @@ function StaffDocumentsPage() {
         </datalist>
         {selectedDocumentIds.length > 0 ? (
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-            <span>
-              {selectedDocumentIds.length} document
-              {selectedDocumentIds.length === 1 ? "" : "s"} selected
-            </span>
+            <span>{text.selectedDocuments(selectedDocumentIds.length)}</span>
             <div className="flex gap-2">
               <Button
                 type="button"
@@ -2444,21 +2590,21 @@ function StaffDocumentsPage() {
                           sensitivityBadge(item.data_sensitivity),
                         )}
                       >
-                        {item.data_sensitivity}
+                        {formatSensitivityLabel(item.data_sensitivity)}
                       </Badge>
                       <Badge
                         variant="outline"
                         className="rounded-full border-slate-200 bg-white text-slate-700"
                       >
                         v{item.version_number}
-                        {item.is_latest_version ? " current" : ""}
+                        {item.is_latest_version ? ` ${text.current}` : ""}
                       </Badge>
                       {item.needs_categorization ? (
                         <Badge
                           variant="outline"
                           className="rounded-full border-amber-200 bg-amber-50 text-amber-700"
                         >
-                          Needs categorization
+                          {text.needsCategorization}
                         </Badge>
                       ) : null}
                     </div>
@@ -2472,8 +2618,10 @@ function StaffDocumentsPage() {
                       </p>
                     {item.classification_suggestion ? (
                       <p className="mt-2 text-xs text-sky-700">
-                        Suggested {item.classification_suggestion.art} ·{" "}
-                        {item.classification_suggestion.category}
+                        {text.suggested(
+                          item.classification_suggestion.art,
+                          item.classification_suggestion.category,
+                        )}
                       </p>
                     ) : null}
                   </div>
@@ -2487,7 +2635,7 @@ function StaffDocumentsPage() {
                 <div className="mt-4 space-y-2 text-sm text-slate-600">
                   <div>
                     {item.patient_name
-                      ? `${item.patient_pid ?? "PID"} · ${item.patient_name}`
+                      ? `${item.patient_pid ?? text.pidFallback} · ${item.patient_name}`
                       : t.common_not_set}
                   </div>
                   <div>
@@ -2580,7 +2728,7 @@ function StaffDocumentsPage() {
                   {(selectedTemplate?.supported_languages ?? ["de"]).map(
                     (language) => (
                       <option key={language} value={language}>
-                        {language.toUpperCase()}
+                        {formatLanguageLabel(language)}
                       </option>
                     ),
                   )}
@@ -2871,8 +3019,7 @@ function StaffDocumentsPage() {
           <DialogHeader className="border-b border-border/70 px-6 pt-6 pb-4">
             <DialogTitle>{t.documents_upload}</DialogTitle>
             <DialogDescription>
-              Store the file and classify it now or let the intake queue finish
-              triage.
+              {text.uploadDescription}
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleUpload} className="space-y-5 px-6 py-5">
@@ -3233,7 +3380,7 @@ function StaffDocumentsPage() {
                             sensitivityBadge(detail.data_sensitivity),
                           )}
                         >
-                          {detail.data_sensitivity}
+                          {formatSensitivityLabel(detail.data_sensitivity)}
                         </Badge>
                       </div>
                       <p className="mt-3 text-xl font-semibold text-slate-950">
@@ -3249,8 +3396,10 @@ function StaffDocumentsPage() {
                           .join(" · ")}
                       </p>
                       <p className="mt-2 text-xs font-medium uppercase tracking-[0.18em] text-slate-500">
-                        Version {detail.version_number} of {detail.version_count}
-                        {detail.is_latest_version ? " · current" : " · historical"}
+                        {text.versionOf(detail.version_number, detail.version_count)}
+                        {detail.is_latest_version
+                          ? ` · ${text.current}`
+                          : ` · ${text.historical}`}
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -3261,7 +3410,7 @@ function StaffDocumentsPage() {
                           onClick={() => openReplacementTemplate(detail)}
                         >
                           <FileText className="size-4" />
-                          New version
+                          {text.newVersion}
                         </Button>
                       ) : null}
                       {detail.has_stored_file &&
@@ -3363,7 +3512,7 @@ function StaffDocumentsPage() {
                       label={t.orders_patient}
                       value={
                         detail.patient_name
-                          ? `${detail.patient_pid ?? "PID"} · ${detail.patient_name}`
+                          ? `${detail.patient_pid ?? text.pidFallback} · ${detail.patient_name}`
                           : t.common_not_set
                       }
                     />
@@ -3405,7 +3554,7 @@ function StaffDocumentsPage() {
                     />
                     <DetailField
                       label={t.documents_version_chain}
-                      value={`v${detail.version_number} of ${detail.version_count}`}
+                      value={text.versionOf(detail.version_number, detail.version_count)}
                     />
                   </div>
                   {detail.notes ? (
@@ -3491,7 +3640,7 @@ function StaffDocumentsPage() {
                             variant="outline"
                             className="rounded-full border-slate-200 bg-white text-slate-700"
                           >
-                            {textExtraction.method}
+                            {formatExtractionMethodLabel(textExtraction.method)}
                           </Badge>
                         ) : null}
                       </div>
@@ -3569,9 +3718,9 @@ function StaffDocumentsPage() {
                               }
                               className={selectClassName}
                             >
-                              <option value="de">DE</option>
-                              <option value="en">EN</option>
-                              <option value="uk">UK</option>
+                              <option value="de">{formatLanguageLabel("de")}</option>
+                              <option value="en">{formatLanguageLabel("en")}</option>
+                              <option value="uk">{formatLanguageLabel("uk")}</option>
                             </select>
                           </Field>
                           <div className="flex items-end">
@@ -3644,7 +3793,7 @@ function StaffDocumentsPage() {
                                       variant="outline"
                                       className="rounded-full border-slate-200 bg-white text-slate-700"
                                     >
-                                      {request.requested_language.toUpperCase()}
+                                      {formatLanguageLabel(request.requested_language)}
                                     </Badge>
                                   </div>
                                   <p className="mt-2 text-sm font-semibold text-slate-950">
@@ -3654,10 +3803,14 @@ function StaffDocumentsPage() {
                                   <p className="mt-1 text-xs text-slate-500">
                                     {formatDateTime(request.requested_at)}
                                     {request.completed_at
-                                      ? ` · completed ${formatDateTime(request.completed_at)}`
+                                      ? text.completedAt(
+                                          formatDateTime(request.completed_at),
+                                        )
                                       : ""}
                                     {request.translated_by_name
-                                      ? ` · workspace ${request.translated_by_name}`
+                                      ? text.translatedByWorkspace(
+                                          request.translated_by_name,
+                                        )
                                       : ""}
                                   </p>
                                 </div>
@@ -3726,9 +3879,9 @@ function StaffDocumentsPage() {
                                         className={selectClassName}
                                       >
                                         <option value="">{t.common_not_set}</option>
-                                        <option value="de">DE</option>
-                                        <option value="en">EN</option>
-                                        <option value="uk">UK</option>
+                                        <option value="de">{formatLanguageLabel("de")}</option>
+                                        <option value="en">{formatLanguageLabel("en")}</option>
+                                        <option value="uk">{formatLanguageLabel("uk")}</option>
                                       </select>
                                     </Field>
                                     <div className="flex flex-wrap items-end gap-2">
@@ -3847,7 +4000,7 @@ function StaffDocumentsPage() {
                       </div>
                       {detail.classification_suggestion ? (
                         <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
-                          Suggested classification:{" "}
+                          {text.suggestedClassification}{" "}
                           <span className="font-medium">
                             {detail.classification_suggestion.art} ·{" "}
                             {detail.classification_suggestion.category}
@@ -4331,7 +4484,7 @@ function StaffDocumentsPage() {
                         const target = share.provider_name
                           ? `${t.documents_provider_target} · ${share.provider_name}`
                           : share.target_user_name
-                            ? `${share.target_user_name} · ${share.target_user_role ?? "user"}`
+                            ? `${share.target_user_name} · ${formatRoleLabel(share.target_user_role)}`
                             : t.documents_unknown_target;
                         const canCurrentUserConfirm =
                           !share.confirmed &&
@@ -4356,7 +4509,7 @@ function StaffDocumentsPage() {
                                 </p>
                                 {share.channel ? (
                                   <p className="mt-1 text-xs text-slate-500">
-                                    {share.channel}
+                                    {formatShareChannelLabel(share.channel)}
                                   </p>
                                 ) : null}
                                 {share.message ? (
@@ -4371,7 +4524,7 @@ function StaffDocumentsPage() {
                                     variant="outline"
                                     className="rounded-full border-slate-200 bg-slate-100 text-slate-600"
                                   >
-                                    Revoked
+                                    {text.revokedBadge}
                                   </Badge>
                                 ) : share.confirmed ? (
                                   <Badge
@@ -4497,7 +4650,7 @@ function StaffDocumentsPage() {
                               <option value="">{t.documents_select_user}</option>
                               {staff.map((item) => (
                                 <option key={item.id} value={item.id}>
-                                  {item.name} · {item.role}
+                                  {item.name} · {formatRoleLabel(item.role)}
                                 </option>
                               ))}
                             </select>

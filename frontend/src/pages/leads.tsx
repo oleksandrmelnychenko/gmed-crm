@@ -311,7 +311,9 @@ function StatCard({
 
 export function LeadsPage() {
   const { user } = useAuth();
-  const { t } = useLang();
+  const { t, lang } = useLang();
+  const l = (de: string, ru: string, en: string) =>
+    lang === "de" ? de : lang === "ru" ? ru : en;
   const { staffGo } = useStaffNavigate();
   const failedLoadMessage = t.common_failed_load;
   const [searchParams, setSearchParams] = useSearchParams();
@@ -632,10 +634,15 @@ export function LeadsPage() {
     return (
       <div className="space-y-6">
         <section className={cardClass("p-8")}>
-          <h1 className="text-3xl font-semibold tracking-tight text-slate-950">Leads workspace</h1>
+          <h1 className="text-3xl font-semibold tracking-tight text-slate-950">
+            {l("Lead-Bereich", "Раздел лидов", "Leads workspace")}
+          </h1>
           <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600">
-            This screen is limited to patient managers and sales because it drives intake
-            qualification and conversion into patient records.
+            {l(
+              "Dieser Bereich ist auf Patientenmanager und Sales beschränkt, weil er die Intake-Qualifizierung und die Umwandlung in Patientenakten steuert.",
+              "Этот экран доступен только менеджерам пациентов и sales, потому что он управляет квалификацией входящих обращений и конверсией в карточки пациентов.",
+              "This screen is limited to patient managers and sales because it drives intake qualification and conversion into patient records.",
+            )}
           </p>
         </section>
       </div>
@@ -653,25 +660,32 @@ export function LeadsPage() {
             <div className="max-w-3xl">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant="outline" className="rounded-full border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-sky-700">
-                  Intake and qualification
+                  {l("Intake und Qualifizierung", "Приём и квалификация", "Intake and qualification")}
                 </Badge>
                 <Badge variant="outline" className="rounded-full border-slate-200 bg-white/80 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-600">
                   {permissions.canConvert ? t.leads_title : t.leads_subtitle}
                 </Badge>
               </div>
               <h1 className="mt-4 text-3xl font-semibold tracking-tight text-slate-950 md:text-4xl">
-                Lead pipeline connected to patient conversion
+                {l(
+                  "Lead-Pipeline mit direkter Patientenkonvertierung",
+                  "Пайплайн лидов с прямой конверсией в пациента",
+                  "Lead pipeline connected to patient conversion",
+                )}
               </h1>
               <p className="mt-3 text-sm leading-7 text-slate-600 md:text-[15px]">
-                Work the intake queue with real backend filters, qualification actions and direct
-                conversion into patient records from the same workspace.
+                {l(
+                  "Bearbeiten Sie die Intake-Warteschlange mit echten Backend-Filtern, Qualifizierungsaktionen und direkter Umwandlung in Patientenakten aus demselben Bereich.",
+                  "Работайте с очередью входящих обращений через реальные backend-фильтры, действия квалификации и прямую конверсию в карточки пациентов из того же раздела.",
+                  "Work the intake queue with real backend filters, qualification actions and direct conversion into patient records from the same workspace.",
+                )}
               </p>
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
               <Button type="button" variant="outline" className="rounded-2xl" onClick={reload}>
                 <RefreshCw className="size-4" />
-                Refresh
+                {l("Aktualisieren", "Обновить", "Refresh")}
               </Button>
               {permissions.canCreate ? (
                 <Button
@@ -684,7 +698,7 @@ export function LeadsPage() {
                   }}
                 >
                   <Plus className="size-4" />
-                  New lead
+                  {l("Neuer Lead", "Новый лид", "New lead")}
                 </Button>
               ) : null}
             </div>
@@ -1036,7 +1050,7 @@ export function LeadsPage() {
 
             <div className="flex justify-end gap-3 pt-2">
               <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>
-                Cancel
+                {l("Abbrechen", "Отмена", "Cancel")}
               </Button>
               <Button type="submit" disabled={createBusy}>
                 {createBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
@@ -1789,18 +1803,25 @@ export function LeadsPage() {
       >
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Convert lead to patient?</DialogTitle>
+            <DialogTitle>{l("Lead in Patienten umwandeln?", "Преобразовать лида в пациента?", "Convert lead to patient?")}</DialogTitle>
             <DialogDescription>
               {pendingConvertLead ? (
                 <>
-                  This will create a patient record for{" "}
+                  {l("Dadurch wird eine Patientenakte für", "Будет создана карточка пациента для", "This will create a patient record for")}{" "}
                   <span className="font-medium text-slate-900">
                     {pendingConvertLead.first_name} {pendingConvertLead.last_name}
                   </span>
-                  , assign you as the patient manager, and bootstrap the default
-                  workflow checklist. The lead itself moves to the{" "}
-                  <span className="font-mono text-xs">converted</span> state.
-                  This action cannot be undone.
+                  {l(
+                    ", Sie als Patientenmanager zuweisen und die standardmäßige Workflow-Checkliste vorbereiten. Der Lead selbst wechselt in den Status",
+                    ", вам будет назначена роль менеджера пациента, и будет создан стандартный workflow-checklist. Сам лид перейдёт в статус",
+                    ", assign you as the patient manager, and bootstrap the default workflow checklist. The lead itself moves to the",
+                  )}{" "}
+                  <span className="font-mono text-xs">{l("converted", "converted", "converted")}</span>{" "}
+                  {l(
+                    "umgeschaltet. Diese Aktion kann nicht rückgängig gemacht werden.",
+                    "и это действие нельзя отменить.",
+                    "state. This action cannot be undone.",
+                  )}
                 </>
               ) : null}
             </DialogDescription>
@@ -1809,7 +1830,7 @@ export function LeadsPage() {
             <DialogClose
               render={
                 <Button type="button" variant="outline" disabled={Boolean(actionBusy)}>
-                  Cancel
+                  {l("Abbrechen", "Отмена", "Cancel")}
                 </Button>
               }
             />
@@ -1825,7 +1846,7 @@ export function LeadsPage() {
               {pendingConvertLead && actionBusy === `convert:${pendingConvertLead.id}` ? (
                 <LoaderCircle className="mr-2 size-4 animate-spin" />
               ) : null}
-              Create patient
+              {l("Patient anlegen", "Создать пациента", "Create patient")}
             </Button>
           </DialogFooter>
         </DialogContent>

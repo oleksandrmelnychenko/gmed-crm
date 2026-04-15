@@ -6,15 +6,6 @@ import { Button } from "@/components/ui/button";
 import { useAuth, PendingLoginError } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 
-const loginI18n = {
-  de: {
-    signInSub: "Weiter zum operativen Arbeitsbereich für Kliniken, Ärzte und Termine.",
-  },
-  ru: {
-    signInSub: "Продолжить в операционное пространство для клиник, врачей и приёмов.",
-  },
-};
-
 function LogoMark() {
   return (
     <svg
@@ -41,8 +32,6 @@ export function LoginPage() {
   const [pendingStatus, setPendingStatus] = useState<"pending" | "rejected" | null>(null);
   const { lang, setLang: switchLang, t: tr } = useLang();
 
-  const lt = loginI18n[lang as "de" | "ru"];
-
   const redirectTo =
     typeof location.state === "object" &&
     location.state &&
@@ -60,17 +49,21 @@ export function LoginPage() {
     const trimmed = email.trim();
 
     if (!trimmed) {
-      errors.email = lang === "de" ? "E-Mail ist erforderlich" : "Email обязателен";
-    } else if (trimmed.length > 320 || !trimmed.includes("@") || !trimmed.includes(".")) {
-      errors.email = lang === "de" ? "Ungültige E-Mail-Adresse" : "Неверный формат email";
+      errors.email = tr.login_error_email_required;
+    } else if (
+      trimmed.length > 320 ||
+      !trimmed.includes("@") ||
+      !trimmed.includes(".")
+    ) {
+      errors.email = tr.login_error_email_invalid;
     }
 
     if (!password) {
-      errors.password = lang === "de" ? "Passwort ist erforderlich" : "Пароль обязателен";
+      errors.password = tr.login_error_password_required;
     } else if (password.length < 8) {
-      errors.password = lang === "de" ? "Mindestens 8 Zeichen" : "Минимум 8 символов";
+      errors.password = tr.login_error_password_short;
     } else if (password.length > 256) {
-      errors.password = lang === "de" ? "Passwort zu lang" : "Пароль слишком длинный";
+      errors.password = tr.login_error_password_long;
     }
 
     setFieldErrors(errors);
@@ -94,7 +87,7 @@ export function LoginPage() {
         setPendingId(err.pendingId);
         setPendingStatus("pending");
       } else {
-        setError(err instanceof Error ? err.message : "Unable to sign in");
+        setError(err instanceof Error ? err.message : tr.login_error_unknown);
       }
     } finally {
       setLoading(false);
@@ -130,7 +123,7 @@ export function LoginPage() {
           <div>
             <h2 className="text-3xl font-semibold text-slate-950">{tr.login_title}</h2>
             <p className="mt-2 text-sm leading-6 text-slate-600">
-              {lt.signInSub}
+              {tr.login_sign_in_subtitle}
             </p>
           </div>
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-slate-700">
@@ -203,7 +196,7 @@ export function LoginPage() {
                 className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
               >
                 <Globe className="size-3.5" />
-                {lang === "de" ? "Deutsch" : "Русский"}
+                {tr.common_lang_native}
               </button>
             </div>
 
@@ -216,19 +209,17 @@ export function LoginPage() {
                       <AlertCircle className="size-8 text-red-500" />
                     </div>
                     <h3 className="text-lg font-semibold text-slate-950">
-                      {tr.mfa_reject === "Ablehnen" ? "Zugang abgelehnt" : "Доступ отклонён"}
+                      {tr.login_mfa_rejected_title}
                     </h3>
                     <p className="text-sm text-slate-500 max-w-xs">
-                      {lang === "de"
-                        ? "Ihr Anmeldeversuch wurde von einem Administrator abgelehnt."
-                        : "Ваша попытка входа была отклонена администратором."}
+                      {tr.login_mfa_rejected_msg}
                     </p>
                     <Button
                       variant="outline"
                       className="mt-2 rounded-xl"
                       onClick={() => { setPendingId(null); setPendingStatus(null); }}
                     >
-                      {lang === "de" ? "Zurück" : "Назад"}
+                      {tr.common_back}
                     </Button>
                   </div>
                 ) : (
@@ -240,14 +231,12 @@ export function LoginPage() {
                       {tr.mfa_pending}
                     </h3>
                     <p className="text-sm text-slate-500 max-w-xs">
-                      {lang === "de"
-                        ? "Warten Sie, bis ein Administrator Ihre Anmeldung genehmigt."
-                        : "Ожидайте, пока администратор подтвердит ваш вход."}
+                      {tr.login_mfa_pending_msg}
                     </p>
                     <div className="flex items-center gap-2 mt-2">
                       <div className="size-2 rounded-full bg-sky-400 animate-pulse" />
                       <span className="text-xs text-slate-400">
-                        {lang === "de" ? "Prüfung läuft..." : "Проверка..."}
+                        {tr.login_mfa_checking}
                       </span>
                     </div>
                     <Button

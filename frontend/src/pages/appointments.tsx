@@ -52,7 +52,12 @@ import {
 } from "@/components/ui/sheet";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useAuth } from "@/lib/auth";
-import { useLang, type Translations } from "@/lib/i18n";
+import {
+  getLang,
+  t as translateCatalog,
+  useLang,
+  type Translations,
+} from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { apiFetch } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -1126,12 +1131,27 @@ function blankConciergeServiceForm(
 }
 
 function roleLabel(role?: string | null) {
-  return role
-    ? role
+  const tr = runtimeTranslations();
+  if (!role) return "";
+  const translated = tr[`role_${role}` as keyof typeof tr];
+  return typeof translated === "string"
+    ? translated
+    : role
         .split("_")
         .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-        .join(" ")
-    : "";
+        .join(" ");
+}
+
+function runtimeTranslations() {
+  return translateCatalog(getLang());
+}
+
+function runtimeLocale() {
+  return getLang() === "ru" ? "ru-RU" : "de-DE";
+}
+
+function appointmentText(de: string, ru: string, _en: string) {
+  return getLang() === "ru" ? ru : de;
 }
 
 function appointmentTypeLabel(
@@ -1139,22 +1159,23 @@ function appointmentTypeLabel(
   tr?: Record<string, string>,
 ) {
   if (type === "non_medical") return tr?.role_concierge ?? "Concierge";
-  if (type === "internal") return tr?.common_provider ?? "Internal";
+  if (type === "internal")
+    return appointmentText("Intern", "Внутренний", "Internal");
   return tr?.common_doctor ?? "Medical";
 }
 
 function carePathKindLabel(value?: string | null) {
   switch (value) {
     case "preventive":
-      return "Preventive";
+      return appointmentText("Praventiv", "Профилактика", "Preventive");
     case "control":
-      return "Control";
+      return appointmentText("Kontrolle", "Контроль", "Control");
     case "followup":
-      return "Follow-up";
+      return appointmentText("Nachsorge", "Наблюдение", "Follow-up");
     case "regular":
-      return "Regular";
+      return appointmentText("Standard", "Стандартный", "Regular");
     default:
-      return "Regular";
+      return appointmentText("Standard", "Стандартный", "Regular");
   }
 }
 
@@ -1166,17 +1187,52 @@ function normalizeCarePathKindForAppointmentType(
 }
 
 function statusLabel(status: AppointmentStatus) {
-  return status.replace("_", " ");
+  switch (status) {
+    case "planned":
+      return appointmentText("Geplant", "Запланирован", "Planned");
+    case "confirmed":
+      return appointmentText("Bestatigt", "Подтверждён", "Confirmed");
+    case "in_progress":
+      return appointmentText("Lauft", "В процессе", "In progress");
+    case "completed":
+      return appointmentText("Abgeschlossen", "Завершён", "Completed");
+    case "cancelled":
+      return appointmentText("Abgesagt", "Отменён", "Cancelled");
+  }
 }
 
 function communicationStatusLabel(status: AppointmentCommunicationStatus) {
-  return status.replace("_", " ");
+  switch (status) {
+    case "planned":
+      return appointmentText("Geplant", "Запланировано", "Planned");
+    case "sent":
+      return appointmentText("Gesendet", "Отправлено", "Sent");
+    case "answered":
+      return appointmentText("Beantwortet", "Получен ответ", "Answered");
+    case "closed":
+      return appointmentText("Geschlossen", "Закрыто", "Closed");
+    case "cancelled":
+      return appointmentText("Abgebrochen", "Отменено", "Cancelled");
+  }
+  return String(status).replace("_", " ");
 }
 
 function communicationChannelLabel(channel: AppointmentCommunicationChannel) {
-  return channel === "whatsapp"
-    ? "WhatsApp"
-    : channel.charAt(0).toUpperCase() + channel.slice(1);
+  switch (channel) {
+    case "phone":
+      return appointmentText("Telefon", "Телефон", "Phone");
+    case "email":
+      return appointmentText("E-Mail", "Эл. почта", "Email");
+    case "portal":
+      return appointmentText("Portal", "Портал", "Portal");
+    case "fax":
+      return appointmentText("Fax", "Факс", "Fax");
+    case "whatsapp":
+      return "WhatsApp";
+    case "other":
+      return appointmentText("Anderer Kanal", "Другой канал", "Other");
+  }
+  return String(channel).charAt(0).toUpperCase() + String(channel).slice(1);
 }
 
 function communicationTargetLabel(
@@ -1185,23 +1241,54 @@ function communicationTargetLabel(
 ) {
   switch (target) {
     case "doctor":
-      return detail?.doctor_name || "Doctor";
+      return detail?.doctor_name || appointmentText("Arzt", "Врач", "Doctor");
     case "service_provider":
-      return detail?.provider_name || "Service provider";
+      return (
+        detail?.provider_name ||
+        appointmentText("Leistungserbringer", "Поставщик услуг", "Service provider")
+      );
     default:
-      return detail?.provider_name || "Clinic";
+      return detail?.provider_name || appointmentText("Klinik", "Клиника", "Clinic");
   }
 }
 
 function responseLabel(value: InterpreterResponse) {
-  return value === "discussion" ? "Needs discussion" : value;
+  switch (value) {
+    case "pending":
+      return appointmentText("Ausstehend", "Ожидается", "Pending");
+    case "accepted":
+      return appointmentText("Bestatigt", "Подтверждено", "Accepted");
+    case "declined":
+      return appointmentText("Abgelehnt", "Отклонено", "Declined");
+    case "discussion":
+      return appointmentText(
+        "Klärung erforderlich",
+        "Нужно уточнение",
+        "Needs discussion",
+      );
+  }
 }
 
 function reportApprovalLabel(status: string) {
-  return status
-    .split("_")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
+  switch (status) {
+    case "approved":
+      return appointmentText("Freigegeben", "Согласовано", "Approved");
+    case "rejected":
+      return appointmentText("Zuruckgewiesen", "Отклонено", "Rejected");
+    case "pending_review":
+      return appointmentText("Prufung ausstehend", "Ожидает проверки", "Pending review");
+    case "needs_interpreter_revision":
+      return appointmentText(
+        "Uberarbeitung durch Dolmetscher",
+        "Нужна доработка переводчика",
+        "Needs interpreter revision",
+      );
+    default:
+      return status
+        .split("_")
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(" ");
+  }
 }
 
 function reportApprovalBadgeClass(status: string) {
@@ -1416,15 +1503,39 @@ function buildScheduleNotice(
 ) {
   const parts: string[] = [];
   if (conflicts?.patient_conflict_count) {
-    parts.push(`${conflicts.patient_conflict_count} patient overlap`);
+    parts.push(
+      appointmentText(
+        `${conflicts.patient_conflict_count} Patientenuberschneidung`,
+        `${conflicts.patient_conflict_count} пересечение по пациенту`,
+        `${conflicts.patient_conflict_count} patient overlap`,
+      ),
+    );
   }
   if (conflicts?.interpreter_conflict_count) {
-    parts.push(`${conflicts.interpreter_conflict_count} interpreter overlap`);
+    parts.push(
+      appointmentText(
+        `${conflicts.interpreter_conflict_count} Dolmetscheruberschneidung`,
+        `${conflicts.interpreter_conflict_count} пересечение по переводчику`,
+        `${conflicts.interpreter_conflict_count} interpreter overlap`,
+      ),
+    );
   }
   for (const warning of warnings) {
-    parts.push(`${warning.items.length} ${warning.scope} overlap`);
+    parts.push(
+      appointmentText(
+        `${warning.items.length} Konflikt bei ${warning.label.toLowerCase()}`,
+        `${warning.items.length} конфликт по ${warning.label.toLowerCase()}`,
+        `${warning.items.length} ${warning.scope} overlap`,
+      ),
+    );
   }
-  return parts.length ? `Scheduling warning: ${parts.join(", ")}.` : "";
+  return parts.length
+    ? appointmentText(
+        `Planungshinweis: ${parts.join(", ")}.`,
+        `Предупреждение по расписанию: ${parts.join(", ")}.`,
+        `Scheduling warning: ${parts.join(", ")}.`,
+      )
+    : "";
 }
 
 function matchesOperationalScope(
@@ -1472,36 +1583,58 @@ function operationalScopeReason(
   switch (scope) {
     case "owned_by_me":
       return item.owner_role
-        ? `${tr?.patients_assign_owner ?? "Owner"} · ${roleLabel(item.owner_role)}`
-        : (tr?.patients_assign_owner ?? "Owned by me");
+        ? `${tr?.patients_assign_owner ?? appointmentText("Zustandig", "Куратор", "Owner")} · ${roleLabel(item.owner_role)}`
+        : appointmentText("Bei mir", "Мои", "Owned by me");
     case "needs_attention":
       return (
         attentionIndex?.get(item.id)?.reasons[0] ||
-        (tr?.common_error ?? "Operational follow-up required")
+        (tr?.common_error ??
+          appointmentText(
+            "Operative Nachverfolgung erforderlich",
+            "Нужно операционное действие",
+            "Operational follow-up required",
+          ))
       );
     case "pending_interpreter":
       return item.interpreter_name
         ? `${item.interpreter_name} · ${responseLabel(item.interpreter_response ?? "pending")}`
-        : (tr?.mfa_pending ?? "Interpreter pending");
+        : appointmentText(
+            "Dolmetscher ausstehend",
+            "Ожидается переводчик",
+            "Interpreter pending",
+          );
     case "my_interpreter_queue":
       return item.interpreter_response === "pending"
-        ? (tr?.mfa_pending ?? "Response required")
+        ? appointmentText("Antwort ausstehend", "Нужен ответ", "Response required")
         : item.status === "completed"
-          ? (tr?.common_active ?? "Completed slot")
-          : (tr?.role_interpreter ?? "Assigned interpreter slot");
+          ? appointmentText("Slot abgeschlossen", "Слот завершён", "Completed slot")
+          : appointmentText(
+              "Zugewiesener Dolmetscher-Slot",
+              "Назначенный слот переводчика",
+              "Assigned interpreter slot",
+            );
     case "concierge_flow":
       return (
-        item.provider_name || (tr?.role_concierge ?? "Non-medical service flow")
+        item.provider_name ||
+        appointmentText(
+          "Nicht-medizinischer Servicefluss",
+          "Поток немедицинского сервиса",
+          "Non-medical service flow",
+        )
       );
     case "blocked_medical":
       return userRole === "concierge"
-        ? (tr?.common_inactive ?? "Medical slot shown as blocked")
-        : (tr?.common_inactive ?? "Blocked slot");
+        ? appointmentText(
+            "Medizinischer Slot als blockiert angezeigt",
+            "Медицинский слот показан как заблокированный",
+            "Medical slot shown as blocked",
+          )
+        : appointmentText("Blockierter Slot", "Заблокированный слот", "Blocked slot");
     case "all":
       return (
         item.owner_name ||
         item.provider_name ||
-        (tr?.appointments_title ?? "Appointment")
+        (tr?.appointments_title ?? appointmentText("Termin", "Приём", "Appointment"))
       );
   }
 }
@@ -1511,19 +1644,23 @@ function operationalScopeOptions(
   tr: Record<string, string>,
 ): OperationalScopeOption[] {
   const options: OperationalScopeOption[] = [
-    { id: "all", label: tr.providers_all ?? "All visible" },
+    {
+      id: "all",
+      label:
+        tr.providers_all ?? appointmentText("Alle sichtbar", "Все видимые", "All visible"),
+    },
   ];
 
   if (role && role !== "interpreter") {
     options.push({
       id: "owned_by_me",
-      label: tr.patients_assign_owner ?? "Owned by me",
+      label: appointmentText("Bei mir", "Мои", "Owned by me"),
     });
   }
   if (role) {
     options.push({
       id: "needs_attention",
-      label: tr.common_error ?? "Needs attention",
+      label: appointmentText("Braucht Aufmerksamkeit", "Требует внимания", "Needs attention"),
     });
   }
   if (
@@ -1533,25 +1670,37 @@ function operationalScopeOptions(
   ) {
     options.push({
       id: "pending_interpreter",
-      label: tr.mfa_pending ?? "Pending interpreter",
+      label: appointmentText(
+        "Dolmetscher ausstehend",
+        "Ожидается переводчик",
+        "Pending interpreter",
+      ),
     });
   }
   if (role === "teamlead_interpreter" || role === "interpreter") {
     options.push({
       id: "my_interpreter_queue",
-      label: tr.role_interpreter ?? "Interpreter queue",
+      label: appointmentText(
+        "Dolmetscher-Warteschlange",
+        "Очередь переводчика",
+        "Interpreter queue",
+      ),
     });
   }
   if (role === "ceo" || role === "patient_manager" || role === "concierge") {
     options.push({
       id: "concierge_flow",
-      label: tr.role_concierge ?? "Concierge flow",
+      label: appointmentText("Concierge-Flow", "Поток concierge", "Concierge flow"),
     });
   }
   if (role === "concierge") {
     options.push({
       id: "blocked_medical",
-      label: tr.common_inactive ?? "Blocked medical",
+      label: appointmentText(
+        "Blockierte Medizin-Slots",
+        "Заблокированные медслоты",
+        "Blocked medical",
+      ),
     });
   }
 
@@ -1606,9 +1755,9 @@ function formatDateLabel(date: string) {
 }
 
 function formatDateTimeLabel(dateTime: string | null | undefined) {
-  if (!dateTime) return "Not set";
+  if (!dateTime) return runtimeTranslations().common_not_set;
   try {
-    return new Intl.DateTimeFormat("en-GB", {
+    return new Intl.DateTimeFormat(runtimeLocale(), {
       day: "2-digit",
       month: "short",
       year: "numeric",
@@ -1684,11 +1833,11 @@ function doctorLabel(doctor: DoctorOption) {
 function recurrenceFrequencyLabel(value: AppointmentRecurrenceFrequency) {
   switch (value) {
     case "daily":
-      return "Daily";
+      return appointmentText("Taglich", "Ежедневно", "Daily");
     case "weekly":
-      return "Weekly";
+      return appointmentText("Wochentlich", "Еженедельно", "Weekly");
     case "monthly":
-      return "Monthly";
+      return appointmentText("Monatlich", "Ежемесячно", "Monthly");
     default:
       return value;
   }
@@ -1698,21 +1847,28 @@ function recurrenceCadenceLabel(item: {
   recurrence_frequency: AppointmentRecurrenceFrequency | null;
   recurrence_interval: number | null;
 }) {
-  if (!item.recurrence_frequency) return "One-time appointment";
+  if (!item.recurrence_frequency)
+    return appointmentText("Einmaliger Termin", "Разовый приём", "One-time appointment");
   const interval = item.recurrence_interval ?? 1;
-  const unit =
-    item.recurrence_frequency === "daily"
-      ? interval === 1
-        ? "day"
-        : "days"
-      : item.recurrence_frequency === "weekly"
-        ? interval === 1
-          ? "week"
-          : "weeks"
-        : interval === 1
-          ? "month"
-          : "months";
-  return `Every ${interval} ${unit}`;
+  if (item.recurrence_frequency === "daily") {
+    return appointmentText(
+      interval === 1 ? "Jeden Tag" : `Alle ${interval} Tage`,
+      interval === 1 ? "Каждый день" : `Каждые ${interval} дней`,
+      `Every ${interval} ${interval === 1 ? "day" : "days"}`,
+    );
+  }
+  if (item.recurrence_frequency === "weekly") {
+    return appointmentText(
+      interval === 1 ? "Jede Woche" : `Alle ${interval} Wochen`,
+      interval === 1 ? "Каждую неделю" : `Каждые ${interval} недель`,
+      `Every ${interval} ${interval === 1 ? "week" : "weeks"}`,
+    );
+  }
+  return appointmentText(
+    interval === 1 ? "Jeden Monat" : `Alle ${interval} Monate`,
+    interval === 1 ? "Каждый месяц" : `Каждые ${interval} месяцев`,
+    `Every ${interval} ${interval === 1 ? "month" : "months"}`,
+  );
 }
 
 function recurrenceLineageText(
@@ -1826,9 +1982,13 @@ function findingsArtifactLabel(value: FindingsFollowUpArtifact) {
     case "arztbrief":
       return "Arztbrief";
     case "written_findings":
-      return "Written findings";
+      return appointmentText("Schriftlicher Befund", "Письменное заключение", "Written findings");
     case "both":
-      return "Arztbrief and written findings";
+      return appointmentText(
+        "Arztbrief und schriftlicher Befund",
+        "Arztbrief и письменное заключение",
+        "Arztbrief and written findings",
+      );
     default:
       return value;
   }
@@ -1837,17 +1997,17 @@ function findingsArtifactLabel(value: FindingsFollowUpArtifact) {
 function incomingDataSourceLabel(value: IncomingDataSource) {
   switch (value) {
     case "patient":
-      return "Patient";
+      return appointmentText("Patient", "Пациент", "Patient");
     case "doctor":
-      return "Doctor";
+      return appointmentText("Arzt", "Врач", "Doctor");
     case "clinic":
-      return "Clinic";
+      return appointmentText("Klinik", "Клиника", "Clinic");
     case "interpreter":
-      return "Interpreter";
+      return appointmentText("Dolmetscher", "Переводчик", "Interpreter");
     case "external_lab":
-      return "External lab";
+      return appointmentText("Externes Labor", "Внешняя лаборатория", "External lab");
     case "other":
-      return "Other source";
+      return appointmentText("Andere Quelle", "Другой источник", "Other source");
     default:
       return value;
   }
@@ -1856,37 +2016,59 @@ function incomingDataSourceLabel(value: IncomingDataSource) {
 function incomingDataCategoryLabel(value: IncomingDataCategory) {
   switch (value) {
     case "medical_update":
-      return "Medical";
+      return appointmentText("Medizinisch", "Медицинское", "Medical");
     case "diagnosis":
-      return "Diagnosis";
+      return appointmentText("Diagnose", "Диагноз", "Diagnosis");
     case "medication":
-      return "Medication";
+      return appointmentText("Medikation", "Назначения", "Medication");
     case "symptom":
-      return "Symptoms";
+      return appointmentText("Symptome", "Симптомы", "Symptoms");
     case "lab_result":
-      return "Lab result";
+      return appointmentText("Laborergebnis", "Результат анализа", "Lab result");
     case "imaging":
-      return "Imaging";
+      return appointmentText("Bildgebung", "Визуализация", "Imaging");
     case "recommendation":
-      return "Recommendation";
+      return appointmentText("Empfehlung", "Рекомендация", "Recommendation");
     case "risk_flag":
-      return "Risk flag";
+      return appointmentText("Risikohinweis", "Флаг риска", "Risk flag");
     case "other":
-      return "Other";
+      return appointmentText("Sonstiges", "Другое", "Other");
     default:
       return value;
   }
 }
 
 function taskStatusLabel(status: string) {
-  return status
-    .split("_")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
+  switch (status) {
+    case "open":
+      return appointmentText("Offen", "Открыта", "Open");
+    case "in_progress":
+      return appointmentText("In Bearbeitung", "В работе", "In progress");
+    case "completed":
+      return appointmentText("Erledigt", "Завершена", "Completed");
+    case "cancelled":
+      return appointmentText("Abgebrochen", "Отменена", "Cancelled");
+    default:
+      return status
+        .split("_")
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(" ");
+  }
 }
 
 function taskPriorityLabel(priority: string) {
-  return priority.charAt(0).toUpperCase() + priority.slice(1);
+  switch (priority) {
+    case "low":
+      return appointmentText("Niedrig", "Низкий", "Low");
+    case "medium":
+      return appointmentText("Mittel", "Средний", "Medium");
+    case "high":
+      return appointmentText("Hoch", "Высокий", "High");
+    case "urgent":
+      return appointmentText("Dringend", "Срочно", "Urgent");
+    default:
+      return priority.charAt(0).toUpperCase() + priority.slice(1);
+  }
 }
 
 function communicationStatusBadgeClass(status: AppointmentCommunicationStatus) {
@@ -1906,17 +2088,17 @@ function communicationStatusBadgeClass(status: AppointmentCommunicationStatus) {
 function billingHandoffKindLabel(kind: BillingHandoffKind) {
   switch (kind) {
     case "interpreter_hours":
-      return "Interpreter hours";
+      return appointmentText("Dolmetscherstunden", "Часы переводчика", "Interpreter hours");
     case "concierge_settlement":
-      return "Concierge settlement";
+      return appointmentText("Concierge-Abrechnung", "Расчёт concierge", "Concierge settlement");
     case "patient_invoice":
-      return "Patient invoice";
+      return appointmentText("Patientenrechnung", "Счёт пациенту", "Patient invoice");
     case "provider_invoice":
-      return "Provider invoice";
+      return appointmentText("Rechnung des Providers", "Счёт провайдера", "Provider invoice");
     case "payment_confirmation":
-      return "Payment confirmation";
+      return appointmentText("Zahlungsbestätigung", "Подтверждение оплаты", "Payment confirmation");
     case "other":
-      return "Other";
+      return appointmentText("Sonstiges", "Другое", "Other");
     default:
       return kind;
   }
@@ -1930,15 +2112,34 @@ function serviceKindLabel(kind: string) {
 }
 
 function billingStatusLabel(status: string) {
-  return status.charAt(0).toUpperCase() + status.slice(1);
+  switch (status) {
+    case "draft":
+      return appointmentText("Entwurf", "Черновик", "Draft");
+    case "planned":
+      return appointmentText("Geplant", "Запланировано", "Planned");
+    case "ready":
+      return appointmentText("Bereit", "Готово", "Ready");
+    case "submitted":
+      return appointmentText("Ubergeben", "Передано", "Submitted");
+    case "approved":
+      return appointmentText("Freigegeben", "Согласовано", "Approved");
+    case "settled":
+      return appointmentText("Abgerechnet", "Рассчитано", "Settled");
+    case "paid":
+      return appointmentText("Bezahlt", "Оплачено", "Paid");
+    case "cancelled":
+      return appointmentText("Abgebrochen", "Отменено", "Cancelled");
+    default:
+      return status.charAt(0).toUpperCase() + status.slice(1);
+  }
 }
 
 function formatMoneyLabel(value: string | null, currency = "EUR") {
-  if (!value) return "Not set";
+  if (!value) return runtimeTranslations().common_not_set;
   const numeric = Number(value);
   if (Number.isNaN(numeric)) return `${value} ${currency}`;
   try {
-    return new Intl.NumberFormat("en-GB", {
+    return new Intl.NumberFormat(runtimeLocale(), {
       style: "currency",
       currency,
       maximumFractionDigits: 2,
@@ -3449,7 +3650,11 @@ function StaffAppointmentsPage() {
         {canGridQuickManage ? (
           <button
             type="button"
-            aria-label="Open quick appointment actions"
+            aria-label={appointmentText(
+              "Schnellaktionen fur Termin offnen",
+              "Открыть быстрые действия по приёму",
+              "Open quick appointment actions",
+            )}
             aria-haspopup="menu"
             aria-expanded={
               calendarQuickActionMenu?.appointmentId === arg.event.id
@@ -3475,7 +3680,9 @@ function StaffAppointmentsPage() {
         <div className="fc-apt-event-meta">{props.patientName}</div>
         <div className="fc-apt-event-submeta">{secondaryLine}</div>
         {props.isBlocked ? (
-          <div className="fc-apt-event-note">Blocked visibility</div>
+          <div className="fc-apt-event-note">
+            {appointmentText("Blockierte Sicht", "Заблокированная видимость", "Blocked visibility")}
+          </div>
         ) : props.interpreterName ? (
           <div className="fc-apt-event-note">
             Interpreter: {props.interpreterName}
@@ -5282,7 +5489,7 @@ function StaffAppointmentsPage() {
                       ))}
                     </select>
                   </Field>
-                  <Field label="Care path">
+                  <Field label={appointmentText("Versorgungspfad", "Траектория лечения", "Care path")}>
                     <select
                       value={filters.carePathKind}
                       onChange={(event) =>
@@ -5900,7 +6107,7 @@ function StaffAppointmentsPage() {
                     ))}
                   </select>
                 </Field>
-                <Field label="Care path">
+                <Field label={appointmentText("Versorgungspfad", "Траектория лечения", "Care path")}>
                   <select
                     value={createForm.carePathKind}
                     onChange={(event) =>
@@ -6041,7 +6248,7 @@ function StaffAppointmentsPage() {
                         className="h-10 rounded-xl bg-white"
                       />
                     </Field>
-                    <Field label="Total occurrences">
+                    <Field label={appointmentText("Anzahl Termine", "Всего повторов", "Total occurrences")}>
                       <Input
                         type="number"
                         min="2"
@@ -6053,11 +6260,15 @@ function StaffAppointmentsPage() {
                             repeatCount: event.target.value,
                           }))
                         }
-                        placeholder="Optional if until date is set"
+                        placeholder={appointmentText(
+                          "Optional, wenn ein Enddatum gesetzt ist",
+                          "Необязательно, если указана дата окончания",
+                          "Optional if until date is set",
+                        )}
                         className="h-10 rounded-xl bg-white"
                       />
                     </Field>
-                    <Field label="Repeat until">
+                    <Field label={appointmentText("Wiederholen bis", "Повторять до", "Repeat until")}>
                       <Input
                         type="date"
                         value={createForm.repeatUntil}
@@ -7077,7 +7288,7 @@ function StaffAppointmentsPage() {
                         </Field>
                       </div>
                       <div className="grid gap-4 md:grid-cols-2">
-                        <Field label="Care path">
+                        <Field label={appointmentText("Versorgungspfad", "Траектория лечения", "Care path")}>
                           <select
                             value={followUpVisitForm.carePathKind}
                             onChange={(event) =>
@@ -8968,28 +9179,48 @@ function StaffAppointmentsPage() {
                       />
                       <ContextCard
                         label={t.common_search}
-                        value={`${pendingReminderCount} pending`}
+                        value={appointmentText(
+                          `${pendingReminderCount} ausstehend`,
+                          `${pendingReminderCount} ожидает`,
+                          `${pendingReminderCount} pending`,
+                        )}
                         meta={
                           pendingReminderCount === 0
-                            ? "No outstanding reminders."
-                            : "Pending reminders stay active after closure."
+                            ? appointmentText(
+                                "Keine offenen Erinnerungen.",
+                                "Нет активных напоминаний.",
+                                "No outstanding reminders.",
+                              )
+                            : appointmentText(
+                                "Offene Erinnerungen bleiben auch nach dem Abschluss aktiv.",
+                                "Ожидающие напоминания остаются активными и после закрытия.",
+                                "Pending reminders stay active after closure.",
+                              )
                         }
                       />
                       <ContextCard
                         label={tr.role_interpreter}
                         value={
                           !detail.interpreter_id
-                            ? "Not required"
+                            ? appointmentText("Nicht erforderlich", "Не требуется", "Not required")
                             : interpreterReportReady
-                              ? "Approved"
-                              : "Pending"
+                              ? appointmentText("Freigegeben", "Согласовано", "Approved")
+                              : appointmentText("Ausstehend", "Ожидается", "Pending")
                         }
                         meta={
                           !detail.interpreter_id
-                            ? "No interpreter linked."
+                            ? appointmentText(
+                                "Kein Dolmetscher verknupft.",
+                                "Переводчик не привязан.",
+                                "No interpreter linked.",
+                              )
                             : detailReport
                               ? detailReport.approval_status
-                              : "No report submitted yet."
+                              : appointmentText(
+                                  "Noch kein Bericht eingereicht.",
+                                  "Отчёт ещё не отправлен.",
+                                  "No report submitted yet.",
+                                )
                         }
                       />
                     </div>
@@ -9220,7 +9451,7 @@ function StaffAppointmentsPage() {
                           className="h-10 rounded-xl bg-slate-50"
                         />
                       </Field>
-                      <Field label="Care path">
+                      <Field label={appointmentText("Versorgungspfad", "Траектория лечения", "Care path")}>
                         <select
                           value={editForm.carePathKind}
                           onChange={(event) =>
@@ -9428,7 +9659,7 @@ function StaffAppointmentsPage() {
                             {t.appointments_scope_following_hint}
                           </p>
                           <div className="mt-4 grid gap-4 md:grid-cols-2">
-                            <Field label="Repeat frequency">
+                            <Field label={appointmentText("Wiederholungsrhythmus", "Частота повторения", "Repeat frequency")}>
                               <select
                                 value={editForm.repeatFrequency}
                                 onChange={(event) =>
@@ -9445,12 +9676,12 @@ function StaffAppointmentsPage() {
                                 className={selectClassName}
                                 disabled={editRecurrenceScope === "single"}
                               >
-                                <option value="daily">Daily</option>
-                                <option value="weekly">Weekly</option>
-                                <option value="monthly">Monthly</option>
+                                <option value="daily">{recurrenceFrequencyLabel("daily")}</option>
+                                <option value="weekly">{recurrenceFrequencyLabel("weekly")}</option>
+                                <option value="monthly">{recurrenceFrequencyLabel("monthly")}</option>
                               </select>
                             </Field>
-                            <Field label="Repeat every">
+                            <Field label={appointmentText("Wiederholen alle", "Повторять каждые", "Repeat every")}>
                               <Input
                                 inputMode="numeric"
                                 pattern="[0-9]*"
@@ -9469,7 +9700,7 @@ function StaffAppointmentsPage() {
                                 disabled={editRecurrenceScope === "single"}
                               />
                             </Field>
-                            <Field label="Total occurrences">
+                            <Field label={appointmentText("Anzahl Termine", "Всего повторов", "Total occurrences")}>
                               <Input
                                 inputMode="numeric"
                                 pattern="[0-9]*"
@@ -9485,11 +9716,15 @@ function StaffAppointmentsPage() {
                                   )
                                 }
                                 className="h-10 rounded-xl bg-white/80"
-                                placeholder="Optional when repeat-until is set"
+                                placeholder={appointmentText(
+                                  "Optional, wenn ein Enddatum gesetzt ist",
+                                  "Необязательно, если указана дата окончания",
+                                  "Optional when repeat-until is set",
+                                )}
                                 disabled={editRecurrenceScope === "single"}
                               />
                             </Field>
-                            <Field label="Repeat until">
+                            <Field label={appointmentText("Wiederholen bis", "Повторять до", "Repeat until")}>
                               <Input
                                 type="date"
                                 value={editForm.repeatUntil}
@@ -10130,7 +10365,11 @@ function StaffAppointmentsPage() {
                                   {task.assigned_to_name} ·{" "}
                                   {roleLabel(task.assigned_to_role)}
                                   {task.due_date
-                                    ? ` · Due ${formatDateTimeLabel(task.due_date)}`
+                                    ? appointmentText(
+                                        ` · Fallig ${formatDateTimeLabel(task.due_date)}`,
+                                        ` · Срок ${formatDateTimeLabel(task.due_date)}`,
+                                        ` · Due ${formatDateTimeLabel(task.due_date)}`,
+                                      )
                                     : ""}
                                 </p>
                                 {task.description ? (
@@ -10787,17 +11026,24 @@ function StaffAppointmentsPage() {
                     <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                       <div>
                         <h3 className="text-sm font-semibold text-slate-950">
-                          Billing and settlement handoff
+                          {appointmentText(
+                            "Ubergabe an Abrechnung und Settlement",
+                            "Передача в биллинг и расчёты",
+                            "Billing and settlement handoff",
+                          )}
                         </h3>
                         <p className="text-xs text-slate-500">
-                          Structured transfer to billing before the document
-                          layer lands.
+                          {appointmentText(
+                            "Strukturierte Ubergabe an die Abrechnung, bevor die Dokumentenschicht nachzieht.",
+                            "Структурированная передача в биллинг до того, как подключится документный слой.",
+                            "Structured transfer to billing before the document layer lands.",
+                          )}
                         </p>
                       </div>
                       <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
                         {billingHandoffTasks.length +
                           billingHandoffReminders.length}{" "}
-                        linked
+                        {appointmentText("verknupft", "связано", "linked")}
                       </span>
                     </div>
 
@@ -10807,9 +11053,17 @@ function StaffAppointmentsPage() {
                         value={
                           detail?.interpreter_id
                             ? interpreterReportReady && detailReport
-                              ? `${detailReport.hours} h approved`
-                              : "Pending approval"
-                            : "Not required"
+                              ? appointmentText(
+                                  `${detailReport.hours} Std. freigegeben`,
+                                  `${detailReport.hours} ч согласовано`,
+                                  `${detailReport.hours} h approved`,
+                                )
+                              : appointmentText(
+                                  "Freigabe ausstehend",
+                                  "Ожидает согласования",
+                                  "Pending approval",
+                                )
+                            : appointmentText("Nicht erforderlich", "Не требуется", "Not required")
                         }
                         meta={
                           detail?.interpreter_id
@@ -10818,27 +11072,55 @@ function StaffAppointmentsPage() {
                                 reportApprovalLabel(
                                   detailReport.approval_status,
                                 )
-                              : "No report submitted"
-                            : "No interpreter on this appointment"
+                              : appointmentText(
+                                  "Kein Bericht eingereicht",
+                                  "Отчёт не отправлен",
+                                  "No report submitted",
+                                )
+                            : appointmentText(
+                                "Kein Dolmetscher fur diesen Termin",
+                                "Для этого приёма нет переводчика",
+                                "No interpreter on this appointment",
+                              )
                         }
                       />
                       <ContextCard
                         label={tr.role_concierge}
                         value={
                           detail?.type === "non_medical"
-                            ? `${readyConciergeServices.length} ready / ${settledConciergeServices.length} billed`
-                            : "Not applicable"
+                            ? appointmentText(
+                                `${readyConciergeServices.length} bereit / ${settledConciergeServices.length} abgerechnet`,
+                                `${readyConciergeServices.length} готово / ${settledConciergeServices.length} выставлено`,
+                                `${readyConciergeServices.length} ready / ${settledConciergeServices.length} billed`,
+                              )
+                            : appointmentText("Nicht anwendbar", "Не применимо", "Not applicable")
                         }
                         meta={
                           detail?.type === "non_medical"
-                            ? `${detailServices.length} service(s) linked`
-                            : "Medical appointment"
+                            ? appointmentText(
+                                `${detailServices.length} Leistung(en) verknupft`,
+                                `${detailServices.length} услуг(а) связано`,
+                                `${detailServices.length} service(s) linked`,
+                              )
+                            : appointmentText(
+                                "Medizinischer Termin",
+                                "Медицинский приём",
+                                "Medical appointment",
+                              )
                         }
                       />
                       <ContextCard
                         label={tr.role_billing}
-                        value={`${openBillingHandoffTasks.length} open task(s)`}
-                        meta={`${billingHandoffReminders.length} reminder(s) linked`}
+                        value={appointmentText(
+                          `${openBillingHandoffTasks.length} offene Aufgabe(n)`,
+                          `${openBillingHandoffTasks.length} открытых задач`,
+                          `${openBillingHandoffTasks.length} open task(s)`,
+                        )}
+                        meta={appointmentText(
+                          `${billingHandoffReminders.length} Erinnerung(en) verknupft`,
+                          `${billingHandoffReminders.length} напоминаний связано`,
+                          `${billingHandoffReminders.length} reminder(s) linked`,
+                        )}
                       />
                     </div>
 
@@ -10856,10 +11138,15 @@ function StaffAppointmentsPage() {
                       <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
                         <div className="flex items-center justify-between gap-3">
                           <h4 className="text-sm font-semibold text-slate-950">
-                            Billing reminders
+                            {appointmentText(
+                              "Billing-Erinnerungen",
+                              "Напоминания для биллинга",
+                              "Billing reminders",
+                            )}
                           </h4>
                           <span className="text-xs text-slate-500">
-                            {billingHandoffReminders.length} linked
+                            {billingHandoffReminders.length}{" "}
+                            {appointmentText("verknupft", "связано", "linked")}
                           </span>
                         </div>
                         <div className="mt-3 space-y-3">
@@ -10892,10 +11179,15 @@ function StaffAppointmentsPage() {
                       <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
                         <div className="flex items-center justify-between gap-3">
                           <h4 className="text-sm font-semibold text-slate-950">
-                            Billing tasks
+                            {appointmentText(
+                              "Billing-Aufgaben",
+                              "Задачи биллинга",
+                              "Billing tasks",
+                            )}
                           </h4>
                           <span className="text-xs text-slate-500">
-                            {billingHandoffTasks.length} linked
+                            {billingHandoffTasks.length}{" "}
+                            {appointmentText("verknupft", "связано", "linked")}
                           </span>
                         </div>
                         <div className="mt-3 space-y-3">
@@ -10922,7 +11214,11 @@ function StaffAppointmentsPage() {
                                   {task.assigned_to_name} ·{" "}
                                   {roleLabel(task.assigned_to_role)}
                                   {task.due_date
-                                    ? ` · Due ${formatDateTimeLabel(task.due_date)}`
+                                    ? appointmentText(
+                                        ` · Fallig ${formatDateTimeLabel(task.due_date)}`,
+                                        ` · Срок ${formatDateTimeLabel(task.due_date)}`,
+                                        ` · Due ${formatDateTimeLabel(task.due_date)}`,
+                                      )
                                     : ""}
                                 </p>
                                 {task.description ? (
@@ -10981,7 +11277,13 @@ function StaffAppointmentsPage() {
                             className={selectClassName}
                             required
                           >
-                            <option value="">Select billing assignee</option>
+                            <option value="">
+                              {appointmentText(
+                                "Billing-Zustandigen auswahlen",
+                                "Выберите ответственного из биллинга",
+                                "Select billing assignee",
+                              )}
+                            </option>
                             {billingStaff.map((member) => (
                               <option key={member.id} value={member.id}>
                                 {member.name} · {roleLabel(member.role)}
@@ -11265,7 +11567,7 @@ function MobileAgendaCard({
         ) : null}
         {item.is_blocked ? (
           <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-amber-700">
-            Blocked visibility
+            {appointmentText("Blockierte Sicht", "Заблокированная видимость", "Blocked visibility")}
           </span>
         ) : null}
       </div>
@@ -11399,7 +11701,13 @@ function ScheduleWarningsPanel({
       <div className="flex items-start gap-3">
         <ShieldAlert className="mt-0.5 size-4 shrink-0" />
         <div className="min-w-0">
-          <p className="font-semibold">Local schedule pressure detected</p>
+          <p className="font-semibold">
+            {appointmentText(
+              "Lokaler Termindruck erkannt",
+              "Обнаружен локальный конфликт расписания",
+              "Local schedule pressure detected",
+            )}
+          </p>
           <div className="mt-3 space-y-2">
             {warnings.map((warning) => (
               <div
@@ -11408,7 +11716,7 @@ function ScheduleWarningsPanel({
               >
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="rounded-full border border-amber-200 bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em]">
-                    {warning.scope}
+                    {warning.label}
                   </span>
                   <span className="text-sm font-medium text-amber-900">
                     {warning.label}

@@ -45,7 +45,7 @@ import {
 } from "@/components/ui/tabs";
 import { apiFetch, downloadApiFile } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { useLang } from "@/lib/i18n";
+import { getLang, useLang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
 
@@ -514,10 +514,10 @@ function fmtDateTime(v?: string | null, fb = "") {
 }
 
 function appointmentCarePathKindLabel(value?: string | null) {
-  if (value === "preventive") return "Preventive";
-  if (value === "control") return "Control";
-  if (value === "followup") return "Follow-up";
-  return "Regular";
+  if (value === "preventive") return patientDetailText("Präventiv", "Профилактика", "Preventive");
+  if (value === "control") return patientDetailText("Kontrolle", "Контроль", "Control");
+  if (value === "followup") return patientDetailText("Nachsorge", "Наблюдение", "Follow-up");
+  return patientDetailText("Regulär", "Стандартный", "Regular");
 }
 
 function fieldVal(v: string | string[] | null | undefined, fb: string) {
@@ -526,7 +526,7 @@ function fieldVal(v: string | string[] | null | undefined, fb: string) {
 }
 
 function fmtMoney(v?: string | null, currency = "EUR") {
-  if (!v) return "Not set";
+  if (!v) return patientDetailText("Nicht festgelegt", "Не задано", "Not set");
   const numeric = Number(v);
   if (Number.isNaN(numeric)) return `${v} ${currency}`;
   try {
@@ -538,6 +538,13 @@ function fmtMoney(v?: string | null, currency = "EUR") {
   } catch {
     return `${v} ${currency}`;
   }
+}
+
+function patientDetailText(de: string, ru: string, en: string) {
+  const lang = getLang();
+  if (lang === "de") return de;
+  if (lang === "ru") return ru;
+  return en;
 }
 
 function toOptional(value: string) {
@@ -581,7 +588,13 @@ function parseOptionalNumberInput(value: string) {
   if (!trimmed) return undefined;
   const parsed = Number(trimmed.replace(",", "."));
   if (!Number.isFinite(parsed)) {
-    throw new Error("Enter a valid number");
+    throw new Error(
+      patientDetailText(
+        "Geben Sie eine gültige Zahl ein",
+        "Введите корректное число",
+        "Enter a valid number",
+      ),
+    );
   }
   return parsed;
 }
@@ -590,7 +603,13 @@ function parseOptionalIntegerInput(value: string) {
   const parsed = parseOptionalNumberInput(value);
   if (parsed == null) return undefined;
   if (!Number.isInteger(parsed)) {
-    throw new Error("Enter a whole number");
+    throw new Error(
+      patientDetailText(
+        "Geben Sie eine ganze Zahl ein",
+        "Введите целое число",
+        "Enter a whole number",
+      ),
+    );
   }
   return parsed;
 }
@@ -671,14 +690,6 @@ const INVOICE_STATUS_OPTIONS: InvoiceStatus[] = [
   "overdue",
   "cancelled",
 ];
-const TIMELINE_RANGE_OPTIONS: Array<{ value: PatientTimelineRangeFilter; label: string }> = [
-  { value: "all", label: "All time" },
-  { value: "30d", label: "Last 30 days" },
-  { value: "90d", label: "Last 90 days" },
-  { value: "180d", label: "Last 180 days" },
-  { value: "365d", label: "Last 365 days" },
-];
-
 function blankRelationForm(): RelationFormState {
   return {
     relatedPatientId: "",
@@ -775,10 +786,24 @@ function blankPatientCardEntryForm(): PatientCardEntryFormState {
 }
 
 function patientCardEntryCategoryLabel(category: string) {
-  return (
-    PATIENT_CARD_ENTRY_CATEGORY_OPTIONS.find((option) => option.value === category)?.label ??
-    category.replaceAll("_", " ")
-  );
+  switch (category) {
+    case "medical_update":
+      return patientDetailText("Medizinisches Update", "Медицинское обновление", "Medical update");
+    case "patient_report":
+      return patientDetailText("Bericht des Patienten", "Сообщение пациента", "Patient report");
+    case "provider_report":
+      return patientDetailText("Bericht der Klinik", "Отчёт провайдера", "Provider report");
+    case "treatment_note":
+      return patientDetailText("Behandlungsnotiz", "Заметка по лечению", "Treatment note");
+    case "followup_note":
+      return patientDetailText("Nachsorge-Notiz", "Заметка по наблюдению", "Follow-up note");
+    case "warning":
+      return patientDetailText("Warnhinweis", "Предупреждение", "Warning");
+    case "other":
+      return patientDetailText("Sonstiges", "Другое", "Other");
+    default:
+      return category.replaceAll("_", " ");
+  }
 }
 
 function blankPatientMedicalOrderForm(): PatientMedicalOrderFormState {
@@ -793,10 +818,24 @@ function blankPatientMedicalOrderForm(): PatientMedicalOrderFormState {
 }
 
 function patientMedicalOrderTypeLabel(orderType: string) {
-  return (
-    PATIENT_MEDICAL_ORDER_TYPE_OPTIONS.find((option) => option.value === orderType)?.label ??
-    orderType.replaceAll("_", " ")
-  );
+  switch (orderType) {
+    case "physiotherapy":
+      return patientDetailText("Physiotherapie", "Физиотерапия", "Physiotherapy");
+    case "diet":
+      return patientDetailText("Ernährung", "Диета", "Diet");
+    case "lab_recheck":
+      return patientDetailText("Laborkontrolle", "Повторный анализ", "Lab recheck");
+    case "imaging":
+      return patientDetailText("Bildgebung", "Визуализация", "Imaging");
+    case "medication_followup":
+      return patientDetailText("Medikationskontrolle", "Контроль медикации", "Medication follow-up");
+    case "procedure":
+      return patientDetailText("Eingriff", "Процедура", "Procedure");
+    case "other":
+      return patientDetailText("Sonstiges", "Другое", "Other");
+    default:
+      return orderType.replaceAll("_", " ");
+  }
 }
 
 function blankPatientRiskScoreForm(): PatientRiskScoreFormState {
@@ -812,21 +851,103 @@ function blankPatientRiskScoreForm(): PatientRiskScoreFormState {
 }
 
 function patientRiskScoreTypeLabel(scoreType: string) {
-  return (
-    PATIENT_RISK_SCORE_TYPE_OPTIONS.find((option) => option.value === scoreType)?.label ??
-    scoreType.replaceAll("_", " ")
-  );
+  switch (scoreType) {
+    case "cha2ds2_vasc":
+      return "CHA2DS2-VASc";
+    case "has_bled":
+      return "HAS-BLED";
+    case "framingham":
+      return "Framingham";
+    case "fall_risk":
+      return patientDetailText("Sturzrisiko", "Риск падения", "Fall risk");
+    case "frailty":
+      return patientDetailText("Gebrechlichkeit", "Хрупкость", "Frailty");
+    case "nutrition_risk":
+      return patientDetailText("Ernährungsrisiko", "Риск питания", "Nutrition risk");
+    case "other":
+      return patientDetailText("Sonstiges", "Другое", "Other");
+    default:
+      return scoreType.replaceAll("_", " ");
+  }
 }
 
 function workflowChecklistLabel(key: string) {
   switch (key) {
     case "patient_intake":
-      return "Patient intake";
+      return patientDetailText("Patientenaufnahme", "Приём пациента", "Patient intake");
     case "patient_custom":
-      return "Custom";
+      return patientDetailText("Benutzerdefiniert", "Пользовательское", "Custom");
     default:
       return key.replaceAll("_", " ");
   }
+}
+
+function patientDetailStatusLabel(status: string) {
+  switch (status) {
+    case "open":
+      return patientDetailText("Offen", "Открыто", "Open");
+    case "in_progress":
+      return patientDetailText("In Bearbeitung", "В работе", "In progress");
+    case "closed":
+      return patientDetailText("Geschlossen", "Закрыто", "Closed");
+    case "active":
+      return patientDetailText("Aktiv", "Активно", "Active");
+    case "completed":
+      return patientDetailText("Abgeschlossen", "Завершено", "Completed");
+    case "draft":
+      return patientDetailText("Entwurf", "Черновик", "Draft");
+    case "sent":
+      return patientDetailText("Gesendet", "Отправлено", "Sent");
+    case "signed":
+      return patientDetailText("Unterzeichnet", "Подписано", "Signed");
+    case "overdue":
+      return patientDetailText("Überfällig", "Просрочено", "Overdue");
+    case "partially_paid":
+      return patientDetailText("Teilweise bezahlt", "Частично оплачено", "Partially paid");
+    case "paid":
+      return patientDetailText("Bezahlt", "Оплачено", "Paid");
+    case "expired":
+      return patientDetailText("Abgelaufen", "Истекло", "Expired");
+    case "terminated":
+      return patientDetailText("Beendet", "Расторгнуто", "Terminated");
+    case "cancelled":
+      return patientDetailText("Storniert", "Отменено", "Cancelled");
+    case "planned":
+      return patientDetailText("Geplant", "Запланировано", "Planned");
+    case "confirmed":
+      return patientDetailText("Bestätigt", "Подтверждено", "Confirmed");
+    case "submitted":
+      return patientDetailText("Eingereicht", "Отправлено", "Submitted");
+    case "archived":
+      return patientDetailText("Archiviert", "В архиве", "Archived");
+    default:
+      return status.replaceAll("_", " ");
+  }
+}
+
+function priorityLabel(priority: string) {
+  switch (priority) {
+    case "low":
+      return patientDetailText("Niedrig", "Низкий", "Low");
+    case "normal":
+      return patientDetailText("Normal", "Обычный", "Normal");
+    case "high":
+      return patientDetailText("Hoch", "Высокий", "High");
+    case "urgent":
+      return patientDetailText("Dringend", "Срочно", "Urgent");
+    default:
+      return priority;
+  }
+}
+
+function timelineRangeOptions(): Array<{ value: PatientTimelineRangeFilter; label: string }> {
+  return [
+    { value: "all", label: patientDetailText("Gesamter Zeitraum", "Всё время", "All time") },
+    { value: "30d", label: patientDetailText("Letzte 30 Tage", "Последние 30 дней", "Last 30 days") },
+    { value: "90d", label: patientDetailText("Letzte 90 Tage", "Последние 90 дней", "Last 90 days") },
+    { value: "180d", label: patientDetailText("Letzte 180 Tage", "Последние 180 дней", "Last 180 days") },
+    { value: "365d", label: patientDetailText("Letzte 365 Tage", "Последние 365 дней", "Last 365 days") },
+  ];
 }
 
 function priorityBadgeClass(priority: string) {
@@ -939,8 +1060,10 @@ export function PatientDetailPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { staffGo } = useStaffNavigate();
   const { user } = useAuth();
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
+  const l = (de: string, ru: string, en: string) =>
+    lang === "de" ? de : lang === "ru" ? ru : en;
 
   const [detail, setDetail] = useState<PatientDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1126,6 +1249,7 @@ export function PatientDetailPage() {
   );
 
   const timelineSummary = useMemo(() => buildPatientTimelineSummary(timeline), [timeline]);
+  const localizedTimelineRangeOptions = useMemo(() => timelineRangeOptions(), [lang]);
   const timelineHasNextPage = timelineOffset + timeline.length < timelineTotal;
   const workflowChecklistGroups = useMemo(() => {
     const items = workflowChecklist?.items ?? [];
@@ -1789,7 +1913,13 @@ export function PatientDetailPage() {
         `/admin/compliance/patient/${id}/export?format=zip`,
         `${detail?.patient_id ?? "patient"}-dsgvo-export.zip`,
       );
-      setNotice("DSGVO export downloaded.");
+      setNotice(
+        l(
+          "DSGVO-Export wurde heruntergeladen.",
+          "Экспорт DSGVO загружен.",
+          "DSGVO export downloaded.",
+        ),
+      );
     } catch (error) {
       setTabActionError(
         error instanceof Error ? error.message : t.common_failed_create
@@ -2067,7 +2197,13 @@ export function PatientDetailPage() {
       if (riskScoreForm.inputsJson.trim()) {
         const parsed = JSON.parse(riskScoreForm.inputsJson);
         if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-          throw new Error("Structured inputs must be a JSON object");
+          throw new Error(
+            l(
+              "Strukturierte Eingaben müssen ein JSON-Objekt sein",
+              "Структурированные входные данные должны быть JSON-объектом",
+              "Structured inputs must be a JSON object",
+            ),
+          );
         }
         inputs = parsed as Record<string, unknown>;
       }
@@ -2162,7 +2298,7 @@ export function PatientDetailPage() {
           {canEditPatientProfile ? (
             <Button variant="outline" size="sm" className="gap-2 rounded-xl" onClick={openProfileEditor}>
               <Pencil className="size-3.5" />
-              Edit profile
+              {l("Profil bearbeiten", "Редактировать профиль", "Edit profile")}
             </Button>
           ) : null}
           <Button
@@ -2189,19 +2325,19 @@ export function PatientDetailPage() {
         {canCreateCase ? (
           <Button type="button" variant="outline" className="rounded-xl" onClick={() => staffGo(`/cases?patient=${id}&create=1`)}>
             <Plus className="mr-2 size-4" />
-            New case
+            {l("Neuer Fall", "Новый кейс", "New case")}
           </Button>
         ) : null}
         {canCreateOrder ? (
           <Button type="button" variant="outline" className="rounded-xl" onClick={() => staffGo(`/orders?patient=${id}&create=1`)}>
             <Plus className="mr-2 size-4" />
-            New order
+            {l("Neuer Auftrag", "Новый заказ", "New order")}
           </Button>
         ) : null}
         {canCreateAppointment ? (
           <Button type="button" variant="outline" className="rounded-xl" onClick={() => staffGo(`/appointments?patient=${id}&create=1`)}>
             <Plus className="mr-2 size-4" />
-            New appointment
+            {l("Neuer Termin", "Новый приём", "New appointment")}
           </Button>
         ) : null}
         {canPrintPatientLabel ? (
@@ -2215,7 +2351,7 @@ export function PatientDetailPage() {
               }
             >
               <SelectTrigger className="w-[210px] rounded-xl bg-white">
-                <SelectValue placeholder="Label format" />
+                <SelectValue placeholder={l("Etikettenformat", "Формат наклейки", "Label format")} />
               </SelectTrigger>
               <SelectContent>
                 {PATIENT_LABEL_FORMAT_OPTIONS.map((option) => (
@@ -2237,7 +2373,7 @@ export function PatientDetailPage() {
               ) : (
                 <Printer className="mr-2 size-4" />
               )}
-              Print sticker
+              {l("Etikett drucken", "Печать наклейки", "Print sticker")}
             </Button>
           </div>
         ) : null}
@@ -2266,17 +2402,17 @@ export function PatientDetailPage() {
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={handleTabChange}>
         <div className="border-b border-slate-200 flex justify-center">
-          <TabsList variant="line" className="w-auto">
-            <TabsTrigger value="profile" className="px-4 py-2">{t.patients_profile}</TabsTrigger>
-            {canViewOperationalSurface ? <TabsTrigger value="relations" className="px-4 py-2">Relations</TabsTrigger> : null}
+            <TabsList variant="line" className="w-auto">
+              <TabsTrigger value="profile" className="px-4 py-2">{t.patients_profile}</TabsTrigger>
+            {canViewOperationalSurface ? <TabsTrigger value="relations" className="px-4 py-2">{l("Beziehungen", "Связи", "Relations")}</TabsTrigger> : null}
             {canViewOperationalSurface ? <TabsTrigger value="cases" className="px-4 py-2">{t.cases_title}</TabsTrigger> : null}
             {canViewOperationalSurface ? <TabsTrigger value="orders" className="px-4 py-2">{t.orders_title}</TabsTrigger> : null}
             {canViewOperationalSurface ? <TabsTrigger value="appointments" className="px-4 py-2">{t.appointments_title}</TabsTrigger> : null}
-            {canViewDocuments ? <TabsTrigger value="documents" className="px-4 py-2">Documents</TabsTrigger> : null}
-            {canViewContracts ? <TabsTrigger value="contracts" className="px-4 py-2">Contracts</TabsTrigger> : null}
-            {canViewInvoices ? <TabsTrigger value="invoices" className="px-4 py-2">Invoices</TabsTrigger> : null}
-            {canViewOperationalSurface ? <TabsTrigger value="workflow" className="px-4 py-2">Workflow</TabsTrigger> : null}
-            {canViewOperationalSurface ? <TabsTrigger value="timeline" className="px-4 py-2">Timeline</TabsTrigger> : null}
+            {canViewDocuments ? <TabsTrigger value="documents" className="px-4 py-2">{l("Dokumente", "Документы", "Documents")}</TabsTrigger> : null}
+            {canViewContracts ? <TabsTrigger value="contracts" className="px-4 py-2">{l("Verträge", "Договоры", "Contracts")}</TabsTrigger> : null}
+            {canViewInvoices ? <TabsTrigger value="invoices" className="px-4 py-2">{l("Rechnungen", "Счета", "Invoices")}</TabsTrigger> : null}
+            {canViewOperationalSurface ? <TabsTrigger value="workflow" className="px-4 py-2">{l("Workflow", "Workflow", "Workflow")}</TabsTrigger> : null}
+            {canViewOperationalSurface ? <TabsTrigger value="timeline" className="px-4 py-2">{l("Zeitachse", "Таймлайн", "Timeline")}</TabsTrigger> : null}
           </TabsList>
         </div>
 
@@ -2302,7 +2438,7 @@ export function PatientDetailPage() {
               <InfoRow label={t.patients_phone_secondary} value={fieldVal(detail.phone_secondary, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
               <InfoRow label={t.patients_email} value={fieldVal(detail.email, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
               <InfoRow label={t.patients_languages} value={fieldVal(detail.languages, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
-              <InfoRow label="Functional labels" value={fieldVal(detail.functional_labels, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
+              <InfoRow label={l("Funktionale Labels", "Функциональные метки", "Functional labels")} value={fieldVal(detail.functional_labels, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
               <InfoRow label={t.patients_residence_country} value={fieldVal(detail.residence_country, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
               <InfoRow label={t.patients_insurance_provider} value={fieldVal(detail.insurance_provider, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
               <InfoRow label={t.patients_insurance_number} value={fieldVal(detail.insurance_number, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
@@ -2341,7 +2477,7 @@ export function PatientDetailPage() {
               {canEditPatientProfile ? (
                 <Button type="button" variant="outline" className="rounded-xl" onClick={openProfileEditor}>
                   <Pencil className="mr-2 size-3.5" />
-                  Update compliance
+                  {l("Compliance aktualisieren", "Обновить compliance", "Update compliance")}
                 </Button>
               ) : null}
             </div>
@@ -2349,13 +2485,17 @@ export function PatientDetailPage() {
             <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
               <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 xl:col-span-2">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-                  Contract status
+                  {l("Vertragsstatus", "Статус договора", "Contract status")}
                 </p>
                 <p className="mt-3 text-lg font-semibold text-slate-950">
-                  {legalStatus.contractStatus.replaceAll("_", " ")}
+                  {patientDetailStatusLabel(legalStatus.contractStatus)}
                 </p>
                 <p className="mt-1 text-xs text-slate-500">
-                  {legalStatusCompletion.completed}/{legalStatusCompletion.total} compliance checks done
+                  {l(
+                    `${legalStatusCompletion.completed}/${legalStatusCompletion.total} Compliance-Prüfungen erledigt`,
+                    `${legalStatusCompletion.completed}/${legalStatusCompletion.total} проверок compliance выполнено`,
+                    `${legalStatusCompletion.completed}/${legalStatusCompletion.total} compliance checks done`,
+                  )}
                 </p>
               </div>
               {legalStatusChecklist.map((item) => (
@@ -2381,7 +2521,7 @@ export function PatientDetailPage() {
             {legalStatus.notes ? (
               <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-                  Compliance notes
+                  {l("Compliance-Notizen", "Заметки по compliance", "Compliance notes")}
                 </p>
                 <p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">{legalStatus.notes}</p>
               </div>
@@ -2390,10 +2530,14 @@ export function PatientDetailPage() {
             <div className="mt-4 grid gap-3 lg:grid-cols-[1.5fr_1fr]">
               <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-                  Compliance handoff
+                  {l("Compliance-Handoff", "Передача compliance", "Compliance handoff")}
                 </p>
                 <p className="mt-2 text-sm text-slate-600">
-                  Use the patient profile as the operational source for DSGVO readiness, then continue consent, erasure and restriction handling in the dedicated compliance workspace.
+                  {l(
+                    "Nutzen Sie das Patientenprofil als operative Quelle für die DSGVO-Bereitschaft und führen Sie Einwilligungen, Löschungen und Einschränkungen anschließend im dedizierten Compliance-Bereich weiter.",
+                    "Используйте профиль пациента как операционный источник для готовности по DSGVO, а согласия, удаление и ограничения продолжайте в отдельном разделе compliance.",
+                    "Use the patient profile as the operational source for DSGVO readiness, then continue consent, erasure and restriction handling in the dedicated compliance workspace.",
+                  )}
                 </p>
                 <div className="mt-4 flex flex-wrap gap-2">
                   {canExportPatientCompliance ? (
@@ -2407,7 +2551,7 @@ export function PatientDetailPage() {
                       {complianceExportBusy ? (
                         <LoaderCircle className="mr-2 size-4 animate-spin" />
                       ) : null}
-                      DSGVO export
+                      {l("DSGVO-Export", "Экспорт DSGVO", "DSGVO export")}
                     </Button>
                   ) : null}
                   {canOpenComplianceWorkspace ? (
@@ -2417,7 +2561,7 @@ export function PatientDetailPage() {
                       className="rounded-xl"
                       onClick={() => staffGo(`/admin/compliance?patient=${id}`)}
                     >
-                      Open DSGVO workspace
+                      {l("DSGVO-Bereich öffnen", "Открыть раздел DSGVO", "Open DSGVO workspace")}
                     </Button>
                   ) : null}
                   {canOpenDocumentsWorkspace ? (
@@ -2427,7 +2571,7 @@ export function PatientDetailPage() {
                       className="rounded-xl"
                       onClick={() => staffGo(`/documents?patient=${id}`)}
                     >
-                      Open documents
+                      {l("Dokumente öffnen", "Открыть документы", "Open documents")}
                     </Button>
                   ) : null}
                   {canViewContracts ? (
@@ -2437,7 +2581,7 @@ export function PatientDetailPage() {
                       className="rounded-xl"
                       onClick={() => staffGo(`/contracts?patient=${id}`)}
                     >
-                      Open contracts
+                      {l("Verträge öffnen", "Открыть договоры", "Open contracts")}
                     </Button>
                   ) : null}
                 </div>
@@ -2445,12 +2589,12 @@ export function PatientDetailPage() {
 
               <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-                  Operational boundary
+                  {l("Operative Grenze", "Операционная граница", "Operational boundary")}
                 </p>
                 <ul className="mt-3 space-y-2 text-sm text-slate-600">
-                  <li>Legal readiness is patient-bound here.</li>
-                  <li>Consent register still lives in the DSGVO admin workspace.</li>
-                  <li>Execution should not start before compliance is complete.</li>
+                  <li>{l("Die rechtliche Freigabe ist hier patientengebunden.", "Юридическая готовность здесь привязана к пациенту.", "Legal readiness is patient-bound here.")}</li>
+                  <li>{l("Das Einwilligungsregister bleibt im DSGVO-Adminbereich.", "Реестр согласий по-прежнему находится в админ-разделе DSGVO.", "Consent register still lives in the DSGVO admin workspace.")}</li>
+                  <li>{l("Die Ausführung sollte erst nach abgeschlossener Compliance starten.", "Исполнение не должно начинаться до завершения compliance.", "Execution should not start before compliance is complete.")}</li>
                 </ul>
               </div>
             </div>
@@ -2461,9 +2605,13 @@ export function PatientDetailPage() {
               <div className={cn(card("p-6"), "border-rose-200 bg-rose-50/60")}>
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <div>
-                    <h2 className="text-sm font-semibold text-rose-950">Cave notes</h2>
+                    <h2 className="text-sm font-semibold text-rose-950">{l("CAVE-Hinweise", "Заметки CAVE", "Cave notes")}</h2>
                     <p className="mt-1 text-sm text-rose-700">
-                      Persistent clinical warnings that should stay visible before coordination or treatment starts.
+                      {l(
+                        "Dauerhafte klinische Warnhinweise, die vor Beginn von Koordination oder Behandlung sichtbar bleiben sollen.",
+                        "Постоянные клинические предупреждения, которые должны оставаться видимыми до начала координации или лечения.",
+                        "Persistent clinical warnings that should stay visible before coordination or treatment starts.",
+                      )}
                     </p>
                   </div>
                   {canEditPatientProfile ? (
@@ -2474,27 +2622,31 @@ export function PatientDetailPage() {
                       onClick={openProfileEditor}
                     >
                       <Pencil className="mr-2 size-3.5" />
-                      Update
+                      {l("Aktualisieren", "Обновить", "Update")}
                     </Button>
                   ) : null}
                 </div>
                 {detail.clinical_warnings ? (
                   <p className="whitespace-pre-wrap text-sm text-rose-900">{detail.clinical_warnings}</p>
                 ) : (
-                  <p className="text-sm text-rose-700">No active cave notes documented.</p>
+                  <p className="text-sm text-rose-700">{l("Keine aktiven CAVE-Hinweise dokumentiert.", "Активные заметки CAVE не задокументированы.", "No active cave notes documented.")}</p>
                 )}
               </div>
 
               <div className={card("p-6")}>
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <div>
-                    <h2 className="text-sm font-semibold text-slate-950">Vitals history</h2>
+                    <h2 className="text-sm font-semibold text-slate-950">{l("Vitalwerte-Verlauf", "История показателей", "Vitals history")}</h2>
                     <p className="mt-1 text-sm text-slate-500">
-                      Blood pressure, heart rate and weight snapshots with timestamped clinical context.
+                      {l(
+                        "Blutdruck-, Herzfrequenz- und Gewichtsstände mit zeitgestempeltem klinischem Kontext.",
+                        "Снимки давления, пульса и веса с клиническим контекстом по времени.",
+                        "Blood pressure, heart rate and weight snapshots with timestamped clinical context.",
+                      )}
                     </p>
                   </div>
                   <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
-                    {vitalsHistory.length} entries
+                    {l(`${vitalsHistory.length} Einträge`, `${vitalsHistory.length} записей`, `${vitalsHistory.length} entries`)}
                   </Badge>
                 </div>
 
@@ -2503,7 +2655,7 @@ export function PatientDetailPage() {
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
                         <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-                          Latest measurement
+                          {l("Letzte Messung", "Последнее измерение", "Latest measurement")}
                         </p>
                         <p className="mt-2 text-sm font-medium text-slate-950">
                           {fmtDateTime(latestVitalMeasurement.measured_at, t.common_not_set)}
@@ -2523,7 +2675,7 @@ export function PatientDetailPage() {
                         ) : null}
                         {latestVitalMeasurement.weight_kg != null ? (
                           <Badge variant="outline" className="rounded-full">
-                            Weight {formatVitalNumber(latestVitalMeasurement.weight_kg)} kg
+                            {l("Gewicht", "Вес", "Weight")} {formatVitalNumber(latestVitalMeasurement.weight_kg)} kg
                           </Badge>
                         ) : null}
                         {latestVitalMeasurement.bmi != null ? (
@@ -2541,7 +2693,7 @@ export function PatientDetailPage() {
                   </div>
                 ) : (
                   <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
-                    No vital measurements recorded yet.
+                    {l("Noch keine Vitalwerte erfasst.", "Показатели пока не зафиксированы.", "No vital measurements recorded yet.")}
                   </div>
                 )}
 
@@ -2555,7 +2707,7 @@ export function PatientDetailPage() {
                               {fmtDateTime(item.measured_at, t.common_not_set)}
                             </p>
                             <p className="mt-1 text-xs text-slate-500">
-                              Recorded by {item.recorded_by_name ?? t.common_unknown}
+                              {l("Erfasst von", "Записал", "Recorded by")} {item.recorded_by_name ?? t.common_unknown}
                             </p>
                           </div>
                           <div className="flex flex-wrap gap-2 text-xs text-slate-600">
@@ -2585,20 +2737,24 @@ export function PatientDetailPage() {
             <form className={card("p-6")} onSubmit={handleCreateVitalMeasurement}>
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-sm font-semibold text-slate-950">Add vital measurement</h2>
+                  <h2 className="text-sm font-semibold text-slate-950">{l("Vitalwert hinzufügen", "Добавить показатель", "Add vital measurement")}</h2>
                   <p className="mt-1 text-sm text-slate-500">
-                    Capture patient vitals with a concrete measurement timestamp.
+                    {l(
+                      "Erfassen Sie Vitalwerte des Patienten mit einem konkreten Messzeitpunkt.",
+                      "Фиксируйте показатели пациента с точным временем измерения.",
+                      "Capture patient vitals with a concrete measurement timestamp.",
+                    )}
                   </p>
                 </div>
                 {bmiPreview != null ? (
                   <Badge variant="outline" className="rounded-full border-sky-200 bg-sky-50 text-sky-700">
-                    BMI preview {formatVitalNumber(bmiPreview)}
+                    {l("BMI-Vorschau", "Предпросмотр BMI", "BMI preview")} {formatVitalNumber(bmiPreview)}
                   </Badge>
                 ) : null}
               </div>
               <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 <div className="space-y-2 xl:col-span-2">
-                  <Label htmlFor="patient-vitals-measured-at">Measured at</Label>
+                  <Label htmlFor="patient-vitals-measured-at">{l("Gemessen am", "Измерено", "Measured at")}</Label>
                   <Input
                     id="patient-vitals-measured-at"
                     type="datetime-local"
@@ -2610,7 +2766,7 @@ export function PatientDetailPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="patient-vitals-bp-systolic">BP systolic</Label>
+                  <Label htmlFor="patient-vitals-bp-systolic">{l("RR systolisch", "Систолическое АД", "BP systolic")}</Label>
                   <Input
                     id="patient-vitals-bp-systolic"
                     inputMode="decimal"
@@ -2622,7 +2778,7 @@ export function PatientDetailPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="patient-vitals-bp-diastolic">BP diastolic</Label>
+                  <Label htmlFor="patient-vitals-bp-diastolic">{l("RR diastolisch", "Диастолическое АД", "BP diastolic")}</Label>
                   <Input
                     id="patient-vitals-bp-diastolic"
                     inputMode="decimal"
@@ -2634,7 +2790,7 @@ export function PatientDetailPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="patient-vitals-heart-rate">Heart rate</Label>
+                  <Label htmlFor="patient-vitals-heart-rate">{l("Herzfrequenz", "Пульс", "Heart rate")}</Label>
                   <Input
                     id="patient-vitals-heart-rate"
                     inputMode="numeric"
@@ -2646,7 +2802,7 @@ export function PatientDetailPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="patient-vitals-weight">Weight (kg)</Label>
+                  <Label htmlFor="patient-vitals-weight">{l("Gewicht (kg)", "Вес (кг)", "Weight (kg)")}</Label>
                   <Input
                     id="patient-vitals-weight"
                     inputMode="decimal"
@@ -2658,7 +2814,7 @@ export function PatientDetailPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="patient-vitals-height">Height (cm)</Label>
+                  <Label htmlFor="patient-vitals-height">{l("Größe (cm)", "Рост (см)", "Height (cm)")}</Label>
                   <Input
                     id="patient-vitals-height"
                     inputMode="decimal"
@@ -2678,12 +2834,12 @@ export function PatientDetailPage() {
                     onChange={(event) =>
                       setVitalsForm((current) => ({ ...current, bmi: event.target.value }))
                     }
-                    placeholder={bmiPreview != null ? `${bmiPreview}` : "auto"}
+                    placeholder={bmiPreview != null ? `${bmiPreview}` : l("auto", "авто", "auto")}
                   />
                 </div>
               </div>
               <div className="mt-4 space-y-2">
-                <Label htmlFor="patient-vitals-notes">Measurement notes</Label>
+                <Label htmlFor="patient-vitals-notes">{l("Messnotizen", "Заметки к измерению", "Measurement notes")}</Label>
                 <textarea
                   id="patient-vitals-notes"
                   className={textareaClassName}
@@ -2691,7 +2847,11 @@ export function PatientDetailPage() {
                   onChange={(event) =>
                     setVitalsForm((current) => ({ ...current, notes: event.target.value }))
                   }
-                  placeholder="Context, symptoms or measurement conditions"
+                  placeholder={l(
+                    "Kontext, Symptome oder Messbedingungen",
+                    "Контекст, симптомы или условия измерения",
+                    "Context, symptoms or measurement conditions",
+                  )}
                 />
               </div>
               <div className="mt-4 flex justify-end">
@@ -2701,7 +2861,7 @@ export function PatientDetailPage() {
                   disabled={vitalsBusy}
                 >
                   {vitalsBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
-                  Save vital measurement
+                  {l("Vitalwert speichern", "Сохранить показатель", "Save vital measurement")}
                 </Button>
               </div>
             </form>
@@ -2712,19 +2872,23 @@ export function PatientDetailPage() {
               <div className={card("p-6")}>
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <div>
-                    <h2 className="text-sm font-semibold text-slate-950">Clinical card log</h2>
+                    <h2 className="text-sm font-semibold text-slate-950">{l("Klinisches Kartenprotokoll", "Журнал клинической карты", "Clinical card log")}</h2>
                     <p className="mt-1 text-sm text-slate-500">
-                      Categorized longitudinal entries outside structured anamnesis sections.
+                      {l(
+                        "Kategorisierte Längsverlaufseinträge außerhalb strukturierter Anamneseblöcke.",
+                        "Категоризированные продольные записи вне структурированных разделов анамнеза.",
+                        "Categorized longitudinal entries outside structured anamnesis sections.",
+                      )}
                     </p>
                   </div>
                   <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
-                    {cardEntries.length} entries
+                    {l(`${cardEntries.length} Einträge`, `${cardEntries.length} записей`, `${cardEntries.length} entries`)}
                   </Badge>
                 </div>
 
                 {cardEntries.length === 0 ? (
                   <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
-                    No clinical card entries recorded yet.
+                    {l("Noch keine Einträge in der klinischen Karte.", "Записей в клинической карте пока нет.", "No clinical card entries recorded yet.")}
                   </div>
                 ) : (
                   <div className="space-y-3">
@@ -2755,19 +2919,23 @@ export function PatientDetailPage() {
                 <form className={card("p-6")} onSubmit={handleCreatePatientCardEntry}>
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <h2 className="text-sm font-semibold text-slate-950">Add card entry</h2>
+                      <h2 className="text-sm font-semibold text-slate-950">{l("Karteneintrag hinzufügen", "Добавить запись в карту", "Add card entry")}</h2>
                       <p className="mt-1 text-sm text-slate-500">
-                        Log medical updates, patient reports and provider follow-up outside the structured case schema.
+                        {l(
+                          "Dokumentieren Sie medizinische Updates, Patientenmeldungen und Nachverfolgung der Klinik außerhalb des strukturierten Fallschemas.",
+                          "Фиксируйте медицинские обновления, сообщения пациента и follow-up от провайдера вне структурированной схемы кейса.",
+                          "Log medical updates, patient reports and provider follow-up outside the structured case schema.",
+                        )}
                       </p>
                     </div>
                     <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
-                      Longitudinal record
+                      {l("Längsverlauf", "Продольная запись", "Longitudinal record")}
                     </Badge>
                   </div>
 
                   <div className="mt-4 grid gap-4 md:grid-cols-2">
                     <div className="space-y-2">
-                      <Label htmlFor="patient-card-entry-date">Entry date</Label>
+                      <Label htmlFor="patient-card-entry-date">{l("Eintragsdatum", "Дата записи", "Entry date")}</Label>
                       <Input
                         id="patient-card-entry-date"
                         type="datetime-local"
@@ -2779,7 +2947,7 @@ export function PatientDetailPage() {
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="patient-card-entry-category">Category</Label>
+                      <Label htmlFor="patient-card-entry-category">{l("Kategorie", "Категория", "Category")}</Label>
                       <ShadSelect
                         value={cardEntryForm.category}
                         onValueChange={(value) =>
@@ -2790,12 +2958,12 @@ export function PatientDetailPage() {
                         }
                       >
                         <SelectTrigger id="patient-card-entry-category" className="w-full">
-                          <SelectValue placeholder="Select category" />
+                          <SelectValue placeholder={l("Kategorie wählen", "Выберите категорию", "Select category")} />
                         </SelectTrigger>
                         <SelectContent>
                           {PATIENT_CARD_ENTRY_CATEGORY_OPTIONS.map((option) => (
                             <SelectItem key={option.value} value={option.value}>
-                              {option.label}
+                              {patientCardEntryCategoryLabel(option.value)}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -2804,19 +2972,23 @@ export function PatientDetailPage() {
                   </div>
 
                   <div className="mt-4 space-y-2">
-                    <Label htmlFor="patient-card-entry-source">Source</Label>
+                    <Label htmlFor="patient-card-entry-source">{l("Quelle", "Источник", "Source")}</Label>
                     <Input
                       id="patient-card-entry-source"
                       value={cardEntryForm.source}
                       onChange={(event) =>
                         setCardEntryForm((current) => ({ ...current, source: event.target.value }))
                       }
-                      placeholder="Patient, clinic, doctor, phone follow-up"
+                      placeholder={l(
+                        "Patient, Klinik, Arzt, telefonische Nachverfolgung",
+                        "Пациент, клиника, врач, follow-up по телефону",
+                        "Patient, clinic, doctor, phone follow-up",
+                      )}
                     />
                   </div>
 
                   <div className="mt-4 space-y-2">
-                    <Label htmlFor="patient-card-entry-content">Entry content</Label>
+                    <Label htmlFor="patient-card-entry-content">{l("Inhalt", "Содержание", "Entry content")}</Label>
                     <textarea
                       id="patient-card-entry-content"
                       className={textareaClassName}
@@ -2824,7 +2996,11 @@ export function PatientDetailPage() {
                       onChange={(event) =>
                         setCardEntryForm((current) => ({ ...current, content: event.target.value }))
                       }
-                      placeholder="Document new medical information, patient-reported changes or provider follow-up"
+                      placeholder={l(
+                        "Neue medizinische Informationen, patientenberichtete Änderungen oder Nachverfolgung der Klinik dokumentieren",
+                        "Опишите новую медицинскую информацию, изменения со слов пациента или follow-up провайдера",
+                        "Document new medical information, patient-reported changes or provider follow-up",
+                      )}
                       required
                     />
                   </div>
@@ -2836,7 +3012,7 @@ export function PatientDetailPage() {
                       disabled={cardEntriesBusy}
                     >
                       {cardEntriesBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
-                      Save card entry
+                      {l("Eintrag speichern", "Сохранить запись", "Save card entry")}
                     </Button>
                   </div>
                 </form>
@@ -2849,19 +3025,23 @@ export function PatientDetailPage() {
               <div className={card("p-6")}>
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <div>
-                    <h2 className="text-sm font-semibold text-slate-950">Medical orders</h2>
+                    <h2 className="text-sm font-semibold text-slate-950">{l("Medizinische Anordnungen", "Медицинские назначения", "Medical orders")}</h2>
                     <p className="mt-1 text-sm text-slate-500">
-                      Structured physician or therapeutic orders that should stay visible beyond the case form.
+                      {l(
+                        "Strukturierte ärztliche oder therapeutische Anordnungen, die über das Fallformular hinaus sichtbar bleiben sollen.",
+                        "Структурированные врачебные или терапевтические назначения, которые должны оставаться видимыми вне формы кейса.",
+                        "Structured physician or therapeutic orders that should stay visible beyond the case form.",
+                      )}
                     </p>
                   </div>
                   <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
-                    {medicalOrders.length} orders
+                    {l(`${medicalOrders.length} назначений`, `${medicalOrders.length} назначений`, `${medicalOrders.length} orders`)}
                   </Badge>
                 </div>
 
                 {medicalOrders.length === 0 ? (
                   <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
-                    No medical orders recorded yet.
+                    {l("Noch keine medizinischen Anordnungen erfasst.", "Медицинские назначения пока не зафиксированы.", "No medical orders recorded yet.")}
                   </div>
                 ) : (
                   <div className="space-y-3">
@@ -2875,8 +3055,8 @@ export function PatientDetailPage() {
                               {order.source ? ` · ${order.source}` : ""}
                             </p>
                             <p className="mt-1 text-xs text-slate-500">
-                              Ordered by {order.ordered_by_name ?? t.common_unknown}
-                              {order.due_date ? ` · Due ${order.due_date}` : ""}
+                              {l("Angeordnet von", "Назначил", "Ordered by")} {order.ordered_by_name ?? t.common_unknown}
+                              {order.due_date ? ` · ${l("Срок", "Срок", "Due")} ${order.due_date}` : ""}
                             </p>
                           </div>
                           <Badge
@@ -2886,7 +3066,7 @@ export function PatientDetailPage() {
                               STATUS_BADGE_CLASSES[order.status] ?? "border-slate-200 bg-slate-50 text-slate-700"
                             )}
                           >
-                            {order.status.replaceAll("_", " ")}
+                            {patientDetailStatusLabel(order.status)}
                           </Badge>
                         </div>
                         <p className="mt-3 whitespace-pre-wrap text-sm text-slate-600">{order.instructions}</p>
@@ -2902,7 +3082,7 @@ export function PatientDetailPage() {
                               {medicalOrderActionId === order.id ? (
                                 <LoaderCircle className="mr-2 size-4 animate-spin" />
                               ) : null}
-                              Mark completed
+                              {l("Als abgeschlossen markieren", "Отметить как завершённое", "Mark completed")}
                             </Button>
                             <Button
                               type="button"
@@ -2914,7 +3094,7 @@ export function PatientDetailPage() {
                               {medicalOrderActionId === order.id ? (
                                 <LoaderCircle className="mr-2 size-4 animate-spin" />
                               ) : null}
-                              Cancel
+                              {l("Stornieren", "Отменить", "Cancel")}
                             </Button>
                           </div>
                         ) : null}
@@ -2928,19 +3108,23 @@ export function PatientDetailPage() {
                 <form className={card("p-6")} onSubmit={handleCreatePatientMedicalOrder}>
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <h2 className="text-sm font-semibold text-slate-950">Add medical order</h2>
+                      <h2 className="text-sm font-semibold text-slate-950">{l("Medizinische Anordnung hinzufügen", "Добавить медицинское назначение", "Add medical order")}</h2>
                       <p className="mt-1 text-sm text-slate-500">
-                        Register therapy plans, rechecks and treatment instructions in a structured way.
+                        {l(
+                          "Therapiepläne, Nachkontrollen und Behandlungsanweisungen strukturiert erfassen.",
+                          "Структурированно фиксируйте планы терапии, повторные проверки и инструкции по лечению.",
+                          "Register therapy plans, rechecks and treatment instructions in a structured way.",
+                        )}
                       </p>
                     </div>
                     <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
-                      Structured order
+                      {l("Strukturierte Anordnung", "Структурированное назначение", "Structured order")}
                     </Badge>
                   </div>
 
                   <div className="mt-4 grid gap-4 md:grid-cols-2">
                     <div className="space-y-2">
-                      <Label htmlFor="patient-medical-order-date">Order date</Label>
+                      <Label htmlFor="patient-medical-order-date">{l("Anordnungsdatum", "Дата назначения", "Order date")}</Label>
                       <Input
                         id="patient-medical-order-date"
                         type="datetime-local"
@@ -2952,7 +3136,7 @@ export function PatientDetailPage() {
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="patient-medical-order-type">Order type</Label>
+                      <Label htmlFor="patient-medical-order-type">{l("Anordnungstyp", "Тип назначения", "Order type")}</Label>
                       <ShadSelect
                         value={medicalOrderForm.orderType}
                         onValueChange={(value) =>
@@ -2963,31 +3147,31 @@ export function PatientDetailPage() {
                         }
                       >
                         <SelectTrigger id="patient-medical-order-type" className="w-full">
-                          <SelectValue placeholder="Select order type" />
+                          <SelectValue placeholder={l("Typ wählen", "Выберите тип", "Select order type")} />
                         </SelectTrigger>
                         <SelectContent>
                           {PATIENT_MEDICAL_ORDER_TYPE_OPTIONS.map((option) => (
                             <SelectItem key={option.value} value={option.value}>
-                              {option.label}
+                              {patientMedicalOrderTypeLabel(option.value)}
                             </SelectItem>
                           ))}
                         </SelectContent>
                       </ShadSelect>
                     </div>
                     <div className="space-y-2 md:col-span-2">
-                      <Label htmlFor="patient-medical-order-title">Title</Label>
+                      <Label htmlFor="patient-medical-order-title">{l("Titel", "Название", "Title")}</Label>
                       <Input
                         id="patient-medical-order-title"
                         value={medicalOrderForm.title}
                         onChange={(event) =>
                           setMedicalOrderForm((current) => ({ ...current, title: event.target.value }))
                         }
-                        placeholder="Physiotherapy 2x per week"
+                        placeholder={l("Physiotherapie 2x pro Woche", "Физиотерапия 2 раза в неделю", "Physiotherapy 2x per week")}
                         required
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="patient-medical-order-due-date">Due date</Label>
+                      <Label htmlFor="patient-medical-order-due-date">{l("Fälligkeitsdatum", "Срок", "Due date")}</Label>
                       <Input
                         id="patient-medical-order-due-date"
                         type="date"
@@ -2998,20 +3182,20 @@ export function PatientDetailPage() {
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="patient-medical-order-source">Source</Label>
+                      <Label htmlFor="patient-medical-order-source">{l("Quelle", "Источник", "Source")}</Label>
                       <Input
                         id="patient-medical-order-source"
                         value={medicalOrderForm.source}
                         onChange={(event) =>
                           setMedicalOrderForm((current) => ({ ...current, source: event.target.value }))
                         }
-                        placeholder="Doctor, clinic, discharge note"
+                        placeholder={l("Arzt, Klinik, Entlassungsbericht", "Врач, клиника, выписка", "Doctor, clinic, discharge note")}
                       />
                     </div>
                   </div>
 
                   <div className="mt-4 space-y-2">
-                    <Label htmlFor="patient-medical-order-instructions">Instructions</Label>
+                    <Label htmlFor="patient-medical-order-instructions">{l("Anweisungen", "Инструкции", "Instructions")}</Label>
                     <textarea
                       id="patient-medical-order-instructions"
                       className={textareaClassName}
@@ -3019,7 +3203,11 @@ export function PatientDetailPage() {
                       onChange={(event) =>
                         setMedicalOrderForm((current) => ({ ...current, instructions: event.target.value }))
                       }
-                      placeholder="Explain the therapeutic order, cadence, follow-up or preparation details"
+                      placeholder={l(
+                        "Therapieanordnung, Taktung, Nachkontrolle oder Vorbereitungsdetails erläutern",
+                        "Опишите назначение, частоту, follow-up или детали подготовки",
+                        "Explain the therapeutic order, cadence, follow-up or preparation details",
+                      )}
                       required
                     />
                   </div>
@@ -3031,7 +3219,7 @@ export function PatientDetailPage() {
                       disabled={medicalOrdersBusy}
                     >
                       {medicalOrdersBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
-                      Save medical order
+                      {l("Anordnung speichern", "Сохранить назначение", "Save medical order")}
                     </Button>
                   </div>
                 </form>
@@ -3044,19 +3232,23 @@ export function PatientDetailPage() {
               <div className={card("p-6")}>
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <div>
-                    <h2 className="text-sm font-semibold text-slate-950">Risk scores</h2>
+                    <h2 className="text-sm font-semibold text-slate-950">{l("Risikoscores", "Риск-скоры", "Risk scores")}</h2>
                     <p className="mt-1 text-sm text-slate-500">
-                      Patient-level structured risk score history beyond specialty-specific red flags.
+                      {l(
+                        "Strukturierter Verlauf patientenbezogener Risikoscores jenseits fachbereichsspezifischer Warnzeichen.",
+                        "Структурированная история риск-скоров на уровне пациента вне узкоспециальных красных флагов.",
+                        "Patient-level structured risk score history beyond specialty-specific red flags.",
+                      )}
                     </p>
                   </div>
                   <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
-                    {riskScores.length} scores
+                    {l(`${riskScores.length} Scores`, `${riskScores.length} скоров`, `${riskScores.length} scores`)}
                   </Badge>
                 </div>
 
                 {riskScores.length === 0 ? (
                   <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
-                    No risk scores recorded yet.
+                    {l("Noch keine Risikoscores erfasst.", "Риск-скоры пока не зафиксированы.", "No risk scores recorded yet.")}
                   </div>
                 ) : (
                   <div className="space-y-3">
@@ -3072,7 +3264,7 @@ export function PatientDetailPage() {
                               {score.source ? ` · ${score.source}` : ""}
                             </p>
                             <p className="mt-1 text-xs text-slate-500">
-                              Recorded by {score.recorded_by_name ?? t.common_unknown}
+                              {l("Erfasst von", "Записал", "Recorded by")} {score.recorded_by_name ?? t.common_unknown}
                             </p>
                           </div>
                           <Badge variant="outline" className="rounded-full">
@@ -3087,7 +3279,7 @@ export function PatientDetailPage() {
                         ) : null}
                         {score.inputs ? (
                           <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-600">
-                            <p className="font-medium text-slate-700">Structured inputs</p>
+                            <p className="font-medium text-slate-700">{l("Strukturierte Eingaben", "Структурированные входные данные", "Structured inputs")}</p>
                             <pre className="mt-2 overflow-x-auto whitespace-pre-wrap">
                               {JSON.stringify(score.inputs, null, 2)}
                             </pre>
@@ -3103,19 +3295,23 @@ export function PatientDetailPage() {
                 <form className={card("p-6")} onSubmit={handleCreatePatientRiskScore}>
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <h2 className="text-sm font-semibold text-slate-950">Add risk score</h2>
+                      <h2 className="text-sm font-semibold text-slate-950">{l("Risikoscore hinzufügen", "Добавить риск-скор", "Add risk score")}</h2>
                       <p className="mt-1 text-sm text-slate-500">
-                        Capture structured patient-level risk scoring with optional JSON inputs.
+                        {l(
+                          "Strukturiertes Risikoscoring auf Patientenebene mit optionalen JSON-Eingaben erfassen.",
+                          "Фиксируйте структурированные риск-скоры на уровне пациента с опциональными JSON-входами.",
+                          "Capture structured patient-level risk scoring with optional JSON inputs.",
+                        )}
                       </p>
                     </div>
                     <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
-                      Append-only history
+                      {l("Nur ergänzender Verlauf", "История только на добавление", "Append-only history")}
                     </Badge>
                   </div>
 
                   <div className="mt-4 grid gap-4 md:grid-cols-2">
                     <div className="space-y-2">
-                      <Label htmlFor="patient-risk-score-computed-at">Computed at</Label>
+                      <Label htmlFor="patient-risk-score-computed-at">{l("Berechnet am", "Рассчитано", "Computed at")}</Label>
                       <Input
                         id="patient-risk-score-computed-at"
                         type="datetime-local"
@@ -3127,7 +3323,7 @@ export function PatientDetailPage() {
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="patient-risk-score-type">Score type</Label>
+                      <Label htmlFor="patient-risk-score-type">{l("Score-Typ", "Тип скора", "Score type")}</Label>
                       <ShadSelect
                         value={riskScoreForm.scoreType}
                         onValueChange={(value) =>
@@ -3138,19 +3334,19 @@ export function PatientDetailPage() {
                         }
                       >
                         <SelectTrigger id="patient-risk-score-type" className="w-full">
-                          <SelectValue placeholder="Select score type" />
+                          <SelectValue placeholder={l("Тип wählen", "Выберите тип", "Select score type")} />
                         </SelectTrigger>
                         <SelectContent>
                           {PATIENT_RISK_SCORE_TYPE_OPTIONS.map((option) => (
                             <SelectItem key={option.value} value={option.value}>
-                              {option.label}
+                              {patientRiskScoreTypeLabel(option.value)}
                             </SelectItem>
                           ))}
                         </SelectContent>
                       </ShadSelect>
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="patient-risk-score-value">Score value</Label>
+                      <Label htmlFor="patient-risk-score-value">{l("Wert", "Значение", "Score value")}</Label>
                       <Input
                         id="patient-risk-score-value"
                         inputMode="decimal"
@@ -3163,7 +3359,7 @@ export function PatientDetailPage() {
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="patient-risk-score-scale">Scale max</Label>
+                      <Label htmlFor="patient-risk-score-scale">{l("Skalenmaximum", "Максимум шкалы", "Scale max")}</Label>
                       <Input
                         id="patient-risk-score-scale"
                         inputMode="decimal"
@@ -3175,20 +3371,24 @@ export function PatientDetailPage() {
                       />
                     </div>
                     <div className="space-y-2 md:col-span-2">
-                      <Label htmlFor="patient-risk-score-source">Source</Label>
+                      <Label htmlFor="patient-risk-score-source">{l("Quelle", "Источник", "Source")}</Label>
                       <Input
                         id="patient-risk-score-source"
                         value={riskScoreForm.source}
                         onChange={(event) =>
                           setRiskScoreForm((current) => ({ ...current, source: event.target.value }))
                         }
-                        placeholder="Doctor assessment, discharge note, intake review"
+                        placeholder={l(
+                          "Ärztliche Einschätzung, Entlassungsbericht, Intake-Prüfung",
+                          "Оценка врача, выписка, проверка intake",
+                          "Doctor assessment, discharge note, intake review",
+                        )}
                       />
                     </div>
                   </div>
 
                   <div className="mt-4 space-y-2">
-                    <Label htmlFor="patient-risk-score-interpretation">Interpretation</Label>
+                    <Label htmlFor="patient-risk-score-interpretation">{l("Interpretation", "Интерпретация", "Interpretation")}</Label>
                     <textarea
                       id="patient-risk-score-interpretation"
                       className={textareaClassName}
@@ -3196,12 +3396,16 @@ export function PatientDetailPage() {
                       onChange={(event) =>
                         setRiskScoreForm((current) => ({ ...current, interpretation: event.target.value }))
                       }
-                      placeholder="Explain clinical meaning, escalation threshold or follow-up implication"
+                      placeholder={l(
+                        "Klinische Bedeutung, Eskalationsschwelle oder Nachverfolgungsimplikation erläutern",
+                        "Опишите клиническое значение, порог эскалации или влияние на follow-up",
+                        "Explain clinical meaning, escalation threshold or follow-up implication",
+                      )}
                     />
                   </div>
 
                   <div className="mt-4 space-y-2">
-                    <Label htmlFor="patient-risk-score-inputs">Structured inputs (JSON object)</Label>
+                    <Label htmlFor="patient-risk-score-inputs">{l("Strukturierte Eingaben (JSON-Objekt)", "Структурированные входные данные (JSON-объект)", "Structured inputs (JSON object)")}</Label>
                     <textarea
                       id="patient-risk-score-inputs"
                       className={textareaClassName}
@@ -3220,7 +3424,7 @@ export function PatientDetailPage() {
                       disabled={riskScoresBusy}
                     >
                       {riskScoresBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
-                      Save risk score
+                      {l("Risikoscore speichern", "Сохранить риск-скор", "Save risk score")}
                     </Button>
                   </div>
                 </form>
@@ -3236,7 +3440,7 @@ export function PatientDetailPage() {
                 {canEditPatientProfile ? (
                   <Button type="button" variant="ghost" className="rounded-xl px-3 text-slate-500 hover:text-slate-900" onClick={openProfileEditor}>
                     <Pencil className="mr-2 size-3.5" />
-                    Edit
+                    {l("Bearbeiten", "Редактировать", "Edit")}
                   </Button>
                 ) : null}
               </div>
@@ -3325,20 +3529,20 @@ export function PatientDetailPage() {
         <TabsContent value="relations" className="mt-4 min-h-[400px]">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Patient chain</p>
-              <h3 className="mt-1 text-sm font-semibold text-slate-950">Relations and emergency contacts</h3>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{l("Patientenkette", "Цепочка пациента", "Patient chain")}</p>
+              <h3 className="mt-1 text-sm font-semibold text-slate-950">{l("Beziehungen und Notfallkontakte", "Связи и экстренные контакты", "Relations and emergency contacts")}</h3>
             </div>
             {canManageRelations ? (
               <Button type="button" className="rounded-xl bg-slate-950 text-white hover:bg-slate-800" onClick={openCreateRelation}>
                 <Plus className="mr-2 size-4" />
-                New relation
+                {l("Neue Beziehung", "Новая связь", "New relation")}
               </Button>
             ) : null}
           </div>
           {tabLoading ? (
             <div className="flex items-center justify-center py-16"><LoaderCircle className="size-5 animate-spin text-slate-400" /></div>
           ) : relations.length === 0 ? (
-            <div className={card("p-8 text-center")}><p className="text-sm text-slate-500">No linked relations yet.</p></div>
+            <div className={card("p-8 text-center")}><p className="text-sm text-slate-500">{l("Noch keine verknüpften Beziehungen.", "Связи пока не добавлены.", "No linked relations yet.")}</p></div>
           ) : (
             <div className="grid gap-3 md:grid-cols-2">
               {relations.map((relation) => (
@@ -3347,7 +3551,7 @@ export function PatientDetailPage() {
                     <p className="text-sm font-semibold text-slate-950">{relation.related_display_name || relation.related_name}</p>
                     <div className="flex items-center gap-2">
                       <Badge variant="outline" className="rounded-full text-[10px]">{relation.relation_type}</Badge>
-                      {relation.is_emergency_contact ? <Badge className="rounded-full bg-rose-100 text-rose-700">Emergency</Badge> : null}
+                      {relation.is_emergency_contact ? <Badge className="rounded-full bg-rose-100 text-rose-700">{l("Notfall", "Экстренно", "Emergency")}</Badge> : null}
                     </div>
                   </div>
                   <div className="mt-3 space-y-1 text-sm text-slate-600">
@@ -3365,16 +3569,16 @@ export function PatientDetailPage() {
                           className="rounded-xl"
                           onClick={() => staffGo(`/patients/${relation.related_patient_id}`)}
                         >
-                          Open patient
+                          {l("Patient öffnen", "Открыть пациента", "Open patient")}
                         </Button>
                       ) : null}
                       {canManageRelations ? (
                         <>
                           <Button type="button" variant="outline" className="rounded-xl" onClick={() => openEditRelation(relation)}>
-                            Edit
+                            {l("Bearbeiten", "Редактировать", "Edit")}
                           </Button>
                           <Button type="button" variant="outline" className="rounded-xl border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => void handleDeleteRelation(relation.id)}>
-                            Delete
+                            {l("Löschen", "Удалить", "Delete")}
                           </Button>
                         </>
                       ) : null}
@@ -3468,19 +3672,19 @@ export function PatientDetailPage() {
         <TabsContent value="documents" className="mt-4 min-h-[400px]">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Patient files</p>
-              <h3 className="mt-1 text-sm font-semibold text-slate-950">Documents linked to this patient</h3>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{l("Patientenakten", "Файлы пациента", "Patient files")}</p>
+              <h3 className="mt-1 text-sm font-semibold text-slate-950">{l("Dokumente zu diesem Patienten", "Документы этого пациента", "Documents linked to this patient")}</h3>
             </div>
             <div className="flex flex-wrap gap-2">
               {canOpenDocumentsWorkspace ? (
                 <Button type="button" variant="outline" className="rounded-xl" onClick={() => staffGo(`/documents?patient=${id}`)}>
-                  Open workspace
+                  {l("Bereich öffnen", "Открыть раздел", "Open workspace")}
                 </Button>
               ) : null}
               {canManageDocuments ? (
                 <Button type="button" className="rounded-xl bg-slate-950 text-white hover:bg-slate-800" onClick={() => setDocumentUploadOpen(true)}>
                   <Plus className="mr-2 size-4" />
-                  Upload document
+                  {l("Dokument hochladen", "Загрузить документ", "Upload document")}
                 </Button>
               ) : null}
             </div>
@@ -3497,12 +3701,16 @@ export function PatientDetailPage() {
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                    Required documents
+                    {l("Erforderliche Dokumente", "Обязательные документы", "Required documents")}
                   </p>
                   <h4 className="mt-1 text-sm font-semibold text-slate-950">
                     {documentAlerts.document_pack_complete
-                      ? "Minimum document pack is complete"
-                      : `${documentAlerts.missing_count} required document${documentAlerts.missing_count === 1 ? "" : "s"} missing`}
+                      ? l("Das minimale Dokumentenpaket ist vollständig", "Минимальный пакет документов собран", "Minimum document pack is complete")
+                      : l(
+                          `${documentAlerts.missing_count} erforderliche Dokument${documentAlerts.missing_count === 1 ? "" : "e"} fehlen`,
+                          `Не хватает обязательных документов: ${documentAlerts.missing_count}`,
+                          `${documentAlerts.missing_count} required document${documentAlerts.missing_count === 1 ? "" : "s"} missing`,
+                        )}
                   </h4>
                 </div>
                 <Badge
@@ -3515,7 +3723,7 @@ export function PatientDetailPage() {
                   )}
                 >
                   {documentAlerts.required_documents.filter((item) => item.fulfilled).length}/
-                  {documentAlerts.configured_rule_count} fulfilled
+                  {documentAlerts.configured_rule_count} {l("erfüllt", "выполнено", "fulfilled")}
                 </Badge>
               </div>
               {documentAlerts.missing_count > 0 ? (
@@ -3533,7 +3741,11 @@ export function PatientDetailPage() {
               ) : null}
               {documentAlerts.out_of_sync ? (
                 <p className="mt-3 text-xs text-slate-600">
-                  The stored compliance flag for “Document pack complete” is not aligned with the current document inventory.
+                  {l(
+                    "Das gespeicherte Compliance-Flag für „Dokumentenpaket vollständig“ stimmt nicht mit dem aktuellen Dokumentbestand überein.",
+                    "Сохранённый флаг compliance для «пакет документов собран» не совпадает с текущим составом документов.",
+                    "The stored compliance flag for “Document pack complete” is not aligned with the current document inventory.",
+                  )}
                 </p>
               ) : null}
             </div>
@@ -3561,7 +3773,7 @@ export function PatientDetailPage() {
                   <span className="text-sm font-medium text-slate-900 truncate">{doc.filename}</span>
                   <span className="text-xs text-slate-500">{doc.category ?? t.common_not_set}</span>
                   <Badge variant="outline" className={cn("rounded-full text-[10px] w-fit", STATUS_COLORS[doc.status ?? ""] ?? "border-slate-200 bg-slate-50 text-slate-600")}>
-                    {doc.status ?? t.common_not_set}
+                    {doc.status ? patientDetailStatusLabel(doc.status) : t.common_not_set}
                   </Badge>
                   <span className="text-xs text-slate-500">{doc.uploaded_by_name ?? t.common_unknown}</span>
                   <span className="text-xs text-slate-400">{fmtDate(doc.created_at)}</span>
@@ -3574,17 +3786,17 @@ export function PatientDetailPage() {
         {canViewContracts ? <TabsContent value="contracts" className="mt-4 min-h-[400px]">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Framework billing</p>
-              <h3 className="mt-1 text-sm font-semibold text-slate-950">Contracts for this patient</h3>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{l("Rahmenabrechnung", "Рамочное биллинг-сопровождение", "Framework billing")}</p>
+              <h3 className="mt-1 text-sm font-semibold text-slate-950">{l("Verträge dieses Patienten", "Договоры этого пациента", "Contracts for this patient")}</h3>
             </div>
             <div className="flex flex-wrap gap-2">
               <Button type="button" variant="outline" className="rounded-xl" onClick={() => staffGo(`/contracts?patient=${id}`)}>
-                Open workspace
+                {l("Bereich öffnen", "Открыть раздел", "Open workspace")}
               </Button>
               {canManageContracts ? (
                 <Button type="button" className="rounded-xl bg-slate-950 text-white hover:bg-slate-800" onClick={() => setContractCreateOpen(true)}>
                   <Plus className="mr-2 size-4" />
-                  New contract
+                  {l("Neuer Vertrag", "Новый договор", "New contract")}
                 </Button>
               ) : null}
             </div>
@@ -3592,7 +3804,7 @@ export function PatientDetailPage() {
           {tabLoading ? (
             <div className="flex items-center justify-center py-16"><LoaderCircle className="size-5 animate-spin text-slate-400" /></div>
           ) : contracts.length === 0 ? (
-            <div className={card("p-8 text-center")}><p className="text-sm text-slate-500">No framework contracts yet.</p></div>
+            <div className={card("p-8 text-center")}><p className="text-sm text-slate-500">{l("Noch keine Rahmenverträge.", "Рамочных договоров пока нет.", "No framework contracts yet.")}</p></div>
           ) : (
             <div className="grid gap-3 md:grid-cols-2">
               {contracts.map((contract) => (
@@ -3603,21 +3815,21 @@ export function PatientDetailPage() {
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-xs font-mono text-slate-400">{contract.contract_number}</span>
                     <Badge variant="outline" className={cn("rounded-full text-[10px]", STATUS_COLORS[contract.status] ?? "")}>
-                      {contract.status}
+                      {patientDetailStatusLabel(contract.status)}
                     </Badge>
                   </div>
                   <div className="mt-3 grid gap-2 text-sm text-slate-600">
-                    <p>Signed: {fmtDateTime(contract.signed_at, t.common_not_set)}</p>
-                    <p>Valid from: {fmtDate(contract.valid_from, t.common_not_set)}</p>
-                    <p>Valid to: {fmtDate(contract.valid_to, t.common_not_set)}</p>
+                    <p>{l("Unterzeichnet", "Подписано", "Signed")}: {fmtDateTime(contract.signed_at, t.common_not_set)}</p>
+                    <p>{l("Gültig ab", "Действует с", "Valid from")}: {fmtDate(contract.valid_from, t.common_not_set)}</p>
+                    <p>{l("Gültig bis", "Действует до", "Valid to")}: {fmtDate(contract.valid_to, t.common_not_set)}</p>
                   </div>
                   <div className="mt-4 flex flex-wrap gap-2">
                     <Button type="button" variant="outline" className="rounded-xl" onClick={() => staffGo(`/contracts?contract=${contract.id}`)}>
-                      Open
+                      {l("Öffnen", "Открыть", "Open")}
                     </Button>
                     {canManageContracts ? (
                       <Button type="button" variant="outline" className="rounded-xl" onClick={() => openContractStatusEditor(contract)}>
-                        Update status
+                        {l("Status aktualisieren", "Обновить статус", "Update status")}
                       </Button>
                     ) : null}
                   </div>
@@ -3630,17 +3842,17 @@ export function PatientDetailPage() {
         {canViewInvoices ? <TabsContent value="invoices" className="mt-4 min-h-[400px]">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Patient billing</p>
-              <h3 className="mt-1 text-sm font-semibold text-slate-950">Invoices and payment follow-up</h3>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{l("Patientenabrechnung", "Биллинг пациента", "Patient billing")}</p>
+              <h3 className="mt-1 text-sm font-semibold text-slate-950">{l("Rechnungen und Zahlungsnachverfolgung", "Счета и контроль оплат", "Invoices and payment follow-up")}</h3>
             </div>
             <Button type="button" variant="outline" className="rounded-xl" onClick={() => staffGo(`/invoices?patient=${id}`)}>
-              Open workspace
+              {l("Bereich öffnen", "Открыть раздел", "Open workspace")}
             </Button>
           </div>
           {tabLoading ? (
             <div className="flex items-center justify-center py-16"><LoaderCircle className="size-5 animate-spin text-slate-400" /></div>
           ) : invoices.length === 0 ? (
-            <div className={card("p-8 text-center")}><p className="text-sm text-slate-500">No invoices yet.</p></div>
+            <div className={card("p-8 text-center")}><p className="text-sm text-slate-500">{l("Noch keine Rechnungen.", "Счетов пока нет.", "No invoices yet.")}</p></div>
           ) : (
             <div className="space-y-3">
               {invoices.map((invoice) => (
@@ -3652,27 +3864,27 @@ export function PatientDetailPage() {
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-xs font-mono text-slate-400">{invoice.invoice_number}</span>
                       <Badge variant="outline" className={cn("rounded-full text-[10px]", STATUS_COLORS[invoice.status] ?? "")}>
-                        {invoice.status}
+                        {patientDetailStatusLabel(invoice.status)}
                       </Badge>
                     </div>
                     <p className="text-xs text-slate-400">{fmtDateTime(invoice.issued_at)}</p>
                   </div>
                   <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4 text-sm text-slate-600">
-                    <p>Type: {invoice.invoice_type}</p>
-                    <p>Total: {fmtMoney(invoice.total_gross)}</p>
-                    <p>Paid: {fmtMoney(invoice.paid_amount)}</p>
-                    <p>Open: {fmtMoney(invoice.balance_due)}</p>
-                    <p>Due: {fmtDate(invoice.due_date, t.common_not_set)}</p>
-                    <p>Order: {invoice.order_number ?? t.common_not_set}</p>
-                    <p>Quote: {invoice.quote_number ?? t.common_not_set}</p>
+                    <p>{l("Typ", "Тип", "Type")}: {invoice.invoice_type}</p>
+                    <p>{l("Gesamt", "Итого", "Total")}: {fmtMoney(invoice.total_gross)}</p>
+                    <p>{l("Bezahlt", "Оплачено", "Paid")}: {fmtMoney(invoice.paid_amount)}</p>
+                    <p>{l("Offen", "Остаток", "Open")}: {fmtMoney(invoice.balance_due)}</p>
+                    <p>{l("Fällig", "Срок", "Due")}: {fmtDate(invoice.due_date, t.common_not_set)}</p>
+                    <p>{l("Auftrag", "Заказ", "Order")}: {invoice.order_number ?? t.common_not_set}</p>
+                    <p>{l("Angebot", "Смета", "Quote")}: {invoice.quote_number ?? t.common_not_set}</p>
                   </div>
                   <div className="mt-4 flex flex-wrap gap-2">
                     <Button type="button" variant="outline" className="rounded-xl" onClick={() => staffGo(`/invoices?invoice=${invoice.id}`)}>
-                      Open
+                      {l("Öffnen", "Открыть", "Open")}
                     </Button>
                     {canManageInvoices ? (
                       <Button type="button" variant="outline" className="rounded-xl" onClick={() => openInvoiceManager(invoice)}>
-                        Manage billing
+                        {l("Billing verwalten", "Управлять биллингом", "Manage billing")}
                       </Button>
                     ) : null}
                   </div>
@@ -3771,7 +3983,7 @@ export function PatientDetailPage() {
                                   priorityBadgeClass(item.priority)
                                 )}
                               >
-                                {item.priority}
+                                {priorityLabel(item.priority)}
                               </Badge>
                               <Badge
                                 variant="outline"
@@ -3784,13 +3996,13 @@ export function PatientDetailPage() {
                                 )}
                               >
                                 {item.is_completed
-                                  ? "completed"
-                                  : item.linked_task_status ?? "open"}
+                                  ? patientDetailStatusLabel("completed")
+                                  : patientDetailStatusLabel(item.linked_task_status ?? "open")}
                               </Badge>
                             </div>
                             <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-500">
                               <span>
-                                Owner:{" "}
+                                {l("Verantwortlich", "Ответственный", "Owner")}:{" "}
                                 {item.owner_name
                                   ? `${item.owner_name} · ${roleLbl(
                                       item.owner_user_role ?? item.owner_role,
@@ -3799,14 +4011,14 @@ export function PatientDetailPage() {
                                   : roleLbl(item.owner_role, tr)}
                               </span>
                               <span>
-                                Due: {fmtDateTime(item.due_date, t.common_not_set)}
+                                {l("Fällig", "Срок", "Due")}: {fmtDateTime(item.due_date, t.common_not_set)}
                               </span>
                               <span>
-                                Created: {fmtDateTime(item.created_at, t.common_not_set)}
+                                {l("Erstellt", "Создано", "Created")}: {fmtDateTime(item.created_at, t.common_not_set)}
                               </span>
                               {item.completed_at ? (
                                 <span>
-                                  Completed: {fmtDateTime(item.completed_at, t.common_not_set)}
+                                  {l("Abgeschlossen", "Завершено", "Completed")}: {fmtDateTime(item.completed_at, t.common_not_set)}
                                 </span>
                               ) : null}
                             </div>
@@ -3819,7 +4031,7 @@ export function PatientDetailPage() {
                               disabled={workflowBusy}
                               onClick={() => void handleCompleteWorkflowItem(item.id)}
                             >
-                              Complete
+                              {l("Abschließen", "Завершить", "Complete")}
                             </Button>
                           ) : null}
                         </div>
@@ -3835,15 +4047,19 @@ export function PatientDetailPage() {
             <form onSubmit={handleAddWorkflowItem} className={cn(card("mt-4 p-5"), "space-y-4")}>
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                  Add workflow item
+                  {l("Workflow-Element hinzufügen", "Добавить элемент workflow", "Add workflow item")}
                 </p>
                 <h3 className="mt-1 text-sm font-semibold text-slate-950">
-                  Extend the patient checklist without leaving the profile.
+                  {l(
+                    "Erweitern Sie die Checkliste des Patienten, ohne das Profil zu verlassen.",
+                    "Расширяйте чеклист пациента, не покидая профиль.",
+                    "Extend the patient checklist without leaving the profile.",
+                  )}
                 </h3>
               </div>
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2 md:col-span-2">
-                  <Label htmlFor="patient-workflow-item-text">Checklist item</Label>
+                  <Label htmlFor="patient-workflow-item-text">{l("Checklistenpunkt", "Пункт чеклиста", "Checklist item")}</Label>
                   <Input
                     id="patient-workflow-item-text"
                     value={workflowForm.itemText}
@@ -3854,11 +4070,15 @@ export function PatientDetailPage() {
                       }))
                     }
                     className="h-10 rounded-xl bg-slate-50"
-                    placeholder="Document follow-up, PM call, concierge handoff..."
+                    placeholder={l(
+                      "Nachverfolgung, PM-Anruf, Concierge-Handoff dokumentieren...",
+                      "Документируйте follow-up, звонок PM, передачу concierge...",
+                      "Document follow-up, PM call, concierge handoff...",
+                    )}
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="patient-workflow-owner">Owner</Label>
+                  <Label htmlFor="patient-workflow-owner">{l("Verantwortlich", "Ответственный", "Owner")}</Label>
                   <select
                     id="patient-workflow-owner"
                     className={selectClassName}
@@ -3870,7 +4090,7 @@ export function PatientDetailPage() {
                       }))
                     }
                   >
-                    <option value="">Current user</option>
+                    <option value="">{l("Aktueller Benutzer", "Текущий пользователь", "Current user")}</option>
                     {activeWorkflowAssignees.map((item) => (
                       <option key={item.user_id} value={item.user_id}>
                         {item.user_name} · {roleLbl(item.user_role, tr)}
@@ -3879,7 +4099,7 @@ export function PatientDetailPage() {
                   </select>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="patient-workflow-priority">Priority</Label>
+                  <Label htmlFor="patient-workflow-priority">{l("Priorität", "Приоритет", "Priority")}</Label>
                   <select
                     id="patient-workflow-priority"
                     className={selectClassName}
@@ -3893,13 +4113,13 @@ export function PatientDetailPage() {
                   >
                     {["low", "normal", "high", "urgent"].map((priority) => (
                       <option key={priority} value={priority}>
-                        {priority}
+                        {priorityLabel(priority)}
                       </option>
                     ))}
                   </select>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="patient-workflow-due">Due at</Label>
+                  <Label htmlFor="patient-workflow-due">{l("Fällig am", "Срок до", "Due at")}</Label>
                   <Input
                     id="patient-workflow-due"
                     type="datetime-local"
@@ -3923,7 +4143,7 @@ export function PatientDetailPage() {
                   {workflowBusy ? (
                     <LoaderCircle className="mr-2 size-4 animate-spin" />
                   ) : null}
-                  Add workflow item
+                  {l("Workflow-Element hinzufügen", "Добавить элемент workflow", "Add workflow item")}
                 </Button>
               </div>
             </form>
@@ -3934,29 +4154,29 @@ export function PatientDetailPage() {
           {tabLoading ? (
             <div className="flex items-center justify-center py-16"><LoaderCircle className="size-5 animate-spin text-slate-400" /></div>
           ) : timeline.length === 0 ? (
-            <div className={card("p-8 text-center")}><p className="text-sm text-slate-500">No timeline events yet.</p></div>
+            <div className={card("p-8 text-center")}><p className="text-sm text-slate-500">{l("Noch keine Zeitachsen-Ereignisse.", "Событий таймлайна пока нет.", "No timeline events yet.")}</p></div>
           ) : (
             <div className="space-y-4">
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                 <div className={card("p-4")}>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Total events</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">{l("Ereignisse gesamt", "Всего событий", "Total events")}</p>
                   <p className="mt-3 text-2xl font-semibold text-slate-950">{timelineSummary.total}</p>
-                  <p className="mt-1 text-xs text-slate-500">All recorded patient workflow touchpoints.</p>
+                  <p className="mt-1 text-xs text-slate-500">{l("Alle erfassten Touchpoints im Patienten-Workflow.", "Все зафиксированные точки касания в workflow пациента.", "All recorded patient workflow touchpoints.")}</p>
                 </div>
                 <div className={card("p-4")}>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Open items</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">{l("Offene Punkte", "Открытые пункты", "Open items")}</p>
                   <p className="mt-3 text-2xl font-semibold text-slate-950">{timelineSummary.open}</p>
-                  <p className="mt-1 text-xs text-slate-500">Events that still require operational follow-through.</p>
+                  <p className="mt-1 text-xs text-slate-500">{l("Ereignisse, die noch operative Nachverfolgung erfordern.", "События, которые всё ещё требуют операционного follow-up.", "Events that still require operational follow-through.")}</p>
                 </div>
                 <div className={card("p-4")}>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Last 30 days</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">{l("Letzte 30 Tage", "Последние 30 дней", "Last 30 days")}</p>
                   <p className="mt-3 text-2xl font-semibold text-slate-950">{timelineSummary.recent}</p>
-                  <p className="mt-1 text-xs text-slate-500">Recent movement across care, billing and documents.</p>
+                  <p className="mt-1 text-xs text-slate-500">{l("Aktuelle Bewegung über Behandlung, Billing und Dokumente.", "Недавняя активность по лечению, billing и документам.", "Recent movement across care, billing and documents.")}</p>
                 </div>
                 <div className={card("p-4")}>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Domains active</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">{l("Aktive Bereiche", "Активные домены", "Domains active")}</p>
                   <p className="mt-3 text-2xl font-semibold text-slate-950">{timelineSummary.entityCounts.length}</p>
-                  <p className="mt-1 text-xs text-slate-500">Unique workstreams already touching this patient.</p>
+                  <p className="mt-1 text-xs text-slate-500">{l("Eindeutige Workstreams, die diesen Patienten bereits berühren.", "Уникальные потоки работы, которые уже затрагивают этого пациента.", "Unique workstreams already touching this patient.")}</p>
                 </div>
               </div>
 
@@ -3973,7 +4193,7 @@ export function PatientDetailPage() {
                     )}
                     onClick={() => setTimelineEntityFilter("all")}
                   >
-                    All · {timelineTotal}
+                    {l("Alle", "Все", "All")} · {timelineTotal}
                   </Button>
                   {timelineSummary.entityCounts.map((entry) => (
                     <Button
@@ -3998,7 +4218,7 @@ export function PatientDetailPage() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {TIMELINE_RANGE_OPTIONS.map((option) => (
+                      {localizedTimelineRangeOptions.map((option) => (
                         <SelectItem key={option.value} value={option.value}>
                           {option.label}
                         </SelectItem>
@@ -4010,7 +4230,7 @@ export function PatientDetailPage() {
                       <SelectValue placeholder={t.providers_all} />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All categories</SelectItem>
+                      <SelectItem value="all">{l("Alle Kategorien", "Все категории", "All categories")}</SelectItem>
                       {timelineCategoryOptions.map((category) => (
                         <SelectItem key={category} value={category}>
                           {category}
@@ -4023,7 +4243,7 @@ export function PatientDetailPage() {
                       <SelectValue placeholder={t.providers_all} />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All sources</SelectItem>
+                      <SelectItem value="all">{l("Alle Quellen", "Все источники", "All sources")}</SelectItem>
                       {timelineSourceOptions.map((source) => (
                         <SelectItem key={source} value={source}>
                           {source}
@@ -4051,7 +4271,7 @@ export function PatientDetailPage() {
                         setTimelineOffset(0);
                       }}
                     >
-                      Reset filters
+                      {l("Filter zurücksetzen", "Сбросить фильтры", "Reset filters")}
                     </Button>
                   ) : null}
                 </div>
@@ -4059,17 +4279,17 @@ export function PatientDetailPage() {
 
               {filteredTimeline.length === 0 ? (
                 <div className={card("p-8 text-center")}>
-                  <p className="text-sm text-slate-500">No timeline events match the current filters.</p>
+                  <p className="text-sm text-slate-500">{l("Keine Zeitachsen-Ereignisse entsprechen den aktuellen Filtern.", "Текущим фильтрам не соответствует ни одно событие таймлайна.", "No timeline events match the current filters.")}</p>
                 </div>
               ) : (
                 <div className="space-y-3">
               <div className={card("flex items-center justify-between gap-3 p-4")}>
                 <p className="text-sm text-slate-500">
-                  Showing {timelineTotal === 0 ? 0 : timelineOffset + 1}-
+                  {l("Angezeigt", "Показаны", "Showing")} {timelineTotal === 0 ? 0 : timelineOffset + 1}-
                   {timelineTotal === 0
                     ? 0
                     : Math.min(timelineOffset + timeline.length, timelineTotal)}{" "}
-                  of {timelineTotal}
+                  {l("von", "из", "of")} {timelineTotal}
                 </p>
                 <div className="flex items-center gap-2">
                   <Button
@@ -4079,7 +4299,7 @@ export function PatientDetailPage() {
                     disabled={timelineOffset === 0}
                     onClick={() => setTimelineOffset((current) => Math.max(0, current - timelineLimit))}
                   >
-                    Previous
+                    {l("Zurück", "Назад", "Previous")}
                   </Button>
                   <Button
                     type="button"
@@ -4088,7 +4308,7 @@ export function PatientDetailPage() {
                     disabled={!timelineHasNextPage}
                     onClick={() => setTimelineOffset((current) => current + timelineLimit)}
                   >
-                    Next
+                    {l("Weiter", "Далее", "Next")}
                   </Button>
                 </div>
               </div>
@@ -4119,7 +4339,7 @@ export function PatientDetailPage() {
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2">
                       <Badge variant="outline" className="rounded-full text-[10px]">{item.entity_type}</Badge>
-                      <Badge variant="outline" className={cn("rounded-full text-[10px]", STATUS_COLORS[item.status] ?? "")}>{item.status}</Badge>
+                      <Badge variant="outline" className={cn("rounded-full text-[10px]", STATUS_COLORS[item.status] ?? "")}>{patientDetailStatusLabel(item.status)}</Badge>
                     </div>
                     <p className="text-xs text-slate-400">{fmtDateTime(item.happened_at)}</p>
                   </div>
@@ -4141,98 +4361,102 @@ export function PatientDetailPage() {
       <Dialog open={profileEditorOpen} onOpenChange={setProfileEditorOpen}>
         <DialogContent className="sm:max-w-4xl">
           <DialogHeader>
-            <DialogTitle>Edit patient profile</DialogTitle>
+            <DialogTitle>{l("Patientenprofil bearbeiten", "Редактировать профиль пациента", "Edit patient profile")}</DialogTitle>
             <DialogDescription>
-              Update operational contact data, insurance context, legal compliance and emergency chain without leaving the patient card.
+              {l(
+                "Aktualisieren Sie Kontaktdaten, Versicherungskontext, rechtliche Compliance und Notfallkette, ohne die Patientenkarte zu verlassen.",
+                "Обновляйте контактные данные, страховой контекст, legal compliance и экстренную цепочку, не покидая карточку пациента.",
+                "Update operational contact data, insurance context, legal compliance and emergency chain without leaving the patient card.",
+              )}
             </DialogDescription>
           </DialogHeader>
           {profileEditForm ? (
             <form className="space-y-5" onSubmit={handleSavePatientProfile}>
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                 <div className="space-y-2">
-                  <Label htmlFor="patient-title-edit">Title</Label>
+                  <Label htmlFor="patient-title-edit">{l("Titel", "Титул", "Title")}</Label>
                   <Input id="patient-title-edit" value={profileEditForm.title} onChange={(event) => setProfileEditForm((current) => current ? { ...current, title: event.target.value } : current)} />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="patient-first-name-edit">First name</Label>
+                  <Label htmlFor="patient-first-name-edit">{l("Vorname", "Имя", "First name")}</Label>
                   <Input id="patient-first-name-edit" value={profileEditForm.firstName} onChange={(event) => setProfileEditForm((current) => current ? { ...current, firstName: event.target.value } : current)} required />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="patient-last-name-edit">Last name</Label>
+                  <Label htmlFor="patient-last-name-edit">{l("Nachname", "Фамилия", "Last name")}</Label>
                   <Input id="patient-last-name-edit" value={profileEditForm.lastName} onChange={(event) => setProfileEditForm((current) => current ? { ...current, lastName: event.target.value } : current)} required />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="patient-phone-primary-edit">Primary phone</Label>
+                  <Label htmlFor="patient-phone-primary-edit">{l("Primäre Telefonnummer", "Основной телефон", "Primary phone")}</Label>
                   <Input id="patient-phone-primary-edit" value={profileEditForm.phonePrimary} onChange={(event) => setProfileEditForm((current) => current ? { ...current, phonePrimary: event.target.value } : current)} />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="patient-phone-secondary-edit">Secondary phone</Label>
+                  <Label htmlFor="patient-phone-secondary-edit">{l("Sekundäre Telefonnummer", "Дополнительный телефон", "Secondary phone")}</Label>
                   <Input id="patient-phone-secondary-edit" value={profileEditForm.phoneSecondary} onChange={(event) => setProfileEditForm((current) => current ? { ...current, phoneSecondary: event.target.value } : current)} />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="patient-email-edit">Email</Label>
+                  <Label htmlFor="patient-email-edit">{l("E-Mail", "Эл. почта", "Email")}</Label>
                   <Input id="patient-email-edit" value={profileEditForm.email} onChange={(event) => setProfileEditForm((current) => current ? { ...current, email: event.target.value } : current)} />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="patient-languages-edit">Languages</Label>
+                  <Label htmlFor="patient-languages-edit">{l("Sprachen", "Языки", "Languages")}</Label>
                   <Input id="patient-languages-edit" value={profileEditForm.languages} onChange={(event) => setProfileEditForm((current) => current ? { ...current, languages: event.target.value } : current)} placeholder="de, uk, en" />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="patient-functional-labels-edit">Functional labels</Label>
+                  <Label htmlFor="patient-functional-labels-edit">{l("Funktionale Labels", "Функциональные метки", "Functional labels")}</Label>
                   <Input id="patient-functional-labels-edit" value={profileEditForm.functionalLabels} onChange={(event) => setProfileEditForm((current) => current ? { ...current, functionalLabels: event.target.value } : current)} placeholder="vip, high_risk" />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="patient-nationality-edit">Nationality</Label>
+                  <Label htmlFor="patient-nationality-edit">{l("Nationalität", "Гражданство", "Nationality")}</Label>
                   <Input id="patient-nationality-edit" value={profileEditForm.nationality} onChange={(event) => setProfileEditForm((current) => current ? { ...current, nationality: event.target.value } : current)} />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="patient-residence-edit">Residence country</Label>
+                  <Label htmlFor="patient-residence-edit">{l("Wohnsitzland", "Страна проживания", "Residence country")}</Label>
                   <Input id="patient-residence-edit" value={profileEditForm.residenceCountry} onChange={(event) => setProfileEditForm((current) => current ? { ...current, residenceCountry: event.target.value } : current)} />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="patient-address-street-edit">Street</Label>
+                  <Label htmlFor="patient-address-street-edit">{l("Straße", "Улица", "Street")}</Label>
                   <Input id="patient-address-street-edit" value={profileEditForm.addressStreet} onChange={(event) => setProfileEditForm((current) => current ? { ...current, addressStreet: event.target.value } : current)} />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="patient-address-city-edit">City</Label>
+                  <Label htmlFor="patient-address-city-edit">{l("Stadt", "Город", "City")}</Label>
                   <Input id="patient-address-city-edit" value={profileEditForm.addressCity} onChange={(event) => setProfileEditForm((current) => current ? { ...current, addressCity: event.target.value } : current)} />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="patient-address-zip-edit">ZIP</Label>
+                  <Label htmlFor="patient-address-zip-edit">{l("PLZ", "Индекс", "ZIP")}</Label>
                   <Input id="patient-address-zip-edit" value={profileEditForm.addressZip} onChange={(event) => setProfileEditForm((current) => current ? { ...current, addressZip: event.target.value } : current)} />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="patient-address-country-edit">Address country</Label>
+                  <Label htmlFor="patient-address-country-edit">{l("Adressland", "Страна адреса", "Address country")}</Label>
                   <Input id="patient-address-country-edit" value={profileEditForm.addressCountry} onChange={(event) => setProfileEditForm((current) => current ? { ...current, addressCountry: event.target.value } : current)} />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="patient-insurance-provider-edit">Insurance provider</Label>
+                  <Label htmlFor="patient-insurance-provider-edit">{l("Versicherer", "Страховая компания", "Insurance provider")}</Label>
                   <Input id="patient-insurance-provider-edit" value={profileEditForm.insuranceProvider} onChange={(event) => setProfileEditForm((current) => current ? { ...current, insuranceProvider: event.target.value } : current)} />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="patient-insurance-number-edit">Insurance number</Label>
+                  <Label htmlFor="patient-insurance-number-edit">{l("Versicherungsnummer", "Номер страховки", "Insurance number")}</Label>
                   <Input id="patient-insurance-number-edit" value={profileEditForm.insuranceNumber} onChange={(event) => setProfileEditForm((current) => current ? { ...current, insuranceNumber: event.target.value } : current)} />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="patient-insurance-type-edit">Insurance type</Label>
+                  <Label htmlFor="patient-insurance-type-edit">{l("Versicherungstyp", "Тип страховки", "Insurance type")}</Label>
                   <select id="patient-insurance-type-edit" className={selectClassName} value={profileEditForm.insuranceType} onChange={(event) => setProfileEditForm((current) => current ? { ...current, insuranceType: event.target.value } : current)}>
-                    <option value="">Not set</option>
-                    <option value="private">private</option>
-                    <option value="public">public</option>
-                    <option value="self_pay">self_pay</option>
-                    <option value="foreign">foreign</option>
+                    <option value="">{t.common_not_set}</option>
+                    <option value="private">{l("Privat", "Частная", "Private")}</option>
+                    <option value="public">{l("Gesetzlich", "Государственная", "Public")}</option>
+                    <option value="self_pay">{l("Selbstzahler", "Самооплата", "Self pay")}</option>
+                    <option value="foreign">{l("Ausland", "Иностранная", "Foreign")}</option>
                   </select>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="patient-emergency-name-edit">Emergency contact</Label>
+                  <Label htmlFor="patient-emergency-name-edit">{l("Notfallkontakt", "Контакт для экстренной связи", "Emergency contact")}</Label>
                   <Input id="patient-emergency-name-edit" value={profileEditForm.emergencyContactName} onChange={(event) => setProfileEditForm((current) => current ? { ...current, emergencyContactName: event.target.value } : current)} />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="patient-emergency-phone-edit">Emergency phone</Label>
+                  <Label htmlFor="patient-emergency-phone-edit">{l("Notfalltelefon", "Экстренный телефон", "Emergency phone")}</Label>
                   <Input id="patient-emergency-phone-edit" value={profileEditForm.emergencyContactPhone} onChange={(event) => setProfileEditForm((current) => current ? { ...current, emergencyContactPhone: event.target.value } : current)} />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="patient-emergency-relation-edit">Emergency relation</Label>
+                  <Label htmlFor="patient-emergency-relation-edit">{l("Beziehung", "Связь", "Emergency relation")}</Label>
                   <Input id="patient-emergency-relation-edit" value={profileEditForm.emergencyContactRelation} onChange={(event) => setProfileEditForm((current) => current ? { ...current, emergencyContactRelation: event.target.value } : current)} />
                 </div>
               </div>
@@ -4241,7 +4465,11 @@ export function PatientDetailPage() {
                   <div>
                     <h3 className="text-sm font-semibold text-slate-950">{t.patients_legal_status}</h3>
                     <p className="mt-1 text-sm text-slate-500">
-                      Capture the DSGVO, contract and document-readiness state directly on the patient record.
+                      {l(
+                        "Erfassen Sie den DSGVO-, Vertrags- und Dokumentenstatus direkt am Patientenstammsatz.",
+                        "Фиксируйте статус DSGVO, договора и готовности документов прямо в карточке пациента.",
+                        "Capture the DSGVO, contract and document-readiness state directly on the patient record.",
+                      )}
                     </p>
                   </div>
                   <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
@@ -4267,7 +4495,7 @@ export function PatientDetailPage() {
                         )
                       }
                     />
-                    DSGVO signed
+                    {l("DSGVO unterschrieben", "DSGVO подписано", "DSGVO signed")}
                   </label>
                   <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700">
                     <input
@@ -4287,7 +4515,7 @@ export function PatientDetailPage() {
                         )
                       }
                     />
-                    Schweigepflicht released
+                    {l("Schweigepflicht freigegeben", "Разрешение на снятие врачебной тайны", "Schweigepflicht released")}
                   </label>
                   <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700">
                     <input
@@ -4307,7 +4535,7 @@ export function PatientDetailPage() {
                         )
                       }
                     />
-                    Identity verified
+                    {l("Identität bestätigt", "Личность подтверждена", "Identity verified")}
                   </label>
                   <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700">
                     <input
@@ -4327,7 +4555,7 @@ export function PatientDetailPage() {
                         )
                       }
                     />
-                    Document pack complete
+                    {l("Dokumentenpaket vollständig", "Пакет документов собран", "Document pack complete")}
                   </label>
                   <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700">
                     <input
@@ -4347,10 +4575,10 @@ export function PatientDetailPage() {
                         )
                       }
                     />
-                    Compliance completed
+                    {l("Compliance abgeschlossen", "Compliance завершён", "Compliance completed")}
                   </label>
                   <div className="space-y-2">
-                    <Label htmlFor="patient-contract-status-edit">Contract status</Label>
+                    <Label htmlFor="patient-contract-status-edit">{l("Vertragsstatus", "Статус договора", "Contract status")}</Label>
                     <select
                       id="patient-contract-status-edit"
                       className={selectClassName}
@@ -4371,14 +4599,14 @@ export function PatientDetailPage() {
                     >
                       {PATIENT_CONTRACT_STATUS_OPTIONS.map((status) => (
                         <option key={status} value={status}>
-                          {status.replaceAll("_", " ")}
+                          {patientDetailStatusLabel(status)}
                         </option>
                       ))}
                     </select>
                   </div>
                 </div>
                 <div className="mt-4 space-y-2">
-                  <Label htmlFor="patient-legal-notes-edit">Compliance notes</Label>
+                  <Label htmlFor="patient-legal-notes-edit">{l("Compliance-Notizen", "Заметки по compliance", "Compliance notes")}</Label>
                   <textarea
                     id="patient-legal-notes-edit"
                     className={textareaClassName}
@@ -4396,12 +4624,16 @@ export function PatientDetailPage() {
                           : current
                       )
                     }
-                    placeholder="Pending signatures, missing IDs, open compliance questions"
+                    placeholder={l(
+                      "Ausstehende Unterschriften, fehlende IDs, offene Compliance-Fragen",
+                      "Ожидающие подписи, отсутствующие ID, открытые вопросы compliance",
+                      "Pending signatures, missing IDs, open compliance questions",
+                    )}
                   />
                 </div>
               </div>
                 <div className="space-y-2">
-                  <Label htmlFor="patient-clinical-warnings-edit">Cave notes</Label>
+                  <Label htmlFor="patient-clinical-warnings-edit">{l("CAVE-Hinweise", "Заметки CAVE", "Cave notes")}</Label>
                   <textarea
                     id="patient-clinical-warnings-edit"
                     className={textareaClassName}
@@ -4413,20 +4645,24 @@ export function PatientDetailPage() {
                           : current
                       )
                     }
-                    placeholder="Persistent clinical warnings or safety alerts"
+                    placeholder={l(
+                      "Dauerhafte klinische Warnhinweise oder Sicherheitshinweise",
+                      "Постоянные клинические предупреждения или сигналы безопасности",
+                      "Persistent clinical warnings or safety alerts",
+                    )}
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="patient-notes-edit">Notes</Label>
+                  <Label htmlFor="patient-notes-edit">{l("Notizen", "Заметки", "Notes")}</Label>
                   <textarea id="patient-notes-edit" className={textareaClassName} value={profileEditForm.notes} onChange={(event) => setProfileEditForm((current) => current ? { ...current, notes: event.target.value } : current)} />
                 </div>
               <DialogFooter>
                 <Button type="button" variant="outline" className="rounded-xl" onClick={() => setProfileEditorOpen(false)}>
-                  Cancel
+                  {l("Abbrechen", "Отмена", "Cancel")}
                 </Button>
                 <Button type="submit" className="rounded-xl bg-slate-950 text-white hover:bg-slate-800" disabled={profileEditorBusy}>
                   {profileEditorBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
-                  Save patient
+                  {l("Patient speichern", "Сохранить пациента", "Save patient")}
                 </Button>
               </DialogFooter>
             </form>
@@ -4437,25 +4673,29 @@ export function PatientDetailPage() {
       <Dialog open={relationEditorOpen} onOpenChange={setRelationEditorOpen}>
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>{editingRelation ? "Edit relation" : "Add relation"}</DialogTitle>
+            <DialogTitle>{editingRelation ? l("Beziehung bearbeiten", "Редактировать связь", "Edit relation") : l("Beziehung hinzufügen", "Добавить связь", "Add relation")}</DialogTitle>
             <DialogDescription>
-              Keep relatives, caregivers and emergency contacts directly on the patient profile.
+              {l(
+                "Hinterlegen Sie Angehörige, Betreuungspersonen und Notfallkontakte direkt im Patientenprofil.",
+                "Храните родственников, опекунов и экстренные контакты прямо в профиле пациента.",
+                "Keep relatives, caregivers and emergency contacts directly on the patient profile.",
+              )}
             </DialogDescription>
           </DialogHeader>
           <form className="space-y-4" onSubmit={handleSaveRelation}>
             <div className={card("p-4")}>
               <div className="grid gap-4 md:grid-cols-[1.2fr_1.8fr]">
                 <div className="space-y-2">
-                  <Label htmlFor="relation-patient-search">Search existing patient</Label>
+                  <Label htmlFor="relation-patient-search">{l("Bestehenden Patienten suchen", "Поиск существующего пациента", "Search existing patient")}</Label>
                   <Input
                     id="relation-patient-search"
                     value={relationPatientSearch}
                     onChange={(event) => setRelationPatientSearch(event.target.value)}
-                    placeholder="PID or patient name"
+                    placeholder={l("PID oder Patientenname", "PID или имя пациента", "PID or patient name")}
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="relation-linked-patient">Link patient in system</Label>
+                  <Label htmlFor="relation-linked-patient">{l("Patient im System verknüpfen", "Связать пациента в системе", "Link patient in system")}</Label>
                   <select
                     id="relation-linked-patient"
                     className={selectClassName}
@@ -4540,22 +4780,26 @@ export function PatientDetailPage() {
                     }))
                   }
                 />
-                Emergency contact
+                {l("Notfallkontakt", "Экстренный контакт", "Emergency contact")}
               </label>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="relation-notes">Notes</Label>
+              <Label htmlFor="relation-notes">{l("Notizen", "Заметки", "Notes")}</Label>
               <textarea
                 id="relation-notes"
                 className={textareaClassName}
                 value={relationForm.notes}
                 onChange={(event) => setRelationForm((current) => ({ ...current, notes: event.target.value }))}
-                placeholder="Availability, contact notes or special instructions"
+                placeholder={l(
+                  "Erreichbarkeit, Kontakthinweise oder besondere Anweisungen",
+                  "Доступность, заметки по контакту или особые инструкции",
+                  "Availability, contact notes or special instructions",
+                )}
               />
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" className="rounded-xl" onClick={() => setRelationEditorOpen(false)}>
-                Cancel
+                {l("Abbrechen", "Отмена", "Cancel")}
               </Button>
               <Button type="submit" className="rounded-xl bg-slate-950 text-white hover:bg-slate-800" disabled={relationBusy}>
                 {relationBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
@@ -4569,28 +4813,32 @@ export function PatientDetailPage() {
       <Dialog open={documentUploadOpen} onOpenChange={setDocumentUploadOpen}>
         <DialogContent className="sm:max-w-3xl">
           <DialogHeader>
-            <DialogTitle>Upload patient document</DialogTitle>
+            <DialogTitle>{l("Patientendokument hochladen", "Загрузить документ пациента", "Upload patient document")}</DialogTitle>
             <DialogDescription>
-              Files uploaded here are linked directly to this patient and can also be attached to an order or appointment.
+              {l(
+                "Hier hochgeladene Dateien werden direkt mit diesem Patienten verknüpft und können auch einem Auftrag oder Termin zugeordnet werden.",
+                "Загруженные здесь файлы привязываются напрямую к пациенту и также могут быть связаны с заказом или приёмом.",
+                "Files uploaded here are linked directly to this patient and can also be attached to an order or appointment.",
+              )}
             </DialogDescription>
           </DialogHeader>
           <form className="space-y-4" onSubmit={handleUploadDocument}>
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="document-file">File</Label>
+                <Label htmlFor="document-file">{l("Datei", "Файл", "File")}</Label>
                 <Input id="document-file" type="file" onChange={handleDocumentFileChange} />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="document-name">Display name</Label>
+                <Label htmlFor="document-name">{l("Anzeigename", "Отображаемое имя", "Display name")}</Label>
                 <Input
                   id="document-name"
                   value={documentUploadForm.autoName}
                   onChange={(event) => setDocumentUploadForm((current) => ({ ...current, autoName: event.target.value }))}
-                  placeholder="Optional patient-facing name"
+                  placeholder={l("Optionaler sichtbarer Name für den Patienten", "Необязательное имя для отображения пациенту", "Optional patient-facing name")}
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="document-art">Type</Label>
+                <Label htmlFor="document-art">{l("Typ", "Тип", "Type")}</Label>
                 <Input
                   id="document-art"
                   value={documentUploadForm.art}
@@ -4599,7 +4847,7 @@ export function PatientDetailPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="document-category">Category</Label>
+                <Label htmlFor="document-category">{l("Kategorie", "Категория", "Category")}</Label>
                 <Input
                   id="document-category"
                   value={documentUploadForm.category}
@@ -4608,7 +4856,7 @@ export function PatientDetailPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="document-status">Status</Label>
+                <Label htmlFor="document-status">{l("Status", "Статус", "Status")}</Label>
                 <select
                   id="document-status"
                   className={selectClassName}
@@ -4622,13 +4870,13 @@ export function PatientDetailPage() {
                 >
                   {DOCUMENT_STATUS_OPTIONS.map((status) => (
                     <option key={status} value={status}>
-                      {status}
+                      {patientDetailStatusLabel(status)}
                     </option>
                   ))}
                 </select>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="document-visibility">Visibility</Label>
+                <Label htmlFor="document-visibility">{l("Sichtbarkeit", "Видимость", "Visibility")}</Label>
                 <select
                   id="document-visibility"
                   className={selectClassName}
@@ -4642,20 +4890,26 @@ export function PatientDetailPage() {
                 >
                   {DOCUMENT_VISIBILITY_OPTIONS.map((visibility) => (
                     <option key={visibility} value={visibility}>
-                      {visibility}
+                      {visibility === "internal"
+                        ? l("Intern", "Внутреннее", "Internal")
+                        : visibility === "released_internal"
+                          ? l("Intern freigegeben", "Внутренне опубликовано", "Released internal")
+                          : visibility === "released_external"
+                            ? l("Extern freigegeben", "Внешне опубликовано", "Released external")
+                            : l("Für Patienten sichtbar", "Видно пациенту", "Patient visible")}
                     </option>
                   ))}
                 </select>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="document-order">Order</Label>
+                <Label htmlFor="document-order">{l("Auftrag", "Заказ", "Order")}</Label>
                 <select
                   id="document-order"
                   className={selectClassName}
                   value={documentUploadForm.orderId}
                   onChange={(event) => setDocumentUploadForm((current) => ({ ...current, orderId: event.target.value }))}
                 >
-                  <option value="">No order link</option>
+                  <option value="">{l("Keine Auftragsverknüpfung", "Без привязки к заказу", "No order link")}</option>
                   {orders.map((order) => (
                     <option key={order.id} value={order.id}>
                       {order.order_number}
@@ -4664,7 +4918,7 @@ export function PatientDetailPage() {
                 </select>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="document-appointment">Appointment</Label>
+                <Label htmlFor="document-appointment">{l("Termin", "Приём", "Appointment")}</Label>
                 <select
                   id="document-appointment"
                   className={selectClassName}
@@ -4676,7 +4930,7 @@ export function PatientDetailPage() {
                     }))
                   }
                 >
-                  <option value="">No appointment link</option>
+                  <option value="">{l("Keine Terminverknüpfung", "Без привязки к приёму", "No appointment link")}</option>
                   {appointments.map((appointment) => (
                     <option key={appointment.id} value={appointment.id}>
                       {appointment.title} · {fmtDate(appointment.date)}
@@ -4695,26 +4949,26 @@ export function PatientDetailPage() {
                     }))
                   }
                 />
-                Medical document
+                {l("Medizinisches Dokument", "Медицинский документ", "Medical document")}
               </label>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="document-notes">Notes</Label>
+              <Label htmlFor="document-notes">{l("Notizen", "Заметки", "Notes")}</Label>
               <textarea
                 id="document-notes"
                 className={textareaClassName}
                 value={documentUploadForm.notes}
                 onChange={(event) => setDocumentUploadForm((current) => ({ ...current, notes: event.target.value }))}
-                placeholder="Optional processing or visibility notes"
+                placeholder={l("Optionale Verarbeitungs- oder Sichtbarkeitsnotizen", "Необязательные заметки по обработке или видимости", "Optional processing or visibility notes")}
               />
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" className="rounded-xl" onClick={() => setDocumentUploadOpen(false)}>
-                Cancel
+                {l("Abbrechen", "Отмена", "Cancel")}
               </Button>
               <Button type="submit" className="rounded-xl bg-slate-950 text-white hover:bg-slate-800" disabled={documentUploadBusy}>
                 {documentUploadBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
-                Upload document
+                {l("Dokument hochladen", "Загрузить документ", "Upload document")}
               </Button>
             </DialogFooter>
           </form>
@@ -4724,15 +4978,19 @@ export function PatientDetailPage() {
       <Dialog open={contractCreateOpen} onOpenChange={setContractCreateOpen}>
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Create framework contract</DialogTitle>
+            <DialogTitle>{l("Rahmenvertrag erstellen", "Создать рамочный договор", "Create framework contract")}</DialogTitle>
             <DialogDescription>
-              Start a patient-bound contract directly from the profile without leaving the patient loop.
+              {l(
+                "Starten Sie einen patientengebundenen Vertrag direkt aus dem Profil, ohne den Patientenkontext zu verlassen.",
+                "Создайте договор, привязанный к пациенту, прямо из профиля, не выходя из контура пациента.",
+                "Start a patient-bound contract directly from the profile without leaving the patient loop.",
+              )}
             </DialogDescription>
           </DialogHeader>
           <form className="space-y-4" onSubmit={handleCreateContract}>
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="contract-status">Status</Label>
+                <Label htmlFor="contract-status">{l("Status", "Статус", "Status")}</Label>
                 <select
                   id="contract-status"
                   className={selectClassName}
@@ -4746,13 +5004,13 @@ export function PatientDetailPage() {
                 >
                   {CONTRACT_STATUS_OPTIONS.map((status) => (
                     <option key={status} value={status}>
-                      {status}
+                      {patientDetailStatusLabel(status)}
                     </option>
                   ))}
                 </select>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="contract-signed-at">Signed at</Label>
+                <Label htmlFor="contract-signed-at">{l("Unterzeichnet am", "Подписано", "Signed at")}</Label>
                 <Input
                   id="contract-signed-at"
                   type="datetime-local"
@@ -4761,7 +5019,7 @@ export function PatientDetailPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="contract-valid-from">Valid from</Label>
+                <Label htmlFor="contract-valid-from">{l("Gültig ab", "Действует с", "Valid from")}</Label>
                 <Input
                   id="contract-valid-from"
                   type="date"
@@ -4770,7 +5028,7 @@ export function PatientDetailPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="contract-valid-to">Valid to</Label>
+                <Label htmlFor="contract-valid-to">{l("Gültig bis", "Действует до", "Valid to")}</Label>
                 <Input
                   id="contract-valid-to"
                   type="date"
@@ -4781,11 +5039,11 @@ export function PatientDetailPage() {
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" className="rounded-xl" onClick={() => setContractCreateOpen(false)}>
-                Cancel
+                {l("Abbrechen", "Отмена", "Cancel")}
               </Button>
               <Button type="submit" className="rounded-xl bg-slate-950 text-white hover:bg-slate-800" disabled={contractBusy}>
                 {contractBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
-                Create contract
+                {l("Vertrag erstellen", "Создать договор", "Create contract")}
               </Button>
             </DialogFooter>
           </form>
@@ -4795,15 +5053,19 @@ export function PatientDetailPage() {
       <Dialog open={Boolean(contractStatusId)} onOpenChange={(open) => { if (!open) setContractStatusId(""); }}>
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Update contract status</DialogTitle>
+            <DialogTitle>{l("Vertragsstatus aktualisieren", "Обновить статус договора", "Update contract status")}</DialogTitle>
             <DialogDescription>
-              Adjust lifecycle and validity dates without leaving the patient profile.
+              {l(
+                "Passen Sie Lebenszyklus und Gültigkeitsdaten an, ohne das Patientenprofil zu verlassen.",
+                "Обновляйте жизненный цикл и даты действия, не выходя из профиля пациента.",
+                "Adjust lifecycle and validity dates without leaving the patient profile.",
+              )}
             </DialogDescription>
           </DialogHeader>
           <form className="space-y-4" onSubmit={handleSaveContractStatus}>
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="contract-status-edit">Status</Label>
+                <Label htmlFor="contract-status-edit">{l("Status", "Статус", "Status")}</Label>
                 <select
                   id="contract-status-edit"
                   className={selectClassName}
@@ -4817,13 +5079,13 @@ export function PatientDetailPage() {
                 >
                   {CONTRACT_STATUS_OPTIONS.map((status) => (
                     <option key={status} value={status}>
-                      {status}
+                      {patientDetailStatusLabel(status)}
                     </option>
                   ))}
                 </select>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="contract-signed-at-edit">Signed at</Label>
+                <Label htmlFor="contract-signed-at-edit">{l("Unterzeichnet am", "Подписано", "Signed at")}</Label>
                 <Input
                   id="contract-signed-at-edit"
                   type="datetime-local"
@@ -4832,7 +5094,7 @@ export function PatientDetailPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="contract-valid-from-edit">Valid from</Label>
+                <Label htmlFor="contract-valid-from-edit">{l("Gültig ab", "Действует с", "Valid from")}</Label>
                 <Input
                   id="contract-valid-from-edit"
                   type="date"
@@ -4841,7 +5103,7 @@ export function PatientDetailPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="contract-valid-to-edit">Valid to</Label>
+                <Label htmlFor="contract-valid-to-edit">{l("Gültig bis", "Действует до", "Valid to")}</Label>
                 <Input
                   id="contract-valid-to-edit"
                   type="date"
@@ -4852,11 +5114,11 @@ export function PatientDetailPage() {
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" className="rounded-xl" onClick={() => setContractStatusId("")}>
-                Cancel
+                {l("Abbrechen", "Отмена", "Cancel")}
               </Button>
               <Button type="submit" className="rounded-xl bg-slate-950 text-white hover:bg-slate-800" disabled={contractBusy}>
                 {contractBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
-                Save status
+                {l("Status speichern", "Сохранить статус", "Save status")}
               </Button>
             </DialogFooter>
           </form>
@@ -4866,16 +5128,20 @@ export function PatientDetailPage() {
       <Dialog open={Boolean(invoiceManageId)} onOpenChange={(open) => { if (!open) setInvoiceManageId(""); }}>
         <DialogContent className="sm:max-w-3xl">
           <DialogHeader>
-            <DialogTitle>Manage invoice</DialogTitle>
+            <DialogTitle>{l("Rechnung verwalten", "Управлять счётом", "Manage invoice")}</DialogTitle>
             <DialogDescription>
-              Update billing status and continue dunning flow directly from the patient profile.
+              {l(
+                "Aktualisieren Sie den Billing-Status und setzen Sie den Mahnprozess direkt aus dem Patientenprofil fort.",
+                "Обновляйте статус billing и продолжайте процесс напоминаний прямо из профиля пациента.",
+                "Update billing status and continue dunning flow directly from the patient profile.",
+              )}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-5">
             <form className="space-y-4" onSubmit={handleSaveInvoiceStatus}>
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
-                  <Label htmlFor="invoice-status-edit">Status</Label>
+                  <Label htmlFor="invoice-status-edit">{l("Status", "Статус", "Status")}</Label>
                   <select
                     id="invoice-status-edit"
                     className={selectClassName}
@@ -4889,13 +5155,13 @@ export function PatientDetailPage() {
                   >
                     {INVOICE_STATUS_OPTIONS.map((status) => (
                       <option key={status} value={status}>
-                        {status}
+                        {patientDetailStatusLabel(status)}
                       </option>
                     ))}
                   </select>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="invoice-due-date-edit">Due date</Label>
+                  <Label htmlFor="invoice-due-date-edit">{l("Fälligkeitsdatum", "Срок", "Due date")}</Label>
                   <Input
                     id="invoice-due-date-edit"
                     type="date"
@@ -4904,7 +5170,7 @@ export function PatientDetailPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="invoice-paid-amount-edit">Paid amount</Label>
+                  <Label htmlFor="invoice-paid-amount-edit">{l("Bezahlter Betrag", "Оплаченная сумма", "Paid amount")}</Label>
                   <Input
                     id="invoice-paid-amount-edit"
                     value={invoiceStatusForm.paidAmount}
@@ -4914,19 +5180,19 @@ export function PatientDetailPage() {
                 </div>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="invoice-notes-edit">Notes</Label>
+                <Label htmlFor="invoice-notes-edit">{l("Notizen", "Заметки", "Notes")}</Label>
                 <textarea
                   id="invoice-notes-edit"
                   className={textareaClassName}
                   value={invoiceStatusForm.notes}
                   onChange={(event) => setInvoiceStatusForm((current) => ({ ...current, notes: event.target.value }))}
-                  placeholder="Billing notes or payment confirmation details"
+                  placeholder={l("Billing-Notizen oder Details zur Zahlungsbestätigung", "Заметки по billing или детали подтверждения оплаты", "Billing notes or payment confirmation details")}
                 />
               </div>
               <div className="flex justify-end">
                 <Button type="submit" className="rounded-xl bg-slate-950 text-white hover:bg-slate-800" disabled={invoiceBusy}>
                   {invoiceBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
-                  Save invoice
+                  {l("Rechnung speichern", "Сохранить счёт", "Save invoice")}
                 </Button>
               </div>
             </form>
@@ -4935,28 +5201,28 @@ export function PatientDetailPage() {
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-semibold text-slate-950">Mahnwesen</p>
-                  <p className="mt-1 text-xs text-slate-500">Track sent reminders and escalate overdue invoices.</p>
+                  <p className="mt-1 text-xs text-slate-500">{l("Verfolgen Sie versendete Mahnungen und eskalieren Sie überfällige Rechnungen.", "Отслеживайте отправленные напоминания и эскалируйте просроченные счета.", "Track sent reminders and escalate overdue invoices.")}</p>
                 </div>
                 {canManageInvoices && nextDunningLevel(dunningEvents) ? (
                   <Button type="button" className="rounded-xl bg-slate-950 text-white hover:bg-slate-800" onClick={() => void handleCreateDunning()} disabled={dunningBusy}>
                     {dunningBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
-                    Send {nextDunningLevel(dunningEvents)}
+                    {l("Senden", "Отправить", "Send")} {nextDunningLevel(dunningEvents)}
                   </Button>
                 ) : null}
               </div>
               <div className="mt-4 space-y-2">
-                <Label htmlFor="dunning-note">Reminder note</Label>
+                <Label htmlFor="dunning-note">{l("Mahnhinweis", "Заметка по напоминанию", "Reminder note")}</Label>
                 <textarea
                   id="dunning-note"
                   className={textareaClassName}
                   value={dunningNote}
                   onChange={(event) => setDunningNote(event.target.value)}
-                  placeholder="Optional note for billing trail"
+                  placeholder={l("Optionale Notiz für den Billing-Verlauf", "Необязательная заметка для trail биллинга", "Optional note for billing trail")}
                 />
               </div>
               <div className="mt-4 space-y-3">
                 {dunningEvents.length === 0 ? (
-                  <p className="text-sm text-slate-500">No dunning events yet.</p>
+                  <p className="text-sm text-slate-500">{l("Noch keine Mahnereignisse.", "Событий напоминаний пока нет.", "No dunning events yet.")}</p>
                 ) : (
                   dunningEvents.map((event) => (
                     <div key={event.id} className="rounded-xl border border-slate-200 bg-white px-4 py-3">
@@ -4967,8 +5233,8 @@ export function PatientDetailPage() {
                         <span className="text-xs text-slate-400">{fmtDateTime(event.sent_at)}</span>
                       </div>
                       <div className="mt-2 space-y-1 text-sm text-slate-600">
-                        <p>Balance due: {fmtMoney(event.balance_due)}</p>
-                        <p>Created by: {event.created_by_name}</p>
+                        <p>{l("Offener Betrag", "Сумма к оплате", "Balance due")}: {fmtMoney(event.balance_due)}</p>
+                        <p>{l("Erstellt von", "Создано", "Created by")}: {event.created_by_name}</p>
                         {event.note ? <p>{event.note}</p> : null}
                       </div>
                     </div>
@@ -4979,7 +5245,7 @@ export function PatientDetailPage() {
 
             <DialogFooter>
               <Button type="button" variant="outline" className="rounded-xl" onClick={() => setInvoiceManageId("")}>
-                Close
+                {l("Schließen", "Закрыть", "Close")}
               </Button>
             </DialogFooter>
           </div>

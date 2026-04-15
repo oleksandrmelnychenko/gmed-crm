@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/sheet";
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { getLang, useLang } from "@/lib/i18n";
 import {
   feedbackSourceLabel,
   feedbackStatusTone,
@@ -37,6 +38,8 @@ import {
   formatPortalDate,
   formatPortalDateTime,
   npsBandLabel,
+  portalNotSetLabel,
+  portalStatusLabel,
 } from "@/pages/patient-portal.shared";
 import type {
   PortalAppointmentItem,
@@ -84,6 +87,13 @@ type FeedbackFormState = {
 
 const scoreOptions = ["1", "2", "3", "4", "5"];
 const npsOptions = Array.from({ length: 11 }, (_, index) => String(index));
+
+function feedbackText(de: string, ru: string, en: string) {
+  const lang = getLang();
+  if (lang === "de") return de;
+  if (lang === "ru") return ru;
+  return en;
+}
 
 function blankFeedbackForm(): FeedbackFormState {
   return {
@@ -176,16 +186,16 @@ function detailField(label: string, value?: string | null) {
   return (
     <div className="rounded-[1rem] border border-slate-200 bg-white px-3 py-3">
       <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{label}</p>
-      <p className="mt-2 text-sm text-slate-900">{value || "Not set"}</p>
+      <p className="mt-2 text-sm text-slate-900">{value || portalNotSetLabel()}</p>
     </div>
   );
 }
 
 function treatmentSuccessLabel(value?: string | null) {
-  if (value === "yes") return "Yes";
-  if (value === "partial") return "Partial";
-  if (value === "no") return "No";
-  return "Not set";
+  if (value === "yes") return feedbackText("Ja", "Да", "Yes");
+  if (value === "partial") return feedbackText("Teilweise", "Частично", "Partial");
+  if (value === "no") return feedbackText("Nein", "Нет", "No");
+  return portalNotSetLabel();
 }
 
 function feedbackCard(item: PortalFeedbackItem, withInternal = false, footer?: ReactNode) {
@@ -195,7 +205,7 @@ function feedbackCard(item: PortalFeedbackItem, withInternal = false, footer?: R
         <div>
           <div className="flex flex-wrap gap-2">
             <Badge variant="outline" className={cn("rounded-full", feedbackStatusTone(item.status))}>
-              {item.status.replaceAll("_", " ")}
+              {portalStatusLabel(item.status)}
             </Badge>
             <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
               {feedbackSourceLabel(item.source)}
@@ -204,52 +214,52 @@ function feedbackCard(item: PortalFeedbackItem, withInternal = false, footer?: R
               NPS {item.nps_score} · {npsBandLabel(item.nps_score)}
             </Badge>
           </div>
-          <h2 className="mt-3 text-lg font-semibold text-slate-950">{item.patient_name || "Patient feedback"}</h2>
+          <h2 className="mt-3 text-lg font-semibold text-slate-950">{item.patient_name || feedbackText("Patientenfeedback", "Отзыв пациента", "Patient feedback")}</h2>
           <p className="mt-2 text-sm text-slate-500">
-            {[item.patient_pid, item.appointment_title, item.provider_name, item.doctor_name].filter(Boolean).join(" · ") || "General feedback"}
+            {[item.patient_pid, item.appointment_title, item.provider_name, item.doctor_name].filter(Boolean).join(" · ") || feedbackText("Allgemeines Feedback", "Общий отзыв", "General feedback")}
           </p>
         </div>
         <p className="text-xs text-slate-500">{formatPortalDateTime(item.submitted_at)}</p>
       </div>
 
       <div className="mt-5 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
-        {detailField("Overall", String(item.overall_score))}
-        {detailField("PM", item.patient_manager_score ? String(item.patient_manager_score) : "Not rated")}
-        {detailField("Interpreter", item.interpreter_score ? String(item.interpreter_score) : "Not rated")}
-        {detailField("Concierge", item.concierge_score ? String(item.concierge_score) : "Not rated")}
-        {detailField("Treatment", item.treatment_score ? String(item.treatment_score) : "Not rated")}
-        {detailField("Doctor", item.doctor_score ? String(item.doctor_score) : "Not rated")}
+        {detailField(feedbackText("Gesamt", "Общая", "Overall"), String(item.overall_score))}
+        {detailField("PM", item.patient_manager_score ? String(item.patient_manager_score) : feedbackText("Nicht bewertet", "Не оценено", "Not rated"))}
+        {detailField(feedbackText("Dolmetscher", "Переводчик", "Interpreter"), item.interpreter_score ? String(item.interpreter_score) : feedbackText("Nicht bewertet", "Не оценено", "Not rated"))}
+        {detailField("Concierge", item.concierge_score ? String(item.concierge_score) : feedbackText("Nicht bewertet", "Не оценено", "Not rated"))}
+        {detailField(feedbackText("Behandlung", "Лечение", "Treatment"), item.treatment_score ? String(item.treatment_score) : feedbackText("Nicht bewertet", "Не оценено", "Not rated"))}
+        {detailField(feedbackText("Arzt", "Врач", "Doctor"), item.doctor_score ? String(item.doctor_score) : feedbackText("Nicht bewertet", "Не оценено", "Not rated"))}
       </div>
       <div className="mt-3 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
-        {detailField("Organization", item.organization_score ? String(item.organization_score) : "Not rated")}
-        {detailField("Service", item.service_score ? String(item.service_score) : "Not rated")}
-        {detailField("Ambience", item.infrastructure_score ? String(item.infrastructure_score) : "Not rated")}
-        {detailField("Price / value", item.price_value_score ? String(item.price_value_score) : "Not rated")}
-        {detailField("Treatment success", treatmentSuccessLabel(item.treatment_success))}
-        {detailField("Complication", item.complication_reported ? "Reported" : "No")}
+        {detailField(feedbackText("Organisation", "Организация", "Organization"), item.organization_score ? String(item.organization_score) : feedbackText("Nicht bewertet", "Не оценено", "Not rated"))}
+        {detailField(feedbackText("Service", "Сервис", "Service"), item.service_score ? String(item.service_score) : feedbackText("Nicht bewertet", "Не оценено", "Not rated"))}
+        {detailField(feedbackText("Ambiente", "Инфраструктура", "Ambience"), item.infrastructure_score ? String(item.infrastructure_score) : feedbackText("Nicht bewertet", "Не оценено", "Not rated"))}
+        {detailField(feedbackText("Preis / Leistung", "Цена / ценность", "Price / value"), item.price_value_score ? String(item.price_value_score) : feedbackText("Nicht bewertet", "Не оценено", "Not rated"))}
+        {detailField(feedbackText("Behandlungserfolg", "Успех лечения", "Treatment success"), treatmentSuccessLabel(item.treatment_success))}
+        {detailField(feedbackText("Komplikation", "Осложнение", "Complication"), item.complication_reported ? feedbackText("Gemeldet", "Сообщено", "Reported") : feedbackText("Nein", "Нет", "No"))}
       </div>
 
       {item.comments ? (
         <div className="mt-4 rounded-[1.2rem] border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm text-slate-700">
-          <p className="font-medium text-slate-900">Comment</p>
+          <p className="font-medium text-slate-900">{feedbackText("Kommentar", "Комментарий", "Comment")}</p>
           <p className="mt-2">{item.comments}</p>
         </div>
       ) : null}
       {item.improvement_notes ? (
         <div className="mt-3 rounded-[1.2rem] border border-amber-200 bg-amber-50/70 px-4 py-3 text-sm text-amber-900">
-          <p className="font-medium">Improvement notes</p>
+          <p className="font-medium">{feedbackText("Verbesserungshinweise", "Замечания по улучшению", "Improvement notes")}</p>
           <p className="mt-2">{item.improvement_notes}</p>
         </div>
       ) : null}
       {withInternal && item.internal_note ? (
         <div className="mt-3 rounded-[1.2rem] border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm text-slate-700">
-          <p className="font-medium text-slate-900">Internal capture note</p>
+          <p className="font-medium text-slate-900">{feedbackText("Interne Erfassungsnotiz", "Внутренняя заметка фиксации", "Internal capture note")}</p>
           <p className="mt-2">{item.internal_note}</p>
         </div>
       ) : null}
       {item.review_note ? (
         <div className="mt-3 rounded-[1.2rem] border border-emerald-200 bg-emerald-50/70 px-4 py-3 text-sm text-emerald-900">
-          <p className="font-medium">Review note</p>
+          <p className="font-medium">{feedbackText("Prüfnotiz", "Заметка по проверке", "Review note")}</p>
           <p className="mt-2">{item.review_note}</p>
         </div>
       ) : null}
@@ -265,6 +275,9 @@ export function FeedbackPage() {
 }
 
 function PatientFeedbackWorkspace() {
+  const { lang } = useLang();
+  const l = (de: string, ru: string, en: string) =>
+    lang === "de" ? de : lang === "ru" ? ru : en;
   const [feedback, setFeedback] = useState<PortalFeedbackItem[]>([]);
   const [appointments, setAppointments] = useState<PortalAppointmentItem[]>([]);
   const [form, setForm] = useState<FeedbackFormState>(blankFeedbackForm());
@@ -295,7 +308,15 @@ function PatientFeedbackWorkspace() {
         });
       } catch (err) {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : "Failed to load feedback workspace.");
+        setError(
+          err instanceof Error
+            ? err.message
+            : l(
+                "Feedback-Bereich konnte nicht geladen werden.",
+                "Не удалось загрузить раздел отзывов.",
+                "Failed to load feedback workspace.",
+              ),
+        );
       } finally {
         if (!cancelled) {
           setLoading(false);
@@ -361,10 +382,24 @@ function PatientFeedbackWorkspace() {
         }),
       });
       setForm(blankFeedbackForm());
-      setNotice("Feedback submitted. Thank you.");
+      setNotice(
+        l(
+          "Feedback wurde gesendet. Vielen Dank.",
+          "Отзыв отправлен. Спасибо.",
+          "Feedback submitted. Thank you.",
+        ),
+      );
       setVersion((value) => value + 1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to submit feedback.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : l(
+              "Feedback konnte nicht gesendet werden.",
+              "Не удалось отправить отзыв.",
+              "Failed to submit feedback.",
+            ),
+      );
     } finally {
       setSubmitting(false);
     }
@@ -375,7 +410,11 @@ function PatientFeedbackWorkspace() {
       <div className="flex min-h-[60vh] items-center justify-center">
         <div className="flex items-center gap-3 rounded-full border border-slate-200 bg-white px-5 py-3 text-sm text-slate-500 shadow-sm">
           <LoaderCircle className="size-4 animate-spin" />
-          Loading feedback workspace...
+          {l(
+            "Feedback-Bereich wird geladen...",
+            "Раздел отзывов загружается...",
+            "Loading feedback workspace...",
+          )}
         </div>
       </div>
     );
@@ -386,10 +425,18 @@ function PatientFeedbackWorkspace() {
       <section className={shellCard("bg-[radial-gradient(circle_at_top_left,_rgba(14,165,233,0.14),_transparent_32%),linear-gradient(135deg,#0f172a_0%,#1e293b_55%,#0f766e_100%)] px-6 py-6 text-white")}>
         <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-3xl">
-            <p className="text-sm uppercase tracking-[0.18em] text-white/60">Patient portal</p>
-            <h1 className="mt-3 text-3xl font-semibold tracking-tight">My feedback</h1>
+            <p className="text-sm uppercase tracking-[0.18em] text-white/60">
+              {l("Patientenportal", "Портал пациента", "Patient portal")}
+            </p>
+            <h1 className="mt-3 text-3xl font-semibold tracking-tight">
+              {l("Mein Feedback", "Мои отзывы", "My feedback")}
+            </h1>
             <p className="mt-3 text-sm leading-7 text-white/75">
-              Share treatment, clinic and service experience so the team can improve the journey.
+              {l(
+                "Teilen Sie Ihre Erfahrungen mit Behandlung, Klinik und Service, damit das Team den Ablauf verbessern kann.",
+                "Поделитесь впечатлениями о лечении, клинике и сервисе, чтобы команда могла улучшить весь путь пациента.",
+                "Share treatment, clinic and service experience so the team can improve the journey.",
+              )}
             </p>
           </div>
           <Button
@@ -398,7 +445,7 @@ function PatientFeedbackWorkspace() {
             onClick={() => setVersion((value) => value + 1)}
           >
             {refreshing ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
-            Refresh
+            {l("Aktualisieren", "Обновить", "Refresh")}
           </Button>
         </div>
       </section>
@@ -422,10 +469,16 @@ function PatientFeedbackWorkspace() {
       ) : null}
 
       <section className="grid gap-4 md:grid-cols-4">
-        {metricCard("Submitted feedback", feedback.length)}
-        {metricCard("Promoters", promoters)}
-        {metricCard("Average overall", averageOverall === null ? "Not set" : formatPortalAverage(averageOverall))}
-        {metricCard("Available visits to rate", availableAppointments.length)}
+        {metricCard(l("Abgegebene Rückmeldungen", "Отправлено отзывов", "Submitted feedback"), feedback.length)}
+        {metricCard(l("Promotoren", "Промоутеры", "Promoters"), promoters)}
+        {metricCard(
+          l("Durchschnitt gesamt", "Средняя общая оценка", "Average overall"),
+          averageOverall === null ? portalNotSetLabel() : formatPortalAverage(averageOverall),
+        )}
+        {metricCard(
+          l("Verfügbare Termine zur Bewertung", "Доступно визитов для оценки", "Available visits to rate"),
+          availableAppointments.length,
+        )}
       </section>
 
       <section className="grid gap-6 xl:grid-cols-[0.95fr_1.25fr]">
@@ -435,22 +488,28 @@ function PatientFeedbackWorkspace() {
               <Star className="size-5" />
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-slate-950">New satisfaction survey</h2>
+              <h2 className="text-lg font-semibold text-slate-950">
+                {l("Neue Zufriedenheitsumfrage", "Новый опрос удовлетворённости", "New satisfaction survey")}
+              </h2>
               <p className="mt-1 text-sm text-slate-500">
-                One portal feedback can be submitted per appointment. General feedback without an appointment is also allowed.
+                {l(
+                  "Pro Termin kann eine Portal-Rückmeldung abgegeben werden. Allgemeines Feedback ohne Termin ist ebenfalls möglich.",
+                  "По каждому приёму можно отправить один отзыв через портал. Также можно оставить общий отзыв без привязки к приёму.",
+                  "One portal feedback can be submitted per appointment. General feedback without an appointment is also allowed.",
+                )}
               </p>
             </div>
           </div>
 
           <form className="mt-5 space-y-4" onSubmit={(event) => void handleSubmit(event)}>
             <div className="space-y-2">
-              <Label>Appointment</Label>
+              <Label>{l("Termin", "Приём", "Appointment")}</Label>
               <select
                 value={form.appointmentId}
                 onChange={(event) => setForm((current) => ({ ...current, appointmentId: event.target.value }))}
                 className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
               >
-                <option value="">General feedback</option>
+                <option value="">{l("Allgemeines Feedback", "Общий отзыв", "General feedback")}</option>
                 {availableAppointments.map((item) => (
                   <option key={item.id} value={item.id}>
                     {[formatPortalDate(item.date), item.title, item.provider_name, item.doctor_name].filter(Boolean).join(" · ")}
@@ -460,27 +519,72 @@ function PatientFeedbackWorkspace() {
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
-              {scoreField("Overall satisfaction", form.overallScore, (value) => setForm((current) => ({ ...current, overallScore: value })), scoreOptions)}
+              {scoreField(
+                l("Gesamtzufriedenheit", "Общая удовлетворённость", "Overall satisfaction"),
+                form.overallScore,
+                (value) => setForm((current) => ({ ...current, overallScore: value })),
+                scoreOptions,
+              )}
               {scoreField("NPS 0-10", form.npsScore, (value) => setForm((current) => ({ ...current, npsScore: value })), npsOptions)}
-              {scoreField("Patient manager", form.patientManagerScore, (value) => setForm((current) => ({ ...current, patientManagerScore: value })), scoreOptions)}
-              {scoreField("Interpreter", form.interpreterScore, (value) => setForm((current) => ({ ...current, interpreterScore: value })), scoreOptions)}
+              {scoreField(
+                l("Patientenmanager", "Менеджер пациента", "Patient manager"),
+                form.patientManagerScore,
+                (value) => setForm((current) => ({ ...current, patientManagerScore: value })),
+                scoreOptions,
+              )}
+              {scoreField(
+                l("Dolmetscher", "Переводчик", "Interpreter"),
+                form.interpreterScore,
+                (value) => setForm((current) => ({ ...current, interpreterScore: value })),
+                scoreOptions,
+              )}
               {scoreField("Concierge", form.conciergeScore, (value) => setForm((current) => ({ ...current, conciergeScore: value })), scoreOptions)}
-              {scoreField("Treatment quality", form.treatmentScore, (value) => setForm((current) => ({ ...current, treatmentScore: value })), scoreOptions)}
-              {scoreField("Doctors", form.doctorScore, (value) => setForm((current) => ({ ...current, doctorScore: value })), scoreOptions)}
-              {scoreField("Inpatient organization", form.organizationScore, (value) => setForm((current) => ({ ...current, organizationScore: value })), scoreOptions)}
-              {scoreField("Service quality", form.serviceScore, (value) => setForm((current) => ({ ...current, serviceScore: value })), scoreOptions)}
-              {scoreField("Infrastructure / ambience", form.infrastructureScore, (value) => setForm((current) => ({ ...current, infrastructureScore: value })), scoreOptions)}
-              {scoreField("Price / value", form.priceValueScore, (value) => setForm((current) => ({ ...current, priceValueScore: value })), scoreOptions)}
+              {scoreField(
+                l("Behandlungsqualität", "Качество лечения", "Treatment quality"),
+                form.treatmentScore,
+                (value) => setForm((current) => ({ ...current, treatmentScore: value })),
+                scoreOptions,
+              )}
+              {scoreField(
+                l("Ärzte", "Врачи", "Doctors"),
+                form.doctorScore,
+                (value) => setForm((current) => ({ ...current, doctorScore: value })),
+                scoreOptions,
+              )}
+              {scoreField(
+                l("Organisation der stationären Behandlung", "Организация стационарного лечения", "Inpatient organization"),
+                form.organizationScore,
+                (value) => setForm((current) => ({ ...current, organizationScore: value })),
+                scoreOptions,
+              )}
+              {scoreField(
+                l("Servicequalität", "Качество сервиса", "Service quality"),
+                form.serviceScore,
+                (value) => setForm((current) => ({ ...current, serviceScore: value })),
+                scoreOptions,
+              )}
+              {scoreField(
+                l("Infrastruktur / Ambiente", "Инфраструктура / атмосфера", "Infrastructure / ambience"),
+                form.infrastructureScore,
+                (value) => setForm((current) => ({ ...current, infrastructureScore: value })),
+                scoreOptions,
+              )}
+              {scoreField(
+                l("Preis / Leistung", "Цена / ценность", "Price / value"),
+                form.priceValueScore,
+                (value) => setForm((current) => ({ ...current, priceValueScore: value })),
+                scoreOptions,
+              )}
               <div className="space-y-2">
-                <Label>Treatment success</Label>
+                <Label>{l("Behandlungserfolg", "Успех лечения", "Treatment success")}</Label>
                 <select
                   value={form.treatmentSuccess}
                   onChange={(event) => setForm((current) => ({ ...current, treatmentSuccess: event.target.value }))}
                   className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
                 >
-                  <option value="yes">Yes</option>
-                  <option value="partial">Partial</option>
-                  <option value="no">No</option>
+                  <option value="yes">{l("Ja", "Да", "Yes")}</option>
+                  <option value="partial">{l("Teilweise", "Частично", "Partial")}</option>
+                  <option value="no">{l("Nein", "Нет", "No")}</option>
                 </select>
               </div>
               <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
@@ -490,46 +594,60 @@ function PatientFeedbackWorkspace() {
                   onChange={(event) => setForm((current) => ({ ...current, complicationReported: event.target.checked }))}
                   className="size-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
                 />
-                Complication reported after visit
+                {l(
+                  "Komplikation nach dem Termin gemeldet",
+                  "Сообщено об осложнении после визита",
+                  "Complication reported after visit",
+                )}
               </label>
             </div>
 
             <div className="space-y-2">
-              <Label>Comment</Label>
+              <Label>{l("Kommentar", "Комментарий", "Comment")}</Label>
               <textarea
                 value={form.comments}
                 onChange={(event) => setForm((current) => ({ ...current, comments: event.target.value }))}
-                placeholder="What worked well?"
+                placeholder={l("Was ist gut gelaufen?", "Что прошло хорошо?", "What worked well?")}
                 className="min-h-[120px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
               />
             </div>
             <div className="space-y-2">
-              <Label>Improvement notes</Label>
+              <Label>{l("Verbesserungshinweise", "Замечания по улучшению", "Improvement notes")}</Label>
               <textarea
                 value={form.improvementNotes}
                 onChange={(event) => setForm((current) => ({ ...current, improvementNotes: event.target.value }))}
-                placeholder="What should the team improve?"
+                placeholder={l(
+                  "Was sollte das Team verbessern?",
+                  "Что команде стоит улучшить?",
+                  "What should the team improve?",
+                )}
                 className="min-h-[120px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
               />
             </div>
             <Button type="submit" className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800" disabled={submitting}>
               {submitting ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}
-              Submit feedback
+              {l("Feedback senden", "Отправить отзыв", "Submit feedback")}
             </Button>
           </form>
         </section>
 
         <section className={shellCard("p-5")}>
           <div>
-            <h2 className="text-lg font-semibold text-slate-950">Feedback history</h2>
+            <h2 className="text-lg font-semibold text-slate-950">
+              {l("Feedback-Verlauf", "История отзывов", "Feedback history")}
+            </h2>
             <p className="mt-1 text-sm text-slate-500">
-              Submitted surveys, review notes and treatment quality signals.
+              {l(
+                "Übermittelte Umfragen, Prüfnachweise und Signale zur Behandlungsqualität.",
+                "Отправленные анкеты, заметки проверки и сигналы о качестве лечения.",
+                "Submitted surveys, review notes and treatment quality signals.",
+              )}
             </p>
           </div>
 
           {feedback.length === 0 ? (
             <div className="mt-5 rounded-[1.35rem] border border-dashed border-slate-200 bg-slate-50/70 px-4 py-8 text-sm text-slate-500">
-              No feedback submitted yet.
+              {l("Noch kein Feedback gesendet.", "Отзывов пока нет.", "No feedback submitted yet.")}
             </div>
           ) : (
             <div className="mt-5 space-y-4">
@@ -544,6 +662,9 @@ function PatientFeedbackWorkspace() {
 
 function StaffFeedbackWorkspace() {
   const { user } = useAuth();
+  const { lang } = useLang();
+  const l = (de: string, ru: string, en: string) =>
+    lang === "de" ? de : lang === "ru" ? ru : en;
   const canViewWorkspace = canViewStaffFeedback(user?.role);
   const [feedback, setFeedback] = useState<PortalFeedbackItem[]>([]);
   const [summary, setSummary] = useState<PortalFeedbackSummary | null>(null);
@@ -601,7 +722,15 @@ function StaffFeedbackWorkspace() {
         });
       } catch (err) {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : "Failed to load feedback workspace.");
+        setError(
+          err instanceof Error
+            ? err.message
+            : l(
+                "Feedback-Bereich konnte nicht geladen werden.",
+                "Не удалось загрузить раздел отзывов.",
+                "Failed to load feedback workspace.",
+              ),
+        );
       } finally {
         if (!cancelled) {
           setLoading(false);
@@ -661,7 +790,13 @@ function StaffFeedbackWorkspace() {
   async function handleCapture(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedPatientId) {
-      setError("Select a patient first.");
+      setError(
+        l(
+          "Wählen Sie zuerst einen Patienten aus.",
+          "Сначала выберите пациента.",
+          "Select a patient first.",
+        ),
+      );
       return;
     }
 
@@ -696,10 +831,18 @@ function StaffFeedbackWorkspace() {
       setForm(blankFeedbackForm());
       setSelectedPatientId("");
       setPatientAppointments([]);
-      setNotice("Feedback captured.");
+      setNotice(l("Feedback wurde erfasst.", "Отзыв сохранён.", "Feedback captured."));
       setVersion((value) => value + 1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to capture feedback.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : l(
+              "Feedback konnte nicht erfasst werden.",
+              "Не удалось сохранить отзыв.",
+              "Failed to capture feedback.",
+            ),
+      );
     } finally {
       setSubmitting(false);
     }
@@ -724,10 +867,24 @@ function StaffFeedbackWorkspace() {
       setActiveReview(null);
       setReviewStatus("reviewed");
       setReviewNote("");
-      setNotice("Feedback review saved.");
+      setNotice(
+        l(
+          "Feedback-Prüfung wurde gespeichert.",
+          "Проверка отзыва сохранена.",
+          "Feedback review saved.",
+        ),
+      );
       setVersion((value) => value + 1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to review feedback.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : l(
+              "Feedback konnte nicht geprüft werden.",
+              "Не удалось сохранить проверку отзыва.",
+              "Failed to review feedback.",
+            ),
+      );
     } finally {
       setReviewBusy(false);
     }
@@ -738,7 +895,11 @@ function StaffFeedbackWorkspace() {
       <div className="flex min-h-[60vh] items-center justify-center">
         <div className="flex items-center gap-3 rounded-full border border-slate-200 bg-white px-5 py-3 text-sm text-slate-500 shadow-sm">
           <LoaderCircle className="size-4 animate-spin" />
-          Loading feedback workspace...
+          {l(
+            "Feedback-Bereich wird geladen...",
+            "Раздел отзывов загружается...",
+            "Loading feedback workspace...",
+          )}
         </div>
       </div>
     );
@@ -748,10 +909,14 @@ function StaffFeedbackWorkspace() {
     return (
       <section className={shellCard("px-6 py-6")}>
         <h1 className="text-3xl font-semibold tracking-tight text-slate-950">
-          Feedback workspace
+          {l("Feedback-Bereich", "Раздел отзывов", "Feedback workspace")}
         </h1>
         <p className="mt-3 text-sm text-slate-500">
-          This role cannot access feedback operations.
+          {l(
+            "Diese Rolle hat keinen Zugriff auf Feedback-Vorgänge.",
+            "У этой роли нет доступа к операциям с отзывами.",
+            "This role cannot access feedback operations.",
+          )}
         </p>
       </section>
     );
@@ -762,10 +927,18 @@ function StaffFeedbackWorkspace() {
       <section className={shellCard("bg-[radial-gradient(circle_at_top_left,_rgba(56,189,248,0.16),_transparent_34%),linear-gradient(135deg,#0f172a_0%,#0f172a_48%,#155e75_100%)] px-6 py-6 text-white")}>
         <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-3xl">
-            <p className="text-sm uppercase tracking-[0.18em] text-white/60">Operations</p>
-            <h1 className="mt-3 text-3xl font-semibold tracking-tight">Feedback and NPS</h1>
+            <p className="text-sm uppercase tracking-[0.18em] text-white/60">
+              {l("Betrieb", "Операции", "Operations")}
+            </p>
+            <h1 className="mt-3 text-3xl font-semibold tracking-tight">
+              {l("Feedback und NPS", "Отзывы и NPS", "Feedback and NPS")}
+            </h1>
             <p className="mt-3 text-sm leading-7 text-white/75">
-              Review patient satisfaction, capture clinic feedback and track promoter signals across the care chain.
+              {l(
+                "Prüfen Sie die Patientenzufriedenheit, erfassen Sie Klinik-Feedback und verfolgen Sie Promotorensignale entlang der gesamten Versorgungskette.",
+                "Проверяйте удовлетворённость пациентов, фиксируйте отзывы о клинике и отслеживайте сигналы промоутеров по всей цепочке лечения.",
+                "Review patient satisfaction, capture clinic feedback and track promoter signals across the care chain.",
+              )}
             </p>
           </div>
           <Button
@@ -774,7 +947,7 @@ function StaffFeedbackWorkspace() {
             onClick={() => setVersion((value) => value + 1)}
           >
             {refreshing ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
-            Refresh
+            {l("Aktualisieren", "Обновить", "Refresh")}
           </Button>
         </div>
       </section>
@@ -798,10 +971,21 @@ function StaffFeedbackWorkspace() {
       ) : null}
 
       <section className="grid gap-4 md:grid-cols-4">
-        {metricCard("Total feedback", summary?.total_feedback ?? 0)}
-        {metricCard("NPS", summary?.nps_score ?? 0, `${summary?.promoters ?? 0} promoters / ${summary?.detractors ?? 0} detractors`)}
-        {metricCard("Reviewed", summary?.reviewed_feedback ?? 0)}
-        {metricCard("Average overall", formatPortalAverage(summary?.average_scores?.overall))}
+        {metricCard(l("Feedback gesamt", "Всего отзывов", "Total feedback"), summary?.total_feedback ?? 0)}
+        {metricCard(
+          "NPS",
+          summary?.nps_score ?? 0,
+          l(
+            `${summary?.promoters ?? 0} Promotoren / ${summary?.detractors ?? 0} Detraktoren`,
+            `${summary?.promoters ?? 0} промоутеров / ${summary?.detractors ?? 0} критиков`,
+            `${summary?.promoters ?? 0} promoters / ${summary?.detractors ?? 0} detractors`,
+          ),
+        )}
+        {metricCard(l("Geprüft", "Проверено", "Reviewed"), summary?.reviewed_feedback ?? 0)}
+        {metricCard(
+          l("Durchschnitt gesamt", "Средняя общая оценка", "Average overall"),
+          formatPortalAverage(summary?.average_scores?.overall),
+        )}
       </section>
 
       <section className="grid gap-6 xl:grid-cols-[1.25fr_0.95fr]">
@@ -809,9 +993,15 @@ function StaffFeedbackWorkspace() {
           <section className={shellCard("p-5")}>
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <h2 className="text-lg font-semibold text-slate-950">Feedback queue</h2>
+                <h2 className="text-lg font-semibold text-slate-950">
+                  {l("Feedback-Warteschlange", "Очередь отзывов", "Feedback queue")}
+                </h2>
                 <p className="mt-1 text-sm text-slate-500">
-                  Search by patient, clinic, doctor or free-text notes. Role scope is enforced server-side.
+                  {l(
+                    "Suche nach Patient, Klinik, Arzt oder Freitextnotizen. Der Rollenbereich wird serverseitig erzwungen.",
+                    "Поиск по пациенту, клинике, врачу или свободным заметкам. Ограничения роли применяются на сервере.",
+                    "Search by patient, clinic, doctor or free-text notes. Role scope is enforced server-side.",
+                  )}
                 </p>
               </div>
               <div className="flex flex-col gap-3 md:flex-row">
@@ -820,7 +1010,11 @@ function StaffFeedbackWorkspace() {
                   <Input
                     value={search}
                     onChange={(event) => setSearch(event.target.value)}
-                    placeholder="Search patient, clinic, doctor or note"
+                    placeholder={l(
+                      "Patient, Klinik, Arzt oder Notiz suchen",
+                      "Поиск по пациенту, клинике, врачу или заметке",
+                      "Search patient, clinic, doctor or note",
+                    )}
                     className="w-full rounded-2xl pl-9 md:w-80"
                   />
                 </div>
@@ -829,19 +1023,19 @@ function StaffFeedbackWorkspace() {
                   onChange={(event) => setStatusFilter(event.target.value)}
                   className="h-10 rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
                 >
-                  <option value="">All statuses</option>
-                  <option value="submitted">Submitted</option>
-                  <option value="reviewed">Reviewed</option>
-                  <option value="archived">Archived</option>
+                  <option value="">{l("Alle Status", "Все статусы", "All statuses")}</option>
+                  <option value="submitted">{l("Eingereicht", "Отправлено", "Submitted")}</option>
+                  <option value="reviewed">{l("Geprüft", "Проверено", "Reviewed")}</option>
+                  <option value="archived">{l("Archiviert", "В архиве", "Archived")}</option>
                 </select>
                 <select
                   value={sourceFilter}
                   onChange={(event) => setSourceFilter(event.target.value)}
                   className="h-10 rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
                 >
-                  <option value="">All sources</option>
-                  <option value="patient_portal">Patient portal</option>
-                  <option value="staff_capture">Staff capture</option>
+                  <option value="">{l("Alle Quellen", "Все источники", "All sources")}</option>
+                  <option value="patient_portal">{l("Patientenportal", "Портал пациента", "Patient portal")}</option>
+                  <option value="staff_capture">{l("Erfassung durch Team", "Фиксация сотрудником", "Staff capture")}</option>
                 </select>
               </div>
             </div>
@@ -849,8 +1043,16 @@ function StaffFeedbackWorkspace() {
 
           {feedback.length === 0 ? (
             <section className={shellCard("border-dashed px-6 py-12 text-center")}>
-              <p className="text-base font-semibold text-slate-950">No feedback entries</p>
-              <p className="mt-2 text-sm text-slate-500">Current filters do not return any feedback records.</p>
+              <p className="text-base font-semibold text-slate-950">
+                {l("Keine Feedback-Einträge", "Нет записей об отзывах", "No feedback entries")}
+              </p>
+              <p className="mt-2 text-sm text-slate-500">
+                {l(
+                  "Die aktuellen Filter liefern keine Feedback-Datensätze.",
+                  "Текущие фильтры не возвращают записи об отзывах.",
+                  "Current filters do not return any feedback records.",
+                )}
+              </p>
             </section>
           ) : (
             feedback.map((item) =>
@@ -859,7 +1061,11 @@ function StaffFeedbackWorkspace() {
                 true,
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <p className="text-xs text-slate-500">
-                    Reviewed {item.reviewed_at ? formatPortalDateTime(item.reviewed_at) : "not yet"} by {item.reviewed_by_name || "n/a"}
+                    {l(
+                      `Geprüft ${item.reviewed_at ? formatPortalDateTime(item.reviewed_at) : "noch nicht"} von ${item.reviewed_by_name || "k. A."}`,
+                      `Проверено ${item.reviewed_at ? formatPortalDateTime(item.reviewed_at) : "ещё нет"}: ${item.reviewed_by_name || "н/д"}`,
+                      `Reviewed ${item.reviewed_at ? formatPortalDateTime(item.reviewed_at) : "not yet"} by ${item.reviewed_by_name || "n/a"}`,
+                    )}
                   </p>
                   <Button
                     type="button"
@@ -872,7 +1078,7 @@ function StaffFeedbackWorkspace() {
                     }}
                   >
                     <ClipboardPen className="size-4" />
-                    Review
+                    {l("Prüfen", "Проверить", "Review")}
                   </Button>
                 </div>,
                 ),
@@ -888,46 +1094,67 @@ function StaffFeedbackWorkspace() {
                   <BarChart3 className="size-5" />
                 </div>
                 <div>
-                  <h2 className="text-lg font-semibold text-slate-950">Summary and ranking</h2>
+                  <h2 className="text-lg font-semibold text-slate-950">
+                    {l("Übersicht und Ranking", "Сводка и рейтинги", "Summary and ranking")}
+                  </h2>
                   <p className="mt-1 text-sm text-slate-500">
-                    Average quality scores, top promoters and interpreter/clinic ranking.
+                    {l(
+                      "Durchschnittliche Qualitätswerte, Top-Promotoren und Ranking von Dolmetschern und Kliniken.",
+                      "Средние оценки качества, топ промоутеров и рейтинг переводчиков и клиник.",
+                      "Average quality scores, top promoters and interpreter/clinic ranking.",
+                    )}
                   </p>
                 </div>
               </div>
               <div className="mt-5 grid gap-3 md:grid-cols-2">
-                {detailField("Overall avg", formatPortalAverage(summary.average_scores.overall))}
-                {detailField("Interpreter avg", formatPortalAverage(summary.average_scores.interpreter))}
-                {detailField("Concierge avg", formatPortalAverage(summary.average_scores.concierge))}
-                {detailField("Treatment avg", formatPortalAverage(summary.average_scores.treatment))}
-                {detailField("Service avg", formatPortalAverage(summary.average_scores.service))}
-                {detailField("Ambience avg", formatPortalAverage(summary.average_scores.infrastructure))}
-                {detailField("Value avg", formatPortalAverage(summary.average_scores.price_value))}
+                {detailField(l("Durchschnitt gesamt", "Средняя общая", "Overall avg"), formatPortalAverage(summary.average_scores.overall))}
+                {detailField(l("Durchschnitt Dolmetscher", "Средняя по переводчику", "Interpreter avg"), formatPortalAverage(summary.average_scores.interpreter))}
+                {detailField(l("Durchschnitt Concierge", "Средняя по concierge", "Concierge avg"), formatPortalAverage(summary.average_scores.concierge))}
+                {detailField(l("Durchschnitt Behandlung", "Средняя по лечению", "Treatment avg"), formatPortalAverage(summary.average_scores.treatment))}
+                {detailField(l("Durchschnitt Service", "Средняя по сервису", "Service avg"), formatPortalAverage(summary.average_scores.service))}
+                {detailField(l("Durchschnitt Ambiente", "Средняя по атмосфере", "Ambience avg"), formatPortalAverage(summary.average_scores.infrastructure))}
+                {detailField(l("Durchschnitt Preis/Leistung", "Средняя по цене/ценности", "Value avg"), formatPortalAverage(summary.average_scores.price_value))}
                 {detailField(
-                  "Treatment success",
+                  l("Behandlungserfolg", "Успех лечения", "Treatment success"),
                   summary.treatment_success_yes_rate === null || summary.treatment_success_yes_rate === undefined
-                    ? "Not set"
-                    : `${summary.treatment_success_yes_rate.toFixed(1)}% yes`,
+                    ? portalNotSetLabel()
+                    : l(
+                        `${summary.treatment_success_yes_rate.toFixed(1)}% ja`,
+                        `${summary.treatment_success_yes_rate.toFixed(1)}% да`,
+                        `${summary.treatment_success_yes_rate.toFixed(1)}% yes`,
+                      ),
                 )}
                 {detailField(
-                  "Complication rate",
+                  l("Komplikationsrate", "Частота осложнений", "Complication rate"),
                   summary.complication_rate === null || summary.complication_rate === undefined
-                    ? "Not set"
+                    ? portalNotSetLabel()
                     : `${summary.complication_rate.toFixed(1)}%`,
                 )}
               </div>
 
               <div className="mt-5 grid gap-4">
                 <div className="rounded-[1.35rem] border border-slate-200 bg-slate-50/80 px-4 py-4">
-                  <p className="text-sm font-semibold text-slate-950">Top promoters</p>
+                  <p className="text-sm font-semibold text-slate-950">
+                    {l("Top-Promotoren", "Топ промоутеров", "Top promoters")}
+                  </p>
                   <div className="mt-3 space-y-3">
                     {summary.top_promoters.length === 0 ? (
-                      <p className="text-sm text-slate-500">No promoter ranking yet.</p>
+                      <p className="text-sm text-slate-500">
+                        {l("Noch kein Promotoren-Ranking.", "Рейтинг промоутеров пока отсутствует.", "No promoter ranking yet.")}
+                      </p>
                     ) : (
                       summary.top_promoters.slice(0, 5).map((item) => (
                         <div key={item.patient_id} className="flex items-center justify-between gap-3 text-sm">
                           <div>
                             <p className="font-medium text-slate-900">{item.patient_name}</p>
-                            <p className="text-slate-500">{item.patient_pid || "Patient"} · {item.feedback_count} feedback</p>
+                            <p className="text-slate-500">
+                              {item.patient_pid || l("Patient", "Пациент", "Patient")} ·{" "}
+                              {l(
+                                `${item.feedback_count} Rückmeldungen`,
+                                `${item.feedback_count} отзывов`,
+                                `${item.feedback_count} feedback`,
+                              )}
+                            </p>
                           </div>
                           <Badge variant="outline" className="rounded-full border-emerald-200 bg-emerald-50 text-emerald-700">
                             {item.average_nps.toFixed(1)}
@@ -939,16 +1166,26 @@ function StaffFeedbackWorkspace() {
                 </div>
 
                 <div className="rounded-[1.35rem] border border-slate-200 bg-slate-50/80 px-4 py-4">
-                  <p className="text-sm font-semibold text-slate-950">Interpreter ranking</p>
+                  <p className="text-sm font-semibold text-slate-950">
+                    {l("Dolmetscher-Ranking", "Рейтинг переводчиков", "Interpreter ranking")}
+                  </p>
                   <div className="mt-3 space-y-3">
                     {summary.interpreter_ranking.length === 0 ? (
-                      <p className="text-sm text-slate-500">No interpreter feedback yet.</p>
+                      <p className="text-sm text-slate-500">
+                        {l("Noch kein Dolmetscher-Feedback.", "Отзывов по переводчикам пока нет.", "No interpreter feedback yet.")}
+                      </p>
                     ) : (
                       summary.interpreter_ranking.slice(0, 5).map((item) => (
                         <div key={item.user_id ?? item.name} className="flex items-center justify-between gap-3 text-sm">
                           <div>
                             <p className="font-medium text-slate-900">{item.name}</p>
-                            <p className="text-slate-500">{item.feedback_count} ratings</p>
+                            <p className="text-slate-500">
+                              {l(
+                                `${item.feedback_count} Bewertungen`,
+                                `${item.feedback_count} оценок`,
+                                `${item.feedback_count} ratings`,
+                              )}
+                            </p>
                           </div>
                           <Badge variant="outline" className="rounded-full border-sky-200 bg-sky-50 text-sky-700">
                             {item.average_score.toFixed(1)}
@@ -960,16 +1197,26 @@ function StaffFeedbackWorkspace() {
                 </div>
 
                 <div className="rounded-[1.35rem] border border-slate-200 bg-slate-50/80 px-4 py-4">
-                  <p className="text-sm font-semibold text-slate-950">Clinic ranking</p>
+                  <p className="text-sm font-semibold text-slate-950">
+                    {l("Klinik-Ranking", "Рейтинг клиник", "Clinic ranking")}
+                  </p>
                   <div className="mt-3 space-y-3">
                     {summary.clinic_ranking.length === 0 ? (
-                      <p className="text-sm text-slate-500">No clinic ranking yet.</p>
+                      <p className="text-sm text-slate-500">
+                        {l("Noch kein Klinik-Ranking.", "Рейтинг клиник пока отсутствует.", "No clinic ranking yet.")}
+                      </p>
                     ) : (
                       summary.clinic_ranking.slice(0, 5).map((item) => (
                         <div key={item.provider_id ?? item.name} className="flex items-center justify-between gap-3 text-sm">
                           <div>
                             <p className="font-medium text-slate-900">{item.name}</p>
-                            <p className="text-slate-500">{item.feedback_count} ratings</p>
+                            <p className="text-slate-500">
+                              {l(
+                                `${item.feedback_count} Bewertungen`,
+                                `${item.feedback_count} оценок`,
+                                `${item.feedback_count} ratings`,
+                              )}
+                            </p>
                           </div>
                           <Badge variant="outline" className="rounded-full border-sky-200 bg-sky-50 text-sky-700">
                             {item.average_score.toFixed(1)}
@@ -990,22 +1237,28 @@ function StaffFeedbackWorkspace() {
                   <ClipboardPen className="size-5" />
                 </div>
                 <div>
-                  <h2 className="text-lg font-semibold text-slate-950">Capture feedback</h2>
+                  <h2 className="text-lg font-semibold text-slate-950">
+                    {l("Feedback erfassen", "Зафиксировать отзыв", "Capture feedback")}
+                  </h2>
                   <p className="mt-1 text-sm text-slate-500">
-                    Record clinic feedback for the selected patient when the survey comes in by phone or staff handoff.
+                    {l(
+                      "Erfassen Sie Klinik-Feedback für den ausgewählten Patienten, wenn die Rückmeldung telefonisch oder über das Team eingeht.",
+                      "Фиксируйте отзыв о клинике для выбранного пациента, если он поступил по телефону или через сотрудника.",
+                      "Record clinic feedback for the selected patient when the survey comes in by phone or staff handoff.",
+                    )}
                   </p>
                 </div>
               </div>
 
               <form className="mt-5 space-y-4" onSubmit={(event) => void handleCapture(event)}>
                 <div className="space-y-2">
-                  <Label>Patient</Label>
+                  <Label>{l("Patient", "Пациент", "Patient")}</Label>
                   <select
                     value={selectedPatientId}
                     onChange={(event) => setSelectedPatientId(event.target.value)}
                     className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
                   >
-                    <option value="">Select patient</option>
+                    <option value="">{l("Patient auswählen", "Выберите пациента", "Select patient")}</option>
                     {patients.map((item) => (
                       <option key={item.id} value={item.id}>
                         {patientLabel(item)}
@@ -1014,14 +1267,14 @@ function StaffFeedbackWorkspace() {
                   </select>
                 </div>
                 <div className="space-y-2">
-                  <Label>Appointment</Label>
+                  <Label>{l("Termin", "Приём", "Appointment")}</Label>
                   <select
                     value={form.appointmentId}
                     onChange={(event) => setForm((current) => ({ ...current, appointmentId: event.target.value }))}
                     className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
                     disabled={!selectedPatientId}
                   >
-                    <option value="">General feedback</option>
+                    <option value="">{l("Allgemeines Feedback", "Общий отзыв", "General feedback")}</option>
                     {patientAppointments.map((item) => (
                       <option key={item.id} value={item.id}>
                         {[formatPortalDate(item.date), item.title, item.provider_name, item.doctor_name].filter(Boolean).join(" · ")}
@@ -1031,27 +1284,72 @@ function StaffFeedbackWorkspace() {
                 </div>
 
                 <div className="grid gap-4 md:grid-cols-2">
-                  {scoreField("Overall", form.overallScore, (value) => setForm((current) => ({ ...current, overallScore: value })), scoreOptions)}
+                  {scoreField(
+                    l("Gesamt", "Общая", "Overall"),
+                    form.overallScore,
+                    (value) => setForm((current) => ({ ...current, overallScore: value })),
+                    scoreOptions,
+                  )}
                   {scoreField("NPS 0-10", form.npsScore, (value) => setForm((current) => ({ ...current, npsScore: value })), npsOptions)}
-                  {scoreField("Patient manager", form.patientManagerScore, (value) => setForm((current) => ({ ...current, patientManagerScore: value })), scoreOptions)}
-                  {scoreField("Interpreter", form.interpreterScore, (value) => setForm((current) => ({ ...current, interpreterScore: value })), scoreOptions)}
+                  {scoreField(
+                    l("Patientenmanager", "Менеджер пациента", "Patient manager"),
+                    form.patientManagerScore,
+                    (value) => setForm((current) => ({ ...current, patientManagerScore: value })),
+                    scoreOptions,
+                  )}
+                  {scoreField(
+                    l("Dolmetscher", "Переводчик", "Interpreter"),
+                    form.interpreterScore,
+                    (value) => setForm((current) => ({ ...current, interpreterScore: value })),
+                    scoreOptions,
+                  )}
                   {scoreField("Concierge", form.conciergeScore, (value) => setForm((current) => ({ ...current, conciergeScore: value })), scoreOptions)}
-                  {scoreField("Treatment quality", form.treatmentScore, (value) => setForm((current) => ({ ...current, treatmentScore: value })), scoreOptions)}
-                  {scoreField("Doctors", form.doctorScore, (value) => setForm((current) => ({ ...current, doctorScore: value })), scoreOptions)}
-                  {scoreField("Inpatient organization", form.organizationScore, (value) => setForm((current) => ({ ...current, organizationScore: value })), scoreOptions)}
-                  {scoreField("Service quality", form.serviceScore, (value) => setForm((current) => ({ ...current, serviceScore: value })), scoreOptions)}
-                  {scoreField("Infrastructure / ambience", form.infrastructureScore, (value) => setForm((current) => ({ ...current, infrastructureScore: value })), scoreOptions)}
-                  {scoreField("Price / value", form.priceValueScore, (value) => setForm((current) => ({ ...current, priceValueScore: value })), scoreOptions)}
+                  {scoreField(
+                    l("Behandlungsqualität", "Качество лечения", "Treatment quality"),
+                    form.treatmentScore,
+                    (value) => setForm((current) => ({ ...current, treatmentScore: value })),
+                    scoreOptions,
+                  )}
+                  {scoreField(
+                    l("Ärzte", "Врачи", "Doctors"),
+                    form.doctorScore,
+                    (value) => setForm((current) => ({ ...current, doctorScore: value })),
+                    scoreOptions,
+                  )}
+                  {scoreField(
+                    l("Organisation der stationären Behandlung", "Организация стационарного лечения", "Inpatient organization"),
+                    form.organizationScore,
+                    (value) => setForm((current) => ({ ...current, organizationScore: value })),
+                    scoreOptions,
+                  )}
+                  {scoreField(
+                    l("Servicequalität", "Качество сервиса", "Service quality"),
+                    form.serviceScore,
+                    (value) => setForm((current) => ({ ...current, serviceScore: value })),
+                    scoreOptions,
+                  )}
+                  {scoreField(
+                    l("Infrastruktur / Ambiente", "Инфраструктура / атмосфера", "Infrastructure / ambience"),
+                    form.infrastructureScore,
+                    (value) => setForm((current) => ({ ...current, infrastructureScore: value })),
+                    scoreOptions,
+                  )}
+                  {scoreField(
+                    l("Preis / Leistung", "Цена / ценность", "Price / value"),
+                    form.priceValueScore,
+                    (value) => setForm((current) => ({ ...current, priceValueScore: value })),
+                    scoreOptions,
+                  )}
                   <div className="space-y-2">
-                    <Label>Treatment success</Label>
+                    <Label>{l("Behandlungserfolg", "Успех лечения", "Treatment success")}</Label>
                     <select
                       value={form.treatmentSuccess}
                       onChange={(event) => setForm((current) => ({ ...current, treatmentSuccess: event.target.value }))}
                       className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
                     >
-                      <option value="yes">Yes</option>
-                      <option value="partial">Partial</option>
-                      <option value="no">No</option>
+                      <option value="yes">{l("Ja", "Да", "Yes")}</option>
+                      <option value="partial">{l("Teilweise", "Частично", "Partial")}</option>
+                      <option value="no">{l("Nein", "Нет", "No")}</option>
                     </select>
                   </div>
                   <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
@@ -1061,40 +1359,56 @@ function StaffFeedbackWorkspace() {
                       onChange={(event) => setForm((current) => ({ ...current, complicationReported: event.target.checked }))}
                       className="size-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
                     />
-                    Complication reported after visit
+                    {l(
+                      "Komplikation nach dem Termin gemeldet",
+                      "Сообщено об осложнении после визита",
+                      "Complication reported after visit",
+                    )}
                   </label>
                 </div>
 
                 <div className="space-y-2">
-                  <Label>Comment</Label>
+                  <Label>{l("Kommentar", "Комментарий", "Comment")}</Label>
                   <textarea
                     value={form.comments}
                     onChange={(event) => setForm((current) => ({ ...current, comments: event.target.value }))}
                     className="min-h-[110px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
-                    placeholder="Patient statement or key quote"
+                    placeholder={l(
+                      "Aussage des Patienten oder Kernaussage",
+                      "Фраза пациента или ключевая цитата",
+                      "Patient statement or key quote",
+                    )}
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>Improvement notes</Label>
+                  <Label>{l("Verbesserungshinweise", "Замечания по улучшению", "Improvement notes")}</Label>
                   <textarea
                     value={form.improvementNotes}
                     onChange={(event) => setForm((current) => ({ ...current, improvementNotes: event.target.value }))}
                     className="min-h-[110px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
-                    placeholder="What should be improved?"
+                    placeholder={l(
+                      "Was sollte verbessert werden?",
+                      "Что следует улучшить?",
+                      "What should be improved?",
+                    )}
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>Internal capture note</Label>
+                  <Label>{l("Interne Erfassungsnotiz", "Внутренняя заметка фиксации", "Internal capture note")}</Label>
                   <textarea
                     value={form.internalNote}
                     onChange={(event) => setForm((current) => ({ ...current, internalNote: event.target.value }))}
                     className="min-h-[90px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
-                    placeholder="How this feedback was collected"
+                    placeholder={l(
+                      "Wie dieses Feedback erfasst wurde",
+                      "Как был собран этот отзыв",
+                      "How this feedback was collected",
+                    )}
                   />
                 </div>
                 <Button type="submit" className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800" disabled={submitting}>
                   {submitting ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}
-                  Capture feedback
+                  {l("Feedback erfassen", "Зафиксировать отзыв", "Capture feedback")}
                 </Button>
               </form>
             </section>
@@ -1105,44 +1419,54 @@ function StaffFeedbackWorkspace() {
       <Sheet open={Boolean(activeReview)} onOpenChange={(open) => !open && setActiveReview(null)}>
         <SheetContent className="w-full overflow-y-auto sm:max-w-2xl">
           <SheetHeader>
-            <SheetTitle>Review feedback</SheetTitle>
+            <SheetTitle>{l("Feedback prüfen", "Проверить отзыв", "Review feedback")}</SheetTitle>
             <SheetDescription>
-              Mark the entry as reviewed or archive it with an internal note.
+              {l(
+                "Markieren Sie den Eintrag als geprüft oder archivieren Sie ihn mit einer internen Notiz.",
+                "Отметьте запись как проверенную или отправьте её в архив с внутренней заметкой.",
+                "Mark the entry as reviewed or archive it with an internal note.",
+              )}
             </SheetDescription>
           </SheetHeader>
 
           {activeReview ? (
             <form className="mt-6 space-y-4" onSubmit={(event) => void handleReview(event)}>
               <div className="rounded-[1.25rem] border border-slate-200 bg-slate-50/70 px-4 py-4">
-                <p className="text-sm font-semibold text-slate-950">{activeReview.patient_name || "Patient feedback"}</p>
+                <p className="text-sm font-semibold text-slate-950">
+                  {activeReview.patient_name || l("Patientenfeedback", "Отзыв пациента", "Patient feedback")}
+                </p>
                 <p className="mt-2 text-sm text-slate-500">
                   {[activeReview.patient_pid, activeReview.appointment_title, activeReview.provider_name, activeReview.doctor_name].filter(Boolean).join(" · ")}
                 </p>
               </div>
 
               <div className="space-y-2">
-                <Label>Review status</Label>
+                <Label>{l("Prüfstatus", "Статус проверки", "Review status")}</Label>
                 <select
                   value={reviewStatus}
                   onChange={(event) => setReviewStatus(event.target.value)}
                   className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
                 >
-                  <option value="reviewed">Reviewed</option>
-                  <option value="archived">Archived</option>
+                  <option value="reviewed">{l("Geprüft", "Проверено", "Reviewed")}</option>
+                  <option value="archived">{l("Archiviert", "В архиве", "Archived")}</option>
                 </select>
               </div>
               <div className="space-y-2">
-                <Label>Review note</Label>
+                <Label>{l("Prüfnotiz", "Заметка по проверке", "Review note")}</Label>
                 <textarea
                   value={reviewNote}
                   onChange={(event) => setReviewNote(event.target.value)}
                   className="min-h-[140px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
-                  placeholder="Operational follow-up or review note"
+                  placeholder={l(
+                    "Operative Nachverfolgung oder Prüfnotiz",
+                    "Операционное действие или заметка проверки",
+                    "Operational follow-up or review note",
+                  )}
                 />
               </div>
               <Button type="submit" className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800" disabled={reviewBusy}>
                 {reviewBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                Save review
+                {l("Prüfung speichern", "Сохранить проверку", "Save review")}
               </Button>
             </form>
           ) : null}

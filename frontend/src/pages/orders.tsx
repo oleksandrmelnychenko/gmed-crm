@@ -828,20 +828,23 @@ function orderFollowupToForm(
   };
 }
 
-function workflowChecklistLabel(key: string) {
+function workflowChecklistLabel(
+  key: string,
+  labels?: Partial<Record<OrderPhase | "custom", string>>,
+) {
   switch (key) {
     case "order_discovery":
-      return "Discovery";
+      return labels?.discovery ?? "Discovery";
     case "order_intake":
-      return "Intake";
+      return labels?.intake ?? "Intake";
     case "order_execution":
-      return "Execution";
+      return labels?.execution ?? "Execution";
     case "order_closure":
-      return "Closure";
+      return labels?.closure ?? "Closure";
     case "order_followup":
-      return "Follow-up";
+      return labels?.followup ?? "Follow-up";
     case "order_custom":
-      return "Custom";
+      return labels?.custom ?? "Custom";
     default:
       return key.replaceAll("_", " ");
   }
@@ -883,14 +886,17 @@ function recheckBadgeClass(passed: boolean) {
     : "border-amber-200 bg-amber-50 text-amber-700";
 }
 
-function recheckMissingFieldLabel(field: string) {
+function recheckMissingFieldLabel(
+  field: string,
+  labels?: Partial<Record<"primary_contact" | "country" | "language", string>>,
+) {
   switch (field) {
     case "primary_contact":
-      return "Primary contact";
+      return labels?.primary_contact ?? "Primary contact";
     case "country":
-      return "Country";
+      return labels?.country ?? "Country";
     case "language":
-      return "Preferred language";
+      return labels?.language ?? "Preferred language";
     default:
       return field.replaceAll("_", " ");
   }
@@ -930,11 +936,15 @@ function optString(value: string) {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-function formatDate(value: string | null | undefined) {
-  if (!value) return "Not set";
+function formatDate(
+  value: string | null | undefined,
+  locale = "de-DE",
+  emptyLabel = "Nicht festgelegt",
+) {
+  if (!value) return emptyLabel;
   const date = new Date(`${value}T00:00:00`);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("en-GB", { dateStyle: "medium" }).format(date);
+  return new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(date);
 }
 
 function numberFromUnknown(value: unknown) {
@@ -946,45 +956,53 @@ function numberFromUnknown(value: unknown) {
   return null;
 }
 
-function formatNumber(value: unknown) {
+function formatNumber(value: unknown, locale = "de-DE") {
   const parsed = numberFromUnknown(value);
   if (parsed == null) {
     if (typeof value === "string") return value;
     return "0";
   }
-  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(
-    parsed,
-  );
+  return new Intl.NumberFormat(locale, {
+    maximumFractionDigits: 2,
+  }).format(parsed);
 }
 
-function formatCurrency(value: unknown, currency = "EUR") {
+function formatCurrency(value: unknown, currency = "EUR", locale = "de-DE") {
   const parsed = numberFromUnknown(value);
   if (parsed == null) {
     const fallback = typeof value === "string" && value.trim() ? value : "0";
     return `${fallback} ${currency}`;
   }
-  return new Intl.NumberFormat("en-US", {
+  return new Intl.NumberFormat(locale, {
     style: "currency",
     currency,
     maximumFractionDigits: 2,
   }).format(parsed);
 }
 
-function formatDateTime(value: string | null | undefined) {
-  if (!value) return "Not set";
+function formatDateTime(
+  value: string | null | undefined,
+  locale = "de-DE",
+  emptyLabel = "Nicht festgelegt",
+) {
+  if (!value) return emptyLabel;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("en-GB", {
+  return new Intl.DateTimeFormat(locale, {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);
 }
 
-function formatDateOnly(value: string | null | undefined) {
-  if (!value) return "Not set";
+function formatDateOnly(
+  value: string | null | undefined,
+  locale = "de-DE",
+  emptyLabel = "Nicht festgelegt",
+) {
+  if (!value) return emptyLabel;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("en-GB", { dateStyle: "medium" }).format(date);
+  return new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(date);
 }
 
 function toDateTimeInputValue(value: string | null | undefined) {
@@ -1002,12 +1020,12 @@ function inputDateTimeToApiValue(value: string) {
   return date.toISOString();
 }
 
-function patientLabel(patient: PatientOption) {
+function patientLabel(patient: PatientOption, fallback = "Patient") {
   const name = [patient.first_name, patient.last_name]
     .filter(Boolean)
     .join(" ")
     .trim();
-  return `${name || "Patient"} (${patient.patient_id})`;
+  return `${name || fallback} (${patient.patient_id})`;
 }
 
 function nextPhase(current: string) {
@@ -1104,12 +1122,327 @@ function EmptyState({ title, description, action }: EmptyStateProps) {
 }
 
 export function OrdersPage() {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const tx = t as unknown as Record<string, string>;
   const { user } = useAuth();
   const { staffGo } = useStaffNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const permissions = orderPermissions(user?.role);
+  const locale = lang === "de" ? "de-DE" : "ru-RU";
+  const l = (de: string, ru: string) => (lang === "de" ? de : ru);
+  const phaseLabels = useMemo(
+    () => ({
+      discovery: l("Bedarfsklärung", "Уточнение потребности"),
+      intake: l("Aufnahme", "Оформление"),
+      execution: l("Durchführung", "Исполнение"),
+      closure: l("Abschluss", "Закрытие"),
+      followup: l("Nachsorge", "Наблюдение"),
+    }),
+    [lang],
+  );
+  const workflowGroupLabels = useMemo(
+    () => ({
+      ...phaseLabels,
+      custom: l("Individuell", "Individualno"),
+    }),
+    [lang, phaseLabels],
+  );
+  const orderStatusLabels = useMemo(
+    () => ({
+      active: l("Aktiv", "Активен"),
+      paused: l("Pausiert", "На паузе"),
+      completed: l("Abgeschlossen", "Завершён"),
+      cancelled: l("Storniert", "Отменён"),
+    }),
+    [lang],
+  );
+  const debtStatusLabels = useMemo(
+    () => ({
+      review_required: l("Review erforderlich", "Требуется ревью"),
+      payment_plan: l("Zahlungsplan", "План оплаты"),
+      awaiting_payment: l("Zahlung ausstehend", "Ожидание оплаты"),
+      escalated: l("Eskaliert", "Эскалировано"),
+      cleared: l("Geklärt", "Снято"),
+      not_required: l("Nicht erforderlich", "Не требуется"),
+    }),
+    [lang],
+  );
+  const billingReleaseLabels = useMemo(
+    () => ({
+      pending: l("Ausstehend", "Ожидается"),
+      granted: l("Freigegeben", "Разрешено"),
+      denied: l("Abgelehnt", "Отклонено"),
+    }),
+    [lang],
+  );
+  const packageCoverageLabels = useMemo(
+    () => ({
+      unknown: l("Unbekannt", "Неизвестно"),
+      covered: l("Abgedeckt", "Покрыто"),
+      not_covered: l("Nicht abgedeckt", "Не покрыто"),
+    }),
+    [lang],
+  );
+  const roleLabels = useMemo(
+    () => ({
+      ceo: "CEO",
+      admin: l("Admin", "Администратор"),
+      assistant: l("CEO-Assistenz", "Ассистент CEO"),
+      patient_manager: l("Patientenmanagement", "Пациент-менеджер"),
+      billing: l("Billing", "Billing"),
+      concierge: l("Concierge", "Консьерж"),
+      interpreter: l("Dolmetscher", "Переводчик"),
+      teamlead_interpreter: l("Dolmetscher-Teamlead", "Тимлид переводчиков"),
+      debt_owner: l("Debt-Owner", "Ответственный по debt"),
+    }),
+    [lang],
+  );
+  const labelFor = (value: string | null | undefined, labels: Record<string, string>) =>
+    (value ? labels[value] : null) ?? value ?? l("Nicht festgelegt", "Не указано");
+  const formatMoney = (value: unknown, currency = "EUR") =>
+    formatCurrency(value, currency, locale);
+  const formatDateLabel = (value: string | null | undefined) =>
+    formatDate(value, locale, l("Nicht festgelegt", "Не указано"));
+  const formatDateTimeLabel = (value: string | null | undefined) =>
+    formatDateTime(value, locale, l("Nicht festgelegt", "Не указано"));
+  const formatDateOnlyLabel = (value: string | null | undefined) =>
+    formatDateOnly(value, locale, l("Nicht festgelegt", "Не указано"));
+  const phaseLabel = (value: string) => labelFor(value, phaseLabels);
+  const orderStatusLabel = (value: string) => labelFor(value, orderStatusLabels);
+  const debtStatusLabel = (value: string) => labelFor(value, debtStatusLabels);
+  const billingReleaseLabel = (value: string) =>
+    labelFor(value, billingReleaseLabels);
+  const packageCoverageLabel = (value: string) =>
+    labelFor(value, packageCoverageLabels);
+  const leistungStatusLabel = (value: string) =>
+    labelFor(value, {
+      draft: l("Entwurf", "Черновик"),
+      delivered: l("Erbracht", "Оказано"),
+      approved: l("Freigegeben", "Утверждено"),
+      cancelled: l("Storniert", "Отменено"),
+    });
+  const externalInvoiceStatusLabel = (value: string) =>
+    labelFor(value, {
+      expected: l("Erwartet", "Ожидается"),
+      received: l("Eingegangen", "Получен"),
+      approved: l("Freigegeben", "Утверждён"),
+      paid: l("Bezahlt", "Оплачен"),
+      overdue: l("Überfällig", "Просрочен"),
+      cancelled: l("Storniert", "Отменён"),
+    });
+  const treatmentPlanStatusLabel = (value: string) =>
+    labelFor(value, {
+      draft: l("Entwurf", "Черновик"),
+      agreed: l("Abgestimmt", "Согласовано"),
+      correction_requested: l("Korrektur angefragt", "Запрошена корректировка"),
+      finalized: l("Finalisiert", "Финализировано"),
+    });
+  const preparationDocumentStatusLabel = (value: string) =>
+    labelFor(value, {
+      pending: l("Dokumente ausstehend", "Документы ожидаются"),
+      sent: l("Dokumente versendet", "Документы отправлены"),
+      not_required: l("Dokumente nicht erforderlich", "Документы не требуются"),
+    });
+  const interpreterBriefingStatusLabel = (value: string) =>
+    labelFor(value, {
+      not_needed: l("Nicht erforderlich", "Не требуется"),
+      pending: l("Briefing ausstehend", "Брифинг ожидается"),
+      completed: l("Briefing abgeschlossen", "Брифинг завершён"),
+    });
+  const arrivalStatusLabel = (value: string) =>
+    labelFor(value, {
+      pending: l("Ankunft ausstehend", "Прибытие ожидается"),
+      arrived: l("Angekommen", "Прибыл"),
+      not_required: l("Nicht erforderlich", "Не требуется"),
+    });
+  const executionStatusLabel = (value: string) =>
+    labelFor(value, {
+      pending: l("Ausstehend", "Ожидается"),
+      in_progress: l("In Bearbeitung", "В работе"),
+      completed: l("Abgeschlossen", "Завершено"),
+      not_required: l("Nicht erforderlich", "Не требуется"),
+    });
+  const issueStatusLabel = (value: string) =>
+    labelFor(value, {
+      pending: l("Offene Punkte", "Есть открытые вопросы"),
+      monitoring: l("Unter Beobachtung", "Под наблюдением"),
+      resolved: l("Geklärt", "Закрыто"),
+      not_required: l("Keine Punkte", "Нет вопросов"),
+    });
+  const followupStatusLabel = (value: string) =>
+    labelFor(value, {
+      pending: l("Ausstehend", "Ожидается"),
+      scheduled: l("Geplant", "Запланировано"),
+      completed: l("Abgeschlossen", "Завершено"),
+      not_required: l("Nicht erforderlich", "Не требуется"),
+    });
+  const resultsHandoffStatusLabel = (value: string) =>
+    labelFor(value, {
+      pending: l("Ausstehend", "Ожидается"),
+      completed: l("Abgeschlossen", "Завершено"),
+      not_required: l("Nicht erforderlich", "Не требуется"),
+    });
+  const priorityLabel = (value: string) =>
+    labelFor(value, {
+      low: l("Niedrig", "Низкий"),
+      normal: l("Normal", "Обычный"),
+      high: l("Hoch", "Высокий"),
+      urgent: l("Dringend", "Срочный"),
+    });
+  const transitionKindLabel = (value: string) =>
+    labelFor(value, {
+      created: l("Erstellt", "Создано"),
+      phase_change: l("Phasenwechsel", "Смена фазы"),
+    });
+  const roleLabel = (value: string) => labelFor(value, roleLabels);
+  const localizedBlockingReason = (reason: string) => {
+    const exact =
+      lang === "de"
+        ? {
+            "Billing release is not granted and package coverage is not confirmed":
+              "Billing-Release fehlt und die Paketdeckung ist nicht bestatigt.",
+            "Order signatures are still incomplete":
+              "Die Auftragssignaturen sind noch nicht vollstandig.",
+            "Advance invoice exists but payment is still missing":
+              "Es gibt eine Vorausrechnung, aber die Zahlung fehlt noch.",
+            "Treatment plan must be finalized before execution":
+              "Der Behandlungsplan muss vor der Durchfuhrung finalisiert sein.",
+            "At least one confirmed medical appointment is required":
+              "Mindestens ein bestatigter medizinischer Termin ist erforderlich.",
+            "Required non-medical services still need a confirmed booking":
+              "Erforderliche nicht-medizinische Leistungen brauchen noch eine bestatigte Buchung.",
+            "Interpreter is required but not assigned yet":
+              "Ein Dolmetscher ist erforderlich, aber noch nicht zugewiesen.",
+            "Assigned interpreter has not confirmed yet":
+              "Der zugewiesene Dolmetscher hat noch nicht bestatigt.",
+            "Interpreter briefing is still pending":
+              "Das Dolmetscher-Briefing ist noch ausstehend.",
+            "Preparation documents still need to be sent":
+              "Vorbereitungsunterlagen mussen noch versendet werden.",
+            "Patient arrival or execution start is not recorded yet":
+              "Patientenankunft oder Durchfuhrungsstart sind noch nicht erfasst.",
+            "Medical execution must be completed and backed by delivered appointments or services":
+              "Die medizinische Durchfuhrung muss abgeschlossen und durch erbrachte Termine oder Leistungen belegt sein.",
+            "Required non-medical services still need execution confirmation":
+              "Erforderliche nicht-medizinische Leistungen brauchen noch eine Durchfuhrungsbestatigung.",
+            "Interpreter-supported execution still needs completion or report confirmation":
+              "Dolmetscher-gestutzte Durchfuhrung braucht noch Abschluss oder Berichtbestatigung.",
+            "Execution deviations or incidents must be resolved or marked as not required":
+              "Abweichungen oder Vorfalle mussen geklart oder als nicht erforderlich markiert werden.",
+            "Results, Arztbrief or final patient handoff still need to be released":
+              "Ergebnisse, Arztbrief oder finale Patientenubergabe mussen noch freigegeben werden.",
+            "Doctor-directed follow-up is required but not scheduled yet":
+              "Arztgesteuertes Follow-up ist erforderlich, aber noch nicht terminiert.",
+            "1-week follow-up is not scheduled yet":
+              "Das 1-Wochen-Follow-up ist noch nicht terminiert.",
+            "1-month follow-up is not scheduled yet":
+              "Das 1-Monats-Follow-up ist noch nicht terminiert.",
+            "6-month follow-up is not scheduled yet":
+              "Das 6-Monats-Follow-up ist noch nicht terminiert.",
+            "Package-end follow-up is required but not scheduled yet":
+              "Follow-up zum Paketende ist erforderlich, aber noch nicht terminiert.",
+            "No follow-up reminder, task or appointment has been launched yet":
+              "Es wurde noch keine Follow-up-Erinnerung, Aufgabe oder kein Termin gestartet.",
+            "Primary contact is missing": "Hauptkontakt fehlt.",
+            "Residence or address country is missing":
+              "Wohnsitz- oder Adressland fehlt.",
+            "Preferred language is missing": "Bevorzugte Sprache fehlt.",
+            "Compliance status is not completed":
+              "Der Compliance-Status ist nicht abgeschlossen.",
+            "DSGVO/compliance documents are not signed":
+              "DSGVO-/Compliance-Dokumente sind nicht unterschrieben.",
+            "Identity is not verified": "Die Identitat ist nicht verifiziert.",
+            "Valid contract documentation is missing":
+              "Gultige Vertragsdokumentation fehlt.",
+            "Patient is still in debt-management hold":
+              "Der Patient befindet sich noch im Debt-Hold.",
+            "Existing-customer re-check is not required before the first operational order":
+              "Vor dem ersten operativen Auftrag ist kein Bestandskunden-Re-Check erforderlich.",
+          }[reason]
+        : {
+            "Billing release is not granted and package coverage is not confirmed":
+              "Billing-release ne vydan, a pokrytie paketom ne podtverzhdeno.",
+            "Order signatures are still incomplete":
+              "Podpisi po zakazu eshche ne zaversheny.",
+            "Advance invoice exists but payment is still missing":
+              "Est avansovyy schet, no oplata eshche ne postupila.",
+            "Treatment plan must be finalized before execution":
+              "Plan lecheniya dolzhen byt finalizirovan do ispolneniya.",
+            "At least one confirmed medical appointment is required":
+              "Nuzhen kak minimum odin podtverzhdennyy meditsinskiy priem.",
+            "Required non-medical services still need a confirmed booking":
+              "Objazatelnye nemeditsinskie uslugi eshche trebuyut podtverzhdennogo bronirovaniya.",
+            "Interpreter is required but not assigned yet":
+              "Perevodchik trebuetsya, no eshche ne naznachen.",
+            "Assigned interpreter has not confirmed yet":
+              "Naznachennyy perevodchik eshche ne podtverdil uchastie.",
+            "Interpreter briefing is still pending":
+              "Brifing perevodchika vse eshche ozhidaetsya.",
+            "Preparation documents still need to be sent":
+              "Podgotovitelnye dokumenty eshche nuzhno otpravit.",
+            "Patient arrival or execution start is not recorded yet":
+              "Pribytie patsienta ili start ispolneniya eshche ne zafiksirovany.",
+            "Medical execution must be completed and backed by delivered appointments or services":
+              "Meditsinskaya chast dolzhna byt zavershena i podtverzhdena okazannymi priemami ili uslugami.",
+            "Required non-medical services still need execution confirmation":
+              "Objazatelnye nemeditsinskie uslugi eshche trebuyut podtverzhdeniya ispolneniya.",
+            "Interpreter-supported execution still needs completion or report confirmation":
+              "Ispolnenie s uchastiem perevodchika eshche trebuet zaversheniya ili podtverzhdeniya otcheta.",
+            "Execution deviations or incidents must be resolved or marked as not required":
+              "Otkлонeniya ili intsidenty ispolneniya dolzhny byt zakryty ili pomеcheny kak ne trebuyushchie deystviy.",
+            "Results, Arztbrief or final patient handoff still need to be released":
+              "Rezul'taty, Arztbrief ili finalnaya peredacha patsientu eshche dolzhny byt vypushcheny.",
+            "Doctor-directed follow-up is required but not scheduled yet":
+              "Follow-up po naznacheniyu vracha trebuetsya, no eshche ne zaplanirovan.",
+            "1-week follow-up is not scheduled yet":
+              "1-nedelnyy follow-up eshche ne zaplanirovan.",
+            "1-month follow-up is not scheduled yet":
+              "1-mesyachnyy follow-up eshche ne zaplanirovan.",
+            "6-month follow-up is not scheduled yet":
+              "6-mesyachnyy follow-up eshche ne zaplanirovan.",
+            "Package-end follow-up is required but not scheduled yet":
+              "Follow-up po zaversheniyu paketa trebuetsya, no eshche ne zaplanirovan.",
+            "No follow-up reminder, task or appointment has been launched yet":
+              "Eshche ne zapushcheno ni odnogo napominaniya, zadachi ili priema po follow-up.",
+            "Primary contact is missing": "Ne ukazan osnovnoy kontakt.",
+            "Residence or address country is missing":
+              "Ne ukazana strana prozhivaniya ili adresa.",
+            "Preferred language is missing": "Ne ukazan predpochitaemyy yazyk.",
+            "Compliance status is not completed":
+              "Status compliance ne zavershen.",
+            "DSGVO/compliance documents are not signed":
+              "Dokumenty DSGVO/compliance ne podpisany.",
+            "Identity is not verified": "Lichnost ne podtverzhdena.",
+            "Valid contract documentation is missing":
+              "Net validnogo dogovornogo paketa.",
+            "Patient is still in debt-management hold":
+              "Patsient vse eshche nakhoditsya v debt-hold.",
+            "Existing-customer re-check is not required before the first operational order":
+              "Povtornaya proverka sushchestvuyushchego klienta ne trebuetsya pered pervym operatsionnym zakazom.",
+          }[reason];
+    if (exact) return exact;
+    const executionChecklistMatch = reason.match(
+      /^(\\d+) execution checklist item\\(s\\) remain open$/,
+    );
+    if (executionChecklistMatch) {
+      const count = Number(executionChecklistMatch[1]);
+      return l(
+        `${count} Punkt(e) der Durchfuhrungs-Checkliste sind noch offen.`,
+        `Otkryto eshche ${count} punkt(ov) cheklista ispolneniya.`,
+      );
+    }
+    const missingDocsMatch = reason.match(
+      /^(\\d+) required patient document\\(s\\) are missing$/,
+    );
+    if (missingDocsMatch) {
+      const count = Number(missingDocsMatch[1]);
+      return l(
+        `${count} erforderliche Patientendokument(e) fehlen.`,
+        `Ne khvataet ${count} obyazatelnykh dokument(ov) patsienta.`,
+      );
+    }
+    return reason;
+  };
 
   const [filters, setFilters] = useState<OrdersFilters>(DEFAULT_FILTERS);
   const deferredSearch = useDeferredValue(filters.search);
@@ -1268,10 +1601,10 @@ export function OrdersPage() {
     }
     return Array.from(grouped.entries()).map(([key, groupItems]) => ({
       key,
-      label: workflowChecklistLabel(key),
+      label: workflowChecklistLabel(key, workflowGroupLabels),
       items: groupItems,
     }));
-  }, [workflowChecklist]);
+  }, [workflowChecklist, workflowGroupLabels]);
   const nextLifecycleTransition = useMemo(
     () => orderDetail?.lifecycle?.allowed_transitions?.[0] ?? null,
     [orderDetail?.lifecycle],
@@ -1295,7 +1628,7 @@ export function OrdersPage() {
     ) {
       items.push({
         user_id: currentOwnerId,
-        user_name: currentOwnerName ?? "Current owner",
+        user_name: currentOwnerName ?? l("Aktueller Owner", "Текущий ответственный"),
         user_role: "debt_owner",
         user_active: true,
         revoked_at: null,
@@ -2212,7 +2545,7 @@ export function OrdersPage() {
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <div className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
-            Operations
+            {l("Operationen", "Операционный контур")}
           </div>
           <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">
             {t.orders_title}
@@ -2224,12 +2557,12 @@ export function OrdersPage() {
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" onClick={triggerReload}>
             <RefreshCw className="mr-2 size-4" />
-            Refresh
+            {l("Aktualisieren", "Обновить")}
           </Button>
           {permissions.canCreate ? (
             <Button onClick={() => setCreateOpen(true)}>
               <Plus className="mr-2 size-4" />
-              New order
+              {l("Neuen Auftrag", "Создать заказ")}
             </Button>
           ) : null}
         </div>
@@ -2239,33 +2572,48 @@ export function OrdersPage() {
         <StatCard
           label={tx.orders_title}
           value={String(metrics.total)}
-          description={tx.orders_subtitle}
+          description={l(
+            "Alle Auftrage im aktuellen Filter-Scope.",
+            "Все заказы в текущем видимом скоупе.",
+          )}
           icon={<ClipboardList className="size-4" />}
         />
         <StatCard
-          label={tx.common_active}
+          label={l("Aktive Auftrage", "Активные заказы")}
           value={String(metrics.active)}
-          description={tx.orders_subtitle}
+          description={l(
+            "Auftrage mit laufender Bearbeitung im sichtbaren Scope.",
+            "Заказы с активной операционной работой в видимом скоупе.",
+          )}
           icon={<CheckCircle2 className="size-4" />}
         />
         <StatCard
-          label={tx.orders_phase}
+          label={l("In Durchfuhrung", "В исполнении")}
           value={String(metrics.execution)}
-          description={tx.orders_subtitle}
+          description={l(
+            "Auftrage, die sich aktuell in der Durchfuhrung befinden.",
+            "Заказы, которые сейчас находятся в фазе исполнения.",
+          )}
           icon={<Stethoscope className="size-4" />}
         />
         <StatCard
-          label={tx.contracts_total}
-          value={formatCurrency(metrics.estimatedTotal)}
-          description={tx.orders_subtitle}
+          label={l("Geschaftsvolumen", "Оценочный объём")}
+          value={formatMoney(metrics.estimatedTotal)}
+          description={l(
+            "Geschatztes Gesamtvolumen der sichtbaren Auftrage.",
+            "Оценочный совокупный объём видимых заказов.",
+          )}
           icon={<Wallet className="size-4" />}
         />
       </div>
 
       {canManageDebt ? (
         <SectionCard
-          title="Debt-management queue"
-          description="Orders blocked by overdue receivables or an open debt workflow."
+          title={l("Debt-Management-Queue", "Очередь debt-management")}
+          description={l(
+            "Auftrage, die durch uberfallige Forderungen oder einen offenen Debt-Workflow blockiert sind.",
+            "Заказы, заблокированные просроченной задолженностью или открытым debt-workflow.",
+          )}
         >
           {debtQueueError ? (
             <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
@@ -2274,11 +2622,17 @@ export function OrdersPage() {
           ) : debtQueueLoading ? (
             <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">
               <LoaderCircle className="mb-2 size-4 animate-spin" />
-              Loading debt-management queue...
+              {l(
+                "Debt-Management-Queue wird geladen...",
+                "Загрузка очереди debt-management...",
+              )}
             </div>
           ) : debtQueue.length === 0 ? (
             <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-sm text-emerald-700">
-              No open debt-management items right now.
+              {l(
+                "Aktuell gibt es keine offenen Debt-Management-Falle.",
+                "Сейчас нет открытых кейсов debt-management.",
+              )}
             </div>
           ) : (
             <div className="grid gap-4 xl:grid-cols-3">
@@ -2305,18 +2659,24 @@ export function OrdersPage() {
                       variant="outline"
                       className="rounded-full border-amber-200 bg-amber-50 text-amber-700"
                     >
-                      {item.effective_status}
+                      {debtStatusLabel(item.effective_status)}
                     </Badge>
                   </div>
                   <div className="mt-4 space-y-2 text-sm text-slate-600">
-                    <div>{item.blocking_reason ?? "Open debt workflow"}</div>
                     <div>
-                      {item.overdue_invoice_count} overdue /{" "}
-                      {formatCurrency(item.outstanding_balance)}
+                      {item.blocking_reason
+                        ? localizedBlockingReason(item.blocking_reason)
+                        : l("Offener Debt-Workflow", "Открытый debt-workflow")}
                     </div>
                     <div>
-                      Owner: {item.owner_name ?? "Unassigned"} / Review{" "}
-                      {formatDateTime(item.next_review_at)}
+                      {item.overdue_invoice_count}{" "}
+                      {l("uberfallig", "просрочено")} /{" "}
+                      {formatMoney(item.outstanding_balance)}
+                    </div>
+                    <div>
+                      {l("Owner", "Ответственный")}:{" "}
+                      {item.owner_name ?? l("Nicht zugewiesen", "Не назначено")} /{" "}
+                      {l("Review", "ревью")} {formatDateTimeLabel(item.next_review_at)}
                     </div>
                   </div>
                 </button>
@@ -2361,7 +2721,7 @@ export function OrdersPage() {
               <option value="">{t.providers_all}</option>
               {ORDER_PHASES.map((phase) => (
                 <option key={phase} value={phase}>
-                  {phase}
+                  {phaseLabel(phase)}
                 </option>
               ))}
             </select>
@@ -2381,7 +2741,7 @@ export function OrdersPage() {
               <option value="">{t.providers_all}</option>
               {ORDER_STATUSES.map((status) => (
                 <option key={status} value={status}>
-                  {status}
+                  {orderStatusLabel(status)}
                 </option>
               ))}
             </select>
@@ -2397,16 +2757,16 @@ export function OrdersPage() {
               }}
               className={`mt-1 ${selectClassName}`}
             >
-              <option value="">All patients</option>
+              <option value="">{l("Alle Patienten", "Все пациенты")}</option>
               {patients.map((patient) => (
                 <option key={patient.id} value={patient.id}>
-                  {patientLabel(patient)}
+                  {patientLabel(patient, l("Patient", "Пациент"))}
                 </option>
               ))}
             </select>
           </div>
           <div>
-            <Label>Provider</Label>
+            <Label>{l("Provider", "Провайдер")}</Label>
             <select
               value={filters.providerId}
               onChange={(event) => {
@@ -2433,7 +2793,7 @@ export function OrdersPage() {
 
         <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto]">
           <div className="max-w-xs">
-            <Label>Doctor</Label>
+            <Label>{l("Arzt", "Врач")}</Label>
             <select
               value={filters.doctorId}
               onChange={(event) => {
@@ -2466,7 +2826,7 @@ export function OrdersPage() {
                 });
               }}
             >
-              Reset filters
+              {l("Filter zurucksetzen", "Сбросить фильтры")}
             </Button>
           </div>
         </div>
@@ -2491,7 +2851,7 @@ export function OrdersPage() {
             permissions.canCreate ? (
               <Button onClick={() => setCreateOpen(true)}>
                 <Plus className="mr-2 size-4" />
-                New order
+                {l("Neuen Auftrag", "Создать заказ")}
               </Button>
             ) : undefined
           }
@@ -2532,7 +2892,7 @@ export function OrdersPage() {
                     variant="outline"
                     className={cn("rounded-full", phaseClassName(order.phase))}
                   >
-                    {order.phase}
+                    {phaseLabel(order.phase)}
                   </Badge>
                   <Badge
                     variant="outline"
@@ -2541,25 +2901,25 @@ export function OrdersPage() {
                       statusClassName(order.status),
                     )}
                   >
-                    {order.status}
+                    {orderStatusLabel(order.status)}
                   </Badge>
                 </div>
 
                 <div className="mt-5 grid gap-3 sm:grid-cols-2">
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                     <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                      Created
+                      {l("Erstellt", "Создано")}
                     </div>
                     <div className="mt-2 text-sm text-slate-900">
-                      {formatDateOnly(order.created_at)}
+                      {formatDateOnlyLabel(order.created_at)}
                     </div>
                   </div>
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                     <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                      Estimated
+                      {l("Geschaftsvolumen", "Оценочный объём")}
                     </div>
                     <div className="mt-2 text-sm text-slate-900">
-                      {formatCurrency(order.total_estimated)}
+                      {formatMoney(order.total_estimated)}
                     </div>
                   </div>
                 </div>
@@ -2596,8 +2956,10 @@ export function OrdersPage() {
                 : tx.orders_title}
             </SheetTitle>
             <SheetDescription>
-              Full operational view for the current order, including phase
-              control and provider-linked Leistungen.
+              {l(
+                "Vollstandige operative Sicht auf den aktuellen Auftrag inklusive Phasensteuerung und providerbezogener Leistungen.",
+                "Полная операционная картина текущего заказа, включая управление фазой и Leistungen, привязанные к провайдеру.",
+              )}
             </SheetDescription>
           </SheetHeader>
 
@@ -2630,7 +2992,7 @@ export function OrdersPage() {
                           phaseClassName(orderDetail.phase),
                         )}
                       >
-                        {orderDetail.phase}
+                        {phaseLabel(orderDetail.phase)}
                       </Badge>
                       <Badge
                         variant="outline"
@@ -2639,7 +3001,7 @@ export function OrdersPage() {
                           statusClassName(orderDetail.status),
                         )}
                       >
-                        {orderDetail.status}
+                        {orderStatusLabel(orderDetail.status)}
                       </Badge>
                     </div>
                   }
@@ -2654,7 +3016,7 @@ export function OrdersPage() {
                       value={
                         <span className="inline-flex items-center gap-2">
                           <CalendarClock className="size-4 text-slate-500" />
-                          {formatDateTime(orderDetail.created_at)}
+                          {formatDateTimeLabel(orderDetail.created_at)}
                         </span>
                       }
                     />
@@ -2663,7 +3025,7 @@ export function OrdersPage() {
                       value={
                         <span className="inline-flex items-center gap-2">
                           <RefreshCw className="size-4 text-slate-500" />
-                          {formatDateTime(orderDetail.updated_at)}
+                          {formatDateTimeLabel(orderDetail.updated_at)}
                         </span>
                       }
                     />
@@ -2681,22 +3043,28 @@ export function OrdersPage() {
                     />
                     <DetailField
                       label={tx.invoices_subtotal}
-                      value={formatCurrency(orderDetail.total_estimated)}
+                      value={formatMoney(orderDetail.total_estimated)}
                     />
                     <DetailField
                       label={tx.invoices_total}
-                      value={formatCurrency(orderDetail.total_actual)}
+                      value={formatMoney(orderDetail.total_actual)}
                     />
                     <DetailField
                       label={tx.providers_services}
-                      value={`${leistungMetrics.total} items / ${leistungMetrics.delivered} delivered / ${leistungMetrics.approved} approved`}
+                      value={l(
+                        `${leistungMetrics.total} Positionen / ${leistungMetrics.delivered} erbracht / ${leistungMetrics.approved} freigegeben`,
+                        `${leistungMetrics.total} позиций / ${leistungMetrics.delivered} оказано / ${leistungMetrics.approved} утверждено`,
+                      )}
                     />
                   </div>
                 </SectionCard>
 
                 <SectionCard
                   title={tx.providers_linked_patients}
-                  description="Jump to the adjacent patient, case and appointment contexts without rebuilding filters manually."
+                  description={l(
+                    "Direkt in Patienten-, Fall- und Terminkontexte springen, ohne Filter manuell neu aufzubauen.",
+                    "Переходите в соседние контексты пациента, кейса и приёмов без ручной пересборки фильтров.",
+                  )}
                 >
                   <div className="flex flex-wrap gap-2">
                     <Button
@@ -2707,7 +3075,7 @@ export function OrdersPage() {
                         staffGo(`/patients?patient=${orderDetail.patient_id}`)
                       }
                     >
-                      Patient
+                      {l("Patient", "Пациент")}
                     </Button>
                     <Button
                       type="button"
@@ -2717,7 +3085,7 @@ export function OrdersPage() {
                         staffGo(`/cases?patient=${orderDetail.patient_id}`)
                       }
                     >
-                      Cases
+                      {l("Fälle", "Кейсы")}
                     </Button>
                     <Button
                       type="button"
@@ -2729,7 +3097,7 @@ export function OrdersPage() {
                         )
                       }
                     >
-                      Appointments
+                      {l("Termine", "Приёмы")}
                     </Button>
                     <Button
                       type="button"
@@ -2741,7 +3109,7 @@ export function OrdersPage() {
                         )
                       }
                     >
-                      Contracts
+                      {l("Verträge", "Договоры")}
                     </Button>
                     <Button
                       type="button"
@@ -2753,7 +3121,7 @@ export function OrdersPage() {
                         )
                       }
                     >
-                      Invoices
+                      {l("Rechnungen", "Счета")}
                     </Button>
                     <Button
                       type="button"
@@ -2765,20 +3133,23 @@ export function OrdersPage() {
                         )
                       }
                     >
-                      Documents
+                      {l("Dokumente", "Документы")}
                     </Button>
                   </div>
                 </SectionCard>
 
                 {orderDetail.process_gates ? (
                   <SectionCard
-                    title="Process gates"
-                    description="Finance-side execution gates for debt, billing release and package coverage."
+                    title={l("Prozess-Gates", "Процессные гейты")}
+                    description={l(
+                      "Finanzseitige Freigaben fur Debt-Hold, Billing-Release und Paketdeckung.",
+                      "Финансовые гейты исполнения по debt-hold, billing-release и покрытию пакетом.",
+                    )}
                   >
                     <div className="space-y-4">
                       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                         <DetailField
-                          label="Execution readiness"
+                          label={l("Durchfuhrungsfreigabe", "Готовность к исполнению")}
                           value={
                             <Badge
                               variant="outline"
@@ -2790,45 +3161,47 @@ export function OrdersPage() {
                               )}
                             >
                               {orderDetail.process_gates.execution_ready
-                                ? "ready"
-                                : "blocked"}
+                                ? l("bereit", "готово")
+                                : l("blockiert", "заблокировано")}
                             </Badge>
                           }
                         />
                         <DetailField
-                          label="Debt hold"
+                          label={l("Debt-Hold", "Debt-hold")}
                           value={
                             orderDetail.process_gates.debt_management
                               ?.blocking_reason
                               ? orderDetail.process_gates.debt_management
                                   .blocking_reason
                               : orderDetail.process_gates.debt_hold
-                                ? `${orderDetail.process_gates.overdue_invoice_count} overdue invoice(s)`
-                                : "No overdue debt"
+                                ? `${orderDetail.process_gates.overdue_invoice_count} ${l("uberfallige Rechnung(en)", "просроченных счет(ов)")}`
+                                : l("Keine uberfalligen Forderungen", "Нет просроченной задолженности")
                           }
                         />
                         <DetailField
-                          label="Debt workflow"
+                          label={l("Debt-Workflow", "Debt-workflow")}
                           value={
-                            orderDetail.process_gates.debt_management
-                              ?.effective_status ?? "not_required"
+                            debtStatusLabel(
+                              orderDetail.process_gates.debt_management
+                                ?.effective_status ?? "not_required",
+                            )
                           }
                         />
                         <DetailField
-                          label="Billing release"
-                          value={
-                            orderDetail.process_gates.billing_release_status
-                          }
+                          label={l("Billing-Release", "Billing-release")}
+                          value={billingReleaseLabel(
+                            orderDetail.process_gates.billing_release_status,
+                          )}
                         />
                         <DetailField
-                          label="Package coverage"
-                          value={
-                            orderDetail.process_gates.package_coverage_status
-                          }
+                          label={l("Paketdeckung", "Покрытие пакетом")}
+                          value={packageCoverageLabel(
+                            orderDetail.process_gates.package_coverage_status,
+                          )}
                         />
                         <DetailField
-                          label="Outstanding balance"
-                          value={formatCurrency(
+                          label={l("Offener Saldo", "Открытый остаток")}
+                          value={formatMoney(
                             orderDetail.process_gates.outstanding_balance,
                           )}
                         />
@@ -2836,11 +3209,13 @@ export function OrdersPage() {
 
                       {orderDetail.process_gates.blocking_reasons.length > 0 ? (
                         <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                          <div className="font-medium">Blocking reasons</div>
+                          <div className="font-medium">
+                            {l("Blockierende Grunde", "Блокирующие причины")}
+                          </div>
                           <ul className="mt-2 space-y-1">
                             {orderDetail.process_gates.blocking_reasons.map(
                               (reason) => (
-                                <li key={reason}>• {reason}</li>
+                                <li key={reason}>• {localizedBlockingReason(reason)}</li>
                               ),
                             )}
                           </ul>
@@ -2857,11 +3232,13 @@ export function OrdersPage() {
                         {canManageDebt ? (
                           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                             <div className="text-sm font-semibold text-slate-900">
-                              Debt management
+                              {l("Debt-Management", "Debt-management")}
                             </div>
                             <div className="mt-1 text-sm text-slate-500">
-                              Track the active debt workflow, assign ownership
-                              and set the next review checkpoint.
+                              {l(
+                                "Aktiven Debt-Workflow nachverfolgen, Owner zuweisen und den nachsten Review-Punkt setzen.",
+                                "Отслеживать активный debt-workflow, назначать ответственного и ставить следующую точку ревью.",
+                              )}
                             </div>
                             <div className="mt-4 grid gap-3">
                               <select
@@ -2883,7 +3260,7 @@ export function OrdersPage() {
                                   "not_required",
                                 ].map((status) => (
                                   <option key={status} value={status}>
-                                    {status}
+                                    {debtStatusLabel(status)}
                                   </option>
                                 ))}
                               </select>
@@ -2897,13 +3274,18 @@ export function OrdersPage() {
                                 }
                                 className={selectClassName}
                               >
-                                <option value="">Keep current owner</option>
+                                <option value="">
+                                  {l(
+                                    "Aktuellen Owner beibehalten",
+                                    "Оставить текущего ответственного",
+                                  )}
+                                </option>
                                 {debtOwnerOptions.map((item) => (
                                   <option
                                     key={item.user_id}
                                     value={item.user_id}
                                   >
-                                    {item.user_name} · {item.user_role}
+                                    {item.user_name} · {roleLabel(item.user_role)}
                                   </option>
                                 ))}
                               </select>
@@ -2938,7 +3320,10 @@ export function OrdersPage() {
                                   }))
                                 }
                                 className={textareaClassName}
-                                placeholder="Debt-management note"
+                                placeholder={l(
+                                  "Notiz zum Debt-Workflow",
+                                  "Заметка по debt-workflow",
+                                )}
                               />
                               <textarea
                                 value={processGateForm.debtResolutionNote}
@@ -2949,31 +3334,31 @@ export function OrdersPage() {
                                   }))
                                 }
                                 className={textareaClassName}
-                                placeholder="Resolution note"
+                                placeholder={l("Losungsnotiz", "Заметка по решению")}
                               />
                               <div className="grid gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-3 text-xs text-slate-500">
                                 <div>
-                                  Owner:{" "}
+                                  {l("Owner", "Ответственный")}:{" "}
                                   {orderDetail.process_gates.debt_management
-                                    ?.owner_name ?? "Not assigned"}
+                                    ?.owner_name ?? l("Nicht zugewiesen", "Не назначено")}
                                 </div>
                                 <div>
-                                  Last contact:{" "}
-                                  {formatDateTime(
+                                  {l("Letzter Kontakt", "Последний контакт")}:{" "}
+                                  {formatDateTimeLabel(
                                     orderDetail.process_gates.debt_management
                                       ?.last_contact_at,
                                   )}
                                 </div>
                                 <div>
-                                  Next review:{" "}
-                                  {formatDateTime(
+                                  {l("Nachstes Review", "Следующее ревью")}:{" "}
+                                  {formatDateTimeLabel(
                                     orderDetail.process_gates.debt_management
                                       ?.next_review_at,
                                   )}
                                 </div>
                                 <div>
-                                  Resolved:{" "}
-                                  {formatDateTime(
+                                  {l("Erledigt", "Закрыто")}:{" "}
+                                  {formatDateTimeLabel(
                                     orderDetail.process_gates.debt_management
                                       ?.resolved_at,
                                   )}
@@ -2990,7 +3375,10 @@ export function OrdersPage() {
                                   {processGateBusy ? (
                                     <LoaderCircle className="mr-2 size-4 animate-spin" />
                                   ) : null}
-                                  Save debt workflow
+                                  {l(
+                                    "Debt-Workflow speichern",
+                                    "Сохранить debt-workflow",
+                                  )}
                                 </Button>
                               </div>
                             </div>
@@ -3000,11 +3388,13 @@ export function OrdersPage() {
                         {user?.role === "billing" || user?.role === "ceo" ? (
                           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                             <div className="text-sm font-semibold text-slate-900">
-                              Billing release
+                              {l("Billing-Release", "Billing-release")}
                             </div>
                             <div className="mt-1 text-sm text-slate-500">
-                              Abrechnung decides whether execution may continue
-                              outside package coverage.
+                              {l(
+                                "Billing entscheidet, ob die Durchfuhrung ausserhalb der Paketdeckung weiterlaufen darf.",
+                                "Биллинг решает, может ли исполнение продолжаться вне покрытия пакетом.",
+                              )}
                             </div>
                             <div className="mt-4 space-y-3">
                               <select
@@ -3017,9 +3407,9 @@ export function OrdersPage() {
                                 }
                                 className={selectClassName}
                               >
-                                <option value="pending">pending</option>
-                                <option value="granted">granted</option>
-                                <option value="denied">denied</option>
+                                <option value="pending">{billingReleaseLabel("pending")}</option>
+                                <option value="granted">{billingReleaseLabel("granted")}</option>
+                                <option value="denied">{billingReleaseLabel("denied")}</option>
                               </select>
                               <textarea
                                 value={processGateForm.billingReleaseNote}
@@ -3030,7 +3420,7 @@ export function OrdersPage() {
                                   }))
                                 }
                                 className={textareaClassName}
-                                placeholder="Billing note"
+                                placeholder={l("Billing-Notiz", "Заметка биллинга")}
                               />
                               <div className="flex justify-end">
                                 <Button
@@ -3043,7 +3433,10 @@ export function OrdersPage() {
                                   {processGateBusy ? (
                                     <LoaderCircle className="mr-2 size-4 animate-spin" />
                                   ) : null}
-                                  Save billing gate
+                                  {l(
+                                    "Billing-Gate speichern",
+                                    "Сохранить billing-gate",
+                                  )}
                                 </Button>
                               </div>
                             </div>
@@ -3054,11 +3447,13 @@ export function OrdersPage() {
                         user?.role === "ceo" ? (
                           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                             <div className="text-sm font-semibold text-slate-900">
-                              Package coverage
+                              {l("Paketdeckung", "Покрытие пакетом")}
                             </div>
                             <div className="mt-1 text-sm text-slate-500">
-                              Existing-package coverage can unblock repeat work
-                              without a separate billing release.
+                              {l(
+                                "Bestehende Paketdeckung kann Wiederholungsleistungen ohne separates Billing-Release freigeben.",
+                                "Действующее покрытие пакетом может разблокировать повторную работу без отдельного billing-release.",
+                              )}
                             </div>
                             <div className="mt-4 space-y-3">
                               <select
@@ -3071,9 +3466,9 @@ export function OrdersPage() {
                                 }
                                 className={selectClassName}
                               >
-                                <option value="unknown">unknown</option>
-                                <option value="covered">covered</option>
-                                <option value="not_covered">not covered</option>
+                                <option value="unknown">{packageCoverageLabel("unknown")}</option>
+                                <option value="covered">{packageCoverageLabel("covered")}</option>
+                                <option value="not_covered">{packageCoverageLabel("not_covered")}</option>
                               </select>
                               <textarea
                                 value={processGateForm.packageCoverageNote}
@@ -3084,7 +3479,10 @@ export function OrdersPage() {
                                   }))
                                 }
                                 className={textareaClassName}
-                                placeholder="Coverage note"
+                                placeholder={l(
+                                  "Notiz zur Paketdeckung",
+                                  "Заметка по покрытию",
+                                )}
                               />
                               <div className="flex justify-end">
                                 <Button
@@ -3097,7 +3495,10 @@ export function OrdersPage() {
                                   {processGateBusy ? (
                                     <LoaderCircle className="mr-2 size-4 animate-spin" />
                                   ) : null}
-                                  Save package gate
+                                  {l(
+                                    "Paket-Gate speichern",
+                                    "Сохранить package-gate",
+                                  )}
                                 </Button>
                               </div>
                             </div>
@@ -3110,13 +3511,16 @@ export function OrdersPage() {
 
                 {orderDetail.planning_preparation ? (
                   <SectionCard
-                    title="Planning and preparation"
-                    description="Treatment-plan finalization, slot booking, interpreter handoff and prep-document delivery before execution starts."
+                    title={l("Planung und Vorbereitung", "Планирование и подготовка")}
+                    description={l(
+                      "Finalisierung des Behandlungsplans, Terminbuchung, Dolmetscher-Ubergabe und Versand der Vorbereitungsunterlagen vor der Durchfuhrung.",
+                      "Финализация плана лечения, бронирование слотов, передача на переводчика и отправка подготовительных документов до старта исполнения.",
+                    )}
                   >
                     <div className="space-y-4">
                       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                         <DetailField
-                          label="Planning readiness"
+                          label={l("Planungsfreigabe", "Готовность планирования")}
                           value={
                             <Badge
                               variant="outline"
@@ -3128,66 +3532,85 @@ export function OrdersPage() {
                               )}
                             >
                               {orderDetail.planning_preparation.planning_ready
-                                ? "ready"
-                                : "blocked"}
+                                ? l("bereit", "готово")
+                                : l("blockiert", "заблокировано")}
                             </Badge>
                           }
                         />
                         <DetailField
-                          label="Treatment plan"
+                          label={l("Behandlungsplan", "План лечения")}
                           value={
-                            orderDetail.planning_preparation
-                              .treatment_plan_status
+                            treatmentPlanStatusLabel(
+                              orderDetail.planning_preparation
+                                .treatment_plan_status,
+                            )
                           }
                         />
                         <DetailField
-                          label="Medical bookings"
-                          value={`${orderDetail.planning_preparation.medical_confirmed}/${orderDetail.planning_preparation.medical_total} confirmed`}
+                          label={l("Medizinische Termine", "Медицинские записи")}
+                          value={l(
+                            `${orderDetail.planning_preparation.medical_confirmed}/${orderDetail.planning_preparation.medical_total} bestätigt`,
+                            `${orderDetail.planning_preparation.medical_confirmed}/${orderDetail.planning_preparation.medical_total} подтверждено`,
+                          )}
                         />
                         <DetailField
-                          label="Preparation documents"
+                          label={l("Vorbereitungsunterlagen", "Подготовительные документы")}
                           value={
-                            orderDetail.planning_preparation
-                              .preparation_documents_status
+                            preparationDocumentStatusLabel(
+                              orderDetail.planning_preparation
+                                .preparation_documents_status,
+                            )
                           }
                         />
                       </div>
 
                       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                         <DetailField
-                          label="Non-medical flow"
+                          label={l("Nicht-medizinischer Ablauf", "Немедицинский поток")}
                           value={
                             orderDetail.planning_preparation
                               .non_medical_required
-                              ? `${orderDetail.planning_preparation.non_medical_confirmed}/${orderDetail.planning_preparation.non_medical_total} confirmed`
-                              : "Not required"
+                              ? l(
+                                  `${orderDetail.planning_preparation.non_medical_confirmed}/${orderDetail.planning_preparation.non_medical_total} bestätigt`,
+                                  `${orderDetail.planning_preparation.non_medical_confirmed}/${orderDetail.planning_preparation.non_medical_total} подтверждено`,
+                                )
+                              : l("Nicht erforderlich", "Не требуется")
                           }
                         />
                         <DetailField
-                          label="Interpreter"
+                          label={l("Dolmetscher", "Переводчик")}
                           value={
                             orderDetail.planning_preparation
                               .interpreter_required
-                              ? `${orderDetail.planning_preparation.interpreter_assigned} assigned / ${orderDetail.planning_preparation.interpreter_confirmed} accepted`
-                              : "Not required"
+                              ? l(
+                                  `${orderDetail.planning_preparation.interpreter_assigned} zugewiesen / ${orderDetail.planning_preparation.interpreter_confirmed} bestätigt`,
+                                  `${orderDetail.planning_preparation.interpreter_assigned} назначено / ${orderDetail.planning_preparation.interpreter_confirmed} принято`,
+                                )
+                              : l("Nicht erforderlich", "Не требуется")
                           }
                         />
                         <DetailField
-                          label="Interpreter briefing"
+                          label={l("Dolmetscher-Briefing", "Брифинг переводчика")}
                           value={
-                            orderDetail.planning_preparation
-                              .interpreter_briefing_status
+                            interpreterBriefingStatusLabel(
+                              orderDetail.planning_preparation
+                                .interpreter_briefing_status,
+                            )
                           }
                         />
                         <DetailField
-                          label="Latest milestone"
+                          label={l("Letzter Meilenstein", "Последний этап")}
                           value={
                             orderDetail.planning_preparation.plan_finalized_at
-                              ? `Plan ${formatDateTime(
+                              ? l("Plan", "План") +
+                                ` ${formatDateTimeLabel(
                                   orderDetail.planning_preparation
                                     .plan_finalized_at,
                                 )}`
-                              : "No planning milestone yet"
+                              : l(
+                                  "Noch kein Planungsmeilenstein",
+                                  "Этапов планирования пока нет",
+                                )
                           }
                         />
                       </div>
@@ -3196,20 +3619,22 @@ export function OrdersPage() {
                         .length > 0 ? (
                         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
                           <div className="font-medium">
-                            Execution blockers from planning
+                            {l("Blocker aus der Planung", "Блокеры из планирования")}
                           </div>
                           <ul className="mt-2 space-y-1">
                             {orderDetail.planning_preparation.blocking_reasons.map(
                               (reason) => (
-                                <li key={reason}>• {reason}</li>
+                                <li key={reason}>• {localizedBlockingReason(reason)}</li>
                               ),
                             )}
                           </ul>
                         </div>
                       ) : (
                         <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-                          Planning and preparation requirements are complete for
-                          execution.
+                          {l(
+                            "Planung und Vorbereitung sind fur die Durchfuhrung vollstandig.",
+                            "Планирование и подготовка полностью готовы к исполнению.",
+                          )}
                         </div>
                       )}
 
@@ -3224,12 +3649,13 @@ export function OrdersPage() {
                         <div className="grid gap-4 xl:grid-cols-2">
                           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                             <div className="text-sm font-semibold text-slate-900">
-                              Planning controls
+                              {l("Planungssteuerung", "Управление планированием")}
                             </div>
                             <div className="mt-1 text-sm text-slate-500">
-                              Lock the treatment plan, declare if non-medical
-                              services or interpreter support are still
-                              required, and mark prep documents.
+                              {l(
+                                "Behandlungsplan fixieren, Bedarf an nicht-medizinischen Leistungen oder Dolmetscher-Support markieren und Vorbereitungsunterlagen steuern.",
+                                "Зафиксировать план лечения, отметить необходимость немедицинских услуг или поддержки переводчика и провести подготовительные документы.",
+                              )}
                             </div>
                             <div className="mt-4 space-y-3">
                               <select
@@ -3242,12 +3668,12 @@ export function OrdersPage() {
                                 }
                                 className={selectClassName}
                               >
-                                <option value="draft">draft</option>
-                                <option value="agreed">agreed</option>
+                                <option value="draft">{treatmentPlanStatusLabel("draft")}</option>
+                                <option value="agreed">{treatmentPlanStatusLabel("agreed")}</option>
                                 <option value="correction_requested">
-                                  correction requested
+                                  {treatmentPlanStatusLabel("correction_requested")}
                                 </option>
-                                <option value="finalized">finalized</option>
+                                <option value="finalized">{treatmentPlanStatusLabel("finalized")}</option>
                               </select>
                               <textarea
                                 value={planningForm.treatmentPlanNote}
@@ -3258,7 +3684,10 @@ export function OrdersPage() {
                                   }))
                                 }
                                 className={textareaClassName}
-                                placeholder="Treatment-plan note"
+                                placeholder={l(
+                                  "Notiz zum Behandlungsplan",
+                                  "Заметка по плану лечения",
+                                )}
                               />
                               <label className="flex items-center gap-2 text-sm text-slate-700">
                                 <input
@@ -3271,7 +3700,10 @@ export function OrdersPage() {
                                     }))
                                   }
                                 />
-                                Non-medical services required
+                                {l(
+                                  "Nicht-medizinische Leistungen sind erforderlich",
+                                  "Немедицинские услуги требуются",
+                                )}
                               </label>
                               <label className="flex items-center gap-2 text-sm text-slate-700">
                                 <input
@@ -3291,7 +3723,7 @@ export function OrdersPage() {
                                     }))
                                   }
                                 />
-                                Interpreter required
+                                {l("Dolmetscher ist erforderlich", "Переводчик требуется")}
                               </label>
                               <select
                                 value={planningForm.preparationDocumentsStatus}
@@ -3305,11 +3737,13 @@ export function OrdersPage() {
                                 className={selectClassName}
                               >
                                 <option value="pending">
-                                  documents pending
+                                  {preparationDocumentStatusLabel("pending")}
                                 </option>
-                                <option value="sent">documents sent</option>
+                                <option value="sent">
+                                  {preparationDocumentStatusLabel("sent")}
+                                </option>
                                 <option value="not_required">
-                                  documents not required
+                                  {preparationDocumentStatusLabel("not_required")}
                                 </option>
                               </select>
                               <select
@@ -3324,12 +3758,14 @@ export function OrdersPage() {
                                 className={selectClassName}
                                 disabled={!planningForm.interpreterRequired}
                               >
-                                <option value="not_needed">not needed</option>
+                                <option value="not_needed">
+                                  {interpreterBriefingStatusLabel("not_needed")}
+                                </option>
                                 <option value="pending">
-                                  briefing pending
+                                  {interpreterBriefingStatusLabel("pending")}
                                 </option>
                                 <option value="completed">
-                                  briefing completed
+                                  {interpreterBriefingStatusLabel("completed")}
                                 </option>
                               </select>
                               <div className="flex justify-end">
@@ -3343,7 +3779,10 @@ export function OrdersPage() {
                                   {planningBusy ? (
                                     <LoaderCircle className="mr-2 size-4 animate-spin" />
                                   ) : null}
-                                  Save planning state
+                                  {l(
+                                    "Planungsstand speichern",
+                                    "Сохранить состояние планирования",
+                                  )}
                                 </Button>
                               </div>
                             </div>
@@ -3351,12 +3790,13 @@ export function OrdersPage() {
 
                           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                             <div className="text-sm font-semibold text-slate-900">
-                              Operational handoff
+                              {l("Operative Übergabe", "Операционная передача")}
                             </div>
                             <div className="mt-1 text-sm text-slate-500">
-                              Use the linked workspaces to confirm medical
-                              slots, non-medical services, interpreter
-                              assignment and preparation documents.
+                              {l(
+                                "Verknüpfte Arbeitsbereiche nutzen, um medizinische Slots, nicht-medizinische Leistungen, Dolmetscher-Zuweisung und Vorbereitungsunterlagen zu bestätigen.",
+                                "Используйте связанные рабочие пространства, чтобы подтвердить медицинские слоты, немедицинские услуги, назначение переводчика и подготовительные документы.",
+                              )}
                             </div>
                             <div className="mt-4 grid gap-3">
                               <Button
@@ -3369,7 +3809,10 @@ export function OrdersPage() {
                                   )
                                 }
                               >
-                                Medical and non-medical appointments
+                                {l(
+                                  "Medizinische und nicht-medizinische Termine",
+                                  "Медицинские и немедицинские приёмы",
+                                )}
                               </Button>
                               <Button
                                 type="button"
@@ -3381,7 +3824,7 @@ export function OrdersPage() {
                                   )
                                 }
                               >
-                                Preparation documents
+                                {l("Vorbereitungsunterlagen", "Подготовительные документы")}
                               </Button>
                               <Button
                                 type="button"
@@ -3393,7 +3836,10 @@ export function OrdersPage() {
                                   )
                                 }
                               >
-                                Interpreter assignment and briefing
+                                {l(
+                                  "Dolmetscher-Zuweisung und Briefing",
+                                  "Назначение переводчика и брифинг",
+                                )}
                               </Button>
                               {orderDetail.planning_preparation
                                 .treatment_plan_note ? (
@@ -3414,13 +3860,16 @@ export function OrdersPage() {
 
                 {orderDetail.execution_flow ? (
                   <SectionCard
-                    title="Execution flow"
-                    description="Arrival, delivered services, interpreter support and deviation handling before the order can move to closure."
+                    title={l("Durchfuhrung", "Исполнение")}
+                    description={l(
+                      "Ankunft, erbrachte Leistungen, Dolmetscher-Support und Abweichungsbearbeitung vor dem Wechsel in den Abschluss.",
+                      "Прибытие, оказанные услуги, поддержка переводчика и обработка отклонений до перехода заказа в закрытие.",
+                    )}
                   >
                     <div className="space-y-4">
                       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                         <DetailField
-                          label="Closure readiness"
+                          label={l("Abschlussreife", "Готовность к закрытию")}
                           value={
                             <Badge
                               variant="outline"
@@ -3432,21 +3881,26 @@ export function OrdersPage() {
                               )}
                             >
                               {orderDetail.execution_flow.closure_ready
-                                ? "ready"
-                                : "blocked"}
+                                ? l("bereit", "готово")
+                                : l("blockiert", "заблокировано")}
                             </Badge>
                           }
                         />
                         <DetailField
-                          label="Arrival"
-                          value={orderDetail.execution_flow.arrival_status}
+                          label={l("Ankunft", "Прибытие")}
+                          value={arrivalStatusLabel(
+                            orderDetail.execution_flow.arrival_status,
+                          )}
                         />
                         <DetailField
-                          label="Medical execution"
-                          value={`${orderDetail.execution_flow.medical_execution_status} · ${orderDetail.execution_flow.medical_completed} visit(s) / ${orderDetail.execution_flow.delivered_leistungen} line(s)`}
+                          label={l("Medizinische Durchführung", "Медицинское исполнение")}
+                          value={l(
+                            `${executionStatusLabel(orderDetail.execution_flow.medical_execution_status)} · ${orderDetail.execution_flow.medical_completed} Termin(e) / ${orderDetail.execution_flow.delivered_leistungen} Position(en)`,
+                            `${executionStatusLabel(orderDetail.execution_flow.medical_execution_status)} · ${orderDetail.execution_flow.medical_completed} приём(ов) / ${orderDetail.execution_flow.delivered_leistungen} позици(й)`,
+                          )}
                         />
                         <DetailField
-                          label="Open execution checklist"
+                          label={l("Offene Durchführungspunkte", "Открытые пункты исполнения")}
                           value={String(
                             orderDetail.execution_flow
                               .open_execution_checklist_count,
@@ -3456,27 +3910,36 @@ export function OrdersPage() {
 
                       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                         <DetailField
-                          label="Non-medical execution"
+                          label={l(
+                            "Nicht-medizinische Durchführung",
+                            "Немедицинское исполнение",
+                          )}
                           value={
                             orderDetail.execution_flow.non_medical_required
-                              ? `${orderDetail.execution_flow.non_medical_execution_status} · ${orderDetail.execution_flow.non_medical_completed} visit(s) / ${orderDetail.execution_flow.concierge_completed} concierge service(s)`
-                              : "Not required"
+                              ? l(
+                                  `${executionStatusLabel(orderDetail.execution_flow.non_medical_execution_status)} · ${orderDetail.execution_flow.non_medical_completed} Termin(e) / ${orderDetail.execution_flow.concierge_completed} Concierge-Leistung(en)`,
+                                  `${executionStatusLabel(orderDetail.execution_flow.non_medical_execution_status)} · ${orderDetail.execution_flow.non_medical_completed} приём(ов) / ${orderDetail.execution_flow.concierge_completed} concierge-услуг`,
+                                )
+                              : l("Nicht erforderlich", "Не требуется")
                           }
                         />
                         <DetailField
-                          label="Interpreter support"
+                          label={l("Dolmetscher-Support", "Поддержка переводчика")}
                           value={
                             orderDetail.execution_flow.interpreter_required
-                              ? `${orderDetail.execution_flow.interpreter_service_status} · ${orderDetail.execution_flow.approved_interpreter_reports} approved report(s)`
-                              : "Not required"
+                              ? l(
+                                  `${executionStatusLabel(orderDetail.execution_flow.interpreter_service_status)} · ${orderDetail.execution_flow.approved_interpreter_reports} freigegebene Berichte`,
+                                  `${executionStatusLabel(orderDetail.execution_flow.interpreter_service_status)} · ${orderDetail.execution_flow.approved_interpreter_reports} утверждённых отчётов`,
+                                )
+                              : l("Nicht erforderlich", "Не требуется")
                           }
                         />
                         <DetailField
-                          label="Deviation handling"
-                          value={orderDetail.execution_flow.issue_status}
+                          label={l("Abweichungen", "Отклонения")}
+                          value={issueStatusLabel(orderDetail.execution_flow.issue_status)}
                         />
                         <DetailField
-                          label="Execution documents"
+                          label={l("Durchführungsdokumente", "Документы исполнения")}
                           value={String(
                             orderDetail.execution_flow.execution_documents,
                           )}
@@ -3487,20 +3950,22 @@ export function OrdersPage() {
                       0 ? (
                         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
                           <div className="font-medium">
-                            Closure blockers from execution
+                            {l("Blocker aus der Durchführung", "Блокеры из исполнения")}
                           </div>
                           <ul className="mt-2 space-y-1">
                             {orderDetail.execution_flow.blocking_reasons.map(
                               (reason) => (
-                                <li key={reason}>• {reason}</li>
+                                <li key={reason}>• {localizedBlockingReason(reason)}</li>
                               ),
                             )}
                           </ul>
                         </div>
                       ) : (
                         <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-                          Execution evidence and operational handoff are
-                          complete for closure.
+                          {l(
+                            "Durchführungsnachweise und operative Übergabe sind für den Abschluss vollständig.",
+                            "Подтверждения исполнения и операционная передача готовы для закрытия.",
+                          )}
                         </div>
                       )}
 
@@ -3513,13 +3978,18 @@ export function OrdersPage() {
                       <div className="grid gap-4 xl:grid-cols-2">
                         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                           <div className="text-sm font-semibold text-slate-900">
-                            Execution controls
+                            {l("Steuerung der Durchführung", "Управление исполнением")}
                           </div>
                           <div className="mt-1 text-sm text-slate-500">
-                            Confirm arrival, delivered scope and whether
-                            execution deviations are resolved.
+                            {l(
+                              "Ankunft, Leistungsumfang und Klärung von Abweichungen oder Zwischenfällen bestätigen.",
+                              "Подтвердить прибытие, объём оказанных услуг и то, что отклонения исполнения закрыты.",
+                            )}
                           </div>
-                          <div className="mt-4 space-y-3">
+                          <fieldset
+                            disabled={!permissions.canManagePhase}
+                            className="mt-4 space-y-3"
+                          >
                             <select
                               value={executionForm.arrivalStatus}
                               onChange={(event) =>
@@ -3530,9 +4000,9 @@ export function OrdersPage() {
                               }
                               className={selectClassName}
                             >
-                              <option value="pending">arrival pending</option>
-                              <option value="arrived">arrived</option>
-                              <option value="not_required">not required</option>
+                              <option value="pending">{arrivalStatusLabel("pending")}</option>
+                              <option value="arrived">{arrivalStatusLabel("arrived")}</option>
+                              <option value="not_required">{arrivalStatusLabel("not_required")}</option>
                             </select>
                             <select
                               value={executionForm.medicalExecutionStatus}
@@ -3544,15 +4014,15 @@ export function OrdersPage() {
                               }
                               className={selectClassName}
                             >
-                              <option value="pending">medical pending</option>
+                              <option value="pending">{executionStatusLabel("pending")}</option>
                               <option value="in_progress">
-                                medical in progress
+                                {executionStatusLabel("in_progress")}
                               </option>
                               <option value="completed">
-                                medical completed
+                                {executionStatusLabel("completed")}
                               </option>
                               <option value="not_required">
-                                medical not required
+                                {executionStatusLabel("not_required")}
                               </option>
                             </select>
                             <select
@@ -3569,16 +4039,16 @@ export function OrdersPage() {
                               }
                             >
                               <option value="not_required">
-                                non-medical not required
+                                {executionStatusLabel("not_required")}
                               </option>
                               <option value="pending">
-                                non-medical pending
+                                {executionStatusLabel("pending")}
                               </option>
                               <option value="in_progress">
-                                non-medical in progress
+                                {executionStatusLabel("in_progress")}
                               </option>
                               <option value="completed">
-                                non-medical completed
+                                {executionStatusLabel("completed")}
                               </option>
                             </select>
                             <select
@@ -3595,16 +4065,16 @@ export function OrdersPage() {
                               }
                             >
                               <option value="not_required">
-                                interpreter not required
+                                {executionStatusLabel("not_required")}
                               </option>
                               <option value="pending">
-                                interpreter pending
+                                {executionStatusLabel("pending")}
                               </option>
                               <option value="in_progress">
-                                interpreter in progress
+                                {executionStatusLabel("in_progress")}
                               </option>
                               <option value="completed">
-                                interpreter completed
+                                {executionStatusLabel("completed")}
                               </option>
                             </select>
                             <select
@@ -3617,12 +4087,12 @@ export function OrdersPage() {
                               }
                               className={selectClassName}
                             >
-                              <option value="pending">issues pending</option>
+                              <option value="pending">{issueStatusLabel("pending")}</option>
                               <option value="monitoring">
-                                issues under monitoring
+                                {issueStatusLabel("monitoring")}
                               </option>
-                              <option value="resolved">issues resolved</option>
-                              <option value="not_required">no issues</option>
+                              <option value="resolved">{issueStatusLabel("resolved")}</option>
+                              <option value="not_required">{issueStatusLabel("not_required")}</option>
                             </select>
                             <textarea
                               value={executionForm.deviationNote}
@@ -3633,7 +4103,10 @@ export function OrdersPage() {
                                 }))
                               }
                               className={textareaClassName}
-                              placeholder="Deviation note or unresolved operational detail"
+                              placeholder={l(
+                                "Notiz zu Abweichung oder offenem operativen Detail",
+                                "Заметка по отклонению или нерешённой операционной детали",
+                              )}
                             />
                             <textarea
                               value={executionForm.executionSummary}
@@ -3644,7 +4117,10 @@ export function OrdersPage() {
                                 }))
                               }
                               className={textareaClassName}
-                              placeholder="Arrival, delivered scope, clinic notes, service outcome..."
+                              placeholder={l(
+                                "Ankunft, Leistungsumfang, Kliniknotizen, Ergebnis ...",
+                                "Прибытие, объём оказанного, заметки клиники, результат услуги...",
+                              )}
                             />
                             <div className="flex justify-end">
                               <Button
@@ -3652,46 +4128,54 @@ export function OrdersPage() {
                                 onClick={() => void handleSaveExecutionFlow()}
                                 disabled={executionBusy}
                               >
-                                {executionBusy ? (
-                                  <LoaderCircle className="mr-2 size-4 animate-spin" />
-                                ) : null}
-                                Save execution state
+                                  {executionBusy ? (
+                                    <LoaderCircle className="mr-2 size-4 animate-spin" />
+                                  ) : null}
+                                {l(
+                                  "Durchführungsstand speichern",
+                                  "Сохранить состояние исполнения",
+                                )}
                               </Button>
                             </div>
-                          </div>
+                          </fieldset>
                         </div>
 
                         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                           <div className="text-sm font-semibold text-slate-900">
-                            Execution evidence
+                            {l("Nachweise der Durchführung", "Подтверждения исполнения")}
                           </div>
                           <div className="mt-1 text-sm text-slate-500">
-                            Use linked workspaces to close the remaining
-                            operational trail.
+                            {l(
+                              "Verknüpfte Arbeitsbereiche nutzen, um die restliche operative Spur zu schließen.",
+                              "Используйте связанные рабочие пространства, чтобы закрыть оставшийся операционный след.",
+                            )}
                           </div>
                           <div className="mt-4 grid gap-3">
                             <DetailField
-                              label="Arrival recorded"
-                              value={formatDateTime(
+                              label={l("Ankunft erfasst", "Прибытие зафиксировано")}
+                              value={formatDateTimeLabel(
                                 orderDetail.execution_flow.arrival_recorded_at,
                               )}
                             />
                             <DetailField
-                              label="Medical completed"
-                              value={formatDateTime(
+                              label={l("Medizinisch abgeschlossen", "Медицинская часть завершена")}
+                              value={formatDateTimeLabel(
                                 orderDetail.execution_flow.medical_completed_at,
                               )}
                             />
                             <DetailField
-                              label="Non-medical completed"
-                              value={formatDateTime(
+                              label={l(
+                                "Nicht-medizinisch abgeschlossen",
+                                "Немедицинская часть завершена",
+                              )}
+                              value={formatDateTimeLabel(
                                 orderDetail.execution_flow
                                   .non_medical_completed_at,
                               )}
                             />
                             <DetailField
-                              label="Issues resolved"
-                              value={formatDateTime(
+                              label={l("Abweichungen geklärt", "Отклонения закрыты")}
+                              value={formatDateTimeLabel(
                                 orderDetail.execution_flow.issues_resolved_at,
                               )}
                             />
@@ -3706,7 +4190,7 @@ export function OrdersPage() {
                                   )
                                 }
                               >
-                                Appointments
+                                {l("Termine", "Приёмы")}
                               </Button>
                               <Button
                                 type="button"
@@ -3718,7 +4202,7 @@ export function OrdersPage() {
                                   )
                                 }
                               >
-                                Documents
+                                {l("Dokumente", "Документы")}
                               </Button>
                               <Button
                                 type="button"
@@ -3730,7 +4214,7 @@ export function OrdersPage() {
                                   )
                                 }
                               >
-                                Providers
+                                {l("Provider", "Провайдеры")}
                               </Button>
                             </div>
                           </div>
@@ -3742,13 +4226,16 @@ export function OrdersPage() {
 
                 {orderDetail.followup_flow ? (
                   <SectionCard
-                    title="Follow-up flow"
-                    description="Launch post-care milestones, package-end outreach and final patient handoff before the order enters follow-up."
+                    title={l("Nachsorge-Ablauf", "Поток follow-up")}
+                    description={l(
+                      "Post-Care-Meilensteine, Paketende-Outreach und finale Patientenubergabe starten, bevor der Auftrag in die Nachsorge wechselt.",
+                      "Запуск post-care этапов, outreach по завершению пакета и финальная передача пациенту до перехода заказа в follow-up.",
+                    )}
                   >
                     <div className="space-y-4">
                       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                         <DetailField
-                          label="Follow-up readiness"
+                          label={l("Nachsorge-Freigabe", "Готовность к follow-up")}
                           value={
                             <Badge
                               variant="outline"
@@ -3760,23 +4247,26 @@ export function OrdersPage() {
                               )}
                             >
                               {orderDetail.followup_flow.followup_ready
-                                ? "ready"
-                                : "blocked"}
+                                ? l("bereit", "готово")
+                                : l("blockiert", "заблокировано")}
                             </Badge>
                           }
                         />
                         <DetailField
-                          label="Results handoff"
-                          value={
-                            orderDetail.followup_flow.results_handoff_status
-                          }
+                          label={l("Ergebnisübergabe", "Передача результатов")}
+                          value={resultsHandoffStatusLabel(
+                            orderDetail.followup_flow.results_handoff_status,
+                          )}
                         />
                         <DetailField
-                          label="Follow-up activity"
-                          value={`${orderDetail.followup_flow.followup_appointments_total} appointment(s) / ${orderDetail.followup_flow.followup_1w_reminders + orderDetail.followup_flow.followup_1m_reminders + orderDetail.followup_flow.followup_6m_reminders + orderDetail.followup_flow.package_end_reminders} reminder(s)`}
+                          label={l("Nachsorge-Aktivität", "Активность follow-up")}
+                          value={l(
+                            `${orderDetail.followup_flow.followup_appointments_total} Termin(e) / ${orderDetail.followup_flow.followup_1w_reminders + orderDetail.followup_flow.followup_1m_reminders + orderDetail.followup_flow.followup_6m_reminders + orderDetail.followup_flow.package_end_reminders} Erinnerung(en)`,
+                            `${orderDetail.followup_flow.followup_appointments_total} приём(ов) / ${orderDetail.followup_flow.followup_1w_reminders + orderDetail.followup_flow.followup_1m_reminders + orderDetail.followup_flow.followup_6m_reminders + orderDetail.followup_flow.package_end_reminders} напоминани(й)`,
+                          )}
                         />
                         <DetailField
-                          label="Portal releases"
+                          label={l("Portal-Freigaben", "Публикации в портале")}
                           value={String(
                             orderDetail.followup_flow.results_portal_shares,
                           )}
@@ -3785,30 +4275,32 @@ export function OrdersPage() {
 
                       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                         <DetailField
-                          label="Doctor-directed"
+                          label={l("Arztgesteuert", "По назначению врача")}
                           value={
-                            orderDetail.followup_flow.doctor_followup_status
+                            followupStatusLabel(
+                              orderDetail.followup_flow.doctor_followup_status,
+                            )
                           }
                         />
                         <DetailField
-                          label="1w / 1m / 6m"
-                          value={`${orderDetail.followup_flow.followup_1w_status} / ${orderDetail.followup_flow.followup_1m_status} / ${orderDetail.followup_flow.followup_6m_status}`}
+                          label="1W / 1M / 6M"
+                          value={`${followupStatusLabel(orderDetail.followup_flow.followup_1w_status)} / ${followupStatusLabel(orderDetail.followup_flow.followup_1m_status)} / ${followupStatusLabel(orderDetail.followup_flow.followup_6m_status)}`}
                         />
                         <DetailField
-                          label="Package end"
+                          label={l("Paketende", "Завершение пакета")}
                           value={
                             orderDetail.followup_flow.package_end_required
-                              ? `${orderDetail.followup_flow.package_end_status} · ${formatDateOnly(
+                              ? `${followupStatusLabel(orderDetail.followup_flow.package_end_status)} · ${formatDateOnlyLabel(
                                   orderDetail.followup_flow.package_end_date ??
                                     orderDetail.followup_flow
                                       .suggested_package_end_date,
                                 )}`
-                              : "Not required"
+                              : l("Nicht erforderlich", "Не требуется")
                           }
                         />
                         <DetailField
-                          label="Closure anchor"
-                          value={formatDateTime(
+                          label={l("Abschlussanker", "Якорь закрытия")}
+                          value={formatDateTimeLabel(
                             orderDetail.followup_flow.closure_anchor_at,
                           )}
                         />
@@ -3817,20 +4309,25 @@ export function OrdersPage() {
                       {orderDetail.followup_flow.blocking_reasons.length > 0 ? (
                         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
                           <div className="font-medium">
-                            Follow-up launch blockers
+                            {l(
+                              "Blocker für den Start der Nachsorge",
+                              "Блокеры запуска follow-up",
+                            )}
                           </div>
                           <ul className="mt-2 space-y-1">
                             {orderDetail.followup_flow.blocking_reasons.map(
                               (reason) => (
-                                <li key={reason}>• {reason}</li>
+                                <li key={reason}>• {localizedBlockingReason(reason)}</li>
                               ),
                             )}
                           </ul>
                         </div>
                       ) : (
                         <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-                          Follow-up milestones and handoff are launched for the
-                          post-care phase.
+                          {l(
+                            "Nachsorge-Meilensteine und Übergabe sind für die Post-Care-Phase angestoßen.",
+                            "Этапы follow-up и передача запущены для post-care фазы.",
+                          )}
                         </div>
                       )}
 
@@ -3843,13 +4340,18 @@ export function OrdersPage() {
                       <div className="grid gap-4 xl:grid-cols-2">
                         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                           <div className="text-sm font-semibold text-slate-900">
-                            Follow-up controls
+                            {l("Steuerung der Nachsorge", "Управление follow-up")}
                           </div>
                           <div className="mt-1 text-sm text-slate-500">
-                            Mark which milestones are required and whether the
-                            final handoff to the patient is complete.
+                            {l(
+                              "Markieren, welche Meilensteine erforderlich sind und ob die finale Übergabe an den Patienten vollständig ist.",
+                              "Отметьте, какие этапы обязательны и завершена ли финальная передача пациенту.",
+                            )}
                           </div>
-                          <div className="mt-4 space-y-3">
+                          <fieldset
+                            disabled={!permissions.canManagePhase}
+                            className="mt-4 space-y-3"
+                          >
                             <select
                               value={followupForm.doctorFollowupStatus}
                               onChange={(event) =>
@@ -3861,16 +4363,16 @@ export function OrdersPage() {
                               className={selectClassName}
                             >
                               <option value="not_required">
-                                doctor follow-up not required
+                                {followupStatusLabel("not_required")}
                               </option>
                               <option value="pending">
-                                doctor follow-up pending
+                                {followupStatusLabel("pending")}
                               </option>
                               <option value="scheduled">
-                                doctor follow-up scheduled
+                                {followupStatusLabel("scheduled")}
                               </option>
                               <option value="completed">
-                                doctor follow-up completed
+                                {followupStatusLabel("completed")}
                               </option>
                             </select>
                             <div className="grid gap-3 md:grid-cols-3">
@@ -3884,11 +4386,11 @@ export function OrdersPage() {
                                 }
                                 className={selectClassName}
                               >
-                                <option value="pending">1w pending</option>
-                                <option value="scheduled">1w scheduled</option>
-                                <option value="completed">1w completed</option>
+                                <option value="pending">{`1W ${followupStatusLabel("pending")}`}</option>
+                                <option value="scheduled">{`1W ${followupStatusLabel("scheduled")}`}</option>
+                                <option value="completed">{`1W ${followupStatusLabel("completed")}`}</option>
                                 <option value="not_required">
-                                  1w not required
+                                  {`1W ${followupStatusLabel("not_required")}`}
                                 </option>
                               </select>
                               <select
@@ -3901,11 +4403,11 @@ export function OrdersPage() {
                                 }
                                 className={selectClassName}
                               >
-                                <option value="pending">1m pending</option>
-                                <option value="scheduled">1m scheduled</option>
-                                <option value="completed">1m completed</option>
+                                <option value="pending">{`1M ${followupStatusLabel("pending")}`}</option>
+                                <option value="scheduled">{`1M ${followupStatusLabel("scheduled")}`}</option>
+                                <option value="completed">{`1M ${followupStatusLabel("completed")}`}</option>
                                 <option value="not_required">
-                                  1m not required
+                                  {`1M ${followupStatusLabel("not_required")}`}
                                 </option>
                               </select>
                               <select
@@ -3918,11 +4420,11 @@ export function OrdersPage() {
                                 }
                                 className={selectClassName}
                               >
-                                <option value="pending">6m pending</option>
-                                <option value="scheduled">6m scheduled</option>
-                                <option value="completed">6m completed</option>
+                                <option value="pending">{`6M ${followupStatusLabel("pending")}`}</option>
+                                <option value="scheduled">{`6M ${followupStatusLabel("scheduled")}`}</option>
+                                <option value="completed">{`6M ${followupStatusLabel("completed")}`}</option>
                                 <option value="not_required">
-                                  6m not required
+                                  {`6M ${followupStatusLabel("not_required")}`}
                                 </option>
                               </select>
                             </div>
@@ -3946,21 +4448,21 @@ export function OrdersPage() {
                                     packageEndStatus: event.target.value,
                                   }))
                                 }
-                                className={selectClassName}
-                              >
-                                <option value="not_required">
-                                  package-end not required
-                                </option>
-                                <option value="pending">
-                                  package-end pending
-                                </option>
-                                <option value="scheduled">
-                                  package-end scheduled
-                                </option>
-                                <option value="completed">
-                                  package-end completed
-                                </option>
-                              </select>
+                              className={selectClassName}
+                            >
+                              <option value="not_required">
+                                {l("Paketende nicht erforderlich", "Завершение пакета не требуется")}
+                              </option>
+                              <option value="pending">
+                                {l("Paketende ausstehend", "Завершение пакета ожидается")}
+                              </option>
+                              <option value="scheduled">
+                                {l("Paketende geplant", "Завершение пакета запланировано")}
+                              </option>
+                              <option value="completed">
+                                {l("Paketende abgeschlossen", "Завершение пакета завершено")}
+                              </option>
+                            </select>
                             </div>
                             <select
                               value={followupForm.resultsHandoffStatus}
@@ -3973,13 +4475,13 @@ export function OrdersPage() {
                               className={selectClassName}
                             >
                               <option value="pending">
-                                results handoff pending
+                                {resultsHandoffStatusLabel("pending")}
                               </option>
                               <option value="completed">
-                                results handoff completed
+                                {resultsHandoffStatusLabel("completed")}
                               </option>
                               <option value="not_required">
-                                results handoff not required
+                                {resultsHandoffStatusLabel("not_required")}
                               </option>
                             </select>
                             <textarea
@@ -3991,7 +4493,10 @@ export function OrdersPage() {
                                 }))
                               }
                               className={textareaClassName}
-                              placeholder="Patient communication, Arztbrief handoff, outreach plan..."
+                              placeholder={l(
+                                "Patientenkommunikation, Arztbrief-Übergabe, Outreach-Plan ...",
+                                "Коммуникация с пациентом, передача Arztbrief, план outreach...",
+                              )}
                             />
                             <div className="flex justify-end">
                               <Button
@@ -3999,48 +4504,56 @@ export function OrdersPage() {
                                 onClick={() => void handleSaveFollowupFlow()}
                                 disabled={followupBusy}
                               >
-                                {followupBusy ? (
-                                  <LoaderCircle className="mr-2 size-4 animate-spin" />
-                                ) : null}
-                                Save follow-up state
+                                  {followupBusy ? (
+                                    <LoaderCircle className="mr-2 size-4 animate-spin" />
+                                  ) : null}
+                                {l(
+                                  "Nachsorge-Stand speichern",
+                                  "Сохранить состояние follow-up",
+                                )}
                               </Button>
                             </div>
-                          </div>
+                          </fieldset>
                         </div>
 
                         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                           <div className="text-sm font-semibold text-slate-900">
-                            Recommended milestone anchors
+                            {l(
+                              "Empfohlene Meilenstein-Anker",
+                              "Рекомендуемые контрольные даты",
+                            )}
                           </div>
                           <div className="mt-1 text-sm text-slate-500">
-                            Existing appointment presets and portal visibility
-                            read from these order-level milestones.
+                            {l(
+                              "Bestehende Termin-Presets und Portalsichtbarkeit lesen diese auftragsbezogenen Meilensteine aus.",
+                              "Текущие пресеты приёмов и видимость в портале читают эти вехи уровня заказа.",
+                            )}
                           </div>
                           <div className="mt-4 grid gap-3">
                             <DetailField
-                              label="1-week target"
-                              value={formatDateTime(
+                              label={l("1-Wochen-Ziel", "Цель на 1 неделю")}
+                              value={formatDateTimeLabel(
                                 orderDetail.followup_flow
                                   .recommended_followup_1w_at,
                               )}
                             />
                             <DetailField
-                              label="1-month target"
-                              value={formatDateTime(
+                              label={l("1-Monats-Ziel", "Цель на 1 месяц")}
+                              value={formatDateTimeLabel(
                                 orderDetail.followup_flow
                                   .recommended_followup_1m_at,
                               )}
                             />
                             <DetailField
-                              label="6-month target"
-                              value={formatDateTime(
+                              label={l("6-Monats-Ziel", "Цель на 6 месяцев")}
+                              value={formatDateTimeLabel(
                                 orderDetail.followup_flow
                                   .recommended_followup_6m_at,
                               )}
                             />
                             <DetailField
-                              label="Package-end outreach"
-                              value={formatDateOnly(
+                              label={l("Paketende-Outreach", "Outreach по завершению пакета")}
+                              value={formatDateOnlyLabel(
                                 orderDetail.followup_flow
                                   .recommended_package_end_followup_at,
                               )}
@@ -4056,7 +4569,7 @@ export function OrdersPage() {
                                   )
                                 }
                               >
-                                Appointments
+                                {l("Termine", "Приёмы")}
                               </Button>
                               <Button
                                 type="button"
@@ -4068,7 +4581,7 @@ export function OrdersPage() {
                                   )
                                 }
                               >
-                                Documents
+                                {l("Dokumente", "Документы")}
                               </Button>
                               <Button
                                 type="button"
@@ -4078,7 +4591,7 @@ export function OrdersPage() {
                                   staffGo(`/patients/${orderDetail.patient_id}`)
                                 }
                               >
-                                Patient profile
+                                {l("Patientenprofil", "Профиль пациента")}
                               </Button>
                             </div>
                           </div>
@@ -4090,7 +4603,10 @@ export function OrdersPage() {
 
                 <SectionCard
                   title={tx.orders_phase}
-                  description="Lifecycle transitions are sequential and recorded in workflow history."
+                  description={l(
+                    "Phasenwechsel laufen sequenziell und werden in der Workflow-Historie protokolliert.",
+                    "Переходы по фазам идут последовательно и сохраняются в истории workflow.",
+                  )}
                   action={
                     permissions.canManagePhase &&
                     orderDetail.lifecycle?.next_stage ? (
@@ -4100,7 +4616,8 @@ export function OrdersPage() {
                         disabled={Boolean(nextLifecycleTransition?.blocked)}
                       >
                         <ChevronRight className="mr-2 size-4" />
-                        Advance to {orderDetail.lifecycle.next_stage}
+                        {l("Weiter zu", "Перевести в")}{" "}
+                        {phaseLabel(orderDetail.lifecycle.next_stage)}
                       </Button>
                     ) : null
                   }
@@ -4128,8 +4645,12 @@ export function OrdersPage() {
                               disabled && "cursor-not-allowed opacity-60",
                             )}
                           >
-                            {phase}
-                            {isCurrent ? " (current)" : isNext ? " (next)" : ""}
+                            {phaseLabel(phase)}
+                            {isCurrent
+                              ? l(" (aktuell)", " (текущая)")
+                              : isNext
+                                ? l(" (als Nächstes)", " (следующая)")
+                                : ""}
                           </button>
                         );
                       })}
@@ -4151,33 +4672,34 @@ export function OrdersPage() {
                           {phaseSaving ? (
                             <LoaderCircle className="mr-2 size-4 animate-spin" />
                           ) : null}
-                          Save phase
+                          {l("Phase speichern", "Сохранить фазу")}
                         </Button>
                       ) : (
                         <Badge
                           variant="outline"
                           className="rounded-full border-slate-200 bg-slate-100 text-slate-600"
                         >
-                          Billing read-only
+                          {l("Billing nur lesend", "Только чтение для биллинга")}
                         </Badge>
                       )}
                     </div>
                   </div>
                   {orderDetail.lifecycle?.stage_entered_at ? (
                     <p className="mt-4 text-sm text-slate-600">
-                      Current phase entered{" "}
-                      {formatDateTime(orderDetail.lifecycle.stage_entered_at)}.
+                      {l("Aktuelle Phase seit", "Текущая фаза с")}{" "}
+                      {formatDateTimeLabel(orderDetail.lifecycle.stage_entered_at)}.
                     </p>
                   ) : null}
                   {nextLifecycleTransition?.blocked &&
                   nextLifecycleTransition.reasons.length > 0 ? (
                     <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
                       <div className="font-medium">
-                        {nextLifecycleTransition.phase} is blocked
+                        {phaseLabel(nextLifecycleTransition.phase)}{" "}
+                        {l("ist blockiert", "заблокирована")}
                       </div>
                       <ul className="mt-2 space-y-1">
                         {nextLifecycleTransition.reasons.map((reason) => (
-                          <li key={reason}>• {reason}</li>
+                          <li key={reason}>• {localizedBlockingReason(reason)}</li>
                         ))}
                       </ul>
                     </div>
@@ -4198,15 +4720,15 @@ export function OrdersPage() {
                             <div>
                               <p className="text-sm font-medium text-slate-900">
                                 {event.from_stage
-                                  ? `${event.from_stage} -> ${event.to_stage}`
-                                  : event.to_stage}
+                                  ? `${phaseLabel(event.from_stage)} -> ${phaseLabel(event.to_stage)}`
+                                  : phaseLabel(event.to_stage)}
                               </p>
                               <p className="mt-1 text-xs uppercase tracking-[0.14em] text-slate-500">
-                                {event.transition_kind}
+                                {transitionKindLabel(event.transition_kind)}
                               </p>
                             </div>
                             <span className="text-xs text-slate-500">
-                              {formatDateTime(event.created_at)}
+                              {formatDateTimeLabel(event.created_at)}
                             </span>
                           </div>
                           {event.note ? (
@@ -4221,30 +4743,39 @@ export function OrdersPage() {
                 </SectionCard>
 
                 <SectionCard
-                  title="Workflow checklist"
-                  description="Auto-generated PM and concierge to-do items for this order."
+                  title={l("Workflow-Checkliste", "Workflow-чеклист")}
+                  description={l(
+                    "Automatisch erzeugte To-dos fur PM und Concierge zu diesem Auftrag.",
+                    "Автосозданные задачи для PM и concierge по этому заказу.",
+                  )}
                 >
                   {workflowChecklist ? (
                     <div className="space-y-4">
                       <div className="grid gap-3 md:grid-cols-3">
                         <DetailField
-                          label="Open"
+                          label={l("Offen", "Открыто")}
                           value={String(workflowChecklist.open_count)}
                         />
                         <DetailField
-                          label="Completed"
+                          label={l("Abgeschlossen", "Завершено")}
                           value={String(workflowChecklist.completed_count)}
                         />
                         <DetailField
-                          label="Groups"
+                          label={l("Gruppen", "Группы")}
                           value={String(workflowChecklistGroups.length)}
                         />
                       </div>
 
                       {workflowChecklistGroups.length === 0 ? (
                         <EmptyState
-                          title="No workflow items yet"
-                          description="Checklist items are generated from the order phase and can be extended manually."
+                          title={l(
+                            "Noch keine Workflow-Punkte",
+                            "Пунктов workflow пока нет",
+                          )}
+                          description={l(
+                            "Checklistenpunkte werden aus der Auftragsphase erzeugt und können manuell ergänzt werden.",
+                            "Пункты чеклиста генерируются из фазы заказа и могут дополняться вручную.",
+                          )}
                         />
                       ) : (
                         <div className="space-y-4">
@@ -4264,14 +4795,15 @@ export function OrdersPage() {
                                         (item) => !item.is_completed,
                                       ).length
                                     }{" "}
-                                    open / {group.items.length} total
+                                    {l("offen", "открыто")} / {group.items.length}{" "}
+                                    {l("gesamt", "всего")}
                                   </p>
                                 </div>
                                 <Badge
                                   variant="outline"
                                   className="rounded-full border-slate-200 bg-white text-slate-700"
                                 >
-                                  {group.items.length} items
+                                  {group.items.length} {l("Punkte", "пункт(ов)")}
                                 </Badge>
                               </div>
                               <div className="mt-4 space-y-3">
@@ -4298,7 +4830,7 @@ export function OrdersPage() {
                                               priorityBadgeClass(item.priority),
                                             )}
                                           >
-                                            {item.priority}
+                                            {priorityLabel(item.priority)}
                                           </Badge>
                                           <Badge
                                             variant="outline"
@@ -4313,25 +4845,26 @@ export function OrdersPage() {
                                             )}
                                           >
                                             {item.is_completed
-                                              ? "completed"
-                                              : (item.linked_task_status ??
-                                                "open")}
+                                              ? l("abgeschlossen", "завершено")
+                                              : item.linked_task_status === "open"
+                                                ? l("offen", "открыто")
+                                                : item.linked_task_status ?? l("offen", "открыто")}
                                           </Badge>
                                         </div>
                                         <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-500">
                                           <span>
-                                            Owner:{" "}
+                                            {l("Verantwortlich", "Ответственный")}:{" "}
                                             {item.owner_name
-                                              ? `${item.owner_name} · ${item.owner_user_role ?? item.owner_role}`
-                                              : item.owner_role}
+                                              ? `${item.owner_name} · ${roleLabel(item.owner_user_role ?? item.owner_role)}`
+                                              : roleLabel(item.owner_role)}
                                           </span>
                                           <span>
-                                            Due: {formatDateTime(item.due_date)}
+                                            {l("Fällig", "Срок")}: {formatDateTimeLabel(item.due_date)}
                                           </span>
                                           {item.completed_at ? (
                                             <span>
-                                              Completed:{" "}
-                                              {formatDateTime(
+                                              {l("Erledigt", "Завершено")}:{" "}
+                                              {formatDateTimeLabel(
                                                 item.completed_at,
                                               )}
                                             </span>
@@ -4350,7 +4883,7 @@ export function OrdersPage() {
                                             )
                                           }
                                         >
-                                          Complete
+                                          {l("Abschließen", "Завершить")}
                                         </Button>
                                       ) : null}
                                     </div>
@@ -4370,7 +4903,7 @@ export function OrdersPage() {
                           <div className="grid gap-4 md:grid-cols-2">
                             <div className="space-y-2 md:col-span-2">
                               <Label htmlFor="order-workflow-item">
-                                Checklist item
+                                {l("Checklistenpunkt", "Пункт чеклиста")}
                               </Label>
                               <Input
                                 id="order-workflow-item"
@@ -4382,12 +4915,15 @@ export function OrdersPage() {
                                   }))
                                 }
                                 className="h-10 rounded-xl bg-slate-50"
-                                placeholder="Escalation call, clinic follow-up, document handoff..."
+                                placeholder={l(
+                                  "Eskalationsanruf, Klinik-Nachverfolgung, Dokumentenübergabe ...",
+                                  "Эскалационный звонок, follow-up с клиникой, передача документа...",
+                                )}
                               />
                             </div>
                             <div className="space-y-2">
                               <Label htmlFor="order-workflow-owner">
-                                Owner
+                                {l("Verantwortlich", "Ответственный")}
                               </Label>
                               <select
                                 id="order-workflow-owner"
@@ -4400,20 +4936,20 @@ export function OrdersPage() {
                                   }))
                                 }
                               >
-                                <option value="">Current user</option>
+                                <option value="">{l("Aktueller Benutzer", "Текущий пользователь")}</option>
                                 {activeWorkflowAssignments.map((item) => (
                                   <option
                                     key={item.user_id}
                                     value={item.user_id}
                                   >
-                                    {item.user_name} · {item.user_role}
+                                    {item.user_name} · {roleLabel(item.user_role)}
                                   </option>
                                 ))}
                               </select>
                             </div>
                             <div className="space-y-2">
                               <Label htmlFor="order-workflow-priority">
-                                Priority
+                                {l("Priorität", "Приоритет")}
                               </Label>
                               <select
                                 id="order-workflow-priority"
@@ -4429,14 +4965,16 @@ export function OrdersPage() {
                                 {["low", "normal", "high", "urgent"].map(
                                   (priority) => (
                                     <option key={priority} value={priority}>
-                                      {priority}
+                                      {priorityLabel(priority)}
                                     </option>
                                   ),
                                 )}
                               </select>
                             </div>
                             <div className="space-y-2">
-                              <Label htmlFor="order-workflow-due">Due at</Label>
+                              <Label htmlFor="order-workflow-due">
+                                {l("Fällig am", "Срок")}
+                              </Label>
                               <Input
                                 id="order-workflow-due"
                                 type="datetime-local"
@@ -4461,7 +4999,7 @@ export function OrdersPage() {
                               {workflowBusy ? (
                                 <LoaderCircle className="mr-2 size-4 animate-spin" />
                               ) : null}
-                              Add workflow item
+                              {l("Workflow-Punkt hinzufügen", "Добавить пункт workflow")}
                             </Button>
                           </div>
                         </form>
@@ -4469,8 +5007,14 @@ export function OrdersPage() {
                     </div>
                   ) : (
                     <EmptyState
-                      title="No workflow items yet"
-                      description="Checklist items are generated from the current phase once the order context is loaded."
+                      title={l(
+                        "Noch keine Workflow-Punkte",
+                        "Пунктов workflow пока нет",
+                      )}
+                      description={l(
+                        "Checklistenpunkte werden aus der aktuellen Phase erzeugt, sobald der Auftragskontext geladen ist.",
+                        "Пункты чеклиста генерируются из текущей фазы после загрузки контекста заказа.",
+                      )}
                     />
                   )}
                 </SectionCard>
@@ -4479,37 +5023,52 @@ export function OrdersPage() {
                   <StatCard
                     label={tx.providers_services}
                     value={String(leistungMetrics.total)}
-                    description="Current service lines attached to this order."
+                    description={l(
+                      "Aktuelle Leistungspositionen in diesem Auftrag.",
+                      "Текущие позиции услуг в этом заказе.",
+                    )}
                     icon={<ClipboardList className="size-4" />}
                   />
                   <StatCard
-                    label={tx.common_active}
+                    label={l("Zur Freigabe", "Ждут утверждения")}
                     value={String(leistungMetrics.delivered)}
-                    description="Service lines waiting for PM approval."
+                    description={l(
+                      "Leistungspositionen, die auf PM-Freigabe warten.",
+                      "Позиции услуг, ожидающие утверждения PM.",
+                    )}
                     icon={<CheckCircle2 className="size-4" />}
                   />
                   <StatCard
-                    label={tx.common_active}
+                    label={l("Freigegeben", "Утверждено")}
                     value={String(leistungMetrics.approved)}
-                    description="Lines already approved in the current order."
+                    description={l(
+                      "Bereits freigegebene Leistungspositionen in diesem Auftrag.",
+                      "Позиции услуг, уже утверждённые в текущем заказе.",
+                    )}
                     icon={<Wallet className="size-4" />}
                   />
                   <StatCard
                     label={tx.contracts_total}
-                    value={formatCurrency(leistungMetrics.gross)}
-                    description="Quantity x price across visible service lines."
+                    value={formatMoney(leistungMetrics.gross)}
+                    description={l(
+                      "Menge x Preis uber alle sichtbaren Leistungspositionen.",
+                      "Количество x цена по всем видимым позициям услуг.",
+                    )}
                     icon={<Building2 className="size-4" />}
                   />
                 </div>
 
                 <SectionCard
                   title={tx.providers_services}
-                  description="Provider- and doctor-linked services within the current order."
+                  description={l(
+                    "Provider- und arztbezogene Leistungen innerhalb dieses Auftrags.",
+                    "Привязанные к провайдеру и врачу услуги внутри текущего заказа.",
+                  )}
                   action={
                     permissions.canAddLeistung ? (
                       <Button onClick={() => resetLeistungDialog(true)}>
                         <Plus className="mr-2 size-4" />
-                        Add Leistung
+                        {l("Leistung hinzufugen", "Добавить Leistung")}
                       </Button>
                     ) : null
                   }
@@ -4517,12 +5076,15 @@ export function OrdersPage() {
                   {orderDetail.leistungen.length === 0 ? (
                     <EmptyState
                       title={tx.common_not_set}
-                      description="Use provider-linked lines to build the order delivery scope and give billing enough context."
+                      description={l(
+                        "Mit providerbezogenen Positionen den Leistungsumfang des Auftrags aufbauen und Billing genug Kontext geben.",
+                        "Используйте позиции, привязанные к провайдеру, чтобы собрать объём исполнения заказа и дать биллингу достаточный контекст.",
+                      )}
                       action={
                         permissions.canAddLeistung ? (
                           <Button onClick={() => resetLeistungDialog(true)}>
                             <Plus className="mr-2 size-4" />
-                            Add Leistung
+                            {l("Leistung hinzufugen", "Добавить Leistung")}
                           </Button>
                         ) : undefined
                       }
@@ -4547,7 +5109,7 @@ export function OrdersPage() {
                                     statusClassName(leistung.status),
                                   )}
                                 >
-                                  {leistung.status}
+                                  {leistungStatusLabel(leistung.status)}
                                 </Badge>
                                 {leistung.is_cost_passthrough ? (
                                   <Badge
@@ -4637,22 +5199,22 @@ export function OrdersPage() {
                                 />
                                 <DetailField
                                   label={t.providers_service_price}
-                                  value={formatNumber(leistung.quantity)}
+                                  value={formatNumber(leistung.quantity, locale)}
                                 />
                                 <DetailField
                                   label={tx.invoices_amount}
-                                  value={formatCurrency(
+                                  value={formatMoney(
                                     leistung.unit_price,
                                     leistung.currency,
                                   )}
                                 />
                                 <DetailField
                                   label={t.providers_service_price}
-                                  value={`${formatNumber(leistung.vat_rate)}%`}
+                                  value={`${formatNumber(leistung.vat_rate, locale)}%`}
                                 />
                                 <DetailField
                                   label={tx.invoices_total}
-                                  value={formatCurrency(
+                                  value={formatMoney(
                                     (numberFromUnknown(leistung.quantity) ??
                                       0) *
                                       (numberFromUnknown(leistung.unit_price) ??
@@ -4662,11 +5224,11 @@ export function OrdersPage() {
                                 />
                                 <DetailField
                                   label={tx.common_active}
-                                  value={formatDateTime(leistung.delivered_at)}
+                                  value={formatDateTimeLabel(leistung.delivered_at)}
                                 />
                                 <DetailField
                                   label={tx.common_active}
-                                  value={formatDateTime(leistung.approved_at)}
+                                  value={formatDateTimeLabel(leistung.approved_at)}
                                 />
                                 <DetailField
                                   label={t.orders_supporting_document}
@@ -4733,7 +5295,7 @@ export function OrdersPage() {
                                   ) : (
                                     <CheckCircle2 className="mr-2 size-4" />
                                   )}
-                                  Approve
+                                  {l("Freigeben", "Утвердить")}
                                 </Button>
                               ) : null}
                             </div>
@@ -4745,32 +5307,47 @@ export function OrdersPage() {
                 </SectionCard>
 
                 <SectionCard
-                  title="External invoices"
-                  description="Track supplier and clinic invoices that must be reviewed, paid or escalated inside the order context."
+                  title={l("Externe Rechnungen", "Внешние счета")}
+                  description={l(
+                    "Lieferanten- und Klinikrechnungen im Auftragskontext nachverfolgen, die gepruft, bezahlt oder eskaliert werden mussen.",
+                    "Отслеживание счетов от клиник и поставщиков, которые нужно проверить, оплатить или эскалировать в контексте заказа.",
+                  )}
                 >
                   <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                     <StatCard
-                      label="Tracked invoices"
+                      label={l("Erfasste Rechnungen", "Учтённые счета")}
                       value={String(externalInvoiceMetrics.total)}
-                      description="External invoices linked to the current order."
+                      description={l(
+                        "Externe Rechnungen, die mit dem aktuellen Auftrag verknupft sind.",
+                        "Внешние счета, привязанные к текущему заказу.",
+                      )}
                       icon={<Wallet className="size-4" />}
                     />
                     <StatCard
-                      label="Overdue"
+                      label={l("Überfällig", "Просрочено")}
                       value={String(externalInvoiceMetrics.overdue)}
-                      description="Invoices whose due date already passed."
+                      description={l(
+                        "Rechnungen, deren Fälligkeitsdatum bereits überschritten ist.",
+                        "Счета, у которых уже прошёл срок оплаты.",
+                      )}
                       icon={<CalendarClock className="size-4" />}
                     />
                     <StatCard
-                      label="Paid"
+                      label={l("Bezahlt", "Оплачено")}
                       value={String(externalInvoiceMetrics.paid)}
-                      description="Invoices already marked as settled."
+                      description={l(
+                        "Rechnungen, die bereits als beglichen markiert sind.",
+                        "Счета, уже отмеченные как погашенные.",
+                      )}
                       icon={<CheckCircle2 className="size-4" />}
                     />
                     <StatCard
-                      label="Gross tracked"
-                      value={formatCurrency(externalInvoiceMetrics.gross)}
-                      description="Total gross exposure of all linked external invoices."
+                      label={l("Erfasstes Brutto", "Учтённое брутто")}
+                      value={formatMoney(externalInvoiceMetrics.gross)}
+                      description={l(
+                        "Gesamtes Bruttoexposure aller verknüpften externen Rechnungen.",
+                        "Совокупное брутто по всем привязанным внешним счетам.",
+                      )}
                       icon={<Building2 className="size-4" />}
                     />
                   </div>
@@ -4784,11 +5361,13 @@ export function OrdersPage() {
                         <div className="flex items-start justify-between gap-4">
                           <div>
                             <h3 className="text-sm font-semibold text-slate-900">
-                              Register external invoice
+                              {l("Externe Rechnung erfassen", "Зарегистрировать внешний счёт")}
                             </h3>
                             <p className="mt-1 text-sm text-slate-500">
-                              Use this for inbound clinic or partner invoices
-                              that need deadline tracking.
+                              {l(
+                                "Für eingehende Klinik- oder Partnerrechnungen verwenden, die ein Fristen-Tracking brauchen.",
+                                "Используйте для входящих счетов клиник или партнёров, по которым нужно отслеживать дедлайны.",
+                              )}
                             </p>
                           </div>
                         </div>
@@ -4799,7 +5378,7 @@ export function OrdersPage() {
                         ) : null}
                         <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                           <div>
-                            <Label>Invoice number</Label>
+                            <Label>{l("Rechnungsnummer", "Номер счёта")}</Label>
                             <Input
                               value={externalInvoiceForm.externalInvoiceNumber}
                               onChange={(event) =>
@@ -4832,7 +5411,7 @@ export function OrdersPage() {
                             </select>
                           </div>
                           <div>
-                            <Label>Invoice date</Label>
+                            <Label>{l("Rechnungsdatum", "Дата счёта")}</Label>
                             <Input
                               type="date"
                               value={externalInvoiceForm.invoiceDate}
@@ -4846,7 +5425,7 @@ export function OrdersPage() {
                             />
                           </div>
                           <div>
-                            <Label>Due date</Label>
+                            <Label>{l("Fälligkeitsdatum", "Срок оплаты")}</Label>
                             <Input
                               type="date"
                               value={externalInvoiceForm.dueDate}
@@ -4860,7 +5439,7 @@ export function OrdersPage() {
                             />
                           </div>
                           <div>
-                            <Label>Net</Label>
+                            <Label>{l("Netto", "Нетто")}</Label>
                             <Input
                               value={externalInvoiceForm.amountNet}
                               onChange={(event) =>
@@ -4873,7 +5452,7 @@ export function OrdersPage() {
                             />
                           </div>
                           <div>
-                            <Label>VAT</Label>
+                            <Label>{l("MwSt.", "НДС")}</Label>
                             <Input
                               value={externalInvoiceForm.amountVat}
                               onChange={(event) =>
@@ -4886,7 +5465,7 @@ export function OrdersPage() {
                             />
                           </div>
                           <div>
-                            <Label>Gross</Label>
+                            <Label>{l("Brutto", "Брутто")}</Label>
                             <Input
                               value={externalInvoiceForm.amountGross}
                               onChange={(event) =>
@@ -4899,7 +5478,7 @@ export function OrdersPage() {
                             />
                           </div>
                           <div>
-                            <Label>Status</Label>
+                            <Label>{l("Status", "Статус")}</Label>
                             <select
                               value={externalInvoiceForm.status}
                               onChange={(event) =>
@@ -4913,7 +5492,7 @@ export function OrdersPage() {
                             >
                               {EXTERNAL_INVOICE_STATUSES.map((status) => (
                                 <option key={status} value={status}>
-                                  {status}
+                                  {externalInvoiceStatusLabel(status)}
                                 </option>
                               ))}
                             </select>
@@ -4942,7 +5521,7 @@ export function OrdersPage() {
                             ) : (
                               <Plus className="mr-2 size-4" />
                             )}
-                            Add external invoice
+                            {l("Externe Rechnung hinzufügen", "Добавить внешний счёт")}
                           </Button>
                         </div>
                       </form>
@@ -4950,8 +5529,14 @@ export function OrdersPage() {
 
                     {(orderDetail.external_invoices ?? []).length === 0 ? (
                       <EmptyState
-                        title="No external invoices yet"
-                        description="Register inbound provider or clinic invoices here to track due dates and overdue follow-up."
+                        title={l(
+                          "Noch keine externen Rechnungen",
+                          "Внешних счетов пока нет",
+                        )}
+                        description={l(
+                          "Eingehende Provider- oder Klinikrechnungen hier erfassen, um Fälligkeiten und überfällige Nachverfolgung zu steuern.",
+                          "Регистрируйте здесь входящие счета от провайдеров и клиник, чтобы отслеживать дедлайны и просрочки.",
+                        )}
                       />
                     ) : (
                       <div className="space-y-3">
@@ -4974,7 +5559,7 @@ export function OrdersPage() {
                                         statusClassName(invoice.status),
                                       )}
                                     >
-                                      {invoice.status}
+                                      {externalInvoiceStatusLabel(invoice.status)}
                                     </Badge>
                                     {invoice.provider_name ? (
                                       <Badge
@@ -4987,47 +5572,47 @@ export function OrdersPage() {
                                   </div>
                                   <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                                     <DetailField
-                                      label="Invoice date"
-                                      value={formatDate(invoice.invoice_date)}
+                                      label={l("Rechnungsdatum", "Дата счёта")}
+                                      value={formatDateLabel(invoice.invoice_date)}
                                     />
                                     <DetailField
-                                      label="Due date"
-                                      value={formatDate(invoice.due_date)}
+                                      label={l("Fälligkeitsdatum", "Срок оплаты")}
+                                      value={formatDateLabel(invoice.due_date)}
                                     />
                                     <DetailField
-                                      label="Net"
-                                      value={formatCurrency(
+                                      label={l("Netto", "Нетто")}
+                                      value={formatMoney(
                                         invoice.amount_net,
                                         invoice.currency,
                                       )}
                                     />
                                     <DetailField
-                                      label="VAT"
-                                      value={formatCurrency(
+                                      label={l("MwSt.", "НДС")}
+                                      value={formatMoney(
                                         invoice.amount_vat,
                                         invoice.currency,
                                       )}
                                     />
                                     <DetailField
-                                      label="Gross"
-                                      value={formatCurrency(
+                                      label={l("Brutto", "Брутто")}
+                                      value={formatMoney(
                                         invoice.amount_gross,
                                         invoice.currency,
                                       )}
                                     />
                                     <DetailField
-                                      label="Received"
-                                      value={formatDateTime(
+                                      label={l("Eingegangen", "Получен")}
+                                      value={formatDateTimeLabel(
                                         invoice.received_at,
                                       )}
                                     />
                                     <DetailField
-                                      label="Paid"
-                                      value={formatDateTime(invoice.paid_at)}
+                                      label={l("Bezahlt", "Оплачен")}
+                                      value={formatDateTimeLabel(invoice.paid_at)}
                                     />
                                     <DetailField
-                                      label="Last update"
-                                      value={formatDateTime(invoice.updated_at)}
+                                      label={l("Letzte Aktualisierung", "Последнее обновление")}
+                                      value={formatDateTimeLabel(invoice.updated_at)}
                                     />
                                   </div>
                                   {invoice.notes ? (
@@ -5057,7 +5642,7 @@ export function OrdersPage() {
                                         invoice.id ? (
                                           <LoaderCircle className="mr-2 size-4 animate-spin" />
                                         ) : null}
-                                        Mark approved
+                                        {l("Als freigegeben markieren", "Отметить как утверждённый")}
                                       </Button>
                                     ) : null}
                                     {invoice.status !== "paid" ? (
@@ -5078,7 +5663,7 @@ export function OrdersPage() {
                                         invoice.id ? (
                                           <LoaderCircle className="mr-2 size-4 animate-spin" />
                                         ) : null}
-                                        Mark paid
+                                        {l("Als bezahlt markieren", "Отметить как оплаченный")}
                                       </Button>
                                     ) : null}
                                     {invoice.status !== "cancelled" ? (
@@ -5099,7 +5684,7 @@ export function OrdersPage() {
                                         invoice.id ? (
                                           <LoaderCircle className="mr-2 size-4 animate-spin" />
                                         ) : null}
-                                        Cancel
+                                        {l("Stornieren", "Отменить")}
                                       </Button>
                                     ) : null}
                                   </div>
@@ -5121,7 +5706,7 @@ export function OrdersPage() {
       <Dialog open={createOpen} onOpenChange={resetCreateDialog}>
         <DialogContent className="max-w-xl">
           <DialogHeader>
-            <DialogTitle>Create order</DialogTitle>
+            <DialogTitle>{l("Auftrag anlegen", "Создать заказ")}</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleCreateOrder} className="space-y-4">
             {createError ? (
@@ -5148,7 +5733,7 @@ export function OrdersPage() {
                 <option value="">{t.orders_patient}</option>
                 {patients.map((patient) => (
                   <option key={patient.id} value={patient.id}>
-                    {patientLabel(patient)}
+                    {patientLabel(patient, l("Patient", "Пациент"))}
                   </option>
                 ))}
               </select>
@@ -5159,11 +5744,16 @@ export function OrdersPage() {
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="space-y-1">
                     <div className="text-sm font-semibold text-slate-900">
-                      Existing customer re-check
+                      {l(
+                        "Re-Check fur Bestandskunden",
+                        "Повторная проверка для существующего клиента",
+                      )}
                     </div>
                     <p className="text-xs text-slate-500">
-                      Validate base data, compliance, identity, document pack,
-                      contract status and debt hold before creating a new order.
+                      {l(
+                        "Stammdaten, Compliance, Identitat, Dokumentenpaket, Vertragsstatus und Debt-Hold vor dem Anlegen eines neuen Auftrags prufen.",
+                        "Проверьте базовые данные, compliance, идентификацию, комплект документов, статус договора и debt-hold перед созданием нового заказа.",
+                      )}
                     </p>
                   </div>
                   {createRecheck ? (
@@ -5178,10 +5768,10 @@ export function OrdersPage() {
                       )}
                     >
                       {!createRecheck.requires_recheck
-                        ? "Not required"
+                        ? l("Nicht erforderlich", "Не требуется")
                         : createRecheck.can_create_order
-                          ? "Ready for order"
-                          : "Blocked"}
+                          ? l("Bereit fur Auftrag", "Готов к заказу")
+                          : l("Blockiert", "Заблокирован")}
                     </Badge>
                   ) : null}
                 </div>
@@ -5189,7 +5779,10 @@ export function OrdersPage() {
                 {createRecheckLoading ? (
                   <div className="mt-3 flex items-center gap-2 text-sm text-slate-600">
                     <LoaderCircle className="size-4 animate-spin" />
-                    Loading patient re-check…
+                    {l(
+                      "Patienten-Re-Check wird geladen...",
+                      "Загрузка повторной проверки пациента...",
+                    )}
                   </div>
                 ) : null}
 
@@ -5210,7 +5803,22 @@ export function OrdersPage() {
                           >
                             <div className="flex items-center justify-between gap-2">
                               <span className="text-sm text-slate-700">
-                                {check.label}
+                                {check.key === "base_data"
+                                  ? l("Stammdaten vollstandig", "Базовые данные заполнены")
+                                  : check.key === "compliance"
+                                    ? l("Compliance-Dokumente gultig", "Compliance-документы валидны")
+                                    : check.key === "identity"
+                                      ? l("Identitat verifiziert", "Личность подтверждена")
+                                      : check.key === "document_pack"
+                                        ? l(
+                                            "Erforderliche Patientendokumente vollstandig",
+                                            "Обязательные документы пациента собраны",
+                                          )
+                                        : check.key === "contract"
+                                          ? l("Vertragsunterlagen gultig", "Договорные документы валидны")
+                                          : check.key === "debt_clear"
+                                            ? l("Debt-Hold aufgehoben", "Debt-hold снят")
+                                            : check.label}
                               </span>
                               <Badge
                                 variant="outline"
@@ -5219,7 +5827,9 @@ export function OrdersPage() {
                                   recheckBadgeClass(check.passed),
                                 )}
                               >
-                                {check.passed ? "OK" : "Needs update"}
+                                {check.passed
+                                  ? "OK"
+                                  : l("Aktualisierung notig", "Требует обновления")}
                               </Badge>
                             </div>
                           </div>
@@ -5227,17 +5837,27 @@ export function OrdersPage() {
                       </div>
                     ) : (
                       <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-sm text-emerald-800">
-                        {createRecheck.reason ??
-                          "This patient has no prior operational history yet, so the existing-customer re-check is not required before the first order."}
+                        {createRecheck.reason
+                          ? localizedBlockingReason(createRecheck.reason)
+                          : l(
+                              "Vor dem ersten operativen Auftrag ist kein Bestandskunden-Re-Check erforderlich.",
+                              "Повторная проверка существующего клиента не требуется перед первым операционным заказом.",
+                            )}
                       </div>
                     )}
 
                     {createRecheck.requires_recheck &&
                     createRecheck.base_data_missing_fields.length ? (
                       <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800">
-                        Missing base data:{" "}
+                        {l("Fehlende Stammdaten", "Не хватает базовых данных")}:{" "}
                         {createRecheck.base_data_missing_fields
-                          .map((field) => recheckMissingFieldLabel(field))
+                          .map((field) =>
+                            recheckMissingFieldLabel(field, {
+                              primary_contact: l("Hauptkontakt", "Основной контакт"),
+                              country: l("Land", "Страна"),
+                              language: l("Bevorzugte Sprache", "Предпочитаемый язык"),
+                            }),
+                          )
                           .join(", ")}
                       </div>
                     ) : null}
@@ -5245,17 +5865,21 @@ export function OrdersPage() {
                     {createRecheck.requires_recheck &&
                     createRecheck.blocking_reasons.length ? (
                       <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800">
-                        <div className="font-medium">Blocking reasons</div>
+                        <div className="font-medium">
+                          {l("Blockierende Grunde", "Блокирующие причины")}
+                        </div>
                         <ul className="mt-2 list-disc space-y-1 pl-5">
                           {createRecheck.blocking_reasons.map((reason) => (
-                            <li key={reason}>{reason}</li>
+                            <li key={reason}>{localizedBlockingReason(reason)}</li>
                           ))}
                         </ul>
                       </div>
                     ) : createRecheck.requires_recheck ? (
                       <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-sm text-emerald-800">
-                        Existing customer re-check is complete. The patient can
-                        move into a new order.
+                        {l(
+                          "Der Bestandskunden-Re-Check ist vollstandig. Der Patient kann in einen neuen Auftrag ubergehen.",
+                          "Повторная проверка существующего клиента завершена. Пациент может перейти в новый заказ.",
+                        )}
                       </div>
                     ) : null}
 
@@ -5264,39 +5888,57 @@ export function OrdersPage() {
                         <div>
                           {createRecheck.requires_recheck &&
                           createRecheck.document_alerts.missing_count > 0
-                            ? `${createRecheck.document_alerts.missing_count} required document(s) still missing`
+                            ? l(
+                                `${createRecheck.document_alerts.missing_count} erforderliche Dokument(e) fehlen noch`,
+                                `Ещё не хватает ${createRecheck.document_alerts.missing_count} обязательных документ(ов)`,
+                              )
                             : createRecheck.requires_recheck
-                              ? "Required document pack complete"
-                              : "No existing-customer document check required yet"}
+                              ? l(
+                                  "Erforderliches Dokumentenpaket ist vollstandig",
+                                  "Обязательный комплект документов собран",
+                                )
+                              : l(
+                                  "Fur Bestandskundendokumente ist noch kein Check erforderlich",
+                                  "Проверка документов существующего клиента пока не требуется",
+                                )}
                         </div>
                         <div>
                           {createRecheck.requires_recheck &&
                           createRecheck.debt_hold
-                            ? `${createRecheck.overdue_invoice_count} overdue invoice(s) keep the patient on debt hold`
+                            ? l(
+                                `${createRecheck.overdue_invoice_count} uberfallige Rechnung(en) halten den Patienten im Debt-Hold`,
+                                `${createRecheck.overdue_invoice_count} просроченных счет(ов) держат пациента в debt-hold`,
+                              )
                             : createRecheck.requires_recheck
-                              ? "No overdue debt detected"
-                              : "Debt-management hold is checked when prior customer history exists"}
+                              ? l(
+                                  "Keine uberfalligen Forderungen erkannt",
+                                  "Просроченной задолженности не найдено",
+                                )
+                              : l(
+                                  "Debt-Hold wird gepruft, sobald eine fruhere Kundenhistorie existiert",
+                                  "Debt-hold проверяется, когда уже есть история предыдущего клиента",
+                                )}
                         </div>
                         {createRecheck.requires_recheck &&
                         createRecheck.outstanding_balance ? (
                           <div>
-                            Outstanding balance:{" "}
-                            {formatCurrency(createRecheck.outstanding_balance)}
+                            {l("Offener Saldo", "Открытый остаток")}:{" "}
+                            {formatMoney(createRecheck.outstanding_balance)}
                           </div>
                         ) : null}
                         {createRecheck.requires_recheck &&
                         createRecheck.debt_management?.latest_workflow ? (
                           <div>
-                            Latest debt workflow:{" "}
+                            {l("Letzter Debt-Workflow", "Последний debt-workflow")}:{" "}
                             {
                               createRecheck.debt_management.latest_workflow
                                 .order_number
                             }{" "}
                             /{" "}
-                            {
+                            {debtStatusLabel(
                               createRecheck.debt_management.latest_workflow
-                                .effective_status
-                            }
+                                .effective_status,
+                            )}
                             {createRecheck.debt_management.latest_workflow
                               .owner_name
                               ? ` / ${createRecheck.debt_management.latest_workflow.owner_name}`
@@ -5305,7 +5947,7 @@ export function OrdersPage() {
                         ) : null}
                         {createRecheck.latest_framework_contract ? (
                           <div>
-                            Latest framework contract:{" "}
+                            {l("Letzter Rahmenvertrag", "Последний рамочный договор")}:{" "}
                             {
                               createRecheck.latest_framework_contract
                                 .contract_number
@@ -5313,7 +5955,12 @@ export function OrdersPage() {
                             ({createRecheck.latest_framework_contract.status})
                           </div>
                         ) : (
-                          <div>No framework contract recorded yet</div>
+                          <div>
+                            {l(
+                              "Noch kein Rahmenvertrag hinterlegt",
+                              "Рамочный договор пока не зафиксирован",
+                            )}
+                          </div>
                         )}
                       </div>
                       <Button
@@ -5324,7 +5971,7 @@ export function OrdersPage() {
                           staffGo(`/patients?patient=${createForm.patientId}`)
                         }
                       >
-                        Open patient profile
+                        {l("Patientenprofil offnen", "Открыть профиль пациента")}
                       </Button>
                     </div>
                   </div>
@@ -5333,7 +5980,7 @@ export function OrdersPage() {
             ) : null}
 
             <div>
-              <Label>Needs / intake note</Label>
+              <Label>{l("Bedarfs- / Intake-Notiz", "Заметка по потребности / intake")}</Label>
               <textarea
                 value={createForm.needsDescription}
                 onChange={(event) =>
@@ -5381,7 +6028,7 @@ export function OrdersPage() {
       <Dialog open={leistungOpen} onOpenChange={resetLeistungDialog}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Add Leistung</DialogTitle>
+            <DialogTitle>{l("Leistung hinzufugen", "Добавить Leistung")}</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleAddLeistung} className="space-y-4">
             {leistungError ? (
@@ -5392,7 +6039,7 @@ export function OrdersPage() {
 
             <div className="grid gap-4 md:grid-cols-2">
               <div>
-                <Label>Description</Label>
+                <Label>{l("Beschreibung", "Описание")}</Label>
                 <Input
                   required
                   value={leistungForm.description}
@@ -5406,7 +6053,7 @@ export function OrdersPage() {
                 />
               </div>
               <div>
-                <Label>Notes</Label>
+                <Label>{l("Notizen", "Заметки")}</Label>
                 <Input
                   value={leistungForm.notes}
                   onChange={(event) =>
@@ -5422,7 +6069,7 @@ export function OrdersPage() {
 
             <div className="grid gap-4 md:grid-cols-3">
               <div>
-                <Label>Quantity</Label>
+                <Label>{l("Menge", "Количество")}</Label>
                 <Input
                   value={leistungForm.quantity}
                   onChange={(event) =>
@@ -5435,7 +6082,7 @@ export function OrdersPage() {
                 />
               </div>
               <div>
-                <Label>Unit price</Label>
+                <Label>{l("Einzelpreis", "Цена за единицу")}</Label>
                 <Input
                   value={leistungForm.unitPrice}
                   onChange={(event) =>
@@ -5448,7 +6095,7 @@ export function OrdersPage() {
                 />
               </div>
               <div>
-                <Label>VAT %</Label>
+                <Label>{l("MwSt. %", "НДС %")}</Label>
                 <Input
                   value={leistungForm.vatRate}
                   onChange={(event) =>
@@ -5464,7 +6111,7 @@ export function OrdersPage() {
 
             <div className="grid gap-4 md:grid-cols-2">
               <div>
-                <Label>Provider</Label>
+                <Label>{l("Provider", "Провайдер")}</Label>
                 <select
                   value={leistungForm.providerId}
                   onChange={(event) => {
@@ -5489,7 +6136,7 @@ export function OrdersPage() {
                 </select>
               </div>
               <div>
-                <Label>Doctor</Label>
+                <Label>{l("Arzt", "Врач")}</Label>
                 <select
                   value={leistungForm.doctorId}
                   onChange={(event) =>

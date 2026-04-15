@@ -1,4 +1,5 @@
 import { getAccessToken } from "@/lib/api";
+import { getLang } from "@/lib/i18n";
 
 export type PortalDocumentItem = {
   id: string;
@@ -319,11 +320,66 @@ export type PortalFeedbackSummary = {
   clinic_ranking: PortalFeedbackRanking[];
 };
 
+function portalText(de: string, ru: string, en: string) {
+  const lang = getLang();
+  if (lang === "de") return de;
+  if (lang === "ru") return ru;
+  return en;
+}
+
+function portalLocale() {
+  const lang = getLang();
+  if (lang === "de") return "de-DE";
+  if (lang === "ru") return "ru-RU";
+  return "en-GB";
+}
+
+export function portalNotSetLabel() {
+  return portalText("Nicht festgelegt", "Не указано", "Not set");
+}
+
+export function portalStatusLabel(value?: string | null) {
+  if (!value) return portalNotSetLabel();
+  if (value === "active") return portalText("Aktiv", "Активно", "Active");
+  if (value === "approved") return portalText("Genehmigt", "Одобрено", "Approved");
+  if (value === "archived") return portalText("Archiviert", "Архивировано", "Archived");
+  if (value === "booked") return portalText("Gebucht", "Забронировано", "Booked");
+  if (value === "cancelled") return portalText("Storniert", "Отменено", "Cancelled");
+  if (value === "completed") return portalText("Abgeschlossen", "Завершено", "Completed");
+  if (value === "confirmed") return portalText("Bestätigt", "Подтверждено", "Confirmed");
+  if (value === "converted") return portalText("Umgewandelt", "Преобразовано", "Converted");
+  if (value === "draft") return portalText("Entwurf", "Черновик", "Draft");
+  if (value === "executed") return portalText("Ausgeführt", "Исполнено", "Executed");
+  if (value === "in_progress") return portalText("In Bearbeitung", "В работе", "In progress");
+  if (value === "in_service") return portalText("In Betreuung", "В исполнении", "In service");
+  if (value === "open") return portalText("Offen", "Открыто", "Open");
+  if (value === "overdue") return portalText("Überfällig", "Просрочено", "Overdue");
+  if (value === "paid") return portalText("Bezahlt", "Оплачено", "Paid");
+  if (value === "partially_paid") return portalText("Teilweise bezahlt", "Частично оплачено", "Partially paid");
+  if (value === "pending") return portalText("Ausstehend", "В ожидании", "Pending");
+  if (value === "planned") return portalText("Geplant", "Запланировано", "Planned");
+  if (value === "ready") return portalText("Bereit", "Готово", "Ready");
+  if (value === "rejected") return portalText("Abgelehnt", "Отклонено", "Rejected");
+  if (value === "released") return portalText("Freigegeben", "Опубликовано", "Released");
+  if (value === "retention_hold") return portalText("Aufbewahrungssperre", "Удержание по хранению", "Retention hold");
+  if (value === "reviewed") return portalText("Geprüft", "Проверено", "Reviewed");
+  if (value === "scheduled") return portalText("Eingeplant", "Назначено", "Scheduled");
+  if (value === "sent") return portalText("Versendet", "Отправлено", "Sent");
+  return value.replaceAll("_", " ");
+}
+
+export function invoiceTypeLabel(value: string) {
+  if (value === "advance") return portalText("Vorkasse", "Авансовый счет", "Advance");
+  if (value === "interim") return portalText("Zwischenrechnung", "Промежуточный счет", "Interim");
+  if (value === "final") return portalText("Schlussrechnung", "Итоговый счет", "Final");
+  return value.replaceAll("_", " ");
+}
+
 export function formatPortalDateTime(value?: string | null) {
-  if (!value) return "Not set";
+  if (!value) return portalNotSetLabel();
 
   try {
-    return new Intl.DateTimeFormat("en-GB", {
+    return new Intl.DateTimeFormat(portalLocale(), {
       day: "2-digit",
       month: "short",
       year: "numeric",
@@ -336,10 +392,10 @@ export function formatPortalDateTime(value?: string | null) {
 }
 
 export function formatPortalDate(value?: string | null) {
-  if (!value) return "Not set";
+  if (!value) return portalNotSetLabel();
 
   try {
-    return new Intl.DateTimeFormat("en-GB", {
+    return new Intl.DateTimeFormat(portalLocale(), {
       day: "2-digit",
       month: "short",
       year: "numeric",
@@ -350,7 +406,7 @@ export function formatPortalDate(value?: string | null) {
 }
 
 export function formatPortalFileSize(value?: number | null) {
-  if (!value || value <= 0) return "Not set";
+  if (!value || value <= 0) return portalNotSetLabel();
   if (value < 1024) return `${value} B`;
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
@@ -358,19 +414,20 @@ export function formatPortalFileSize(value?: number | null) {
 
 export function formatPortalCurrency(value: unknown) {
   const numeric = typeof value === "number" ? value : Number(value ?? 0);
-  if (!Number.isFinite(numeric)) return "EUR 0.00";
-  return new Intl.NumberFormat("de-DE", {
+  const formatter = new Intl.NumberFormat(portalLocale(), {
     style: "currency",
     currency: "EUR",
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  }).format(numeric);
+  });
+  if (!Number.isFinite(numeric)) return formatter.format(0);
+  return formatter.format(numeric);
 }
 
 export function privacyRequestLabel(value: string) {
-  if (value === "erasure") return "Erase data";
-  if (value === "restriction") return "Restrict processing";
-  if (value === "third_party_revoke") return "Revoke third-party sharing";
+  if (value === "erasure") return portalText("Daten löschen", "Удалить данные", "Erase data");
+  if (value === "restriction") return portalText("Verarbeitung einschränken", "Ограничить обработку", "Restrict processing");
+  if (value === "third_party_revoke") return portalText("Weitergabe an Dritte widerrufen", "Отозвать передачу третьим лицам", "Revoke third-party sharing");
   return value.replaceAll("_", " ");
 }
 
@@ -393,20 +450,20 @@ export function feedbackStatusTone(status: string) {
 }
 
 export function feedbackSourceLabel(source: string) {
-  if (source === "patient_portal") return "Patient portal";
-  if (source === "staff_capture") return "Staff capture";
+  if (source === "patient_portal") return portalText("Patientenportal", "Портал пациента", "Patient portal");
+  if (source === "staff_capture") return portalText("Durch Mitarbeitende erfasst", "Зафиксировано сотрудником", "Staff capture");
   return source.replaceAll("_", " ");
 }
 
 export function formatPortalAverage(value?: number | null) {
-  if (typeof value !== "number" || Number.isNaN(value)) return "Not set";
+  if (typeof value !== "number" || Number.isNaN(value)) return portalNotSetLabel();
   return value.toFixed(1);
 }
 
 export function npsBandLabel(value: number) {
-  if (value >= 9) return "Promoter";
-  if (value >= 7) return "Passive";
-  return "Detractor";
+  if (value >= 9) return portalText("Promotor", "Промоутер", "Promoter");
+  if (value >= 7) return portalText("Passiv", "Нейтральный", "Passive");
+  return portalText("Kritiker", "Критик", "Detractor");
 }
 
 export function documentTone(item: PortalDocumentItem) {
@@ -474,36 +531,36 @@ export function followupStatusTone(status: string) {
 }
 
 export function appointmentTypeLabel(value: string) {
-  if (value === "medical") return "Medical";
-  if (value === "non_medical") return "Non-medical";
-  if (value === "internal") return "Internal";
+  if (value === "medical") return portalText("Medizinisch", "Медицинский", "Medical");
+  if (value === "non_medical") return portalText("Nicht medizinisch", "Немедицинский", "Non-medical");
+  if (value === "internal") return portalText("Intern", "Внутренний", "Internal");
   return value.replaceAll("_", " ");
 }
 
 export function appointmentCarePathKindLabel(value?: string | null) {
-  if (value === "preventive") return "Preventive";
-  if (value === "control") return "Control";
-  if (value === "followup") return "Follow-up";
-  return "Regular";
+  if (value === "preventive") return portalText("Präventiv", "Профилактический", "Preventive");
+  if (value === "control") return portalText("Kontrolle", "Контрольный", "Control");
+  if (value === "followup") return portalText("Nachsorge", "Последующее наблюдение", "Follow-up");
+  return portalText("Regulär", "Обычный", "Regular");
 }
 
 export function appointmentTimeOfDayLabel(value?: string | null) {
-  if (!value) return "Flexible";
-  if (value === "morning") return "Morning";
-  if (value === "midday") return "Midday";
-  if (value === "afternoon") return "Afternoon";
-  if (value === "evening") return "Evening";
-  return "Flexible";
+  if (!value) return portalText("Flexibel", "Гибко", "Flexible");
+  if (value === "morning") return portalText("Morgens", "Утром", "Morning");
+  if (value === "midday") return portalText("Mittags", "Днем", "Midday");
+  if (value === "afternoon") return portalText("Nachmittags", "После обеда", "Afternoon");
+  if (value === "evening") return portalText("Abends", "Вечером", "Evening");
+  return portalText("Flexibel", "Гибко", "Flexible");
 }
 
 export function conciergeServiceKindLabel(value: string) {
-  if (value === "hotel") return "Hotel";
-  if (value === "transfer") return "Transfer";
-  if (value === "vip_terminal") return "VIP terminal";
-  if (value === "flight") return "Flight";
-  if (value === "chauffeur") return "Chauffeur";
-  if (value === "translation_support") return "Translation support";
-  return "Additional service";
+  if (value === "hotel") return portalText("Hotel", "Отель", "Hotel");
+  if (value === "transfer") return portalText("Transfer", "Трансфер", "Transfer");
+  if (value === "vip_terminal") return portalText("VIP-Terminal", "VIP-терминал", "VIP terminal");
+  if (value === "flight") return portalText("Flug", "Перелет", "Flight");
+  if (value === "chauffeur") return portalText("Chauffeur", "Шофер", "Chauffeur");
+  if (value === "translation_support") return portalText("Sprachunterstützung", "Языковая поддержка", "Translation support");
+  return portalText("Zusatzservice", "Дополнительная услуга", "Additional service");
 }
 
 export function conciergeServiceStatusTone(status: string) {
@@ -516,9 +573,9 @@ export function conciergeServiceStatusTone(status: string) {
 }
 
 export function conciergeServiceSourceLabel(value: string) {
-  if (value === "patient_portal") return "Portal request";
-  if (value === "appointment_bootstrap") return "Care-team flow";
-  return "Care-team entry";
+  if (value === "patient_portal") return portalText("Anfrage aus dem Portal", "Запрос из портала", "Portal request");
+  if (value === "appointment_bootstrap") return portalText("Care-Team-Workflow", "Поток команды сопровождения", "Care-team flow");
+  return portalText("Eintrag durch Care-Team", "Запись команды сопровождения", "Care-team entry");
 }
 
 async function fetchPortalBlob(path: string) {
@@ -550,7 +607,7 @@ function openBlobPreview(blob: Blob) {
   const previewWindow = window.open(url, "_blank", "noopener,noreferrer");
   if (!previewWindow) {
     URL.revokeObjectURL(url);
-    throw new Error("Allow pop-ups to preview the PDF.");
+    throw new Error(portalText("Bitte Pop-ups für die PDF-Vorschau zulassen.", "Разрешите всплывающие окна для предварительного просмотра PDF.", "Allow pop-ups to preview the PDF."));
   }
 
   window.setTimeout(() => URL.revokeObjectURL(url), 60_000);

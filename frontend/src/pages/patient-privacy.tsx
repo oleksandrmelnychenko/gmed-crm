@@ -5,9 +5,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { apiFetch } from "@/lib/api";
+import { useLang } from "@/lib/i18n";
 import {
   formatPortalDate,
   formatPortalDateTime,
+  portalStatusLabel,
   privacyRequestLabel,
   privacyStatusTone,
 } from "@/pages/patient-portal.shared";
@@ -17,6 +19,7 @@ import { cn } from "@/lib/utils";
 type RequestType = "erasure" | "restriction" | "third_party_revoke";
 
 export function PatientPrivacyPage() {
+  const { lang } = useLang();
   const [requests, setRequests] = useState<PortalPrivacyRequest[]>([]);
   const [requestType, setRequestType] = useState<RequestType>("restriction");
   const [reason, setReason] = useState("");
@@ -26,6 +29,7 @@ export function PatientPrivacyPage() {
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [version, setVersion] = useState(0);
+  const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
 
   useEffect(() => {
     let cancelled = false;
@@ -46,7 +50,7 @@ export function PatientPrivacyPage() {
         });
       } catch (err) {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : "Failed to load privacy requests.");
+        setError(err instanceof Error ? err.message : l("Datenschutzanfragen konnten nicht geladen werden.", "Не удалось загрузить запросы по приватности.", "Failed to load privacy requests."));
       } finally {
         if (!cancelled) {
           setLoading(false);
@@ -81,10 +85,10 @@ export function PatientPrivacyPage() {
         }),
       });
       setReason("");
-      setNotice("Privacy request submitted.");
+      setNotice(l("Datenschutzanfrage wurde eingereicht.", "Запрос по приватности отправлен.", "Privacy request submitted."));
       setVersion((value) => value + 1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to submit privacy request.");
+      setError(err instanceof Error ? err.message : l("Datenschutzanfrage konnte nicht gesendet werden.", "Не удалось отправить запрос по приватности.", "Failed to submit privacy request."));
     } finally {
       setSubmitting(false);
     }
@@ -95,7 +99,7 @@ export function PatientPrivacyPage() {
       <div className="flex min-h-[60vh] items-center justify-center">
         <div className="flex items-center gap-3 rounded-full border border-slate-200 bg-white px-5 py-3 text-sm text-slate-500 shadow-sm">
           <LoaderCircle className="size-4 animate-spin" />
-          Loading privacy workspace...
+          {l("Datenschutzbereich wird geladen...", "Загрузка раздела приватности...", "Loading privacy workspace...")}
         </div>
       </div>
     );
@@ -107,22 +111,22 @@ export function PatientPrivacyPage() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-700">
-              Patient portal
+              {l("Patientenportal", "Портал пациента", "Patient portal")}
             </p>
             <h1 className="mt-3 text-3xl font-semibold tracking-tight text-slate-950">
-              Privacy requests
+              {l("Datenschutzanfragen", "Запросы по приватности", "Privacy requests")}
             </h1>
             <p className="mt-3 max-w-3xl text-sm text-slate-500">
-              Submit DSGVO requests for data erasure, processing restriction or third-party sharing revocation.
+              {l("Reichen Sie DSGVO-Anfragen zur Datenlöschung, Verarbeitungseinschränkung oder zum Widerruf der Weitergabe an Dritte ein.", "Отправляйте запросы по защите данных на удаление, ограничение обработки или отзыв передачи третьим лицам.", "Submit DSGVO requests for data erasure, processing restriction or third-party sharing revocation.")}
             </p>
           </div>
           <div className="flex flex-wrap gap-3">
             <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm text-slate-600">
-              Open requests: <span className="font-semibold text-slate-950">{openRequests.length}</span>
+              {l("Offene Anfragen", "Открытые запросы", "Open requests")}: <span className="font-semibold text-slate-950">{openRequests.length}</span>
             </div>
             <Button variant="outline" className="rounded-2xl" onClick={() => setVersion((value) => value + 1)}>
               <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
-              Refresh
+              {l("Aktualisieren", "Обновить", "Refresh")}
             </Button>
           </div>
         </div>
@@ -146,34 +150,34 @@ export function PatientPrivacyPage() {
               <Shield className="size-5" />
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-slate-950">New request</h2>
+              <h2 className="text-lg font-semibold text-slate-950">{l("Neue Anfrage", "Новый запрос", "New request")}</h2>
               <p className="mt-1 text-sm text-slate-500">
-                Requests go to your patient manager for review and execution.
+                {l("Anfragen gehen zur Prüfung und Bearbeitung an Ihren Patientenmanager.", "Запросы поступают вашему менеджеру пациента на рассмотрение и исполнение.", "Requests go to your patient manager for review and execution.")}
               </p>
             </div>
           </div>
 
           <form onSubmit={handleSubmit} className="mt-5 space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="privacy-type">Request type</Label>
+              <Label htmlFor="privacy-type">{l("Anfragetyp", "Тип запроса", "Request type")}</Label>
               <select
                 id="privacy-type"
                 value={requestType}
                 onChange={(event) => setRequestType(event.target.value as RequestType)}
                 className="h-10 w-full rounded-xl border border-input bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
               >
-                <option value="restriction">Restrict processing</option>
-                <option value="erasure">Erase data</option>
-                <option value="third_party_revoke">Revoke third-party sharing</option>
+                <option value="restriction">{l("Verarbeitung einschränken", "Ограничить обработку", "Restrict processing")}</option>
+                <option value="erasure">{l("Daten löschen", "Удалить данные", "Erase data")}</option>
+                <option value="third_party_revoke">{l("Weitergabe an Dritte widerrufen", "Отозвать передачу третьим лицам", "Revoke third-party sharing")}</option>
               </select>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="privacy-reason">Reason</Label>
+              <Label htmlFor="privacy-reason">{l("Begründung", "Причина", "Reason")}</Label>
               <textarea
                 id="privacy-reason"
                 value={reason}
                 onChange={(event) => setReason(event.target.value)}
-                placeholder="Optional context for the care team"
+                placeholder={l("Optionaler Kontext für das Betreuungsteam", "Необязательный контекст для команды сопровождения", "Optional context for the care team")}
                 className="min-h-[120px] w-full rounded-xl border border-input bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
               />
             </div>
@@ -183,7 +187,7 @@ export function PatientPrivacyPage() {
               disabled={submitting}
             >
               {submitting ? <LoaderCircle className="size-4 animate-spin" /> : null}
-              Submit request
+              {l("Anfrage senden", "Отправить запрос", "Submit request")}
             </Button>
           </form>
         </section>
@@ -191,16 +195,16 @@ export function PatientPrivacyPage() {
         <section className="rounded-[1.75rem] border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <h2 className="text-lg font-semibold text-slate-950">Request history</h2>
+              <h2 className="text-lg font-semibold text-slate-950">{l("Anfrageverlauf", "История запросов", "Request history")}</h2>
               <p className="mt-1 text-sm text-slate-500">
-                Timeline for submitted privacy actions and due dates.
+                {l("Zeitachse eingereichter Datenschutzmaßnahmen und ihrer Fristen.", "Хронология отправленных запросов по приватности и их сроков.", "Timeline for submitted privacy actions and due dates.")}
               </p>
             </div>
           </div>
 
           {requests.length === 0 ? (
             <div className="mt-5 rounded-[1.35rem] border border-dashed border-slate-200 bg-slate-50/70 px-4 py-6 text-sm text-slate-500">
-              No privacy requests submitted yet.
+              {l("Noch keine Datenschutzanfragen eingereicht.", "Запросы по приватности еще не отправлялись.", "No privacy requests submitted yet.")}
             </div>
           ) : (
             <div className="mt-5 space-y-3">
@@ -215,22 +219,22 @@ export function PatientPrivacyPage() {
                         {privacyRequestLabel(item.request_type)}
                       </p>
                       <p className="mt-1 text-xs text-slate-500">
-                        Submitted {formatPortalDateTime(item.requested_at)}
+                        {l("Eingereicht", "Отправлено", "Submitted")} {formatPortalDateTime(item.requested_at)}
                       </p>
                     </div>
                     <Badge
                       variant="outline"
                       className={cn("rounded-full", privacyStatusTone(item.status))}
                     >
-                      {item.status.replaceAll("_", " ")}
+                      {portalStatusLabel(item.status)}
                     </Badge>
                   </div>
 
                   <div className="mt-4 grid gap-3 md:grid-cols-2">
-                    <RequestField label="Due" value={formatPortalDate(item.due_at)} />
-                    <RequestField label="Reviewed" value={formatPortalDateTime(item.reviewed_at)} />
-                    <RequestField label="Executed" value={formatPortalDateTime(item.executed_at)} />
-                    <RequestField label="Source" value={item.source.replaceAll("_", " ")} />
+                    <RequestField label={l("Fällig", "Срок", "Due")} value={formatPortalDate(item.due_at)} />
+                    <RequestField label={l("Geprüft", "Проверено", "Reviewed")} value={formatPortalDateTime(item.reviewed_at)} />
+                    <RequestField label={l("Ausgeführt", "Исполнено", "Executed")} value={formatPortalDateTime(item.executed_at)} />
+                    <RequestField label={l("Quelle", "Источник", "Source")} value={item.source.replaceAll("_", " ")} />
                   </div>
 
                   {item.reason ? (

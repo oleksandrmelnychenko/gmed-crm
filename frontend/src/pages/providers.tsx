@@ -328,10 +328,6 @@ function providerTypeBadge(value: string) {
     : "border-sky-200 bg-sky-50 text-sky-700";
 }
 
-function providerContactsLabel(providerType: ProviderType) {
-  return providerType === "non_medical" ? "Contacts" : "Doctors";
-}
-
 function statusBadge(active: boolean) {
   return active
     ? "border-emerald-200 bg-emerald-50 text-emerald-700"
@@ -633,8 +629,9 @@ function providerMeta(provider: ProviderSummary | ProviderDetail) {
 
 function ProvidersPage() {
   const { user } = useAuth();
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
+  const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
   const { staffGo } = useStaffNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const permissions = useMemo(() => providerPermissions(user?.role), [user?.role]);
@@ -1020,11 +1017,14 @@ function ProvidersPage() {
       <div className="space-y-6">
         <section className={cardClass("p-8")}>
           <h1 className="text-3xl font-semibold tracking-tight text-slate-950">
-            Clinic and doctor registry
+            {l("Klinik- und Arztregister", "Реестр клиник и врачей", "Clinic and doctor registry")}
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600">
-            This workspace is limited to CEO, patient managers, concierge, billing and sales
-            roles because it drives clinic coordination and external partner visibility.
+            {l(
+              "Dieser Bereich ist auf CEO, Patientenmanager, Concierge, Billing und Sales beschränkt, weil er die Klinikkoordination und die Sicht auf externe Partner steuert.",
+              "Этот раздел доступен только CEO, менеджерам пациентов, concierge, billing и sales, потому что он управляет координацией клиник и видимостью внешних партнёров.",
+              "This workspace is limited to CEO, patient managers, concierge, billing and sales roles because it drives clinic coordination and external partner visibility.",
+            )}
           </p>
         </section>
       </div>
@@ -1073,7 +1073,7 @@ function ProvidersPage() {
                 }}
               >
                 <RefreshCw className="size-4" />
-                Refresh
+                {l("Aktualisieren", "Обновить", "Refresh")}
               </Button>
               {permissions.canManageRegistry ? (
                 <Button
@@ -1092,14 +1092,14 @@ function ProvidersPage() {
             <MetricCard icon={Building2} label={t.providers_title} value={metrics.total.toString()} tone="sky" />
             <MetricCard
               icon={UsersRound}
-              label={permissions.forceNonMedical ? "Services" : t.providers_doctors}
+              label={permissions.forceNonMedical ? l("Services", "Сервисы", "Services") : t.providers_doctors}
               value={(permissions.forceNonMedical ? metrics.services : metrics.doctors).toString()}
               tone="emerald"
             />
             <MetricCard icon={Stethoscope} label={t.providers_linked_patients} value={metrics.patients.toString()} tone="amber" />
             <MetricCard
               icon={CalendarClock}
-              label={permissions.forceNonMedical ? "Open requests" : t.providers_appointments}
+              label={permissions.forceNonMedical ? l("Offene Anfragen", "Открытые запросы", "Open requests") : t.providers_appointments}
               value={(permissions.forceNonMedical ? metrics.openConciergeRequests : metrics.appointments).toString()}
               tone="slate"
             />
@@ -1116,7 +1116,7 @@ function ProvidersPage() {
                 </p>
               </div>
               <Button type="button" variant="ghost" size="sm" className="rounded-xl" onClick={resetFilters}>
-                Reset
+                {l("Zurücksetzen", "Сбросить", "Reset")}
               </Button>
             </div>
 
@@ -1352,7 +1352,7 @@ function ProvidersPage() {
                           </span>
                           {provider.has_contract ? (
                             <Badge variant="outline" className="rounded-full border-slate-200 bg-white text-slate-700">
-                              Contract
+                              {l("Vertrag", "Договор", "Contract")}
                             </Badge>
                           ) : null}
                         </div>
@@ -1364,12 +1364,12 @@ function ProvidersPage() {
                         ) : null}
                         <p className="mt-1 text-sm text-slate-600">
                           {provider.tax_id
-                            ? `Tax ID ${provider.tax_id}`
+                            ? `${l("Steuer-ID", "Налоговый ID", "Tax ID")} ${provider.tax_id}`
                             : provider.fachbereich || t.common_not_set}
                         </p>
                       </div>
                       <Button type="button" variant="ghost" size="sm" className="rounded-xl">
-                        Open
+                        {l("Öffnen", "Открыть", "Open")}
                       </Button>
                     </div>
 
@@ -1381,7 +1381,7 @@ function ProvidersPage() {
                       <InlineInfo icon={Mail}>{provider.email || t.common_not_set}</InlineInfo>
                       {provider.rating_count > 0 ? (
                         <InlineInfo icon={Star}>
-                          {formatRating(provider.avg_rating)} / 5 · {provider.rating_count} ratings
+                          {formatRating(provider.avg_rating)} / 5 · {provider.rating_count} {l("Bewertungen", "оценок", "ratings")}
                         </InlineInfo>
                       ) : null}
                     </div>
@@ -1389,7 +1389,7 @@ function ProvidersPage() {
                     <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-4">
                       <div className="rounded-2xl bg-slate-50 px-3 py-3">
                         <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">
-                          {providerContactsLabel(provider.provider_type)}
+                          {provider.provider_type === "non_medical" ? l("Kontakte", "Контакты", "Contacts") : t.providers_doctors}
                         </p>
                         <p className="mt-2 text-xl font-semibold text-slate-950">
                           {provider.doctor_count}
@@ -1397,7 +1397,7 @@ function ProvidersPage() {
                       </div>
                       <div className="rounded-2xl bg-slate-50 px-3 py-3">
                         <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">
-                          Patients
+                          {l("Patienten", "Пациенты", "Patients")}
                         </p>
                         <p className="mt-2 text-xl font-semibold text-slate-950">
                           {provider.patient_count}
@@ -1405,7 +1405,7 @@ function ProvidersPage() {
                       </div>
                       <div className="rounded-2xl bg-slate-50 px-3 py-3">
                         <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">
-                          Services
+                          {l("Services", "Сервисы", "Services")}
                         </p>
                         <p className="mt-2 text-xl font-semibold text-slate-950">
                           {provider.service_count}
@@ -1413,7 +1413,7 @@ function ProvidersPage() {
                       </div>
                       <div className="rounded-2xl bg-slate-50 px-3 py-3">
                         <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">
-                          {provider.provider_type === "non_medical" ? "Open requests" : "Slots"}
+                          {provider.provider_type === "non_medical" ? l("Offene Anfragen", "Открытые запросы", "Open requests") : l("Slots", "Слоты", "Slots")}
                         </p>
                         <p className="mt-2 text-xl font-semibold text-slate-950">
                           {provider.provider_type === "non_medical"
@@ -1424,7 +1424,7 @@ function ProvidersPage() {
                     </div>
                     {provider.provider_type === "non_medical" ? (
                       <p className="mt-4 text-sm text-slate-500">
-                        {provider.concierge_service_count} concierge requests tracked
+                        {provider.concierge_service_count} {l("erfasste Concierge-Anfragen", "запросов concierge в учете", "concierge requests tracked")}
                         {provider.last_interaction_at ? ` · Last activity ${compactDateTime(provider.last_interaction_at)}` : ""}
                       </p>
                     ) : provider.last_interaction_at ? (
@@ -1465,10 +1465,13 @@ function ProvidersPage() {
       <Sheet open={createOpen} onOpenChange={setCreateOpen}>
         <SheetContent side="right" className="w-full sm:max-w-[760px]">
           <SheetHeader className="border-b border-border/70 pb-4">
-            <SheetTitle>Create provider</SheetTitle>
+            <SheetTitle>{l("Anbieter anlegen", "Создать провайдера", "Create provider")}</SheetTitle>
             <SheetDescription>
-              Add the next clinic or service partner with contract notes, contact data and
-              specialty context from the start.
+              {l(
+                "Legen Sie die nächste Klinik oder den nächsten Servicepartner direkt mit Vertragsnotizen, Kontaktdaten und Fachkontext an.",
+                "Добавьте следующую клинику или сервисного партнера сразу с примечаниями по договору, контактами и профильным контекстом.",
+                "Add the next clinic or service partner with contract notes, contact data and specialty context from the start.",
+              )}
             </SheetDescription>
           </SheetHeader>
 
@@ -1491,7 +1494,7 @@ function ProvidersPage() {
                   className="rounded-2xl"
                   onClick={() => setCreateOpen(false)}
                 >
-                  Cancel
+                  {l("Abbrechen", "Отмена", "Cancel")}
                 </Button>
                 <Button
                   type="submit"
@@ -1527,8 +1530,11 @@ function ProvidersPage() {
           <SheetHeader className="border-b border-border/70 pb-4">
             <SheetTitle>{detail?.name || selectedSummary?.name || t.providers_detail}</SheetTitle>
             <SheetDescription>
-              Review the clinic profile, keep doctor and service registries in sync and trace the
-              patient-facing activity tied to this partner.
+              {l(
+                "Prüfen Sie das Klinikprofil, halten Sie Arzt- und Serviceverzeichnisse synchron und verfolgen Sie die patientenseitigen Aktivitäten dieses Partners.",
+                "Просматривайте профиль клиники, синхронизируйте реестры врачей и сервисов и отслеживайте активность, связанную с этим партнером.",
+                "Review the clinic profile, keep doctor and service registries in sync and trace the patient-facing activity tied to this partner.",
+              )}
             </SheetDescription>
           </SheetHeader>
 
@@ -1536,7 +1542,7 @@ function ProvidersPage() {
             {detailBusy ? (
               <div className="flex min-h-[320px] items-center justify-center text-sm text-slate-500">
                 <LoaderCircle className="mr-2 size-4 animate-spin" />
-                Loading provider
+                {l("Anbieter wird geladen", "Загрузка провайдера", "Loading provider")}
               </div>
             ) : detailError ? (
               <div className="pt-5">
@@ -1619,7 +1625,7 @@ function ProvidersPage() {
               </div>
             ) : (
               <div className="flex min-h-[320px] items-center justify-center text-sm text-slate-500">
-                Select a provider to open the registry workspace.
+                {l("Wählen Sie einen Anbieter aus, um den Registerbereich zu öffnen.", "Выберите провайдера, чтобы открыть реестровое рабочее пространство.", "Select a provider to open the registry workspace.")}
               </div>
             )}
           </div>
@@ -1658,8 +1664,9 @@ function ProviderOverviewSection({
   onOpenPatients: () => void;
   onOpenAppointments: () => void;
 }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
+  const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
   return (
     <>
       <section className={cardClass("p-5")}>
@@ -1682,7 +1689,7 @@ function ProviderOverviewSection({
           </span>
           {detail.kooperationsvertrag ? (
             <Badge variant="outline" className="rounded-full border-slate-200 bg-white text-slate-700">
-              Contract linked
+              {l("Vertrag verknüpft", "Договор привязан", "Contract linked")}
             </Badge>
           ) : null}
         </div>
@@ -1694,7 +1701,7 @@ function ProviderOverviewSection({
               <p className="mt-1 text-sm font-medium text-slate-700">{detail.legal_name}</p>
             ) : null}
             <p className="mt-2 text-sm text-slate-600">
-              {detail.tax_id ? `Tax ID ${detail.tax_id}` : detail.fachbereich || t.common_not_set}
+              {detail.tax_id ? `${l("Steuer-ID", "Налоговый ID", "Tax ID")} ${detail.tax_id}` : detail.fachbereich || t.common_not_set}
             </p>
           </div>
 
@@ -1708,24 +1715,24 @@ function ProviderOverviewSection({
         <div className="mt-5 grid gap-3 md:grid-cols-4">
           <div className="rounded-2xl bg-slate-50 px-4 py-4">
             <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">
-              {providerContactsLabel(detail.provider_type)}
+              {detail.provider_type === "non_medical" ? l("Kontakte", "Контакты", "Contacts") : t.providers_doctors}
             </p>
             <p className="mt-2 text-2xl font-semibold text-slate-950">{detail.doctors.length}</p>
           </div>
           <div className="rounded-2xl bg-slate-50 px-4 py-4">
-            <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Services</p>
+            <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{l("Services", "Сервисы", "Services")}</p>
             <p className="mt-2 text-2xl font-semibold text-slate-950">{detail.services.length}</p>
           </div>
           <div className="rounded-2xl bg-slate-50 px-4 py-4">
             <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">
-              Linked patients
+              {l("Verknüpfte Patienten", "Связанные пациенты", "Linked patients")}
             </p>
             <p className="mt-2 text-2xl font-semibold text-slate-950">
               {detail.linked_patients.length}
             </p>
           </div>
           <div className="rounded-2xl bg-slate-50 px-4 py-4">
-            <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Activity items</p>
+            <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{l("Aktivität", "Активность", "Activity items")}</p>
             <p className="mt-2 text-2xl font-semibold text-slate-950">
               {detail.interactions.length}
             </p>
@@ -1734,10 +1741,10 @@ function ProviderOverviewSection({
 
         <div className="mt-5 flex flex-wrap gap-2">
           <Button type="button" variant="outline" className="rounded-2xl" onClick={onOpenPatients}>
-            Patient links
+            {l("Patientenlinks", "Связи с пациентами", "Patient links")}
           </Button>
           <Button type="button" variant="outline" className="rounded-2xl" onClick={onOpenAppointments}>
-            Appointments
+            {l("Termine", "Записи", "Appointments")}
           </Button>
         </div>
       </section>
@@ -1745,14 +1752,17 @@ function ProviderOverviewSection({
       <section className={cardClass("p-5")}>
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h3 className="text-sm font-semibold text-slate-950">Provider profile</h3>
+            <h3 className="text-sm font-semibold text-slate-950">{l("Anbieterprofil", "Профиль провайдера", "Provider profile")}</h3>
             <p className="mt-1 text-sm text-slate-600">
-              Keep the canonical clinic data aligned with appointments, services and registry
-              filters.
+              {l(
+                "Halten Sie die kanonischen Klinikdaten mit Terminen, Services und Registerfiltern synchron.",
+                "Поддерживайте канонические данные клиники синхронизированными с записями, сервисами и фильтрами реестра.",
+                "Keep the canonical clinic data aligned with appointments, services and registry filters.",
+              )}
             </p>
           </div>
           <div className="text-xs uppercase tracking-[0.12em] text-slate-500">
-            Updated {compactDateTime(detail.updated_at, t.common_not_set)}
+            {l("Aktualisiert", "Обновлено", "Updated")} {compactDateTime(detail.updated_at, t.common_not_set)}
           </div>
         </div>
 
@@ -1783,7 +1793,7 @@ function ProviderOverviewSection({
                   {providerActionBusy === "activate" ? (
                     <LoaderCircle className="size-4 animate-spin" />
                   ) : null}
-                  Activate
+                  {l("Aktivieren", "Активировать", "Activate")}
                 </Button>
                 <Button
                   type="button"
@@ -1795,7 +1805,7 @@ function ProviderOverviewSection({
                   {providerActionBusy === "deactivate" ? (
                     <LoaderCircle className="size-4 animate-spin" />
                   ) : null}
-                  Deactivate
+                  {l("Deaktivieren", "Деактивировать", "Deactivate")}
                 </Button>
                 <Button
                   type="button"
@@ -1809,7 +1819,7 @@ function ProviderOverviewSection({
                   ) : (
                     <Trash2 className="size-4" />
                   )}
-                  Delete
+                  {l("Löschen", "Удалить", "Delete")}
                 </Button>
               </div>
 
@@ -1824,8 +1834,11 @@ function ProviderOverviewSection({
             </div>
           ) : (
             <div className="border-t border-border/70 pt-4 text-sm text-slate-500">
-              Registry edits are restricted for your role. This sheet stays connected to live
-              provider, doctor and patient activity in read-only mode.
+              {l(
+                "Registeränderungen sind für Ihre Rolle gesperrt. Dieses Blatt bleibt im Lesemodus mit der Live-Aktivität von Anbieter, Ärzten und Patienten verbunden.",
+                "Изменения в реестре для вашей роли ограничены. Этот лист остается связанным с живой активностью провайдера, врачей и пациентов в режиме только чтения.",
+                "Registry edits are restricted for your role. This sheet stays connected to live provider, doctor and patient activity in read-only mode.",
+              )}
             </div>
           )}
         </form>
@@ -1857,22 +1870,23 @@ function DoctorSection({
   onDelete: (doctorId: string, doctorName: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
+  const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
   return (
     <section className={cardClass("p-5")}>
       <div className="flex items-center justify-between gap-3">
         <div>
             <h3 className="text-sm font-semibold text-slate-950">
-              {providerContactsLabel(detail.provider_type)}
+              {detail.provider_type === "non_medical" ? l("Kontakte", "Контакты", "Contacts") : t.providers_doctors}
             </h3>
             <p className="mt-1 text-sm text-slate-600">
               {detail.provider_type === "non_medical"
-                ? "Registry of operational contacts attached to this partner."
-                : "Registry of clinicians attached to this provider."}
+                ? l("Register der operativen Kontakte dieses Partners.", "Реестр операционных контактов этого партнера.", "Registry of operational contacts attached to this partner.")
+                : l("Register der diesem Anbieter zugeordneten Ärztinnen und Ärzte.", "Реестр врачей, привязанных к этому провайдеру.", "Registry of clinicians attached to this provider.")}
             </p>
           </div>
           <div className="text-xs uppercase tracking-[0.12em] text-slate-500">
-            {detail.doctors.length} {detail.provider_type === "non_medical" ? "contacts" : "clinicians"}
+            {detail.doctors.length} {detail.provider_type === "non_medical" ? l("Kontakte", "контактов", "contacts") : l("Kliniker", "врачей", "clinicians")}
           </div>
         </div>
 
@@ -1908,7 +1922,7 @@ function DoctorSection({
                     className="rounded-xl"
                     onClick={() => onEdit(doctor)}
                   >
-                    Edit
+                    {l("Bearbeiten", "Редактировать", "Edit")}
                   </Button>
                 ) : null}
               </div>
@@ -1935,7 +1949,7 @@ function DoctorSection({
               <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="rounded-2xl bg-white px-3 py-3">
                   <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">
-                    License
+                    {l("Lizenz", "Лицензия", "License")}
                   </p>
                   <p className="mt-2 text-sm font-medium text-slate-900">
                     {doctor.license_number || t.common_not_set}
@@ -1946,7 +1960,7 @@ function DoctorSection({
                 </div>
                 <div className="rounded-2xl bg-white px-3 py-3">
                   <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">
-                    License valid until
+                    {l("Lizenz gültig bis", "Лицензия действительна до", "License valid until")}
                   </p>
                   <p className="mt-2 text-sm font-medium text-slate-900">
                     {compactDate(doctor.licensing_valid_until, t.common_not_set)}
@@ -1957,14 +1971,14 @@ function DoctorSection({
               <div className="mt-4 grid grid-cols-2 gap-3">
                 <div className="rounded-2xl bg-white px-3 py-3">
                   <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">
-                    Patients
+                    {l("Patienten", "Пациенты", "Patients")}
                   </p>
                   <p className="mt-2 text-xl font-semibold text-slate-950">
                     {doctor.patient_count}
                   </p>
                 </div>
                 <div className="rounded-2xl bg-white px-3 py-3">
-                  <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Slots</p>
+                  <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{l("Slots", "Слоты", "Slots")}</p>
                   <p className="mt-2 text-xl font-semibold text-slate-950">
                     {doctor.appointment_count}
                   </p>
@@ -1981,7 +1995,7 @@ function DoctorSection({
                     disabled={busy}
                     onClick={() => onDelete(doctor.id, doctor.name)}
                   >
-                    Delete
+                    {l("Löschen", "Удалить", "Delete")}
                   </Button>
                 </div>
               ) : null}
@@ -1998,7 +2012,7 @@ function DoctorSection({
                 {form.id ? t.providers_doctor_detail : t.providers_doctor_new}
               </h4>
               <p className="mt-1 text-sm text-slate-600">
-                Doctor records are used by provider filters and appointment routing.
+                {l("Arztstammdaten werden für Anbieterfilter und Terminrouting verwendet.", "Карточки врачей используются в фильтрах провайдеров и маршрутизации записей.", "Doctor records are used by provider filters and appointment routing.")}
               </p>
             </div>
             {form.id ? (
@@ -2009,7 +2023,7 @@ function DoctorSection({
                 className="rounded-xl"
                 onClick={onCancelEdit}
               >
-                Cancel edit
+                {l("Bearbeitung abbrechen", "Отменить редактирование", "Cancel edit")}
               </Button>
             ) : null}
           </div>
@@ -2057,18 +2071,19 @@ function ServiceSection({
   onDelete: (serviceId: string, serviceName: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
+  const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
   return (
     <section className={cardClass("p-5")}>
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h3 className="text-sm font-semibold text-slate-950">Service catalog</h3>
+          <h3 className="text-sm font-semibold text-slate-950">{l("Servicekatalog", "Каталог сервисов", "Service catalog")}</h3>
           <p className="mt-1 text-sm text-slate-600">
-            Operational catalog used for search and future order / concierge flows.
+            {l("Operativer Katalog für Suche und künftige Order-/Concierge-Abläufe.", "Операционный каталог для поиска и будущих сценариев заказа / concierge.", "Operational catalog used for search and future order / concierge flows.")}
           </p>
         </div>
         <div className="text-xs uppercase tracking-[0.12em] text-slate-500">
-          {detail.services.length} services
+          {detail.services.length} {l("Services", "сервисов", "services")}
         </div>
       </div>
 
@@ -2101,21 +2116,21 @@ function ServiceSection({
                     className="rounded-xl"
                     onClick={() => onEdit(service)}
                   >
-                    Edit
+                    {l("Bearbeiten", "Редактировать", "Edit")}
                   </Button>
                 ) : null}
               </div>
 
               <div className="mt-4 grid gap-3 md:grid-cols-2">
                 <div className="rounded-2xl bg-white px-3 py-3">
-                  <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Price</p>
+                  <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{l("Preis", "Цена", "Price")}</p>
                   <p className="mt-2 text-lg font-semibold text-slate-950">
                     {moneyLabel(service.price, service.currency)}
                   </p>
                 </div>
                 <div className="rounded-2xl bg-white px-3 py-3">
                   <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">
-                    Validity
+                    {l("Gültigkeit", "Срок действия", "Validity")}
                   </p>
                   <p className="mt-2 text-sm font-medium text-slate-900">
                     {compactDate(service.valid_from, t.common_not_set)}
@@ -2135,7 +2150,7 @@ function ServiceSection({
                     disabled={busy}
                     onClick={() => onDelete(service.id, service.service_name)}
                   >
-                    Delete
+                    {l("Löschen", "Удалить", "Delete")}
                   </Button>
                 </div>
               ) : null}
@@ -2152,7 +2167,7 @@ function ServiceSection({
                 {form.id ? t.providers_service_detail : t.providers_service_new}
               </h4>
               <p className="mt-1 text-sm text-slate-600">
-                Services power filters today and will flow into orders and concierge execution next.
+                {l("Services speisen heute die Filter und fließen als Nächstes in Orders und Concierge-Ausführung ein.", "Сервисы уже питают фильтры и следующим шагом войдут в заказы и выполнение concierge.", "Services power filters today and will flow into orders and concierge execution next.")}
               </p>
             </div>
             {form.id ? (
@@ -2163,7 +2178,7 @@ function ServiceSection({
                 className="rounded-xl"
                 onClick={onCancelEdit}
               >
-                Cancel edit
+                {l("Bearbeitung abbrechen", "Отменить редактирование", "Cancel edit")}
               </Button>
             ) : null}
           </div>
@@ -2197,18 +2212,19 @@ function LinkedPatientsSection({
   onOpenPatient: (patientId: string) => void;
   onOpenAppointments: (patientId: string) => void;
 }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
+  const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
   return (
     <section className={cardClass("p-5")}>
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h3 className="text-sm font-semibold text-slate-950">Linked patients</h3>
+          <h3 className="text-sm font-semibold text-slate-950">{l("Verknüpfte Patienten", "Связанные пациенты", "Linked patients")}</h3>
           <p className="mt-1 text-sm text-slate-600">
-            Patients who already touched this provider through appointments or service records.
+            {l("Patienten, die diesen Anbieter bereits über Termine oder Serviceeinträge berührt haben.", "Пациенты, уже связанные с этим провайдером через записи или сервисные записи.", "Patients who already touched this provider through appointments or service records.")}
           </p>
         </div>
         <div className="text-xs uppercase tracking-[0.12em] text-slate-500">
-          {detail.linked_patients.length} patients
+          {detail.linked_patients.length} {l("Patienten", "пациентов", "patients")}
         </div>
       </div>
 
@@ -2228,13 +2244,13 @@ function LinkedPatientsSection({
             >
               <p className="text-base font-semibold text-slate-950">{patientLabel(patient)}</p>
               <p className="mt-1 text-sm text-slate-600">
-                Last interaction {compactDateTime(patient.last_interaction_at)}
+                {l("Letzte Aktivität", "Последнее взаимодействие", "Last interaction")} {compactDateTime(patient.last_interaction_at)}
               </p>
 
               <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <div className="rounded-2xl bg-white px-3 py-3">
                   <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">
-                    Appointments
+                    {l("Termine", "Записи", "Appointments")}
                   </p>
                   <p className="mt-2 text-xl font-semibold text-slate-950">
                     {patient.appointment_count}
@@ -2242,7 +2258,7 @@ function LinkedPatientsSection({
                 </div>
                 <div className="rounded-2xl bg-white px-3 py-3">
                   <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">
-                    Services
+                    {l("Services", "Сервисы", "Services")}
                   </p>
                   <p className="mt-2 text-xl font-semibold text-slate-950">
                     {patient.leistung_count}
@@ -2250,7 +2266,7 @@ function LinkedPatientsSection({
                 </div>
                 <div className="rounded-2xl bg-white px-3 py-3">
                   <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">
-                    Concierge
+                    {l("Concierge", "Concierge", "Concierge")}
                   </p>
                   <p className="mt-2 text-xl font-semibold text-slate-950">
                     {patient.concierge_count}
@@ -2266,7 +2282,7 @@ function LinkedPatientsSection({
                   className="rounded-2xl"
                   onClick={() => onOpenPatient(patient.id)}
                 >
-                  Open patient
+                  {l("Patient öffnen", "Открыть пациента", "Open patient")}
                 </Button>
                 <Button
                   type="button"
@@ -2275,7 +2291,7 @@ function LinkedPatientsSection({
                   className="rounded-2xl"
                   onClick={() => onOpenAppointments(patient.id)}
                 >
-                  Appointments
+                  {l("Termine", "Записи", "Appointments")}
                 </Button>
               </div>
             </div>
@@ -2299,18 +2315,19 @@ function InteractionHistorySection({
   onOpenAppointment: (appointmentId: string) => void;
   onOpenOrder: (orderId: string) => void;
 }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
+  const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
   return (
     <section className={cardClass("p-5")}>
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h3 className="text-sm font-semibold text-slate-950">Interaction history</h3>
+          <h3 className="text-sm font-semibold text-slate-950">{l("Interaktionsverlauf", "История взаимодействий", "Interaction history")}</h3>
           <p className="mt-1 text-sm text-slate-600">
-            Timeline of appointments and service-level interactions associated with this provider.
+            {l("Zeitachse der mit diesem Anbieter verbundenen Termine und Service-Interaktionen.", "Хронология записей и сервисных взаимодействий, связанных с этим провайдером.", "Timeline of appointments and service-level interactions associated with this provider.")}
           </p>
         </div>
         <div className="text-xs uppercase tracking-[0.12em] text-slate-500">
-          {detail.interactions.length} items
+          {detail.interactions.length} {l("Einträge", "записей", "items")}
         </div>
       </div>
 
@@ -2372,7 +2389,7 @@ function InteractionHistorySection({
                   className="rounded-2xl"
                   onClick={() => onOpenPatient(item.patient_id)}
                 >
-                  Patient
+                  {l("Patient", "Пациент", "Patient")}
                 </Button>
                 {item.kind === "appointment" ? (
                   <Button
@@ -2382,7 +2399,7 @@ function InteractionHistorySection({
                     className="rounded-2xl"
                     onClick={() => onOpenAppointment(item.id)}
                   >
-                    Appointment
+                    {l("Termin", "Запись", "Appointment")}
                   </Button>
                 ) : null}
                 {item.kind !== "appointment" ? (
@@ -2393,7 +2410,7 @@ function InteractionHistorySection({
                     className="rounded-2xl"
                     onClick={() => onOpenAppointments(item.patient_id)}
                   >
-                    Appointments
+                    {l("Termine", "Записи", "Appointments")}
                   </Button>
                 ) : null}
                 {item.order_id ? (
@@ -2404,7 +2421,7 @@ function InteractionHistorySection({
                     className="rounded-2xl"
                     onClick={() => onOpenOrder(item.order_id!)}
                   >
-                    Order
+                    {l("Auftrag", "Заказ", "Order")}
                   </Button>
                 ) : null}
               </div>
@@ -2427,11 +2444,12 @@ function ProviderFormFields({
   forceNonMedical: boolean;
   disabled?: boolean;
 }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
+  const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
   return (
     <div className="space-y-4">
       <div className="grid gap-4 md:grid-cols-3">
-        <Field label="Display name">
+        <Field label={l("Anzeigename", "Отображаемое имя", "Display name")}>
           <Input
             value={form.name}
             onChange={(event) => onChange("name", event.target.value)}
@@ -2442,12 +2460,12 @@ function ProviderFormFields({
           />
         </Field>
 
-        <Field label="Legal name">
+        <Field label={l("Rechtlicher Name", "Юридическое название", "Legal name")}>
           <Input
             value={form.legalName}
             onChange={(event) => onChange("legalName", event.target.value)}
             className="h-10 rounded-xl bg-slate-50"
-            placeholder="Legal entity / contract name"
+            placeholder={l("Rechtsträger / Vertragsname", "Юридическое лицо / название договора", "Legal entity / contract name")}
             disabled={disabled}
           />
         </Field>
@@ -2466,12 +2484,12 @@ function ProviderFormFields({
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">
-        <Field label="Tax ID">
+        <Field label={l("Steuer-ID", "Налоговый ID", "Tax ID")}>
           <Input
             value={form.taxId}
             onChange={(event) => onChange("taxId", event.target.value)}
             className="h-10 rounded-xl bg-slate-50"
-            placeholder="VAT / tax ID"
+            placeholder={l("USt-IdNr. / Steuer-ID", "VAT / налоговый ID", "VAT / tax ID")}
             disabled={disabled}
           />
         </Field>
@@ -2491,7 +2509,7 @@ function ProviderFormFields({
             value={form.website}
             onChange={(event) => onChange("website", event.target.value)}
             className="h-10 rounded-xl bg-slate-50"
-            placeholder="https://..."
+            placeholder={l("https://...", "https://...", "https://...")}
             disabled={disabled}
           />
         </Field>
@@ -2559,7 +2577,7 @@ function ProviderFormFields({
           onChange={(event) => onChange("contractText", event.target.value)}
           className={textareaClassName}
           rows={4}
-          placeholder='Plain text becomes {"summary": "..."} automatically. JSON is accepted too.'
+          placeholder={l('Klartext wird automatisch zu {"summary": "..."} umgewandelt. JSON ist ebenfalls erlaubt.', 'Обычный текст автоматически станет {"summary": "..."}; JSON тоже допустим.', 'Plain text becomes {"summary": "..."} automatically. JSON is accepted too.')}
           disabled={disabled}
         />
       </Field>
@@ -2585,7 +2603,8 @@ function DoctorFormFields({
   form: DoctorFormState;
   onChange: (field: keyof DoctorFormState, value: string) => void;
 }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
+  const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
   return (
     <div className="space-y-4">
       <div className="grid gap-4 md:grid-cols-2">
@@ -2615,12 +2634,12 @@ function DoctorFormFields({
             className="h-10 rounded-xl bg-slate-50"
           />
         </Field>
-        <Field label="Languages">
+        <Field label={l("Sprachen", "Языки", "Languages")}>
           <Input
             value={form.languages}
             onChange={(event) => onChange("languages", event.target.value)}
             className="h-10 rounded-xl bg-slate-50"
-            placeholder="de, en, uk"
+            placeholder={l("de, en, uk", "de, en, uk", "de, en, uk")}
           />
         </Field>
         <Field label={t.field_phone}>
@@ -2641,14 +2660,14 @@ function DoctorFormFields({
             className="h-10 rounded-xl bg-slate-50"
           />
         </Field>
-        <Field label="License number">
+        <Field label={l("Lizenznummer", "Номер лицензии", "License number")}>
           <Input
             value={form.licenseNumber}
             onChange={(event) => onChange("licenseNumber", event.target.value)}
             className="h-10 rounded-xl bg-slate-50"
           />
         </Field>
-        <Field label="Licensing country">
+        <Field label={l("Lizenzland", "Страна лицензии", "Licensing country")}>
           <Input
             value={form.licensingCountry}
             onChange={(event) => onChange("licensingCountry", event.target.value)}
@@ -2658,7 +2677,7 @@ function DoctorFormFields({
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
-        <Field label="License valid until">
+        <Field label={l("Lizenz gültig bis", "Лицензия действительна до", "License valid until")}>
           <Input
             type="date"
             value={form.licensingValidUntil}

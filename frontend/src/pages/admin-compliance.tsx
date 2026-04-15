@@ -21,7 +21,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { apiFetch, downloadApiFile } from "@/lib/api";
-import { useLang } from "@/lib/i18n";
+import { useAuth } from "@/lib/auth";
+import { useLang, type Translations } from "@/lib/i18n";
 
 interface ConsentTypeSummary {
   consent_type: string;
@@ -109,18 +110,18 @@ interface PrivacyRequestRecord {
 type PrivacyRequestType = "erasure" | "restriction" | "third_party_revoke";
 type PrivacyReviewAction = "approve" | "hold" | "reject";
 
-const CONSENT_TYPE_OPTIONS = [
-  { value: "dsgvo_data_transfer", label: "DSGVO data transfer" },
-  { value: "schweigepflicht_release", label: "Schweigepflicht release" },
-  { value: "patient_portal_release", label: "Patient portal release" },
-  { value: "treatment_contract", label: "Treatment contract" },
-  { value: "third_party_sharing", label: "Third-party sharing" },
+const CONSENT_TYPE_VALUES = [
+  "dsgvo_data_transfer",
+  "schweigepflicht_release",
+  "patient_portal_release",
+  "treatment_contract",
+  "third_party_sharing",
 ] as const;
 
-const PRIVACY_REQUEST_TYPE_OPTIONS = [
-  { value: "erasure", label: "Erasure request" },
-  { value: "restriction", label: "Processing restriction" },
-  { value: "third_party_revoke", label: "Third-party sharing revoke" },
+const PRIVACY_REQUEST_TYPE_VALUES = [
+  "erasure",
+  "restriction",
+  "third_party_revoke",
 ] as const;
 
 function compactDt(dt: string | null | undefined): string {
@@ -135,32 +136,51 @@ function isPastDate(dt: string | null | undefined): boolean {
   return timestamp < Date.now();
 }
 
-function consentTypeLabel(consentType: string) {
-  return (
-    CONSENT_TYPE_OPTIONS.find((option) => option.value === consentType)
-      ?.label ?? consentType.replaceAll("_", " ")
-  );
+function consentTypeLabel(consentType: string, t: Translations): string {
+  switch (consentType) {
+    case "dsgvo_data_transfer":
+      return t.compliance_consent_type_dsgvo;
+    case "schweigepflicht_release":
+      return t.compliance_consent_type_schweigepflicht;
+    case "patient_portal_release":
+      return t.compliance_consent_type_portal;
+    case "treatment_contract":
+      return t.compliance_consent_type_treatment;
+    case "third_party_sharing":
+      return t.compliance_consent_type_third_party;
+    default:
+      return consentType.replaceAll("_", " ");
+  }
 }
 
-function privacyRequestTypeLabel(requestType: string) {
-  return (
-    PRIVACY_REQUEST_TYPE_OPTIONS.find((option) => option.value === requestType)
-      ?.label ?? requestType.replaceAll("_", " ")
-  );
+function privacyRequestTypeLabel(
+  requestType: string,
+  t: Translations,
+): string {
+  switch (requestType) {
+    case "erasure":
+      return t.compliance_request_type_erasure;
+    case "restriction":
+      return t.compliance_request_type_restriction;
+    case "third_party_revoke":
+      return t.compliance_request_type_third_party_revoke;
+    default:
+      return requestType.replaceAll("_", " ");
+  }
 }
 
-function privacyStatusLabel(status: string) {
+function privacyStatusLabel(status: string, t: Translations) {
   switch (status) {
     case "requested":
-      return "Requested";
+      return t.compliance_privacy_status_requested;
     case "retention_hold":
-      return "Retention hold";
+      return t.compliance_privacy_status_retention_hold;
     case "approved":
-      return "Approved";
+      return t.compliance_privacy_status_approved;
     case "rejected":
-      return "Rejected";
+      return t.compliance_privacy_status_rejected;
     case "completed":
-      return "Completed";
+      return t.compliance_privacy_status_completed;
     default:
       return status.replaceAll("_", " ");
   }
@@ -213,8 +233,20 @@ function privacyNotesLabel(record: PrivacyRequestRecord) {
   return parts.length > 0 ? parts.join(" / ") : "\u2014";
 }
 
+function canExecutePrivacyRequest(
+  role: string | null | undefined,
+  requestType: string,
+) {
+  if (role === "ceo" || role === "it_admin") {
+    return true;
+  }
+
+  return role === "patient_manager" && requestType === "third_party_revoke";
+}
+
 export function AdminCompliancePage() {
   const { t } = useLang();
+  const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const patientParam = searchParams.get("patient") ?? "";
 
@@ -237,7 +269,7 @@ export function AdminCompliancePage() {
   const [patientError, setPatientError] = useState("");
 
   const [consentType, setConsentType] = useState<string>(
-    CONSENT_TYPE_OPTIONS[0].value,
+    CONSENT_TYPE_VALUES[0],
   );
   const [consentNote, setConsentNote] = useState("");
   const [consentExpiresAt, setConsentExpiresAt] = useState("");
@@ -416,7 +448,7 @@ export function AdminCompliancePage() {
   const handleConsentAction = async (action: "grant" | "revoke") => {
     const targetPatientId = (activePatientId || patientInput).trim();
     if (!targetPatientId) {
-      setActionError("Patient UUID is required.");
+      setActionError(t.compliance_uuid_required);
       return;
     }
 
@@ -453,7 +485,7 @@ export function AdminCompliancePage() {
   const handleCreatePrivacyRequest = async () => {
     const targetPatientId = (activePatientId || patientInput).trim();
     if (!targetPatientId) {
-      setActionError("Patient UUID is required.");
+      setActionError(t.compliance_uuid_required);
       return;
     }
 
@@ -555,7 +587,7 @@ export function AdminCompliancePage() {
   const doExport = async () => {
     const targetPatientId = (activePatientId || patientInput).trim();
     if (!targetPatientId) {
-      setActionError("Patient UUID is required.");
+      setActionError(t.compliance_uuid_required);
       return;
     }
 
@@ -567,7 +599,7 @@ export function AdminCompliancePage() {
         `/admin/compliance/patient/${targetPatientId}/export?format=zip`,
         `${targetPatientId}-dsgvo-export.zip`,
       );
-      setExportResult(`Downloaded ${filename}`);
+      setExportResult(`${t.compliance_downloaded} ${filename}`);
     } catch (error) {
       setExportResult(
         `Error: ${error instanceof Error ? error.message : String(error)}`,
@@ -580,9 +612,15 @@ export function AdminCompliancePage() {
     { label: t.compliance_granted, value: dashboard?.granted_active ?? 0 },
     { label: t.compliance_revoked, value: dashboard?.revoked ?? 0 },
     { label: t.compliance_expired, value: expired.length },
-    { label: "Privacy queue", value: privacyCounters.open },
-    { label: "Ready for execution", value: privacyCounters.approved },
-    { label: "Overdue privacy", value: privacyCounters.overdue },
+    { label: t.compliance_stat_privacy_queue, value: privacyCounters.open },
+    {
+      label: t.compliance_stat_ready_for_execution,
+      value: privacyCounters.approved,
+    },
+    {
+      label: t.compliance_stat_overdue_privacy,
+      value: privacyCounters.overdue,
+    },
   ];
 
   return (
@@ -616,11 +654,10 @@ export function AdminCompliancePage() {
             <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
               <div>
                 <h2 className="text-lg font-semibold">
-                  Patient consent register
+                  {t.compliance_patient_register_title}
                 </h2>
                 <p className="text-muted-foreground text-sm">
-                  Load a patient workspace, then grant or revoke agency-wide
-                  consents.
+                  {t.compliance_patient_register_hint}
                 </p>
               </div>
               <div className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
@@ -645,7 +682,7 @@ export function AdminCompliancePage() {
               </div>
               <div className="flex items-end">
                 <Button type="submit" className="w-full md:w-auto">
-                  Load register
+                  {t.compliance_load_register}
                 </Button>
               </div>
             </form>
@@ -658,33 +695,39 @@ export function AdminCompliancePage() {
 
             <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,220px)_minmax(0,1fr)_220px_auto]">
               <div className="space-y-1">
-                <Label htmlFor="consent-type">Consent type</Label>
+                <Label htmlFor="consent-type">
+                  {t.compliance_consent_type_label}
+                </Label>
                 <select
                   id="consent-type"
                   value={consentType}
                   onChange={(event) => setConsentType(event.target.value)}
                   className="h-10 w-full rounded-xl border border-input bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
                 >
-                  {CONSENT_TYPE_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
+                  {CONSENT_TYPE_VALUES.map((value) => (
+                    <option key={value} value={value}>
+                      {consentTypeLabel(value, t)}
                     </option>
                   ))}
                 </select>
               </div>
               <div className="space-y-1">
-                <Label htmlFor="consent-note">Operational note</Label>
+                <Label htmlFor="consent-note">
+                  {t.compliance_operational_note}
+                </Label>
                 <textarea
                   id="consent-note"
                   value={consentNote}
                   onChange={(event) => setConsentNote(event.target.value)}
-                  placeholder="Patient requested revocation, signed in clinic, portal release confirmed"
+                  placeholder={t.compliance_consent_note_placeholder}
                   rows={3}
                   className="min-h-[92px] w-full rounded-xl border border-input bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
                 />
               </div>
               <div className="space-y-1">
-                <Label htmlFor="consent-expires-at">Expiry date</Label>
+                <Label htmlFor="consent-expires-at">
+                  {t.compliance_expiry_date}
+                </Label>
                 <Input
                   id="consent-expires-at"
                   type="date"
@@ -692,7 +735,7 @@ export function AdminCompliancePage() {
                   onChange={(event) => setConsentExpiresAt(event.target.value)}
                 />
                 <p className="text-muted-foreground text-xs">
-                  Leave empty to default to 365 days from grant.
+                  {t.compliance_expiry_hint}
                 </p>
               </div>
               <div className="flex flex-col justify-end gap-2">
@@ -701,7 +744,9 @@ export function AdminCompliancePage() {
                   disabled={consentBusy !== null}
                   onClick={() => void handleConsentAction("grant")}
                 >
-                  {consentBusy === "grant" ? "Saving..." : "Grant consent"}
+                  {consentBusy === "grant"
+                    ? t.compliance_saving
+                    : t.compliance_grant_consent}
                 </Button>
                 <Button
                   type="button"
@@ -709,7 +754,9 @@ export function AdminCompliancePage() {
                   disabled={consentBusy !== null}
                   onClick={() => void handleConsentAction("revoke")}
                 >
-                  {consentBusy === "revoke" ? "Saving..." : "Revoke consent"}
+                  {consentBusy === "revoke"
+                    ? t.compliance_saving
+                    : t.compliance_revoke_consent}
                 </Button>
               </div>
             </div>
@@ -717,8 +764,8 @@ export function AdminCompliancePage() {
             <div className="mt-6 rounded-xl border">
               <div className="border-b px-4 py-3">
                 <h3 className="text-sm font-semibold text-slate-950">
-                  Consent history{" "}
-                  {activePatientId ? `for ${activePatientId}` : ""}
+                  {t.compliance_consent_history}
+                  {activePatientId ? ` — ${activePatientId}` : ""}
                 </h3>
               </div>
 
@@ -729,19 +776,19 @@ export function AdminCompliancePage() {
               ) : patientConsents.length === 0 ? (
                 <p className="text-muted-foreground px-4 py-8 text-center text-sm">
                   {activePatientId
-                    ? "No consent events recorded for this patient yet."
-                    : "Load a patient to view consent history."}
+                    ? t.compliance_no_consent_events
+                    : t.compliance_load_patient_consent_hint}
                 </p>
               ) : (
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Consent</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Managed by</TableHead>
-                      <TableHead>Effective at</TableHead>
-                      <TableHead>Expires</TableHead>
-                      <TableHead>Note</TableHead>
+                      <TableHead>{t.compliance_col_consent}</TableHead>
+                      <TableHead>{t.compliance_col_status}</TableHead>
+                      <TableHead>{t.compliance_col_managed_by}</TableHead>
+                      <TableHead>{t.compliance_col_effective_at}</TableHead>
+                      <TableHead>{t.compliance_col_expires}</TableHead>
+                      <TableHead>{t.compliance_col_note}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -763,7 +810,7 @@ export function AdminCompliancePage() {
                       return (
                         <TableRow key={record.id}>
                           <TableCell className="font-medium">
-                            {consentTypeLabel(record.consent_type)}
+                            {consentTypeLabel(record.consent_type, t)}
                           </TableCell>
                           <TableCell>
                             <Badge className={badgeClass}>
@@ -799,10 +846,11 @@ export function AdminCompliancePage() {
           <div className="rounded-xl border bg-white p-6">
             <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
               <div>
-                <h2 className="text-lg font-semibold">Patient privacy requests</h2>
+                <h2 className="text-lg font-semibold">
+                  {t.compliance_privacy_requests_title}
+                </h2>
                 <p className="text-muted-foreground text-sm">
-                  Register erasure or processing-restriction requests and inspect retention context
-                  before execution.
+                  {t.compliance_privacy_requests_hint}
                 </p>
               </div>
               <div className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
@@ -812,7 +860,9 @@ export function AdminCompliancePage() {
 
             <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,220px)_minmax(0,1fr)_auto]">
               <div className="space-y-1">
-                <Label htmlFor="privacy-request-type">Request type</Label>
+                <Label htmlFor="privacy-request-type">
+                  {t.compliance_request_type_label}
+                </Label>
                 <select
                   id="privacy-request-type"
                   value={privacyRequestType}
@@ -821,20 +871,22 @@ export function AdminCompliancePage() {
                   }
                   className="h-10 w-full rounded-xl border border-input bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
                 >
-                  {PRIVACY_REQUEST_TYPE_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
+                  {PRIVACY_REQUEST_TYPE_VALUES.map((value) => (
+                    <option key={value} value={value}>
+                      {privacyRequestTypeLabel(value, t)}
                     </option>
                   ))}
                 </select>
               </div>
               <div className="space-y-1">
-                <Label htmlFor="privacy-request-reason">Reason / intake note</Label>
+                <Label htmlFor="privacy-request-reason">
+                  {t.compliance_request_reason}
+                </Label>
                 <textarea
                   id="privacy-request-reason"
                   value={privacyReason}
                   onChange={(event) => setPrivacyReason(event.target.value)}
-                  placeholder="Patient requested deletion, legal restriction request, courier confirmed signed withdrawal"
+                  placeholder={t.compliance_request_reason_placeholder}
                   rows={3}
                   className="min-h-[92px] w-full rounded-xl border border-input bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
                 />
@@ -845,11 +897,12 @@ export function AdminCompliancePage() {
                   disabled={privacyCreateBusy}
                   onClick={() => void handleCreatePrivacyRequest()}
                 >
-                  {privacyCreateBusy ? "Saving..." : "Create request"}
+                  {privacyCreateBusy
+                    ? t.compliance_saving
+                    : t.compliance_create_request}
                 </Button>
                 <p className="text-muted-foreground max-w-40 text-xs">
-                  New requests inherit the patient retention snapshot and appear in the global
-                  review queue.
+                  {t.compliance_new_request_hint}
                 </p>
               </div>
             </div>
@@ -857,7 +910,8 @@ export function AdminCompliancePage() {
             <div className="mt-6 rounded-xl border">
               <div className="border-b px-4 py-3">
                 <h3 className="text-sm font-semibold text-slate-950">
-                  Privacy request history {activePatientId ? `for ${activePatientId}` : ""}
+                  {t.compliance_privacy_history}
+                  {activePatientId ? ` — ${activePatientId}` : ""}
                 </h3>
               </div>
 
@@ -868,38 +922,41 @@ export function AdminCompliancePage() {
               ) : patientPrivacyRequests.length === 0 ? (
                 <p className="text-muted-foreground px-4 py-8 text-center text-sm">
                   {activePatientId
-                    ? "No privacy requests recorded for this patient yet."
-                    : "Load a patient to view privacy requests."}
+                    ? t.compliance_no_privacy_requests
+                    : t.compliance_load_patient_privacy_hint}
                 </p>
               ) : (
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Request</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Requested by</TableHead>
-                      <TableHead>Due</TableHead>
-                      <TableHead>Retention until</TableHead>
-                      <TableHead>Linked records</TableHead>
-                      <TableHead>Notes</TableHead>
+                      <TableHead>{t.compliance_col_request}</TableHead>
+                      <TableHead>{t.compliance_col_status}</TableHead>
+                      <TableHead>{t.compliance_col_requested_by}</TableHead>
+                      <TableHead>{t.compliance_col_due}</TableHead>
+                      <TableHead>{t.compliance_col_retention_until}</TableHead>
+                      <TableHead>{t.compliance_col_linked_records}</TableHead>
+                      <TableHead>{t.compliance_col_notes}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {patientPrivacyRequests.map((record) => (
                       <TableRow key={record.id}>
                         <TableCell className="font-medium">
-                          <div>{privacyRequestTypeLabel(record.request_type)}</div>
+                          <div>{privacyRequestTypeLabel(record.request_type, t)}</div>
                           <div className="text-xs text-slate-500">
-                            Created {compactDt(record.requested_at)}
+                            {t.compliance_created_label}{" "}
+                            {compactDt(record.requested_at)}
                           </div>
                         </TableCell>
                         <TableCell>
                           <div className="flex flex-col gap-2">
                             <Badge className={privacyStatusBadgeClass(record.status)}>
-                              {privacyStatusLabel(record.status)}
+                              {privacyStatusLabel(record.status, t)}
                             </Badge>
                             {record.manual_override ? (
-                              <span className="text-xs text-slate-500">Manual override</span>
+                              <span className="text-xs text-slate-500">
+                                {t.compliance_manual_override}
+                              </span>
                             ) : null}
                           </div>
                         </TableCell>
@@ -932,7 +989,7 @@ export function AdminCompliancePage() {
               <div className="flex-1 space-y-1">
                 <Label>{t.compliance_patient_id} (UUID)</Label>
                 <Input
-                  placeholder="Uses the loaded patient UUID"
+                  placeholder={t.compliance_uses_loaded_uuid}
                   value={patientInput}
                   onChange={(event) => setPatientInput(event.target.value)}
                 />
@@ -959,8 +1016,8 @@ export function AdminCompliancePage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Total</TableHead>
+                    <TableHead>{t.compliance_col_type}</TableHead>
+                    <TableHead>{t.compliance_col_total}</TableHead>
                     <TableHead>{t.compliance_granted}</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -968,7 +1025,7 @@ export function AdminCompliancePage() {
                   {dashboard.by_type.map((entry) => (
                     <TableRow key={entry.consent_type}>
                       <TableCell className="font-medium">
-                        {consentTypeLabel(entry.consent_type)}
+                        {consentTypeLabel(entry.consent_type, t)}
                       </TableCell>
                       <TableCell className="font-mono text-sm">
                         {entry.total}
@@ -988,11 +1045,14 @@ export function AdminCompliancePage() {
           <div className="rounded-xl border bg-white">
             <div className="flex flex-col gap-2 border-b px-6 py-4 md:flex-row md:items-end md:justify-between">
               <div>
-                <h2 className="text-lg font-semibold">Privacy review queue</h2>
+                <h2 className="text-lg font-semibold">
+                  {t.compliance_privacy_review_queue}
+                </h2>
                 <p className="text-muted-foreground text-sm">
-                  Requested {privacyCounters.requested} · Hold{" "}
-                  {privacyCounters.retentionHold} · Approved{" "}
-                  {privacyCounters.approved} · Overdue {privacyCounters.overdue}
+                  {t.compliance_stat_requested} {privacyCounters.requested} ·{" "}
+                  {t.compliance_stat_hold} {privacyCounters.retentionHold} ·{" "}
+                  {t.compliance_stat_approved} {privacyCounters.approved} ·{" "}
+                  {t.compliance_stat_overdue} {privacyCounters.overdue}
                 </p>
               </div>
             </div>
@@ -1003,19 +1063,19 @@ export function AdminCompliancePage() {
               </p>
             ) : privacyQueue.length === 0 ? (
               <p className="text-muted-foreground px-6 py-10 text-center text-sm">
-                No privacy requests in scope.
+                {t.compliance_no_privacy_scope}
               </p>
             ) : (
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Patient</TableHead>
-                    <TableHead>Request</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Due</TableHead>
-                    <TableHead>Linked records</TableHead>
-                    <TableHead>Notes</TableHead>
-                    <TableHead>Actions</TableHead>
+                    <TableHead>{t.compliance_col_patient}</TableHead>
+                    <TableHead>{t.compliance_col_request}</TableHead>
+                    <TableHead>{t.compliance_col_status}</TableHead>
+                    <TableHead>{t.compliance_col_due}</TableHead>
+                    <TableHead>{t.compliance_col_linked_records}</TableHead>
+                    <TableHead>{t.compliance_col_notes}</TableHead>
+                    <TableHead>{t.compliance_col_actions}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1038,7 +1098,7 @@ export function AdminCompliancePage() {
                         </TableCell>
                         <TableCell className="font-medium">
                           <div>
-                            {privacyRequestTypeLabel(record.request_type)}
+                            {privacyRequestTypeLabel(record.request_type, t)}
                           </div>
                           <div className="text-xs text-slate-500">
                             {record.source.replaceAll("_", " ")}
@@ -1049,14 +1109,14 @@ export function AdminCompliancePage() {
                             <Badge
                               className={privacyStatusBadgeClass(record.status)}
                             >
-                              {privacyStatusLabel(record.status)}
+                              {privacyStatusLabel(record.status, t)}
                             </Badge>
                             {record.is_overdue &&
                             (record.status === "requested" ||
                               record.status === "retention_hold" ||
                               record.status === "approved") ? (
                               <span className="text-xs font-medium text-red-600">
-                                Overdue
+                                {t.compliance_stat_overdue}
                               </span>
                             ) : null}
                           </div>
@@ -1088,7 +1148,9 @@ export function AdminCompliancePage() {
                                     )
                                   }
                                 >
-                                  {approveBusy ? "Saving..." : "Approve"}
+                                  {approveBusy
+                                    ? t.compliance_saving
+                                    : t.compliance_approve}
                                 </Button>
                                 <Button
                                   type="button"
@@ -1103,7 +1165,9 @@ export function AdminCompliancePage() {
                                     )
                                   }
                                 >
-                                  {holdBusy ? "Saving..." : "Hold"}
+                                  {holdBusy
+                                    ? t.compliance_saving
+                                    : t.compliance_hold}
                                 </Button>
                                 <Button
                                   type="button"
@@ -1118,12 +1182,18 @@ export function AdminCompliancePage() {
                                     )
                                   }
                                 >
-                                  {rejectBusy ? "Saving..." : "Reject"}
+                                  {rejectBusy
+                                    ? t.compliance_saving
+                                    : t.compliance_reject}
                                 </Button>
                               </>
                             ) : null}
 
-                            {record.status === "approved" ? (
+                            {record.status === "approved" &&
+                            canExecutePrivacyRequest(
+                              user?.role,
+                              record.request_type,
+                            ) ? (
                               <Button
                                 type="button"
                                 size="sm"
@@ -1144,14 +1214,17 @@ export function AdminCompliancePage() {
                                 {record.request_type === "erasure" ? (
                                   <ShieldAlert className="mr-1 size-4" />
                                 ) : null}
-                                {executeBusy ? "Executing..." : "Execute"}
+                                {executeBusy
+                                  ? t.compliance_executing
+                                  : t.compliance_execute}
                               </Button>
                             ) : null}
 
                             {record.status === "completed" &&
                             record.executed_at ? (
                               <span className="text-xs text-slate-500">
-                                Executed {compactDt(record.executed_at)}
+                                {t.compliance_executed_label}{" "}
+                                {compactDt(record.executed_at)}
                               </span>
                             ) : null}
                           </div>
@@ -1178,10 +1251,10 @@ export function AdminCompliancePage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Patient</TableHead>
+                    <TableHead>{t.compliance_col_patient}</TableHead>
                     <TableHead>{t.activity_user}</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Expired at</TableHead>
+                    <TableHead>{t.compliance_col_type}</TableHead>
+                    <TableHead>{t.compliance_col_expired_at}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1194,7 +1267,7 @@ export function AdminCompliancePage() {
                       </TableCell>
                       <TableCell>{item.user_name}</TableCell>
                       <TableCell>
-                        {consentTypeLabel(item.consent_type)}
+                        {consentTypeLabel(item.consent_type, t)}
                       </TableCell>
                       <TableCell className="font-mono text-sm text-slate-500">
                         {compactDt(item.expires_at)}
@@ -1214,9 +1287,9 @@ export function AdminCompliancePage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Patient</TableHead>
+                    <TableHead>{t.compliance_col_patient}</TableHead>
                     <TableHead>{t.activity_user}</TableHead>
-                    <TableHead>Type</TableHead>
+                    <TableHead>{t.compliance_col_type}</TableHead>
                     <TableHead>{t.users_status}</TableHead>
                     <TableHead>{t.activity_time}</TableHead>
                   </TableRow>
@@ -1245,7 +1318,7 @@ export function AdminCompliancePage() {
                         </TableCell>
                         <TableCell>{item.user_name}</TableCell>
                         <TableCell>
-                          {consentTypeLabel(item.consent_type)}
+                          {consentTypeLabel(item.consent_type, t)}
                         </TableCell>
                         <TableCell>
                           <Badge className={badgeCls}>{label}</Badge>

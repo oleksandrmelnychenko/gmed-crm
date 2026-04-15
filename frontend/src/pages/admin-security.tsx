@@ -220,8 +220,7 @@ export function AdminSecurityPage() {
             <div className="bg-white rounded-xl border p-4">
               <h2 className="text-lg font-medium">{t.security_audit_analytics}</h2>
               <p className="text-muted-foreground mt-1 text-sm">
-                Failed logins, executive-sensitive access and off-hours reads from the append-only
-                audit trail.
+                {t.security_audit_hint}
               </p>
             </div>
 
@@ -271,8 +270,8 @@ export function AdminSecurityPage() {
                       <TableRow>
                         <TableHead>{t.activity_time}</TableHead>
                         <TableHead>{t.activity_user}</TableHead>
-                        <TableHead>Reason</TableHead>
-                        <TableHead>Route</TableHead>
+                        <TableHead>{t.security_col_reason}</TableHead>
+                        <TableHead>{t.security_col_route}</TableHead>
                         <TableHead>{t.common_ip}</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -284,7 +283,7 @@ export function AdminSecurityPage() {
                           </TableCell>
                           <TableCell>
                             <div className="text-sm font-medium leading-tight">
-                              {event.user_name ?? "Anonymous"}
+                              {event.user_name ?? t.security_anonymous}
                             </div>
                             <div className="text-muted-foreground text-[11px]">
                               {event.user_role ?? event.action}
@@ -308,7 +307,7 @@ export function AdminSecurityPage() {
                   </Table>
                 ) : (
                   <p className="text-muted-foreground py-8 text-center text-sm">
-                    No suspicious audit patterns detected.
+                    {t.security_no_suspicious}
                   </p>
                 )}
               </div>
@@ -322,8 +321,8 @@ export function AdminSecurityPage() {
                     <TableHeader>
                       <TableRow>
                         <TableHead>{t.activity_user}</TableHead>
-                        <TableHead>Events</TableHead>
-                        <TableHead>Distinct entities</TableHead>
+                        <TableHead>{t.security_col_events}</TableHead>
+                        <TableHead>{t.security_col_distinct_entities}</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -345,7 +344,7 @@ export function AdminSecurityPage() {
                   </Table>
                 ) : (
                   <p className="text-muted-foreground py-8 text-center text-sm">
-                    No outlier readers in the last 24 hours.
+                    {t.security_no_outlier_readers}
                   </p>
                 )}
               </div>
@@ -387,7 +386,7 @@ export function AdminSecurityPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>CIDR</TableHead>
+                    <TableHead>{t.security_col_cidr}</TableHead>
                     <TableHead>{t.security_ip_desc}</TableHead>
                     <TableHead>{t.users_actions}</TableHead>
                   </TableRow>

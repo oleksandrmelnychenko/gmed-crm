@@ -117,7 +117,7 @@ export function AdminNotificationsPage() {
   const onTest = async (id: string) => {
     try {
       await apiFetch(`/admin/notifications/${id}/test`, { method: "POST" });
-      setMsg("OK");
+      setMsg(t.notif_test_ok);
     } catch (e) {
       setMsg(e instanceof Error ? e.message : String(e));
     }

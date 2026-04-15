@@ -46,7 +46,12 @@ import {
 } from "@/components/ui/sheet";
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { useLang } from "@/lib/i18n";
+import {
+  getLang,
+  t as translateCatalog,
+  type Translations,
+  useLang,
+} from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
 import {
@@ -663,9 +668,35 @@ function buildCasesPath(filters: CaseFilters) {
   return `/cases${query ? `?${query}` : ""}`;
 }
 
+function runtimeTranslations(): Translations {
+  return translateCatalog(getLang());
+}
+
+function runtimeLocale() {
+  switch (getLang()) {
+    case "ru":
+      return "ru-RU";
+    case "de":
+      return "de-DE";
+    default:
+      return "en-GB";
+  }
+}
+
+function caseText(de: string, ru: string, _en: string) {
+  switch (getLang()) {
+    case "ru":
+      return ru;
+    case "de":
+      return de;
+    default:
+      return _en;
+  }
+}
+
 function patientLabel(patient: PatientOption) {
   const name = [patient.first_name, patient.last_name].filter(Boolean).join(" ").trim();
-  return `${name || "Patient"} (${patient.patient_id})`;
+  return `${name || caseText("Patient", "Пациент", "Patient")} (${patient.patient_id})`;
 }
 
 function doctorOptionLabel(doctor: DoctorOption) {
@@ -675,69 +706,69 @@ function doctorOptionLabel(doctor: DoctorOption) {
 }
 
 function formatDate(value: string | null | undefined) {
-  if (!value) return "Not set";
+  if (!value) return runtimeTranslations().common_not_set;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("en-GB", { dateStyle: "medium" }).format(date);
+  return new Intl.DateTimeFormat(runtimeLocale(), { dateStyle: "medium" }).format(date);
 }
 
 function formatDateTime(value: string | null | undefined) {
-  if (!value) return "Not set";
+  if (!value) return runtimeTranslations().common_not_set;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("en-GB", {
+  return new Intl.DateTimeFormat(runtimeLocale(), {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);
 }
 
 function historyValuePreview(value: unknown) {
-  if (value == null) return "empty";
-  if (typeof value === "string") return value || "empty";
+  if (value == null) return caseText("leer", "пусто", "empty");
+  if (typeof value === "string") return value || caseText("leer", "пусто", "empty");
   const serialized = JSON.stringify(value);
-  if (!serialized) return "empty";
+  if (!serialized) return caseText("leer", "пусто", "empty");
   return serialized.length > 180 ? `${serialized.slice(0, 177)}...` : serialized;
 }
 
 function historySectionLabel(section: string) {
   switch (section) {
     case "overview":
-      return "Overview";
+      return caseText("Übersicht", "Обзор", "Overview");
     case "vorerkrankungen":
-      return "Preconditions";
+      return caseText("Vorerkrankungen", "Сопутствующие заболевания", "Preconditions");
     case "allergien":
-      return "Allergies";
+      return caseText("Allergien", "Аллергии", "Allergies");
     case "operationen":
-      return "Operations";
+      return caseText("Operationen", "Операции", "Operations");
     case "medikamente":
-      return "Medication";
+      return caseText("Medikation", "Медикаменты", "Medication");
     case "pain_records":
-      return "Pain records";
+      return caseText("Schmerzdokumentation", "Записи о боли", "Pain records");
     case "symptome":
-      return "Symptoms";
+      return caseText("Symptome", "Симптомы", "Symptoms");
     case "cardiology":
-      return "Cardiology";
+      return caseText("Kardiologie", "Кардиология", "Cardiology");
     case "gastroenterology":
-      return "Gastroenterology";
+      return caseText("Gastroenterologie", "Гастроэнтерология", "Gastroenterology");
     case "orthopedics":
-      return "Orthopedics";
+      return caseText("Orthopädie", "Ортопедия", "Orthopedics");
     case "neurology":
-      return "Neurology";
+      return caseText("Neurologie", "Неврология", "Neurology");
     case "pulmonology":
-      return "Pulmonology";
+      return caseText("Pneumologie", "Пульмонология", "Pulmonology");
     case "urology":
-      return "Urology";
+      return caseText("Urologie", "Урология", "Urology");
     case "vegetative":
-      return "Vegetative";
+      return caseText("Vegetative Anamnese", "Вегетативный анамнез", "Vegetative");
     case "impfstatus":
-      return "Vaccination";
+      return caseText("Impfstatus", "Вакцинация", "Vaccination");
     default:
       return section;
   }
 }
 
 function textValue(value: string | null | undefined) {
-  return value?.trim() ? value : "Not set";
+  return value?.trim() ? value : runtimeTranslations().common_not_set;
 }
 
 function numericInputToValue(value: string) {
@@ -1204,7 +1235,16 @@ export function CasesPage() {
       })
       .catch((error: unknown) => {
         if (!cancelled) {
-          setSnippetsError(bannerText(error, "Failed to load text snippets"));
+          setSnippetsError(
+            bannerText(
+              error,
+              caseText(
+                "Textbausteine konnten nicht geladen werden",
+                "Не удалось загрузить текстовые шаблоны",
+                "Failed to load text snippets",
+              ),
+            ),
+          );
         }
       })
       .finally(() => {
@@ -1259,7 +1299,16 @@ export function CasesPage() {
       })
       .catch((error: unknown) => {
         if (!cancelled) {
-          setListError(bannerText(error, "Failed to load cases"));
+          setListError(
+            bannerText(
+              error,
+              caseText(
+                "Fälle konnten nicht geladen werden",
+                "Не удалось загрузить кейсы",
+                "Failed to load cases",
+              ),
+            ),
+          );
         }
       })
       .finally(() => {
@@ -1409,7 +1458,16 @@ export function CasesPage() {
       })
       .catch((error: unknown) => {
         if (!cancelled) {
-          setDetailError(bannerText(error, "Failed to load case"));
+          setDetailError(
+            bannerText(
+              error,
+              caseText(
+                "Fall konnte nicht geladen werden",
+                "Не удалось загрузить кейс",
+                "Failed to load case",
+              ),
+            ),
+          );
         }
       })
       .finally(() => {
@@ -1492,7 +1550,16 @@ export function CasesPage() {
       openCase(created.id);
       refreshDetail();
     } catch (error) {
-      setCreateError(bannerText(error, "Failed to create case"));
+      setCreateError(
+        bannerText(
+          error,
+          caseText(
+            "Fall konnte nicht erstellt werden",
+            "Не удалось создать кейс",
+            "Failed to create case",
+          ),
+        ),
+      );
     } finally {
       setCreateBusy(false);
     }
@@ -1568,7 +1635,16 @@ export function CasesPage() {
       setSnippetForm(DEFAULT_CASE_TEXT_SNIPPET_FORM);
       refreshSnippetLibrary();
     } catch (error) {
-      setSnippetSaveError(bannerText(error, "Failed to save text snippet"));
+      setSnippetSaveError(
+        bannerText(
+          error,
+          caseText(
+            "Textbaustein konnte nicht gespeichert werden",
+            "Не удалось сохранить текстовый шаблон",
+            "Failed to save text snippet",
+          ),
+        ),
+      );
     } finally {
       setSnippetSaveBusy(false);
     }
@@ -1657,7 +1733,11 @@ export function CasesPage() {
         apiFetch(`/cases/${detail.id}/medikamente/${medicationId}/expiry-confirm`, {
           method: "POST",
         }),
-      "Failed to confirm medication expiry review",
+      caseText(
+        "Prüfung des Ablaufs der Medikamentengültigkeit konnte nicht bestätigt werden",
+        "Не удалось подтвердить проверку окончания срока действия лекарства",
+        "Failed to confirm medication expiry review",
+      ),
     );
   }
 
@@ -1812,10 +1892,14 @@ export function CasesPage() {
       <div className="space-y-6">
         <section className={cardClass("p-8")}>
           <h1 className="text-3xl font-semibold tracking-tight text-slate-950">
-            Case workspace
+            {caseText("Fallbereich", "Рабочее пространство кейсов", "Case workspace")}
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600">
-            Case management is currently limited to CEO and Patient Manager roles in the backend.
+            {caseText(
+              "Die Fallverwaltung ist im Backend derzeit auf die Rollen CEO und Patient Manager beschränkt.",
+              "Управление кейсами в backend сейчас ограничено ролями CEO и Patient Manager.",
+              "Case management is currently limited to CEO and Patient Manager roles in the backend.",
+            )}
           </p>
         </section>
       </div>
@@ -1833,7 +1917,7 @@ export function CasesPage() {
                   variant="outline"
                   className="rounded-full border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-sky-700"
                 >
-                  Cases
+                  {caseText("Fälle", "Кейсы", "Cases")}
                 </Badge>
                 <Badge
                   variant="outline"
@@ -1854,7 +1938,7 @@ export function CasesPage() {
             <div className="flex flex-wrap items-center gap-3">
               <Button type="button" variant="outline" className="rounded-2xl" onClick={refreshList}>
                 <RefreshCw className="size-4" />
-                Refresh
+                {caseText("Aktualisieren", "Обновить", "Refresh")}
               </Button>
               {permissions.canCreate ? (
                 <Button
@@ -1920,7 +2004,7 @@ export function CasesPage() {
                   updateQuery({ patient: null, case: null });
                 }}
               >
-                Reset
+                {caseText("Zurücksetzen", "Сбросить", "Reset")}
               </Button>
             </div>
 
@@ -2142,7 +2226,7 @@ export function CasesPage() {
                 ))}
               </select>
             </Field>
-            <Field label={`${t.cases_referrer} label`}>
+            <Field label={caseText("Bezeichnung des Zuweisers", "Наименование направившего врача", "Referrer label")}>
               <Input
                 value={createForm.zuweiser}
                 onChange={(event) =>
@@ -2232,13 +2316,13 @@ export function CasesPage() {
                       <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                         <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
                           <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                            Reference code
+                            {caseText("Referenzcode", "Код ссылки", "Reference code")}
                           </div>
                           <div className="mt-2 font-mono text-sm text-slate-900">{detail.case_id}</div>
                         </div>
                         <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
                           <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                            System case UUID
+                            {caseText("System-UUID des Falls", "Системный UUID кейса", "System case UUID")}
                           </div>
                           <div className="mt-2 break-all font-mono text-xs text-slate-900">
                             {detail.case_uuid ?? detail.id}
@@ -2246,7 +2330,7 @@ export function CasesPage() {
                         </div>
                         <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
                           <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                            Retention until
+                            {caseText("Aufbewahrung bis", "Хранить до", "Retention until")}
                           </div>
                           <div className="mt-2 text-sm text-slate-900">
                             {formatDate(detail.retention_until)}
@@ -2254,7 +2338,7 @@ export function CasesPage() {
                         </div>
                         <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
                           <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                            Last clinical update
+                            {caseText("Letzte klinische Aktualisierung", "Последнее клиническое обновление", "Last clinical update")}
                           </div>
                           <div className="mt-2 text-sm text-slate-900">
                             {formatDateTime(detail.last_clinical_update_at ?? detail.updated_at)}
@@ -2265,15 +2349,15 @@ export function CasesPage() {
                     <div className="flex flex-wrap gap-2">
                       <Button type="button" variant="outline" className="rounded-2xl" onClick={openPatientWorkspace}>
                         <UserRound className="size-4" />
-                        Patient
+                        {caseText("Patient", "Пациент", "Patient")}
                       </Button>
                       <Button type="button" variant="outline" className="rounded-2xl" onClick={openOrdersWorkspace}>
                         <ClipboardList className="size-4" />
-                        Orders
+                        {caseText("Aufträge", "Заказы", "Orders")}
                       </Button>
                       <Button type="button" variant="outline" className="rounded-2xl" onClick={openAppointmentsWorkspace}>
                         <CalendarClock className="size-4" />
-                        Appointments
+                        {caseText("Termine", "Приёмы", "Appointments")}
                       </Button>
                     </div>
                   </div>
@@ -2283,7 +2367,16 @@ export function CasesPage() {
                     <MetricCard label={t.cases_allergies} value={detail.allergien.length.toString()} description={t.cases_subtitle} icon={<Plus className="size-4" />} />
                     <MetricCard label={t.cases_medication} value={detail.medikamente.length.toString()} description={t.cases_subtitle} icon={<ClipboardList className="size-4" />} />
                     <MetricCard label={t.cases_symptoms} value={detail.symptome.length.toString()} description={t.cases_subtitle} icon={<Search className="size-4" />} />
-                    <MetricCard label="Clinical revisions" value={String(detail.version_count ?? detail.history?.length ?? 0)} description="Append-only case history entries" icon={<RefreshCw className="size-4" />} />
+                    <MetricCard
+                      label={caseText("Klinische Revisionen", "Клинические ревизии", "Clinical revisions")}
+                      value={String(detail.version_count ?? detail.history?.length ?? 0)}
+                      description={caseText(
+                        "Append-only-Einträge in der Fallhistorie",
+                        "Записи в истории кейса без перезаписи",
+                        "Append-only case history entries",
+                      )}
+                      icon={<RefreshCw className="size-4" />}
+                    />
                   </div>
                 </section>
 
@@ -2340,7 +2433,7 @@ export function CasesPage() {
                           ))}
                         </select>
                       </Field>
-                      <Field label={`${t.cases_referrer} label`}>
+                      <Field label={caseText("Bezeichnung des Zuweisers", "Наименование направившего врача", "Referrer label")}>
                         <Input
                           value={overviewForm.zuweiser}
                           onChange={(event) =>
@@ -2448,7 +2541,7 @@ export function CasesPage() {
                     <div className="flex justify-end border-t border-border/70 pt-4">
                       <Button type="submit" className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800" disabled={sectionBusy === "overview" || !permissions.canEdit}>
                         {sectionBusy === "overview" ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                        Save overview
+                        {caseText("Übersicht speichern", "Сохранить обзор", "Save overview")}
                       </Button>
                     </div>
                   </form>
@@ -2618,7 +2711,7 @@ export function CasesPage() {
                       <Field label={t.cases_note}>
                         <textarea value={item.notiz ?? ""} onChange={(event) => setVorerkrankungen((current) => updateItemAtIndex(current, index, { notiz: event.target.value }))} className="mt-2 min-h-[90px] w-full rounded-xl border border-input bg-white px-3 py-2 text-sm outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100" />
                       </Field>
-                      <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-2xl" onClick={() => setVorerkrankungen((current) => removeItemAtIndex(current, index))}>Remove</Button></div>
+                      <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-2xl" onClick={() => setVorerkrankungen((current) => removeItemAtIndex(current, index))}>{caseText("Entfernen", "Удалить", "Remove")}</Button></div>
                     </div>
                   ))}
                 </ItemEditorSection>
@@ -2630,7 +2723,7 @@ export function CasesPage() {
                         <Field label={t.cases_allergies}><Input value={item.allergie} onChange={(event) => setAllergien((current) => updateItemAtIndex(current, index, { allergie: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_subtitle}><Input value={item.reaktion ?? ""} onChange={(event) => setAllergien((current) => updateItemAtIndex(current, index, { reaktion: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                       </div>
-                      <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-2xl" onClick={() => setAllergien((current) => removeItemAtIndex(current, index))}>Remove</Button></div>
+                      <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-2xl" onClick={() => setAllergien((current) => removeItemAtIndex(current, index))}>{caseText("Entfernen", "Удалить", "Remove")}</Button></div>
                     </div>
                   ))}
                 </ItemEditorSection>
@@ -2641,7 +2734,7 @@ export function CasesPage() {
                       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
                         <Field label={t.appointments_date}><Input type="date" value={item.datum ?? ""} onChange={(event) => setOperationen((current) => updateItemAtIndex(current, index, { datum: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_reason}><Input value={item.grund} onChange={(event) => setOperationen((current) => updateItemAtIndex(current, index, { grund: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label={`${t.common_doctor} registry`}>
+                        <Field label={caseText("Arzt aus Register", "Врач из реестра", "Doctor registry")}>
                           <select
                             value={item.arzt_id ?? ""}
                             onChange={(event) => {
@@ -2666,10 +2759,10 @@ export function CasesPage() {
                             ))}
                           </select>
                         </Field>
-                        <Field label={`${t.common_doctor} label`}><Input value={item.arzt ?? ""} onChange={(event) => setOperationen((current) => updateItemAtIndex(current, index, { arzt: event.target.value }))} className="h-10 rounded-xl bg-white" placeholder="Legacy / manual fallback" /></Field>
+                        <Field label={caseText("Freitext Arzt", "Наименование врача", "Doctor label")}><Input value={item.arzt ?? ""} onChange={(event) => setOperationen((current) => updateItemAtIndex(current, index, { arzt: event.target.value }))} className="h-10 rounded-xl bg-white" placeholder={caseText("Altbestand / manuelle Angabe", "Устаревшее / ручной ввод", "Legacy / manual fallback")} /></Field>
                         <Field label={t.cases_note}><Input value={item.notiz ?? ""} onChange={(event) => setOperationen((current) => updateItemAtIndex(current, index, { notiz: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                       </div>
-                      <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-2xl" onClick={() => setOperationen((current) => removeItemAtIndex(current, index))}>Remove</Button></div>
+                      <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-2xl" onClick={() => setOperationen((current) => removeItemAtIndex(current, index))}>{caseText("Entfernen", "Удалить", "Remove")}</Button></div>
                     </div>
                   ))}
                 </ItemEditorSection>
@@ -2681,7 +2774,7 @@ export function CasesPage() {
                         <Field label={t.cases_medications}><Input value={item.handelsname} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { handelsname: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_medications}><Input value={item.wirkstoff ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { wirkstoff: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.documents_category}><Input value={item.med_typ ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { med_typ: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label="Valid until">
+                        <Field label={caseText("Gültig bis", "Действительно до", "Valid until")}>
                           <Input
                             type="date"
                             value={item.expiry_date ?? ""}
@@ -2702,7 +2795,7 @@ export function CasesPage() {
                         <Field label={t.cases_medications}><Input value={item.einheit ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { einheit: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.providers_service_valid_from}><Input value={item.seit ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { seit: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_reason}><Input value={item.grund ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { grund: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label={`${t.common_doctor} registry`}>
+                        <Field label={caseText("Arzt aus Register", "Врач из реестра", "Doctor registry")}>
                           <select
                             value={item.verordnender_arzt_id ?? ""}
                             onChange={(event) => {
@@ -2727,7 +2820,7 @@ export function CasesPage() {
                             ))}
                           </select>
                         </Field>
-                        <Field label={`${t.common_doctor} label`}><Input value={item.verordnender_arzt ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { verordnender_arzt: event.target.value }))} className="h-10 rounded-xl bg-white" placeholder="Legacy / manual fallback" /></Field>
+                        <Field label={caseText("Freitext Arzt", "Наименование врача", "Doctor label")}><Input value={item.verordnender_arzt ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { verordnender_arzt: event.target.value }))} className="h-10 rounded-xl bg-white" placeholder={caseText("Altbestand / manuelle Angabe", "Устаревшее / ручной ввод", "Legacy / manual fallback")} /></Field>
                         <Field label={t.patients_notes}><Input value={item.anmerkung ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { anmerkung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                       </div>
                       {item.is_expired ? (
@@ -2746,7 +2839,11 @@ export function CasesPage() {
                               </Badge>
                             )}
                             <span>
-                              Medication validity ended on {formatDate(item.expiry_date)}.
+                              {caseText(
+                                `Die Gültigkeit des Medikaments endete am ${formatDate(item.expiry_date)}.`,
+                                `Срок действия лекарства закончился ${formatDate(item.expiry_date)}.`,
+                                `Medication validity ended on ${formatDate(item.expiry_date)}.`,
+                              )}
                             </span>
                           </div>
                           {item.pending_expiry_notification_sent_at ? (
@@ -2773,7 +2870,7 @@ export function CasesPage() {
                             Confirm expiry review
                           </Button>
                         ) : null}
-                        <Button type="button" variant="outline" size="sm" className="rounded-2xl" onClick={() => setMedikamente((current) => removeItemAtIndex(current, index))}>Remove</Button>
+                        <Button type="button" variant="outline" size="sm" className="rounded-2xl" onClick={() => setMedikamente((current) => removeItemAtIndex(current, index))}>{caseText("Entfernen", "Удалить", "Remove")}</Button>
                       </div>
                     </div>
                   ))}
@@ -2796,7 +2893,7 @@ export function CasesPage() {
                         <Field label={t.cases_pain}><Input value={item.ausstrahlung ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { ausstrahlung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_pain}><Input value={item.auftreten ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { auftreten: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                       </div>
-                      <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-2xl" onClick={() => setPainRecords((current) => removeItemAtIndex(current, index))}>Remove</Button></div>
+                      <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-2xl" onClick={() => setPainRecords((current) => removeItemAtIndex(current, index))}>{caseText("Entfernen", "Удалить", "Remove")}</Button></div>
                     </div>
                   ))}
                 </ItemEditorSection>
@@ -2808,17 +2905,25 @@ export function CasesPage() {
                         <Field label={t.patients_notes}><Input value={item.beschreibung} onChange={(event) => setSymptome((current) => updateItemAtIndex(current, index, { beschreibung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_title}><Input value={item.fachrichtung ?? ""} onChange={(event) => setSymptome((current) => updateItemAtIndex(current, index, { fachrichtung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                       </div>
-                      <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-2xl" onClick={() => setSymptome((current) => removeItemAtIndex(current, index))}>Remove</Button></div>
+                      <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-2xl" onClick={() => setSymptome((current) => removeItemAtIndex(current, index))}>{caseText("Entfernen", "Удалить", "Remove")}</Button></div>
                     </div>
                   ))}
                 </ItemEditorSection>
 
                 <Panel
-                  title="Cardiology sub-flow"
+                  title={caseText("Kardiologischer Teilbereich", "Кардиологический блок", "Cardiology sub-flow")}
                   description={
                     cardiologyTriggered
-                      ? "Specialty branch for cardiology-related symptoms and prior cardiac workup."
-                      : "Enable when symptoms or referral indicate cardiology."
+                      ? caseText(
+                          "Fachspezifischer Pfad für kardiologische Symptome und bereits erfolgte Herzdiagnostik.",
+                          "Специализированный блок для кардиологических симптомов и ранее выполненной кардиодиагностики.",
+                          "Specialty branch for cardiology-related symptoms and prior cardiac workup.",
+                        )
+                      : caseText(
+                          "Aktivieren, wenn Symptome oder Überweisung auf Kardiologie hinweisen.",
+                          "Включайте, если симптомы или направление указывают на кардиологию.",
+                          "Enable when symptoms or referral indicate cardiology.",
+                        )
                   }
                 >
                   <form onSubmit={handleSaveCardiology} className="space-y-4">
@@ -2835,14 +2940,14 @@ export function CasesPage() {
                             }))
                           }
                         />
-                        Cardiology relevant
+                        {caseText("Kardiologie relevant", "Показания к кардиологии", "Cardiology relevant")}
                       </label>
                       {[
-                        ["chest_pain", "Chest pain"],
-                        ["dyspnea", "Dyspnea"],
-                        ["palpitations", "Palpitations"],
-                        ["syncope", "Syncope"],
-                        ["edema", "Edema"],
+                        ["chest_pain", caseText("Brustschmerz", "Боль в груди", "Chest pain")],
+                        ["dyspnea", caseText("Dyspnoe", "Одышка", "Dyspnea")],
+                        ["palpitations", caseText("Palpitationen", "Сердцебиение", "Palpitations")],
+                        ["syncope", caseText("Synkope", "Обмороки", "Syncope")],
+                        ["edema", caseText("Ödeme", "Отеки", "Edema")],
                       ].map(([key, label]) => (
                         <label
                           key={key}
@@ -2863,26 +2968,26 @@ export function CasesPage() {
                       ))}
                     </div>
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      <Field label="Known diagnosis">
+                      <Field label={caseText("Bekannte Diagnose", "Известный диагноз", "Known diagnosis")}>
                         <Input value={cardiology.known_diagnosis} onChange={(event) => setCardiology((current) => ({ ...current, known_diagnosis: event.target.value }))} className="h-10 rounded-xl bg-slate-50" />
                       </Field>
-                      <Field label="Prior ECG / echo / workup">
+                      <Field label={caseText("Vorbefunde (EKG / Echo / Diagnostik)", "Предыдущие ЭКГ / Эхо / обследования", "Prior ECG / echo / workup")}>
                         <Input value={cardiology.prior_cardiac_workup} onChange={(event) => setCardiology((current) => ({ ...current, prior_cardiac_workup: event.target.value }))} className="h-10 rounded-xl bg-slate-50" />
                       </Field>
-                      <Field label="Anticoagulation">
+                      <Field label={caseText("Antikoagulation", "Антикоагуляция", "Anticoagulation")}>
                         <Input value={cardiology.anticoagulation} onChange={(event) => setCardiology((current) => ({ ...current, anticoagulation: event.target.value }))} className="h-10 rounded-xl bg-slate-50" />
                       </Field>
-                      <Field label="CV risk factors">
+                      <Field label={caseText("Kardiovaskuläre Risikofaktoren", "Сердечно-сосудистые факторы риска", "CV risk factors")}>
                         <Input value={cardiology.cardiovascular_risk_factors} onChange={(event) => setCardiology((current) => ({ ...current, cardiovascular_risk_factors: event.target.value }))} className="h-10 rounded-xl bg-slate-50" />
                       </Field>
-                      <Field label="Family history">
+                      <Field label={caseText("Familienanamnese", "Семейный анамнез", "Family history")}>
                         <Input value={cardiology.family_history} onChange={(event) => setCardiology((current) => ({ ...current, family_history: event.target.value }))} className="h-10 rounded-xl bg-slate-50" />
                       </Field>
-                      <Field label="Red flags">
+                      <Field label={caseText("Warnzeichen", "Красные флаги", "Red flags")}>
                         <Input value={cardiology.red_flags} onChange={(event) => setCardiology((current) => ({ ...current, red_flags: event.target.value }))} className="h-10 rounded-xl bg-slate-50" />
                       </Field>
                     </div>
-                    <Field label="Cardiology notes">
+                    <Field label={caseText("Kardiologische Notizen", "Кардиологические заметки", "Cardiology notes")}>
                       <textarea
                         value={cardiology.notes}
                         onChange={(event) =>
@@ -2895,18 +3000,26 @@ export function CasesPage() {
                     <div className="flex justify-end border-t border-border/70 pt-4">
                       <Button type="submit" className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800" disabled={sectionBusy === "cardiology" || !permissions.canEdit}>
                         {sectionBusy === "cardiology" ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                        Save cardiology
+                        {caseText("Kardiologie speichern", "Сохранить кардиологию", "Save cardiology")}
                       </Button>
                     </div>
                   </form>
                 </Panel>
 
                 <Panel
-                  title="Gastroenterology sub-flow"
+                  title={caseText("Gastroenterologischer Teilbereich", "Гастроэнтерологический блок", "Gastroenterology sub-flow")}
                   description={
                     gastroenterologyTriggered
-                      ? "Specialty branch for gastroenterology-related symptoms, bowel changes and prior endoscopy context."
-                      : "Enable when symptoms or referral indicate gastroenterology."
+                      ? caseText(
+                          "Fachspezifischer Pfad für gastroenterologische Symptome, Stuhlveränderungen und endoskopische Vorbefunde.",
+                          "Специализированный блок для гастроэнтерологических симптомов, изменений стула и данных прежней эндоскопии.",
+                          "Specialty branch for gastroenterology-related symptoms, bowel changes and prior endoscopy context.",
+                        )
+                      : caseText(
+                          "Aktivieren, wenn Symptome oder Überweisung auf Gastroenterologie hinweisen.",
+                          "Включайте, если симптомы или направление указывают на гастроэнтерологию.",
+                          "Enable when symptoms or referral indicate gastroenterology.",
+                        )
                   }
                 >
                   <form onSubmit={handleSaveGastroenterology} className="space-y-4">
@@ -2925,15 +3038,15 @@ export function CasesPage() {
                             }))
                           }
                         />
-                        Gastroenterology relevant
+                        {caseText("Gastroenterologie relevant", "Показания к гастроэнтерологии", "Gastroenterology relevant")}
                       </label>
                       {[
-                        ["abdominal_pain", "Abdominal pain"],
-                        ["reflux", "Reflux"],
-                        ["nausea", "Nausea"],
-                        ["diarrhea", "Diarrhea"],
-                        ["constipation", "Constipation"],
-                        ["gi_bleeding", "GI bleeding"],
+                        ["abdominal_pain", caseText("Bauchschmerz", "Боль в животе", "Abdominal pain")],
+                        ["reflux", caseText("Reflux", "Рефлюкс", "Reflux")],
+                        ["nausea", caseText("Übelkeit", "Тошнота", "Nausea")],
+                        ["diarrhea", caseText("Durchfall", "Диарея", "Diarrhea")],
+                        ["constipation", caseText("Verstopfung", "Запор", "Constipation")],
+                        ["gi_bleeding", caseText("GI-Blutung", "ЖКТ-кровотечение", "GI bleeding")],
                       ].map(([key, label]) => (
                         <label
                           key={key}
@@ -2956,7 +3069,7 @@ export function CasesPage() {
                       ))}
                     </div>
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      <Field label="Prior endoscopy / colonoscopy">
+                      <Field label={caseText("Vorherige Endoskopie / Koloskopie", "Предыдущая эндоскопия / колоноскопия", "Prior endoscopy / colonoscopy")}>
                         <Input
                           value={gastroenterology.prior_endoscopy}
                           onChange={(event) =>
@@ -2968,7 +3081,7 @@ export function CasesPage() {
                           className="h-10 rounded-xl bg-slate-50"
                         />
                       </Field>
-                      <Field label="Bowel habit changes">
+                      <Field label={caseText("Veränderungen der Stuhlgewohnheiten", "Изменения стула", "Bowel habit changes")}>
                         <Input
                           value={gastroenterology.bowel_habits}
                           onChange={(event) =>
@@ -2980,7 +3093,7 @@ export function CasesPage() {
                           className="h-10 rounded-xl bg-slate-50"
                         />
                       </Field>
-                      <Field label="Liver / hepatobiliary history">
+                      <Field label={caseText("Leber- / hepatobiliäre Vorgeschichte", "Печёночно-билиарный анамнез", "Liver / hepatobiliary history")}>
                         <Input
                           value={gastroenterology.liver_history}
                           onChange={(event) =>
@@ -2992,7 +3105,7 @@ export function CasesPage() {
                           className="h-10 rounded-xl bg-slate-50"
                         />
                       </Field>
-                      <Field label="Food intolerance / triggers">
+                      <Field label={caseText("Nahrungsmittelunverträglichkeiten / Auslöser", "Пищевая непереносимость / триггеры", "Food intolerance / triggers")}>
                         <Input
                           value={gastroenterology.food_intolerance}
                           onChange={(event) =>
@@ -3004,7 +3117,7 @@ export function CasesPage() {
                           className="h-10 rounded-xl bg-slate-50"
                         />
                       </Field>
-                      <Field label="Red flags">
+                      <Field label={caseText("Warnzeichen", "Красные флаги", "Red flags")}>
                         <Input
                           value={gastroenterology.red_flags}
                           onChange={(event) =>
@@ -3017,7 +3130,7 @@ export function CasesPage() {
                         />
                       </Field>
                     </div>
-                    <Field label="Gastroenterology notes">
+                    <Field label={caseText("Gastroenterologische Notizen", "Гастроэнтерологические заметки", "Gastroenterology notes")}>
                       <textarea
                         value={gastroenterology.notes}
                         onChange={(event) =>
@@ -3041,18 +3154,26 @@ export function CasesPage() {
                         {sectionBusy === "gastroenterology" ? (
                           <LoaderCircle className="size-4 animate-spin" />
                         ) : null}
-                        Save gastroenterology
+                        {caseText("Gastroenterologie speichern", "Сохранить гастроэнтерологию", "Save gastroenterology")}
                       </Button>
                     </div>
                   </form>
                 </Panel>
 
                 <Panel
-                  title="Orthopedics sub-flow"
+                  title={caseText("Orthopädischer Teilbereich", "Ортопедический блок", "Orthopedics sub-flow")}
                   description={
                     orthopedicsTriggered
-                      ? "Specialty branch for musculoskeletal pain, mobility issues and trauma-related context."
-                      : "Enable when symptoms or referral indicate orthopedics."
+                      ? caseText(
+                          "Fachspezifischer Pfad für muskuloskelettale Schmerzen, Mobilitätseinschränkungen und traumabezogene Vorgeschichte.",
+                          "Специализированный блок для болей опорно-двигательного аппарата, ограничений подвижности и травматологического анамнеза.",
+                          "Specialty branch for musculoskeletal pain, mobility issues and trauma-related context.",
+                        )
+                      : caseText(
+                          "Aktivieren, wenn Symptome oder Überweisung auf Orthopädie hinweisen.",
+                          "Включайте, если симптомы или направление указывают на ортопедию.",
+                          "Enable when symptoms or referral indicate orthopedics.",
+                        )
                   }
                 >
                   <form onSubmit={handleSaveOrthopedics} className="space-y-4">
@@ -3071,13 +3192,13 @@ export function CasesPage() {
                             }))
                           }
                         />
-                        Orthopedics relevant
+                        {caseText("Orthopädie relevant", "Показания к ортопедии", "Orthopedics relevant")}
                       </label>
                       {[
-                        ["joint_pain", "Joint pain"],
-                        ["back_pain", "Back / spine pain"],
-                        ["mobility_limitation", "Mobility limitation"],
-                        ["trauma_history", "Trauma history"],
+                        ["joint_pain", caseText("Gelenkschmerz", "Боль в суставах", "Joint pain")],
+                        ["back_pain", caseText("Rücken- / Wirbelsäulenschmerz", "Боль в спине / позвоночнике", "Back / spine pain")],
+                        ["mobility_limitation", caseText("Mobilitätseinschränkung", "Ограничение подвижности", "Mobility limitation")],
+                        ["trauma_history", caseText("Traumaanamnese", "Травматологический анамнез", "Trauma history")],
                       ].map(([key, label]) => (
                         <label
                           key={key}
@@ -3098,7 +3219,7 @@ export function CasesPage() {
                       ))}
                     </div>
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      <Field label="Prior imaging">
+                      <Field label={caseText("Vorherige Bildgebung", "Предыдущая визуализация", "Prior imaging")}>
                         <Input
                           value={orthopedics.prior_imaging}
                           onChange={(event) =>
@@ -3110,7 +3231,7 @@ export function CasesPage() {
                           className="h-10 rounded-xl bg-slate-50"
                         />
                       </Field>
-                      <Field label="Assistive devices / implants">
+                      <Field label={caseText("Hilfsmittel / Implantate", "Средства поддержки / импланты", "Assistive devices / implants")}>
                         <Input
                           value={orthopedics.assistive_devices}
                           onChange={(event) =>
@@ -3122,7 +3243,7 @@ export function CasesPage() {
                           className="h-10 rounded-xl bg-slate-50"
                         />
                       </Field>
-                      <Field label="Physiotherapy / rehab history">
+                      <Field label={caseText("Physiotherapie- / Reha-Vorgeschichte", "Физиотерапия / реабилитация в анамнезе", "Physiotherapy / rehab history")}>
                         <Input
                           value={orthopedics.physiotherapy_history}
                           onChange={(event) =>
@@ -3134,7 +3255,7 @@ export function CasesPage() {
                           className="h-10 rounded-xl bg-slate-50"
                         />
                       </Field>
-                      <Field label="Pain triggers / load pattern">
+                      <Field label={caseText("Schmerzauslöser / Belastungsmuster", "Триггеры боли / характер нагрузки", "Pain triggers / load pattern")}>
                         <Input
                           value={orthopedics.pain_triggers}
                           onChange={(event) =>
@@ -3146,7 +3267,7 @@ export function CasesPage() {
                           className="h-10 rounded-xl bg-slate-50"
                         />
                       </Field>
-                      <Field label="Red flags">
+                      <Field label={caseText("Warnzeichen", "Красные флаги", "Red flags")}>
                         <Input
                           value={orthopedics.red_flags}
                           onChange={(event) =>
@@ -3159,7 +3280,7 @@ export function CasesPage() {
                         />
                       </Field>
                     </div>
-                    <Field label="Orthopedics notes">
+                    <Field label={caseText("Orthopädische Notizen", "Ортопедические заметки", "Orthopedics notes")}>
                       <textarea
                         value={orthopedics.notes}
                         onChange={(event) =>
@@ -3181,18 +3302,26 @@ export function CasesPage() {
                         {sectionBusy === "orthopedics" ? (
                           <LoaderCircle className="size-4 animate-spin" />
                         ) : null}
-                        Save orthopedics
+                        {caseText("Orthopädie speichern", "Сохранить ортопедию", "Save orthopedics")}
                       </Button>
                     </div>
                   </form>
                 </Panel>
 
                 <Panel
-                  title="Neurology sub-flow"
+                  title={caseText("Neurologischer Teilbereich", "Неврологический блок", "Neurology sub-flow")}
                   description={
                     neurologyTriggered
-                      ? "Specialty branch for headache, dizziness, neurologic deficits and prior neuro workup."
-                      : "Enable when symptoms or referral indicate neurology."
+                      ? caseText(
+                          "Fachspezifischer Pfad für Kopfschmerzen, Schwindel, neurologische Defizite und frühere neurologische Diagnostik.",
+                          "Специализированный блок для головной боли, головокружения, неврологического дефицита и прежней неврологической диагностики.",
+                          "Specialty branch for headache, dizziness, neurologic deficits and prior neuro workup.",
+                        )
+                      : caseText(
+                          "Aktivieren, wenn Symptome oder Überweisung auf Neurologie hinweisen.",
+                          "Включайте, если симптомы или направление указывают на неврологию.",
+                          "Enable when symptoms or referral indicate neurology.",
+                        )
                   }
                 >
                   <form onSubmit={handleSaveNeurology} className="space-y-4">
@@ -3211,15 +3340,15 @@ export function CasesPage() {
                             }))
                           }
                         />
-                        Neurology relevant
+                        {caseText("Neurologie relevant", "Показания к неврологии", "Neurology relevant")}
                       </label>
                       {[
-                        ["headache", "Headache"],
-                        ["dizziness", "Dizziness / vertigo"],
-                        ["sensory_changes", "Sensory changes"],
-                        ["weakness", "Weakness"],
-                        ["seizure_history", "Seizure history"],
-                        ["gait_balance_issues", "Gait / balance issues"],
+                        ["headache", caseText("Kopfschmerz", "Головная боль", "Headache")],
+                        ["dizziness", caseText("Schwindel / Vertigo", "Головокружение / вертиго", "Dizziness / vertigo")],
+                        ["sensory_changes", caseText("Sensibilitätsveränderungen", "Нарушения чувствительности", "Sensory changes")],
+                        ["weakness", caseText("Schwäche", "Слабость", "Weakness")],
+                        ["seizure_history", caseText("Krampfanamnese", "Судорожный анамнез", "Seizure history")],
+                        ["gait_balance_issues", caseText("Gang- / Gleichgewichtsstörung", "Нарушение походки / равновесия", "Gait / balance issues")],
                       ].map(([key, label]) => (
                         <label
                           key={key}
@@ -3240,7 +3369,7 @@ export function CasesPage() {
                       ))}
                     </div>
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      <Field label="Prior neuro imaging">
+                      <Field label={caseText("Vorherige neuroradiologische Bildgebung", "Предыдущая нейровизуализация", "Prior neuro imaging")}>
                         <Input
                           value={neurology.prior_neuro_imaging}
                           onChange={(event) =>
@@ -3252,7 +3381,7 @@ export function CasesPage() {
                           className="h-10 rounded-xl bg-slate-50"
                         />
                       </Field>
-                      <Field label="Prior neurology workup">
+                      <Field label={caseText("Frühere neurologische Diagnostik", "Предыдущее неврологическое обследование", "Prior neurology workup")}>
                         <Input
                           value={neurology.prior_neurology_workup}
                           onChange={(event) =>
@@ -3264,7 +3393,7 @@ export function CasesPage() {
                           className="h-10 rounded-xl bg-slate-50"
                         />
                       </Field>
-                      <Field label="Cognitive / speech changes">
+                      <Field label={caseText("Kognitive / sprachliche Veränderungen", "Когнитивные / речевые изменения", "Cognitive / speech changes")}>
                         <Input
                           value={neurology.cognitive_changes}
                           onChange={(event) =>
@@ -3276,7 +3405,7 @@ export function CasesPage() {
                           className="h-10 rounded-xl bg-slate-50"
                         />
                       </Field>
-                      <Field label="Red flags">
+                      <Field label={caseText("Warnzeichen", "Красные флаги", "Red flags")}>
                         <Input
                           value={neurology.red_flags}
                           onChange={(event) =>
@@ -3289,7 +3418,7 @@ export function CasesPage() {
                         />
                       </Field>
                     </div>
-                    <Field label="Neurology notes">
+                    <Field label={caseText("Neurologische Notizen", "Неврологические заметки", "Neurology notes")}>
                       <textarea
                         value={neurology.notes}
                         onChange={(event) =>
@@ -3311,18 +3440,26 @@ export function CasesPage() {
                         {sectionBusy === "neurology" ? (
                           <LoaderCircle className="size-4 animate-spin" />
                         ) : null}
-                        Save neurology
+                        {caseText("Neurologie speichern", "Сохранить неврологию", "Save neurology")}
                       </Button>
                     </div>
                   </form>
                 </Panel>
 
                 <Panel
-                  title="Pulmonology sub-flow"
+                  title={caseText("Pneumologischer Teilbereich", "Пульмонологический блок", "Pulmonology sub-flow")}
                   description={
                     pulmonologyTriggered
-                      ? "Specialty branch for respiratory symptoms, chronic cough and prior chest workup."
-                      : "Enable when symptoms or referral indicate pulmonology."
+                      ? caseText(
+                          "Fachspezifischer Pfad für respiratorische Symptome, chronischen Husten und frühere Thoraxdiagnostik.",
+                          "Специализированный блок для респираторных симптомов, хронического кашля и прежней диагностики грудной клетки.",
+                          "Specialty branch for respiratory symptoms, chronic cough and prior chest workup.",
+                        )
+                      : caseText(
+                          "Aktivieren, wenn Symptome oder Überweisung auf Pneumologie hinweisen.",
+                          "Включайте, если симптомы или направление указывают на пульмонологию.",
+                          "Enable when symptoms or referral indicate pulmonology.",
+                        )
                   }
                 >
                   <form onSubmit={handleSavePulmonology} className="space-y-4">
@@ -3341,14 +3478,14 @@ export function CasesPage() {
                             }))
                           }
                         />
-                        Pulmonology relevant
+                        {caseText("Pneumologie relevant", "Показания к пульмонологии", "Pulmonology relevant")}
                       </label>
                       {[
-                        ["chronic_cough", "Chronic cough"],
-                        ["dyspnea", "Dyspnea / shortness of breath"],
-                        ["wheezing", "Wheezing"],
-                        ["chest_tightness", "Chest tightness"],
-                        ["hemoptysis", "Hemoptysis"],
+                        ["chronic_cough", caseText("Chronischer Husten", "Хронический кашель", "Chronic cough")],
+                        ["dyspnea", caseText("Dyspnoe / Kurzatmigkeit", "Одышка / нехватка воздуха", "Dyspnea / shortness of breath")],
+                        ["wheezing", caseText("Giemen", "Свистящее дыхание", "Wheezing")],
+                        ["chest_tightness", caseText("Brustenge", "Стеснение в груди", "Chest tightness")],
+                        ["hemoptysis", caseText("Hämoptyse", "Кровохарканье", "Hemoptysis")],
                       ].map(([key, label]) => (
                         <label
                           key={key}
@@ -3369,7 +3506,7 @@ export function CasesPage() {
                       ))}
                     </div>
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      <Field label="Smoking history / pack years">
+                      <Field label={caseText("Raucheranamnese / Pack Years", "Курительный анамнез / пачка-лет", "Smoking history / pack years")}>
                         <Input
                           value={pulmonology.smoking_history}
                           onChange={(event) =>
@@ -3381,7 +3518,7 @@ export function CasesPage() {
                           className="h-10 rounded-xl bg-slate-50"
                         />
                       </Field>
-                      <Field label="Prior chest imaging">
+                      <Field label={caseText("Vorherige Thoraxbildgebung", "Предыдущая визуализация грудной клетки", "Prior chest imaging")}>
                         <Input
                           value={pulmonology.prior_chest_imaging}
                           onChange={(event) =>
@@ -3393,7 +3530,7 @@ export function CasesPage() {
                           className="h-10 rounded-xl bg-slate-50"
                         />
                       </Field>
-                      <Field label="Inhaler / respiratory therapy">
+                      <Field label={caseText("Inhalation / Atemtherapie", "Ингаляторы / респираторная терапия", "Inhaler / respiratory therapy")}>
                         <Input
                           value={pulmonology.inhaler_therapy}
                           onChange={(event) =>
@@ -3405,7 +3542,7 @@ export function CasesPage() {
                           className="h-10 rounded-xl bg-slate-50"
                         />
                       </Field>
-                      <Field label="Sleep apnea / CPAP history">
+                      <Field label={caseText("Schlafapnoe- / CPAP-Anamnese", "Анамнез апноэ сна / CPAP", "Sleep apnea / CPAP history")}>
                         <Input
                           value={pulmonology.sleep_apnea_history}
                           onChange={(event) =>
@@ -3417,7 +3554,7 @@ export function CasesPage() {
                           className="h-10 rounded-xl bg-slate-50"
                         />
                       </Field>
-                      <Field label="Red flags">
+                      <Field label={caseText("Warnzeichen", "Красные флаги", "Red flags")}>
                         <Input
                           value={pulmonology.red_flags}
                           onChange={(event) =>
@@ -3430,7 +3567,7 @@ export function CasesPage() {
                         />
                       </Field>
                     </div>
-                    <Field label="Pulmonology notes">
+                    <Field label={caseText("Pneumologische Notizen", "Пульмонологические заметки", "Pulmonology notes")}>
                       <textarea
                         value={pulmonology.notes}
                         onChange={(event) =>
@@ -3452,18 +3589,26 @@ export function CasesPage() {
                         {sectionBusy === "pulmonology" ? (
                           <LoaderCircle className="size-4 animate-spin" />
                         ) : null}
-                        Save pulmonology
+                        {caseText("Pneumologie speichern", "Сохранить пульмонологию", "Save pulmonology")}
                       </Button>
                     </div>
                   </form>
                 </Panel>
 
                 <Panel
-                  title="Urology sub-flow"
+                  title={caseText("Urologischer Teilbereich", "Урологический блок", "Urology sub-flow")}
                   description={
                     urologyTriggered
-                      ? "Specialty branch for urinary symptoms, retention and prior urology workup."
-                      : "Enable when symptoms or referral indicate urology."
+                      ? caseText(
+                          "Fachspezifischer Pfad für urologische Symptome, Harnverhalt und frühere urologische Diagnostik.",
+                          "Специализированный блок для урологических симптомов, задержки мочи и предыдущего урологического обследования.",
+                          "Specialty branch for urinary symptoms, retention and prior urology workup.",
+                        )
+                      : caseText(
+                          "Aktivieren, wenn Symptome oder Überweisung auf Urologie hinweisen.",
+                          "Включайте, если симптомы или направление указывают на урологию.",
+                          "Enable when symptoms or referral indicate urology.",
+                        )
                   }
                 >
                   <form onSubmit={handleSaveUrology} className="space-y-4">
@@ -3482,15 +3627,15 @@ export function CasesPage() {
                             }))
                           }
                         />
-                        Urology relevant
+                        {caseText("Urologie relevant", "Показания к урологии", "Urology relevant")}
                       </label>
                       {[
-                        ["dysuria", "Dysuria / burning"],
-                        ["hematuria", "Hematuria"],
-                        ["flank_pain", "Flank pain"],
-                        ["urinary_frequency", "Urinary frequency"],
-                        ["urinary_retention", "Urinary retention"],
-                        ["incontinence", "Incontinence"],
+                        ["dysuria", caseText("Dysurie / Brennen", "Дизурия / жжение", "Dysuria / burning")],
+                        ["hematuria", caseText("Hämaturie", "Гематурия", "Hematuria")],
+                        ["flank_pain", caseText("Flankenschmerz", "Боль в боку", "Flank pain")],
+                        ["urinary_frequency", caseText("Häufiges Wasserlassen", "Частое мочеиспускание", "Urinary frequency")],
+                        ["urinary_retention", caseText("Harnverhalt", "Задержка мочи", "Urinary retention")],
+                        ["incontinence", caseText("Inkontinenz", "Недержание", "Incontinence")],
                       ].map(([key, label]) => (
                         <label
                           key={key}
@@ -3511,7 +3656,7 @@ export function CasesPage() {
                       ))}
                     </div>
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      <Field label="Prior urology workup">
+                      <Field label={caseText("Frühere urologische Diagnostik", "Предыдущее урологическое обследование", "Prior urology workup")}>
                         <Input
                           value={urology.prior_urology_workup}
                           onChange={(event) =>
@@ -3523,7 +3668,7 @@ export function CasesPage() {
                           className="h-10 rounded-xl bg-slate-50"
                         />
                       </Field>
-                      <Field label="Catheter / instrumentation history">
+                      <Field label={caseText("Katheter- / Instrumentationsanamnese", "Катетеризация / инструментальные вмешательства в анамнезе", "Catheter / instrumentation history")}>
                         <Input
                           value={urology.catheter_history}
                           onChange={(event) =>
@@ -3535,7 +3680,7 @@ export function CasesPage() {
                           className="h-10 rounded-xl bg-slate-50"
                         />
                       </Field>
-                      <Field label="Stone / renal colic history">
+                      <Field label={caseText("Stein- / Nierenkolikanamnese", "Анамнез камней / почечной колики", "Stone / renal colic history")}>
                         <Input
                           value={urology.stone_history}
                           onChange={(event) =>
@@ -3547,7 +3692,7 @@ export function CasesPage() {
                           className="h-10 rounded-xl bg-slate-50"
                         />
                       </Field>
-                      <Field label="Red flags">
+                      <Field label={caseText("Warnzeichen", "Красные флаги", "Red flags")}>
                         <Input
                           value={urology.red_flags}
                           onChange={(event) =>
@@ -3560,7 +3705,7 @@ export function CasesPage() {
                         />
                       </Field>
                     </div>
-                    <Field label="Urology notes">
+                    <Field label={caseText("Urologische Notizen", "Урологические заметки", "Urology notes")}>
                       <textarea
                         value={urology.notes}
                         onChange={(event) =>
@@ -3582,7 +3727,7 @@ export function CasesPage() {
                         {sectionBusy === "urology" ? (
                           <LoaderCircle className="size-4 animate-spin" />
                         ) : null}
-                        Save urology
+                        {caseText("Urologie speichern", "Сохранить урологию", "Save urology")}
                       </Button>
                     </div>
                   </form>
@@ -3601,7 +3746,7 @@ export function CasesPage() {
                     <div className="flex justify-end border-t border-border/70 pt-4">
                       <Button type="submit" className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800" disabled={sectionBusy === "vegetative" || !permissions.canEdit}>
                         {sectionBusy === "vegetative" ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                        Save vegetative
+                        {caseText("Vegetative Anamnese speichern", "Сохранить вегетативный анамнез", "Save vegetative")}
                       </Button>
                     </div>
                   </form>
@@ -3616,15 +3761,19 @@ export function CasesPage() {
                     <div className="flex justify-end border-t border-border/70 pt-4">
                       <Button type="submit" className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800" disabled={sectionBusy === "impfstatus" || !permissions.canEdit}>
                         {sectionBusy === "impfstatus" ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                        Save vaccination
+                        {caseText("Impfstatus speichern", "Сохранить вакцинацию", "Save vaccination")}
                       </Button>
                     </div>
                   </form>
                 </Panel>
 
                 <Panel
-                  title="Clinical history"
-                  description="Append-only section history with retention metadata for audit and review."
+                  title={caseText("Klinische Historie", "Клиническая история", "Clinical history")}
+                  description={caseText(
+                    "Append-only-Abschnittshistorie mit Aufbewahrungsmetadaten für Audit und Prüfung.",
+                    "История разделов без перезаписи с метаданными хранения для аудита и проверки.",
+                    "Append-only section history with retention metadata for audit and review.",
+                  )}
                 >
                   {detail.history?.length ? (
                     <div className="space-y-3">
@@ -3653,7 +3802,7 @@ export function CasesPage() {
                           <div className="mt-3 grid gap-3 md:grid-cols-2">
                             <div className="rounded-xl border border-slate-200 bg-white p-3">
                               <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                Previous
+                                {caseText("Vorher", "Было", "Previous")}
                               </div>
                               <p className="mt-2 break-words font-mono text-xs text-slate-700">
                                 {historyValuePreview(entry.old_value)}
@@ -3661,7 +3810,7 @@ export function CasesPage() {
                             </div>
                             <div className="rounded-xl border border-slate-200 bg-white p-3">
                               <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                New
+                                {caseText("Neu", "Стало", "New")}
                               </div>
                               <p className="mt-2 break-words font-mono text-xs text-slate-700">
                                 {historyValuePreview(entry.new_value)}
@@ -3673,15 +3822,19 @@ export function CasesPage() {
                     </div>
                   ) : (
                     <EmptyPanel
-                      title="No clinical revisions yet"
-                      text="The case has no persisted section history at the moment."
+                      title={caseText("Noch keine klinischen Revisionen", "Клинических ревизий пока нет", "No clinical revisions yet")}
+                      text={caseText(
+                        "Für diesen Fall liegt derzeit noch keine persistierte Abschnittshistorie vor.",
+                        "Для этого кейса пока нет сохранённой истории разделов.",
+                        "The case has no persisted section history at the moment.",
+                      )}
                     />
                   )}
                 </Panel>
               </>
             ) : (
               <div className="flex min-h-[320px] items-center justify-center text-sm text-slate-500">
-                Select a case from the roster.
+                {caseText("Wählen Sie einen Fall aus der Liste aus.", "Выберите кейс из списка.", "Select a case from the roster.")}
               </div>
             )}
           </div>

@@ -269,7 +269,8 @@ export function ProviderDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { staffGo } = useStaffNavigate();
   const { user } = useAuth();
-  const { t } = useLang();
+  const { t, lang } = useLang();
+  const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
 
   const [detail, setDetail] = useState<ProviderDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -445,7 +446,7 @@ export function ProviderDetailPage() {
                   {detail.is_active ? t.common_active : t.common_inactive}
                 </Badge>
                 {detail.fachbereich && <span>{detail.fachbereich}</span>}
-                {detail.tax_id && <span>{`Tax ID ${detail.tax_id}`}</span>}
+                {detail.tax_id && <span>{`${l("Steuer-ID", "Налоговый ID", "Tax ID")} ${detail.tax_id}`}</span>}
               </div>
             </div>
           </div>
@@ -494,7 +495,7 @@ export function ProviderDetailPage() {
             <TabsTrigger value="overview" className="px-4 py-2">{t.providers_detail}</TabsTrigger>
             <TabsTrigger value="doctors" className="px-4 py-2">{t.providers_doctors}</TabsTrigger>
             <TabsTrigger value="services" className="px-4 py-2">{t.providers_services}</TabsTrigger>
-            <TabsTrigger value="templates" className="px-4 py-2">Templates</TabsTrigger>
+            <TabsTrigger value="templates" className="px-4 py-2">{l("Vorlagen", "Шаблоны", "Templates")}</TabsTrigger>
             <TabsTrigger value="patients" className="px-4 py-2">{t.providers_linked_patients}</TabsTrigger>
             <TabsTrigger value="appointments" className="px-4 py-2">{t.appointments_title}</TabsTrigger>
           </TabsList>
@@ -511,8 +512,8 @@ export function ProviderDetailPage() {
               <InfoRow label={t.providers_country} value={fieldVal(detail.address_country, t.common_not_set)} />
               <InfoRow label={t.field_phone} value={fieldVal(detail.phone, t.common_not_set)} />
               <InfoRow label={t.field_email} value={fieldVal(detail.email, t.common_not_set)} />
-              <InfoRow label="Legal name" value={fieldVal(detail.legal_name, t.common_not_set)} />
-              <InfoRow label="Tax ID" value={fieldVal(detail.tax_id, t.common_not_set)} />
+              <InfoRow label={l("Rechtlicher Name", "Юридическое название", "Legal name")} value={fieldVal(detail.legal_name, t.common_not_set)} />
+              <InfoRow label={l("Steuer-ID", "Налоговый ID", "Tax ID")} value={fieldVal(detail.tax_id, t.common_not_set)} />
               <InfoRow label={t.providers_website} value={fieldVal(detail.website, t.common_not_set)} />
               <InfoRow label={t.providers_fachbereich} value={fieldVal(detail.fachbereich, t.common_not_set)} />
             </div>
@@ -556,9 +557,9 @@ export function ProviderDetailPage() {
                     </div>
                   )}
                   <div className="mt-3 grid grid-cols-1 gap-2 text-xs text-slate-500">
-                    <div>{`License ${doc.license_number || t.common_not_set}`}</div>
-                    <div>{`Country ${doc.licensing_country || t.common_not_set}`}</div>
-                    <div>{`Valid until ${fmtDate(doc.licensing_valid_until, t.common_not_set)}`}</div>
+                    <div>{`${l("Lizenz", "Лицензия", "License")} ${doc.license_number || t.common_not_set}`}</div>
+                    <div>{`${l("Land", "Страна", "Country")} ${doc.licensing_country || t.common_not_set}`}</div>
+                    <div>{`${l("Gültig bis", "Действует до", "Valid until")} ${fmtDate(doc.licensing_valid_until, t.common_not_set)}`}</div>
                   </div>
                   <div className="mt-3 flex gap-3 text-xs text-slate-400">
                     <span>{doc.patient_count} {t.providers_linked_patients}</span>
@@ -603,10 +604,10 @@ export function ProviderDetailPage() {
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <h2 className="text-sm font-semibold text-slate-950">
-                    Clinic templates
+                    {l("Klinikvorlagen", "Шаблоны клиники", "Clinic templates")}
                   </h2>
                   <p className="mt-1 text-xs text-slate-500">
-                    Store provider-specific document templates for generation.
+                    {l("Speichern Sie anbieterbezogene Dokumentvorlagen für die Generierung.", "Сохраняйте шаблоны документов, специфичные для провайдера, для генерации.", "Store provider-specific document templates for generation.")}
                   </p>
                 </div>
                 {canManage ? (
@@ -616,14 +617,14 @@ export function ProviderDetailPage() {
                     className="rounded-xl"
                     onClick={startNewTemplate}
                   >
-                    New template
+                    {l("Neue Vorlage", "Новый шаблон", "New template")}
                   </Button>
                 ) : null}
               </div>
               <div className="mt-4 space-y-3">
                 {detail.templates.length === 0 ? (
                   <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
-                    No provider templates yet.
+                    {l("Noch keine Vorlagen für diesen Anbieter.", "Для этого провайдера пока нет шаблонов.", "No provider templates yet.")}
                   </div>
                 ) : (
                   detail.templates.map((template) => (
@@ -662,7 +663,7 @@ export function ProviderDetailPage() {
                       <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-500">
                         <span>{template.art}</span>
                         {template.auto_send_on_confirmed_appointment ? (
-                          <span>Auto-send on confirmation</span>
+                          <span>{l("Automatisch bei Bestätigung senden", "Автоотправка при подтверждении", "Auto-send on confirmation")}</span>
                         ) : null}
                         <span>· {template.category}</span>
                         {template.doctor_name ? (
@@ -690,11 +691,14 @@ export function ProviderDetailPage() {
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <h2 className="text-sm font-semibold text-slate-950">
-                    {selectedTemplateId ? "Edit template" : "Create template"}
+                    {selectedTemplateId ? l("Vorlage bearbeiten", "Редактировать шаблон", "Edit template") : l("Vorlage erstellen", "Создать шаблон", "Create template")}
                   </h2>
                   <p className="mt-1 text-xs text-slate-500">
-                    Generated documents will use the selected provider template
-                    in the documents workspace.
+                    {l(
+                      "Generierte Dokumente verwenden die ausgewählte Anbietervorlage im Dokumentenbereich.",
+                      "Сгенерированные документы будут использовать выбранный шаблон провайдера в разделе документов.",
+                      "Generated documents will use the selected provider template in the documents workspace.",
+                    )}
                   </p>
                 </div>
                 {selectedTemplateId ? (
@@ -704,7 +708,7 @@ export function ProviderDetailPage() {
                     className="rounded-xl"
                     onClick={startNewTemplate}
                   >
-                    Reset
+                    {l("Zurücksetzen", "Сбросить", "Reset")}
                   </Button>
                 ) : null}
               </div>
@@ -717,7 +721,7 @@ export function ProviderDetailPage() {
 
               <div className="mt-4 grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
-                  <Label>Label</Label>
+                  <Label>{l("Label", "Метка", "Label")}</Label>
                   <Input
                     value={templateForm.label}
                     onChange={(event) =>
@@ -730,7 +734,7 @@ export function ProviderDetailPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>Default file name</Label>
+                  <Label>{l("Standard-Dateiname", "Имя файла по умолчанию", "Default file name")}</Label>
                   <Input
                     value={templateForm.defaultAutoName}
                     onChange={(event) =>
@@ -743,7 +747,7 @@ export function ProviderDetailPage() {
                   />
                 </div>
                 <div className="space-y-2 md:col-span-2">
-                  <Label>Description</Label>
+                  <Label>{l("Beschreibung", "Описание", "Description")}</Label>
                   <textarea
                     value={templateForm.description}
                     onChange={(event) =>
@@ -756,7 +760,7 @@ export function ProviderDetailPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>Doctor binding</Label>
+                  <Label>{l("Arztbindung", "Привязка к врачу", "Doctor binding")}</Label>
                   <select
                     value={templateForm.doctorId}
                     onChange={(event) =>
@@ -767,7 +771,7 @@ export function ProviderDetailPage() {
                     }
                     className={inputClassName}
                   >
-                    <option value="">Any doctor in this clinic</option>
+                    <option value="">{l("Beliebiger Arzt dieser Klinik", "Любой врач этой клиники", "Any doctor in this clinic")}</option>
                     {detail.doctors.map((doctor) => (
                       <option key={doctor.id} value={doctor.id}>
                         {doctor.title ? `${doctor.title} ` : ""}
@@ -777,7 +781,7 @@ export function ProviderDetailPage() {
                   </select>
                 </div>
                 <div className="space-y-2">
-                  <Label>Status</Label>
+                  <Label>{l("Status", "Статус", "Status")}</Label>
                   <select
                     value={templateForm.defaultStatus}
                     onChange={(event) =>
@@ -790,13 +794,13 @@ export function ProviderDetailPage() {
                     }
                     className={inputClassName}
                   >
-                    <option value="draft">draft</option>
-                    <option value="active">active</option>
-                    <option value="archived">archived</option>
+                    <option value="draft">{l("Entwurf", "Черновик", "Draft")}</option>
+                    <option value="active">{l("Aktiv", "Активно", "Active")}</option>
+                    <option value="archived">{l("Archiviert", "В архиве", "Archived")}</option>
                   </select>
                 </div>
                 <div className="space-y-2">
-                  <Label>Document art</Label>
+                  <Label>{l("Dokumentart", "Тип документа", "Document art")}</Label>
                   <Input
                     value={templateForm.art}
                     onChange={(event) =>
@@ -809,7 +813,7 @@ export function ProviderDetailPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>Category</Label>
+                  <Label>{l("Kategorie", "Категория", "Category")}</Label>
                   <Input
                     value={templateForm.category}
                     onChange={(event) =>
@@ -822,7 +826,7 @@ export function ProviderDetailPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>Visibility</Label>
+                  <Label>{l("Sichtbarkeit", "Видимость", "Visibility")}</Label>
                   <select
                     value={templateForm.defaultVisibility}
                     onChange={(event) =>
@@ -835,10 +839,10 @@ export function ProviderDetailPage() {
                     }
                     className={inputClassName}
                   >
-                    <option value="patient_visible">patient_visible</option>
-                    <option value="internal">internal</option>
-                    <option value="released_internal">released_internal</option>
-                    <option value="released_external">released_external</option>
+                    <option value="patient_visible">{l("Für Patienten sichtbar", "Видно пациенту", "Patient visible")}</option>
+                    <option value="internal">{l("Intern", "Внутреннее", "Internal")}</option>
+                    <option value="released_internal">{l("Intern freigegeben", "Внутренне опубликовано", "Released internal")}</option>
+                    <option value="released_external">{l("Extern freigegeben", "Внешне опубликовано", "Released external")}</option>
                   </select>
                 </div>
                 <div className="flex flex-wrap items-center gap-5 md:col-span-2">
@@ -853,7 +857,7 @@ export function ProviderDetailPage() {
                         }))
                       }
                     />
-                    Medical data
+                    {l("Medizinische Daten", "Медицинские данные", "Medical data")}
                   </label>
                   <label className="inline-flex items-center gap-2 text-sm text-slate-700">
                     <input
@@ -866,7 +870,7 @@ export function ProviderDetailPage() {
                         }))
                       }
                     />
-                    Active
+                    {l("Aktiv", "Активно", "Active")}
                   </label>
                   <label className="inline-flex items-center gap-2 text-sm text-slate-700">
                     <input
@@ -879,19 +883,19 @@ export function ProviderDetailPage() {
                         }))
                       }
                     />
-                    Auto-send when appointment is confirmed
+                    {l("Automatisch senden, wenn der Termin bestätigt ist", "Автоотправка при подтверждении записи", "Auto-send when appointment is confirmed")}
                   </label>
                 </div>
               </div>
 
               <div className="mt-6">
-                <Lbl>Localized bodies</Lbl>
+                <Lbl>{l("Lokalisierte Inhalte", "Локализованные тексты", "Localized bodies")}</Lbl>
                 <div className="mt-3 grid gap-4 md:grid-cols-2">
                   {[
-                    ["de", "German", "bodyDe"],
-                    ["en", "English", "bodyEn"],
-                    ["uk", "Ukrainian", "bodyUk"],
-                    ["ru", "Russian", "bodyRu"],
+                    ["de", l("Deutsch", "Немецкий", "German"), "bodyDe"],
+                    ["en", l("Englisch", "Английский", "English"), "bodyEn"],
+                    ["uk", l("Ukrainisch", "Украинский", "Ukrainian"), "bodyUk"],
+                    ["ru", l("Russisch", "Русский", "Russian"), "bodyRu"],
                   ].map(([language, label, field]) => {
                     const checked =
                       templateForm.supportedLanguages.includes(language);
@@ -927,7 +931,11 @@ export function ProviderDetailPage() {
                             }))
                           }
                           disabled={!checked}
-                          placeholder="Use placeholders like {{patient_name}}, {{provider_name}}, {{appointment_date}}."
+                          placeholder={l(
+                            "Platzhalter wie {{patient_name}}, {{provider_name}}, {{appointment_date}} verwenden.",
+                            "Используйте плейсхолдеры вроде {{patient_name}}, {{provider_name}}, {{appointment_date}}.",
+                            "Use placeholders like {{patient_name}}, {{provider_name}}, {{appointment_date}}.",
+                          )}
                           className={cn(
                             textareaClassName,
                             "mt-3 min-h-[140px]",
@@ -941,7 +949,7 @@ export function ProviderDetailPage() {
               </div>
 
               <div className="mt-6 space-y-2">
-                <Label>Internal notes</Label>
+                <Label>{l("Interne Notizen", "Внутренние заметки", "Internal notes")}</Label>
                 <textarea
                   value={templateForm.notes}
                   onChange={(event) =>
@@ -964,13 +972,12 @@ export function ProviderDetailPage() {
                     {templateBusy ? (
                       <LoaderCircle className="mr-2 size-4 animate-spin" />
                     ) : null}
-                    {selectedTemplateId ? "Save template" : "Create template"}
+                    {selectedTemplateId ? l("Vorlage speichern", "Сохранить шаблон", "Save template") : l("Vorlage erstellen", "Создать шаблон", "Create template")}
                   </Button>
                 </div>
               ) : (
                 <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
-                  Read-only access. CEO or patient manager can edit clinic
-                  templates.
+                  {l("Nur Lesezugriff. CEO oder Patientenmanager können Klinikvorlagen bearbeiten.", "Только чтение. CEO или менеджер пациента могут редактировать шаблоны клиники.", "Read-only access. CEO or patient manager can edit clinic templates.")}
                 </div>
               )}
             </div>

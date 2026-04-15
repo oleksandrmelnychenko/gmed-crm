@@ -146,7 +146,7 @@ function MetricCard({
 // ---------------------------------------------------------------------------
 
 export function AdminUsersPage() {
-  const { t, lang } = useLang();
+  const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
 
   const [users, setUsers] = useState<User[]>([]);
@@ -213,7 +213,7 @@ export function AdminUsersPage() {
   const onSubmitCreate = async (ev: FormEvent) => {
     ev.preventDefault();
     if (newPassword !== newPasswordConfirm) {
-      setCreateError(lang === "de" ? "Passwörter stimmen nicht überein" : "Пароли не совпадают");
+      setCreateError(t.users_password_mismatch);
       return;
     }
     setCreating(true);
@@ -302,7 +302,7 @@ export function AdminUsersPage() {
           <MetricCard icon={UsersRound} label={t.users_count} value={String(metrics.total)} tone="sky" />
           <MetricCard icon={UserRound} label={t.users_active} value={String(metrics.active)} tone="emerald" />
           <MetricCard icon={UserRound} label={t.users_inactive} value={String(metrics.inactive)} tone="amber" />
-          <MetricCard icon={Shield} label="Admins" value={String(metrics.admins)} tone="slate" />
+          <MetricCard icon={Shield} label={t.users_admins} value={String(metrics.admins)} tone="slate" />
         </div>
       )}
 
@@ -362,7 +362,7 @@ export function AdminUsersPage() {
               </div>
               <div className="space-y-2.5">
                 <Label className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">
-                  {lang === "de" ? "Passwort bestätigen" : "Подтвердите пароль"}
+                  {t.users_confirm_password}
                 </Label>
                 <Input
                   type="password"
@@ -375,7 +375,7 @@ export function AdminUsersPage() {
                 />
                 {newPasswordConfirm && newPassword !== newPasswordConfirm && (
                   <p className="text-xs text-rose-600">
-                    {lang === "de" ? "Passwörter stimmen nicht überein" : "Пароли не совпадают"}
+                    {t.users_password_mismatch}
                   </p>
                 )}
               </div>
@@ -423,12 +423,12 @@ export function AdminUsersPage() {
             </div>
             <div className="space-y-2.5">
               <Label className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">
-                {lang === "de" ? "Passwort zurücksetzen" : "Сброс пароля"}
+                {t.users_reset_password}
               </Label>
               <div className="flex gap-3">
                 <Input type="password" placeholder={t.users_password_hint} value={euPassword} onChange={(e) => setEuPassword(e.target.value)} className="h-10 rounded-xl" />
                 <Button type="button" variant="outline" className="h-10 px-5 rounded-xl" disabled={euPassword.length < 8} onClick={resetPassword}>
-                  Reset
+                  {t.users_reset_button}
                 </Button>
               </div>
             </div>
@@ -454,7 +454,7 @@ export function AdminUsersPage() {
       ) : filtered.length === 0 ? (
         <div className="rounded-[1.5rem] border border-dashed border-slate-200 bg-slate-50/90 px-5 py-10 text-center">
           <p className="text-sm font-medium text-slate-900">
-            {search ? (lang === "de" ? "Keine Ergebnisse" : "Нет результатов") : (lang === "de" ? "Keine Benutzer" : "Нет пользователей")}
+            {search ? t.users_empty_no_results : t.users_empty_no_users}
           </p>
         </div>
       ) : (

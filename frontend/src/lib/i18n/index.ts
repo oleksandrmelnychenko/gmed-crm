@@ -27,6 +27,17 @@ export interface Translations {
   login_submit: string;
   login_loading: string;
   login_error_invalid: string;
+  login_error_email_required: string;
+  login_error_email_invalid: string;
+  login_error_password_required: string;
+  login_error_password_short: string;
+  login_error_password_long: string;
+  login_error_unknown: string;
+  login_mfa_rejected_title: string;
+  login_mfa_rejected_msg: string;
+  login_mfa_pending_msg: string;
+  login_mfa_checking: string;
+  login_sign_in_subtitle: string;
 
   users_title: string;
   users_subtitle: string;
@@ -48,6 +59,13 @@ export interface Translations {
   users_active: string;
   users_inactive: string;
   users_password_hint: string;
+  users_confirm_password: string;
+  users_password_mismatch: string;
+  users_admins: string;
+  users_reset_password: string;
+  users_reset_button: string;
+  users_empty_no_results: string;
+  users_empty_no_users: string;
 
   role_ceo: string;
   role_ceo_assistant: string;
@@ -416,6 +434,15 @@ export interface Translations {
   security_audit_token_theft: string;
   security_audit_executive_access: string;
   security_audit_off_hours: string;
+  security_audit_hint: string;
+  security_col_reason: string;
+  security_col_route: string;
+  security_col_events: string;
+  security_col_distinct_entities: string;
+  security_col_cidr: string;
+  security_anonymous: string;
+  security_no_suspicious: string;
+  security_no_outlier_readers: string;
 
   health_title: string;
   health_subtitle: string;
@@ -427,6 +454,10 @@ export interface Translations {
   health_users_locked: string;
   health_sessions_active: string;
   health_mfa_pending: string;
+  health_data: string;
+  health_audit_suffix: string;
+  health_col_table: string;
+  health_col_size: string;
 
   compliance_title: string;
   compliance_subtitle: string;
@@ -441,6 +472,96 @@ export interface Translations {
   compliance_no_expired: string;
   compliance_recent: string;
   compliance_patient_id: string;
+  compliance_privacy_status_requested: string;
+  compliance_privacy_status_retention_hold: string;
+  compliance_privacy_status_approved: string;
+  compliance_privacy_status_rejected: string;
+  compliance_privacy_status_completed: string;
+  compliance_stat_privacy_queue: string;
+  compliance_stat_ready_for_execution: string;
+  compliance_stat_overdue_privacy: string;
+  compliance_patient_register_title: string;
+  compliance_patient_register_hint: string;
+  compliance_load_register: string;
+  compliance_consent_type_label: string;
+  compliance_operational_note: string;
+  compliance_consent_note_placeholder: string;
+  compliance_expiry_date: string;
+  compliance_expiry_hint: string;
+  compliance_saving: string;
+  compliance_grant_consent: string;
+  compliance_revoke_consent: string;
+  compliance_consent_history: string;
+  compliance_no_consent_events: string;
+  compliance_load_patient_consent_hint: string;
+  compliance_col_consent: string;
+  compliance_col_status: string;
+  compliance_col_managed_by: string;
+  compliance_col_effective_at: string;
+  compliance_col_expires: string;
+  compliance_col_note: string;
+  compliance_privacy_requests_title: string;
+  compliance_privacy_requests_hint: string;
+  compliance_request_type_label: string;
+  compliance_request_reason: string;
+  compliance_request_reason_placeholder: string;
+  compliance_create_request: string;
+  compliance_new_request_hint: string;
+  compliance_privacy_history: string;
+  compliance_no_privacy_requests: string;
+  compliance_load_patient_privacy_hint: string;
+  compliance_col_request: string;
+  compliance_col_requested_by: string;
+  compliance_col_due: string;
+  compliance_col_retention_until: string;
+  compliance_col_linked_records: string;
+  compliance_col_notes: string;
+  compliance_created_label: string;
+  compliance_manual_override: string;
+  compliance_uuid_required: string;
+  compliance_uses_loaded_uuid: string;
+  compliance_col_type: string;
+  compliance_col_total: string;
+  compliance_privacy_review_queue: string;
+  compliance_stat_requested: string;
+  compliance_stat_hold: string;
+  compliance_stat_approved: string;
+  compliance_stat_overdue: string;
+  compliance_no_privacy_scope: string;
+  compliance_col_patient: string;
+  compliance_col_actions: string;
+  compliance_approve: string;
+  compliance_hold: string;
+  compliance_reject: string;
+  compliance_execute: string;
+  compliance_executing: string;
+  compliance_executed_label: string;
+  compliance_col_expired_at: string;
+  compliance_downloaded: string;
+  compliance_consent_type_dsgvo: string;
+  compliance_consent_type_schweigepflicht: string;
+  compliance_consent_type_portal: string;
+  compliance_consent_type_treatment: string;
+  compliance_consent_type_third_party: string;
+  compliance_request_type_erasure: string;
+  compliance_request_type_restriction: string;
+  compliance_request_type_third_party_revoke: string;
+
+  stub_not_implemented: string;
+
+  ann_success: string;
+
+  staff_link_no_access: string;
+
+  topbar_search: string;
+  topbar_notifications: string;
+  topbar_mark_all_read: string;
+  topbar_no_notifications: string;
+  topbar_message_placeholder: string;
+  topbar_online: string;
+
+  common_back: string;
+  common_lang_native: string;
 
   nav_security: string;
   nav_health: string;
@@ -463,6 +584,7 @@ export interface Translations {
   notif_port: string;
   notif_user: string;
   notif_url: string;
+  notif_test_ok: string;
 
   cf_title: string;
   cf_subtitle: string;

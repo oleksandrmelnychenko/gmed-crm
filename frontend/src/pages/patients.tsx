@@ -1505,8 +1505,9 @@ function PatientFormFields({
   onChange: (field: keyof PatientFormState, value: string) => void;
   includeBirthAndGender?: boolean;
 }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
+  const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
 
   return (
     <div className="space-y-4">
@@ -1590,12 +1591,12 @@ function PatientFormFields({
         />
       </Field>
 
-      <Field label="Functional labels">
+      <Field label={l("Funktionslabels", "Функциональные метки", "Functional labels")}>
         <Input
           value={form.functionalLabels}
           onChange={(event) => onChange("functionalLabels", event.target.value)}
           className="h-10 rounded-xl bg-slate-50"
-          placeholder="vip, high_risk"
+          placeholder={l("vip, high_risk", "vip, high_risk", "vip, high_risk")}
         />
       </Field>
 

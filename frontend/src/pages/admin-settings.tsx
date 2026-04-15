@@ -319,11 +319,10 @@ export function AdminSettingsPage() {
           <div className="bg-white rounded-xl border p-6 space-y-4">
             <div>
               <h2 className="text-lg font-medium">
-                {tr.settings_document_requirements ?? "Required documents"}
+                {t.settings_document_requirements}
               </h2>
               <p className="text-muted-foreground mt-1 text-sm">
-                {tr.settings_document_requirements_hint ??
-                  "Configure the minimum patient document pack used for missing-document alerts."}
+                {t.settings_document_requirements_hint}
               </p>
             </div>
             <div className="grid gap-4">
@@ -334,11 +333,10 @@ export function AdminSettingsPage() {
           <div className="bg-white rounded-xl border p-6 space-y-4">
             <div>
               <h2 className="text-lg font-medium">
-                {tr.settings_clinical_data ?? "Clinical data retention"}
+                {t.settings_clinical_data}
               </h2>
               <p className="text-muted-foreground mt-1 text-sm">
-                {tr.settings_clinical_data_hint ??
-                  "Controls the retention horizon for medical cases and append-only anamnesis history."}
+                {t.settings_clinical_data_hint}
               </p>
             </div>
             <div className="grid gap-4 lg:grid-cols-2">

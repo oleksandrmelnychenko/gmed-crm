@@ -156,7 +156,7 @@ export function AdminAnnouncementsPage() {
                     <SelectItem value="info">{t.ann_info}</SelectItem>
                     <SelectItem value="warning">{t.ann_warning}</SelectItem>
                     <SelectItem value="error">{t.common_error}</SelectItem>
-                    <SelectItem value="success">Success</SelectItem>
+                    <SelectItem value="success">{t.ann_success}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

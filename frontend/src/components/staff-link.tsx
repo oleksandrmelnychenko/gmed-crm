@@ -6,6 +6,7 @@ import {
 } from "react";
 import { Link, type LinkProps } from "react-router-dom";
 
+import { useLang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
 
@@ -35,6 +36,7 @@ export function StaffLink({
   ...rest
 }: StaffLinkProps) {
   const { canStaffPath } = useStaffNavigate();
+  const { t } = useLang();
   const path = pathnameOnly(to);
 
   if (!canStaffPath(path)) {
@@ -48,7 +50,7 @@ export function StaffLink({
       return cloneElement(child, {
         disabled: true,
         className: cn(className, child.props.className, "cursor-not-allowed opacity-45"),
-        title: child.props.title ?? "No access for your role",
+        title: child.props.title ?? t.staff_link_no_access,
       });
     }
     return (

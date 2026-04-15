@@ -1,6 +1,9 @@
 import { useLocation } from "react-router-dom";
 
+import { useLang } from "@/lib/i18n";
+
 export function StubPage() {
+  const { t } = useLang();
   const { pathname } = useLocation();
   const name = pathname
     .split("/")
@@ -10,8 +13,8 @@ export function StubPage() {
 
   return (
     <div>
-      <h1 className="text-2xl font-semibold mb-4">{name || "Page"}</h1>
-      <p className="text-muted-foreground">This page is not yet implemented.</p>
+      <h1 className="text-2xl font-semibold mb-4">{name || "—"}</h1>
+      <p className="text-muted-foreground">{t.stub_not_implemented}</p>
     </div>
   );
 }

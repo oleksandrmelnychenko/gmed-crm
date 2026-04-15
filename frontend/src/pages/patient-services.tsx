@@ -6,12 +6,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiFetch } from "@/lib/api";
+import { useLang } from "@/lib/i18n";
 import {
   conciergeServiceKindLabel,
   conciergeServiceSourceLabel,
   conciergeServiceStatusTone,
   formatPortalCurrency,
   formatPortalDateTime,
+  portalStatusLabel,
 } from "@/pages/patient-portal.shared";
 import type { PortalConciergeServiceItem } from "@/pages/patient-portal.shared";
 import { cn } from "@/lib/utils";
@@ -52,6 +54,7 @@ function toIsoDateTime(value: string) {
 }
 
 export function PatientServicesPage() {
+  const { lang } = useLang();
   const [services, setServices] = useState<PortalConciergeServiceItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -62,6 +65,7 @@ export function PatientServicesPage() {
   const [cancelBusyId, setCancelBusyId] = useState("");
   const [form, setForm] = useState<ServiceRequestFormState>(blankServiceRequestForm());
   const [version, setVersion] = useState(0);
+  const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
 
   useEffect(() => {
     let cancelled = false;
@@ -82,7 +86,7 @@ export function PatientServicesPage() {
         });
       } catch (err) {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : "Failed to load additional services.");
+        setError(err instanceof Error ? err.message : l("Zusatzservices konnten nicht geladen werden.", "Не удалось загрузить дополнительные сервисы.", "Failed to load additional services."));
       } finally {
         if (!cancelled) {
           setLoading(false);
@@ -130,11 +134,11 @@ export function PatientServicesPage() {
           service_notes: form.serviceNotes || undefined,
         }),
       });
-      setNotice("Additional service request sent to the care team.");
+      setNotice(l("Serviceanfrage wurde an das Betreuungsteam gesendet.", "Запрос на сервис отправлен команде сопровождения.", "Additional service request sent to the care team."));
       setForm(blankServiceRequestForm());
       setVersion((value) => value + 1);
     } catch (err) {
-      setRequestError(err instanceof Error ? err.message : "Failed to create service request.");
+      setRequestError(err instanceof Error ? err.message : l("Serviceanfrage konnte nicht erstellt werden.", "Не удалось создать сервисный запрос.", "Failed to create service request."));
     } finally {
       setRequestBusy(false);
     }
@@ -149,10 +153,10 @@ export function PatientServicesPage() {
       await apiFetch(`/me/concierge-services/${serviceId}/cancel`, {
         method: "POST",
       });
-      setNotice("Service request cancelled.");
+      setNotice(l("Serviceanfrage wurde storniert.", "Сервисный запрос отменен.", "Service request cancelled."));
       setVersion((value) => value + 1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to cancel service request.");
+      setError(err instanceof Error ? err.message : l("Serviceanfrage konnte nicht storniert werden.", "Не удалось отменить сервисный запрос.", "Failed to cancel service request."));
     } finally {
       setCancelBusyId("");
     }
@@ -163,7 +167,7 @@ export function PatientServicesPage() {
       <div className="flex min-h-[60vh] items-center justify-center">
         <div className="flex items-center gap-3 rounded-full border border-slate-200 bg-white px-5 py-3 text-sm text-slate-500 shadow-sm">
           <LoaderCircle className="size-4 animate-spin" />
-          Loading additional services...
+          {l("Zusatzservices werden geladen...", "Загрузка дополнительных сервисов...", "Loading additional services...")}
         </div>
       </div>
     );
@@ -178,10 +182,14 @@ export function PatientServicesPage() {
       >
         <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-3xl">
-            <p className="text-sm uppercase tracking-[0.18em] text-white/60">Patient portal</p>
-            <h1 className="mt-3 text-3xl font-semibold tracking-tight">My additional services</h1>
+            <p className="text-sm uppercase tracking-[0.18em] text-white/60">{l("Patientenportal", "Портал пациента", "Patient portal")}</p>
+            <h1 className="mt-3 text-3xl font-semibold tracking-tight">{l("Meine Zusatzservices", "Мои дополнительные сервисы", "My additional services")}</h1>
             <p className="mt-3 text-sm leading-7 text-white/75">
-              Request travel, hotel, transfer or other concierge support and track how the care team processes it.
+              {l(
+                "Fordern Sie Reise-, Hotel-, Transfer- oder andere Concierge-Unterstützung an und verfolgen Sie die Bearbeitung durch das Betreuungsteam.",
+                "Запрашивайте поездки, отели, трансферы и другие concierge-сервисы и отслеживайте, как команда сопровождения их обрабатывает.",
+                "Request travel, hotel, transfer or other concierge support and track how the care team processes it.",
+              )}
             </p>
           </div>
           <Button
@@ -190,7 +198,7 @@ export function PatientServicesPage() {
             onClick={() => setVersion((value) => value + 1)}
           >
             {refreshing ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
-            Refresh
+            {l("Aktualisieren", "Обновить", "Refresh")}
           </Button>
         </div>
       </section>
@@ -207,27 +215,27 @@ export function PatientServicesPage() {
       ) : null}
 
       <section className="grid gap-4 md:grid-cols-3">
-        <MetricCard label="Open requests" value={String(openItems.length)} />
-        <MetricCard label="Booked or in service" value={String(bookedItems.length)} />
-        <MetricCard label="Completed services" value={String(completedItems.length)} />
+        <MetricCard label={l("Offene Anfragen", "Открытые запросы", "Open requests")} value={String(openItems.length)} />
+        <MetricCard label={l("Gebucht oder in Bearbeitung", "Забронировано или в работе", "Booked or in service")} value={String(bookedItems.length)} />
+        <MetricCard label={l("Abgeschlossene Services", "Завершенные сервисы", "Completed services")} value={String(completedItems.length)} />
       </section>
 
       <section className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
         <section className="space-y-4">
           <section className={shellCard("p-5")}>
             <div>
-              <h2 className="text-lg font-semibold text-slate-950">Service history</h2>
+              <h2 className="text-lg font-semibold text-slate-950">{l("Serviceverlauf", "История сервисов", "Service history")}</h2>
               <p className="mt-1 text-sm text-slate-500">
-                Portal requests and concierge services already organized for your case.
+                {l("Portal-Anfragen und Concierge-Services, die bereits für Ihren Fall organisiert wurden.", "Запросы из портала и concierge-сервисы, уже организованные по вашему случаю.", "Portal requests and concierge services already organized for your case.")}
               </p>
             </div>
           </section>
 
           {services.length === 0 ? (
             <section className={shellCard("border-dashed px-6 py-12 text-center")}>
-              <p className="text-base font-semibold text-slate-950">No additional services yet</p>
+              <p className="text-base font-semibold text-slate-950">{l("Noch keine Zusatzservices", "Пока нет дополнительных сервисов", "No additional services yet")}</p>
               <p className="mt-2 text-sm text-slate-500">
-                Once you or the care team create a concierge service entry, it will appear here.
+                {l("Sobald Sie oder das Betreuungsteam einen Concierge-Service anlegen, erscheint er hier.", "Как только вы или команда сопровождения создадите запись concierge-сервиса, она появится здесь.", "Once you or the care team create a concierge service entry, it will appear here.")}
               </p>
             </section>
           ) : (
@@ -237,7 +245,7 @@ export function PatientServicesPage() {
                   <div>
                     <div className="flex flex-wrap gap-2">
                       <Badge variant="outline" className={cn("rounded-full", conciergeServiceStatusTone(item.status))}>
-                        {item.status.replaceAll("_", " ")}
+                        {portalStatusLabel(item.status)}
                       </Badge>
                       <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
                         {conciergeServiceKindLabel(item.service_kind)}
@@ -248,21 +256,21 @@ export function PatientServicesPage() {
                     </div>
                     <h2 className="mt-3 text-xl font-semibold text-slate-950">{item.title}</h2>
                     <p className="mt-2 text-sm text-slate-500">
-                      {[item.provider_name, item.assigned_concierge_name, item.appointment_title].filter(Boolean).join(" · ") || "Care-team handling pending"}
+                      {[item.provider_name, item.assigned_concierge_name, item.appointment_title].filter(Boolean).join(" · ") || l("Bearbeitung durch Betreuungsteam ausstehend", "Ожидает обработки командой сопровождения", "Care-team handling pending")}
                     </p>
                   </div>
                   <Building2 className="size-5 text-sky-700" />
                 </div>
                 <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                  <Detail label="Preferred start" value={formatPortalDateTime(item.starts_at)} />
-                  <Detail label="Preferred end" value={formatPortalDateTime(item.ends_at)} />
-                  <Detail label="Vendor" value={item.vendor_name || "Not set"} />
+                  <Detail label={l("Bevorzugter Start", "Предпочтительное начало", "Preferred start")} value={formatPortalDateTime(item.starts_at)} />
+                  <Detail label={l("Bevorzugtes Ende", "Предпочтительное окончание", "Preferred end")} value={formatPortalDateTime(item.ends_at)} />
+                  <Detail label={l("Anbieter", "Поставщик", "Vendor")} value={item.vendor_name || l("Nicht festgelegt", "Не указано", "Not set")} />
                   <Detail
-                    label="Estimate"
-                    value={item.cost_estimate ? formatPortalCurrency(item.cost_estimate) : "Not set"}
+                    label={l("Schätzung", "Оценка", "Estimate")}
+                    value={item.cost_estimate ? formatPortalCurrency(item.cost_estimate) : l("Nicht festgelegt", "Не указано", "Not set")}
                   />
-                  <Detail label="Booking reference" value={item.booking_reference || "Not set"} />
-                  <Detail label="Created" value={formatPortalDateTime(item.created_at)} />
+                  <Detail label={l("Buchungsreferenz", "Референс бронирования", "Booking reference")} value={item.booking_reference || l("Nicht festgelegt", "Не указано", "Not set")} />
+                  <Detail label={l("Erstellt", "Создано", "Created")} value={formatPortalDateTime(item.created_at)} />
                 </div>
                 {item.service_notes ? (
                   <div className="mt-4 rounded-[1.2rem] border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm text-slate-600">
@@ -279,7 +287,7 @@ export function PatientServicesPage() {
                       onClick={() => void handleCancel(item.id)}
                     >
                       {cancelBusyId === item.id ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                      Cancel request
+                      {l("Anfrage stornieren", "Отменить запрос", "Cancel request")}
                     </Button>
                   </div>
                 ) : null}
@@ -291,15 +299,15 @@ export function PatientServicesPage() {
         <section className={shellCard("p-5")}>
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h2 className="text-lg font-semibold text-slate-950">Request a service</h2>
+              <h2 className="text-lg font-semibold text-slate-950">{l("Service anfragen", "Запросить сервис", "Request a service")}</h2>
               <p className="mt-1 text-sm text-slate-500">
-                Send a concierge need directly from the portal. The assigned team reviews and books it operationally.
+                {l("Senden Sie einen Concierge-Bedarf direkt aus dem Portal. Das zuständige Team prüft die Anfrage und bucht operativ.", "Отправьте запрос на concierge-сервис прямо из портала. Назначенная команда рассмотрит его и оформит на своей стороне.", "Send a concierge need directly from the portal. The assigned team reviews and books it operationally.")}
               </p>
             </div>
             <Send className="mt-1 size-5 text-sky-700" />
           </div>
           <form className="mt-5 space-y-4" onSubmit={(event) => void handleSubmit(event)}>
-            <Field label="Service type">
+            <Field label={l("Servicetyp", "Тип сервиса", "Service type")}>
               <select
                 value={form.serviceKind}
                 onChange={(event) =>
@@ -310,51 +318,51 @@ export function PatientServicesPage() {
                 }
                 className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
               >
-                <option value="hotel">Hotel</option>
-                <option value="transfer">Transfer</option>
-                <option value="vip_terminal">VIP terminal</option>
-                <option value="flight">Flight</option>
-                <option value="chauffeur">Chauffeur</option>
-                <option value="translation_support">Translation support</option>
-                <option value="other">Other</option>
+                <option value="hotel">{l("Hotel", "Отель", "Hotel")}</option>
+                <option value="transfer">{l("Transfer", "Трансфер", "Transfer")}</option>
+                <option value="vip_terminal">{l("VIP-Terminal", "VIP-терминал", "VIP terminal")}</option>
+                <option value="flight">{l("Flug", "Перелет", "Flight")}</option>
+                <option value="chauffeur">{l("Chauffeur", "Шофер", "Chauffeur")}</option>
+                <option value="translation_support">{l("Sprachunterstützung", "Языковая поддержка", "Translation support")}</option>
+                <option value="other">{l("Sonstiges", "Другое", "Other")}</option>
               </select>
             </Field>
 
-            <Field label="Title">
+            <Field label={l("Titel", "Название", "Title")}>
               <Input
                 value={form.title}
                 onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))}
-                placeholder="Airport hotel stay"
+                placeholder={l("Hotelübernachtung am Flughafen", "Отель у аэропорта", "Airport hotel stay")}
                 required
               />
             </Field>
 
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Preferred vendor">
+              <Field label={l("Bevorzugter Anbieter", "Предпочтительный поставщик", "Preferred vendor")}>
                 <Input
                   value={form.vendorName}
                   onChange={(event) => setForm((current) => ({ ...current, vendorName: event.target.value }))}
-                  placeholder="Hotel / airline / transfer company"
+                  placeholder={l("Hotel / Fluglinie / Transferfirma", "Отель / авиакомпания / трансферная компания", "Hotel / airline / transfer company")}
                 />
               </Field>
-              <Field label="Vendor contact">
+              <Field label={l("Kontakt des Anbieters", "Контакт поставщика", "Vendor contact")}>
                 <Input
                   value={form.vendorContact}
                   onChange={(event) => setForm((current) => ({ ...current, vendorContact: event.target.value }))}
-                  placeholder="Booking email or phone"
+                  placeholder={l("Buchungs-E-Mail oder Telefon", "Почта или телефон для бронирования", "Booking email or phone")}
                 />
               </Field>
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Preferred start">
+              <Field label={l("Bevorzugter Start", "Предпочтительное начало", "Preferred start")}>
                 <Input
                   type="datetime-local"
                   value={form.startsAt}
                   onChange={(event) => setForm((current) => ({ ...current, startsAt: event.target.value }))}
                 />
               </Field>
-              <Field label="Preferred end">
+              <Field label={l("Bevorzugtes Ende", "Предпочтительное окончание", "Preferred end")}>
                 <Input
                   type="datetime-local"
                   value={form.endsAt}
@@ -363,7 +371,7 @@ export function PatientServicesPage() {
               </Field>
             </div>
 
-            <Field label="Estimated budget (EUR)">
+            <Field label={l("Geschätztes Budget (EUR)", "Ориентировочный бюджет (EUR)", "Estimated budget (EUR)")}>
               <Input
                 type="number"
                 min="0"
@@ -374,11 +382,11 @@ export function PatientServicesPage() {
               />
             </Field>
 
-            <Field label="Notes">
+            <Field label={l("Notizen", "Заметки", "Notes")}>
               <textarea
                 value={form.serviceNotes}
                 onChange={(event) => setForm((current) => ({ ...current, serviceNotes: event.target.value }))}
-                placeholder="Arrival details, luggage, hotel preferences, VIP support context..."
+                placeholder={l("Ankunftsdetails, Gepäck, Hotelwünsche, VIP-Kontext...", "Детали прибытия, багаж, предпочтения по отелю, контекст VIP...", "Arrival details, luggage, hotel preferences, VIP support context...")}
                 className="min-h-[132px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
               />
             </Field>
@@ -395,7 +403,7 @@ export function PatientServicesPage() {
               disabled={requestBusy}
             >
               {requestBusy ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}
-              Send request
+              {l("Anfrage senden", "Отправить запрос", "Send request")}
             </Button>
           </form>
         </section>

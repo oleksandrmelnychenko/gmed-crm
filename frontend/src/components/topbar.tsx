@@ -81,7 +81,7 @@ function notificationHref(item: Notification) {
 
 export function Topbar() {
   const { user } = useAuth();
-  const { lang, setLang } = useLang();
+  const { lang, setLang, t } = useLang();
   const [unread, setUnread] = useState(0);
   const [onlineUsers, setOnlineUsers] = useState<ActiveSession[]>([]);
   const isPatientPortal = user?.role === "patient";
@@ -169,7 +169,7 @@ export function Topbar() {
           {!isPatientPortal ? (
             <div className="flex items-center gap-2 h-8 px-3 rounded-lg border border-border bg-muted/50 text-muted-foreground text-sm cursor-pointer hover:bg-muted transition-colors">
               <Search className="size-3.5" />
-              <span>Search</span>
+              <span>{t.topbar_search}</span>
               <kbd className="ml-2 text-[10px] font-mono bg-background border border-border rounded px-1.5 py-0.5">
                 /
               </kbd>
@@ -256,6 +256,7 @@ function NotificationPanel({
   staffRole: string;
 }) {
   const navigate = useNavigate();
+  const { t } = useLang();
   const [notifs, setNotifs] = useState<Notification[]>([]);
   const [announcements, setAnnouncements] = useState<ActiveAnnouncement[]>([]);
 
@@ -298,12 +299,12 @@ function NotificationPanel({
       <div className="fixed inset-0 z-40" onClick={onClose} />
       <div className="fixed right-20 top-14 z-50 w-96 rounded-2xl border border-border bg-background shadow-xl animate-in fade-in slide-in-from-top-2 duration-200">
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-          <h3 className="text-sm font-semibold">Notifications</h3>
+          <h3 className="text-sm font-semibold">{t.topbar_notifications}</h3>
           <button
             onClick={markAll}
             className="text-xs text-primary hover:underline"
           >
-            Mark all read
+            {t.topbar_mark_all_read}
           </button>
         </div>
         <div className="max-h-96 overflow-y-auto">
@@ -331,7 +332,7 @@ function NotificationPanel({
           )}
           {notifs.length === 0 ? (
             <div className="py-10 text-center text-sm text-muted-foreground">
-              No notifications
+              {t.topbar_no_notifications}
             </div>
           ) : (
             notifs.map((n) => (
@@ -376,6 +377,7 @@ function UsersPanel({
   currentUserId?: string;
   onClose: () => void;
 }) {
+  const { t } = useLang();
   const [chatUser, setChatUser] = useState<ActiveSession | null>(null);
   const [chatMsgs, setChatMsgs] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
@@ -476,7 +478,7 @@ function UsersPanel({
               type="text"
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
-              placeholder="Message..."
+              placeholder={t.topbar_message_placeholder}
               className="flex-1 h-9 rounded-full bg-muted px-4 text-sm outline-none placeholder:text-muted-foreground"
             />
             <button
@@ -497,7 +499,7 @@ function UsersPanel({
       <div className="fixed right-20 top-14 z-50 w-80 rounded-2xl border border-border bg-background shadow-xl animate-in fade-in slide-in-from-top-2 duration-200">
         <div className="px-4 py-3 border-b border-border">
           <h3 className="text-sm font-semibold">
-            Online ({users.length})
+            {t.topbar_online} ({users.length})
           </h3>
         </div>
         <div className="max-h-80 overflow-y-auto">

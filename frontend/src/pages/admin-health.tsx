@@ -137,9 +137,9 @@ export function AdminHealthPage() {
               }
             />
             <StatCard
-              label="Data"
+              label={t.health_data}
               value={`P:${data.data.patients} L:${data.data.leads} O:${data.data.orders}`}
-              sub={`${data.data.audit_entries} audit`}
+              sub={`${data.data.audit_entries} ${t.health_audit_suffix}`}
             />
           </div>
 
@@ -151,8 +151,8 @@ export function AdminHealthPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Table</TableHead>
-                  <TableHead>Size</TableHead>
+                  <TableHead>{t.health_col_table}</TableHead>
+                  <TableHead>{t.health_col_size}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>

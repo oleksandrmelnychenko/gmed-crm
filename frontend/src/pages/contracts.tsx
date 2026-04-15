@@ -324,13 +324,13 @@ function blankQuoteForm(orderId = ""): QuoteFormState {
   };
 }
 
-function blankAgencyServiceForm(): AgencyServiceFormState {
+function blankAgencyServiceForm(lang: "de" | "ru" = "de"): AgencyServiceFormState {
   return {
     id: "",
     serviceKey: "",
     serviceName: "",
     description: "",
-    unitLabel: "unit",
+    unitLabel: lang === "de" ? "Einheit" : "ед.",
     unitPrice: "",
     currency: "EUR",
     vatRate: "19",
@@ -391,10 +391,14 @@ function toDateTimeLocal(value: string) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-function formatDateTime(value?: string | null) {
-  if (!value) return "Not set";
+function formatDateTime(
+  value?: string | null,
+  locale = "de-DE",
+  emptyLabel = "-",
+) {
+  if (!value) return emptyLabel;
   try {
-    return new Intl.DateTimeFormat("en-GB", {
+    return new Intl.DateTimeFormat(locale, {
       day: "2-digit",
       month: "short",
       year: "numeric",
@@ -406,10 +410,14 @@ function formatDateTime(value?: string | null) {
   }
 }
 
-function formatDate(value?: string | null) {
-  if (!value) return "Not set";
+function formatDate(
+  value?: string | null,
+  locale = "de-DE",
+  emptyLabel = "-",
+) {
+  if (!value) return emptyLabel;
   try {
-    return new Intl.DateTimeFormat("en-GB", {
+    return new Intl.DateTimeFormat(locale, {
       day: "2-digit",
       month: "short",
       year: "numeric",
@@ -417,6 +425,10 @@ function formatDate(value?: string | null) {
   } catch {
     return value;
   }
+}
+
+function enumLabel(value: string, labels: Record<string, string>) {
+  return labels[value] ?? value.replaceAll("_", " ");
 }
 
 function formatCurrency(value: unknown) {
@@ -476,10 +488,239 @@ function buildSearchParams(
 
 export function ContractsPage() {
   const { user } = useAuth();
-  const { t } = useLang();
+  const { t, lang } = useLang();
+  const tr = t as unknown as Record<string, string>;
   const { staffGo } = useStaffNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const permissions = contractsPermissions(user?.role);
+  const locale = lang === "de" ? "de-DE" : "ru-RU";
+  const text = lang === "de"
+    ? {
+        accessDenied:
+          "Verträge und Angebote sind nur für CEO, CEO-Assistenz, Patientenmanager und Abrechnung verfügbar.",
+        workspaceKicker: "Kaufmännischer Arbeitsbereich",
+        workspaceTitle: "Verträge und Angebote",
+        workspaceDescription:
+          "Patientengebundene Rahmenverträge und Angebote auf Basis von Auftragsleistungen, Durchlaufkosten und kaufmännischer Freigabe.",
+        refresh: "Aktualisieren",
+        newContract: "Neuer Vertrag",
+        newQuote: "Neues Angebot",
+        contractsTab: "Rahmenverträge",
+        quotesTab: "Angebote",
+        contractStatsDescription: "unterzeichnet / versendet",
+        quoteStatsDescription: "angenommen",
+        agencyServiceTitle: "Leistungskatalog der Agentur",
+        agencyServiceDescription:
+          "Interner Preiskatalog für agenturseitige Leistungen und künftige Auto-Abrechnungen.",
+        agencyServiceSearchPlaceholder:
+          "Nach Schlüssel, Leistungsname oder Beschreibung suchen",
+        activeOnly: "Nur aktiv",
+        allStatuses: "Alle Status",
+        inactiveOnly: "Nur inaktiv",
+        catalogItems: "Katalogpositionen",
+        activeLabel: "Aktiv",
+        priced: "Mit Preis",
+        noCatalogItems: "Keine Katalogpositionen",
+        noCatalogItemsDescription:
+          "Lege wiederverwendbare Agenturpositionen an, etwa Dolmetscherstunden oder Koordinationspakete.",
+        activeState: "aktiv",
+        inactiveState: "inaktiv",
+        unitPrice: "Einzelpreis",
+        unit: "Einheit",
+        updated: "Aktualisiert",
+        editCatalogItem: "Katalogposition bearbeiten",
+        newCatalogItem: "Neue Katalogposition",
+        catalogHelp:
+          "Verwende stabile Service-Keys wie `interpreter_hours` für künftige Automatisierungen.",
+        cancelEdit: "Bearbeitung verwerfen",
+        serviceKey: "Service-Key",
+        serviceName: "Leistungsname",
+        unitLabel: "Einheitsbezeichnung",
+        currency: "Währung",
+        vatPercent: "MwSt. %",
+        description: "Beschreibung",
+        itemIsActive:
+          "Position ist aktiv und kann in nachgelagerten Workflows verwendet werden",
+        saveCatalogItem: "Katalogposition speichern",
+        createCatalogItem: "Katalogposition anlegen",
+        createContractDescription:
+          "Lege zuerst die patientengebundene kaufmännische Basis fest, bevor Angebote und Ausführungsaufträge erstellt werden.",
+        selectPatient: "Patient auswählen",
+        createContract: "Vertrag anlegen",
+        createQuoteDescription:
+          "Erzeuge ein Angebot aus den aktuellen Auftragsleistungen. Summen werden serverseitig aus den Auftragspositionen berechnet.",
+        loadingOrders: "Aufträge werden geladen...",
+        selectOrder: "Auftrag auswählen",
+        chooseOrder: "Auftrag auswählen",
+        createQuote: "Angebot anlegen",
+        contractSheetDescription:
+          "Status, Laufzeit und kaufmännischer Kontext für den ausgewählten Patienten.",
+        contractOverviewDescription:
+          "Details zur patientengebundenen Vereinbarung und aktueller Lebenszyklus.",
+        linkedContractDescription:
+          "Mit aktuellem Vertragskontext direkt zu Patient, Auftrag oder Dokumenten springen.",
+        orders: "Aufträge",
+        documents: "Dokumente",
+        saveContract: "Vertrag speichern",
+        quoteSheetDescription:
+          "Angebotssummen, Positionen und Zahlungsstatus für den ausgewählten Auftrag.",
+        quoteOverviewDescription:
+          "Kaufmännische Summen und Umfang aus dem verknüpften Auftrag.",
+        vatTotal: "MwSt. gesamt",
+        grossTotal: "Gesamt brutto",
+        snapshotVersion: "Snapshot-Version",
+        linkedQuoteDescription:
+          "Mit aktuellem Angebotskontext direkt zu Patient, Auftrag, Rechnungen oder Dokumenten springen.",
+        order: "Auftrag",
+        invoices: "Rechnungen",
+        quoteLifecycle: "Angebots-Lebenszyklus",
+        quoteLifecycleDescription:
+          "Angebot durch Versand- und Zahlungsbestätigung führen.",
+        saveQuote: "Angebot speichern",
+        lineItems: "Positionen",
+        lineItemsDescription:
+          "Netto-, MwSt.- und Bruttowerte wie im Angebots-Snapshot gespeichert.",
+        noLineItems: "Keine Positionen",
+        noLineItemsDescription:
+          "Dieses Angebot enthält noch keine materialisierten Positionen.",
+        quantity: "Menge",
+        net: "Netto",
+        gross: "Brutto",
+        versionHistory: "Versionsverlauf",
+        versionHistoryDescription:
+          "Unveränderliche Angebots-Snapshots für Lebenszyklus- und Zahlungsstatusänderungen.",
+        noVersions: "Keine Versionen",
+        noVersionsDescription:
+          "Es sind noch keine gespeicherten Angebots-Snapshots vorhanden.",
+        version: "Version",
+        snapshotFallback: "Snapshot",
+        lineItemsCount: "Positionen",
+        updatedAt: "Aktualisiert am",
+        roleLabels: {
+          draft: "Entwurf",
+          sent: "Versendet",
+          signed: "Unterzeichnet",
+          expired: "Abgelaufen",
+          terminated: "Beendet",
+          accepted: "Angenommen",
+          rejected: "Abgelehnt",
+        },
+      }
+    : {
+        accessDenied:
+          "Договоры и предложения доступны только CEO, ассистенту CEO, пациент-менеджерам и биллингу.",
+        workspaceKicker: "Коммерческое рабочее пространство",
+        workspaceTitle: "Договоры и предложения",
+        workspaceDescription:
+          "Рамочные договоры и предложения по пациенту на основе услуг заказа, проходных расходов и коммерческого согласования.",
+        refresh: "Обновить",
+        newContract: "Новый договор",
+        newQuote: "Новое предложение",
+        contractsTab: "Рамочные договоры",
+        quotesTab: "Предложения",
+        contractStatsDescription: "подписано / отправлено",
+        quoteStatsDescription: "принято",
+        agencyServiceTitle: "Каталог агентских услуг",
+        agencyServiceDescription:
+          "Внутренний прайс-каталог для агентских услуг и будущих потоков автоначисления.",
+        agencyServiceSearchPlaceholder:
+          "Поиск по ключу, названию услуги или описанию",
+        activeOnly: "Только активные",
+        allStatuses: "Все статусы",
+        inactiveOnly: "Только неактивные",
+        catalogItems: "Позиции каталога",
+        activeLabel: "Активные",
+        priced: "С ценой",
+        noCatalogItems: "Нет позиций каталога",
+        noCatalogItemsDescription:
+          "Создайте переиспользуемые агентские позиции, например часы переводчика или пакеты координации.",
+        activeState: "активна",
+        inactiveState: "неактивна",
+        unitPrice: "Цена за единицу",
+        unit: "Единица",
+        updated: "Обновлено",
+        editCatalogItem: "Редактировать позицию каталога",
+        newCatalogItem: "Новая позиция каталога",
+        catalogHelp:
+          "Используйте стабильные service keys вроде `interpreter_hours` для будущей автоматизации.",
+        cancelEdit: "Отменить редактирование",
+        serviceKey: "Ключ услуги",
+        serviceName: "Название услуги",
+        unitLabel: "Обозначение единицы",
+        currency: "Валюта",
+        vatPercent: "НДС %",
+        description: "Описание",
+        itemIsActive:
+          "Позиция активна и может использоваться в последующих рабочих процессах",
+        saveCatalogItem: "Сохранить позицию каталога",
+        createCatalogItem: "Создать позицию каталога",
+        createContractDescription:
+          "Сначала задайте коммерческую основу по пациенту, а затем создавайте предложения и рабочие заказы.",
+        selectPatient: "Выберите пациента",
+        createContract: "Создать договор",
+        createQuoteDescription:
+          "Сформируйте предложение из текущих услуг заказа. Итоги рассчитываются на бэкенде по строкам заказа.",
+        loadingOrders: "Загрузка заказов...",
+        selectOrder: "Выберите заказ",
+        chooseOrder: "Выберите заказ",
+        createQuote: "Создать предложение",
+        contractSheetDescription:
+          "Статус, срок действия и коммерческий контекст для выбранного пациента.",
+        contractOverviewDescription:
+          "Детали соглашения по пациенту и его текущий жизненный цикл.",
+        linkedContractDescription:
+          "Быстрый переход к пациенту, заказам или документам в контексте текущего договора.",
+        orders: "Заказы",
+        documents: "Документы",
+        saveContract: "Сохранить договор",
+        quoteSheetDescription:
+          "Суммы предложения, позиции и статус оплаты для выбранного заказа.",
+        quoteOverviewDescription:
+          "Коммерческие итоги и объём, унаследованные из связанного заказа.",
+        vatTotal: "НДС итого",
+        grossTotal: "Итого брутто",
+        snapshotVersion: "Версия снимка",
+        linkedQuoteDescription:
+          "Быстрый переход к пациенту, заказу, счетам или документам в контексте текущего предложения.",
+        order: "Заказ",
+        invoices: "Счета",
+        quoteLifecycle: "Жизненный цикл предложения",
+        quoteLifecycleDescription:
+          "Проведите предложение через этапы отправки и подтверждения оплаты.",
+        saveQuote: "Сохранить предложение",
+        lineItems: "Позиции",
+        lineItemsDescription:
+          "Значения нетто, НДС и брутто в том виде, как они сохранены в снимке предложения.",
+        noLineItems: "Нет позиций",
+        noLineItemsDescription:
+          "В этом предложении пока нет материализованных позиций.",
+        quantity: "Кол-во",
+        net: "Нетто",
+        gross: "Брутто",
+        versionHistory: "История версий",
+        versionHistoryDescription:
+          "Неизменяемые снимки предложения для изменений жизненного цикла и статуса оплаты.",
+        noVersions: "Нет версий",
+        noVersionsDescription:
+          "Сохранённые снимки предложения пока отсутствуют.",
+        version: "Версия",
+        snapshotFallback: "Снимок",
+        lineItemsCount: "позиций",
+        updatedAt: "Обновлено",
+        roleLabels: {
+          draft: "Черновик",
+          sent: "Отправлено",
+          signed: "Подписано",
+          expired: "Истекло",
+          terminated: "Прекращено",
+          accepted: "Принято",
+          rejected: "Отклонено",
+        },
+      };
+  const contractStatusLabel = (status: string) => enumLabel(status, text.roleLabels);
+  const quoteStatusLabel = (status: string) => enumLabel(status, text.roleLabels);
+  const roleLabel = (roleValue: string) =>
+    tr[`role_${roleValue}`] ?? roleValue.replaceAll("_", " ");
 
   const initialTab =
     searchParams.get("tab") === "quotes" || searchParams.has("quote") || searchParams.has("order")
@@ -543,7 +784,7 @@ export function ContractsPage() {
     DEFAULT_AGENCY_SERVICE_FILTERS,
   );
   const [agencyServiceForm, setAgencyServiceForm] = useState<AgencyServiceFormState>(
-    blankAgencyServiceForm(),
+    blankAgencyServiceForm(lang),
   );
   const [agencyServiceBusy, setAgencyServiceBusy] = useState(false);
   const [agencyServiceFormError, setAgencyServiceFormError] = useState<string | null>(null);
@@ -824,7 +1065,7 @@ export function ContractsPage() {
   async function handleCreateQuote(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!createQuoteForm.orderId) {
-      setCreateQuoteError("Select an order first.");
+      setCreateQuoteError(text.selectOrder);
       return;
     }
     setCreateQuoteBusy(true);
@@ -878,7 +1119,7 @@ export function ContractsPage() {
         method: "POST",
         body: JSON.stringify(payload),
       });
-      setAgencyServiceForm(blankAgencyServiceForm());
+      setAgencyServiceForm(blankAgencyServiceForm(lang));
       setAgencyServicesReloadToken((current) => current + 1);
     } catch (error) {
       setAgencyServiceFormError(
@@ -896,7 +1137,7 @@ export function ContractsPage() {
 
   function resetAgencyServiceForm() {
     setAgencyServiceFormError(null);
-    setAgencyServiceForm(blankAgencyServiceForm());
+    setAgencyServiceForm(blankAgencyServiceForm(lang));
   }
 
   async function handleSaveContractStatus() {
@@ -969,7 +1210,7 @@ export function ContractsPage() {
   if (!permissions.canViewPage) {
     return (
       <div className="rounded-3xl border border-amber-200 bg-amber-50 px-6 py-5 text-sm text-amber-800 shadow-sm">
-        Contracts and quotes are restricted to CEO, CEO assistant, patient managers and billing.
+        {text.accessDenied}
       </div>
     );
   }
@@ -981,14 +1222,13 @@ export function ContractsPage() {
           <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
             <div>
               <div className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
-                Commercial workspace
+                {text.workspaceKicker}
               </div>
               <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">
-                Contracts and quotes
+                {text.workspaceTitle}
               </h1>
               <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">
-                Patient-bound framework contracts and quote preparation based on order services, cost passthrough
-                rules and commercial approval state.
+                {text.workspaceDescription}
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -1002,7 +1242,7 @@ export function ContractsPage() {
                 }}
               >
                 <RefreshCw className="mr-2 size-4" />
-                Refresh
+                {text.refresh}
               </Button>
               {permissions.canCreateContract ? (
                 <Button
@@ -1016,7 +1256,7 @@ export function ContractsPage() {
                   }}
                 >
                   <FileBadge2 className="mr-2 size-4" />
-                  New contract
+                  {text.newContract}
                 </Button>
               ) : null}
               {permissions.canCreateQuote ? (
@@ -1030,7 +1270,7 @@ export function ContractsPage() {
                   }}
                 >
                   <Plus className="mr-2 size-4" />
-                  New quote
+                  {text.newQuote}
                 </Button>
               ) : null}
             </div>
@@ -1041,13 +1281,17 @@ export function ContractsPage() {
           <StatCard
             label={t.contracts_title}
             value={String(contractStats.total)}
-            description={`${contractStats.signed} signed / ${contractStats.sent} sent`}
+            description={lang === "de"
+              ? `${contractStats.signed} unterzeichnet / ${contractStats.sent} versendet`
+              : `${contractStats.signed} подписано / ${contractStats.sent} отправлено`}
             icon={<ShieldCheck className="size-5" />}
           />
           <StatCard
-            label={t.contracts_title}
+            label={text.quotesTab}
             value={String(quoteStats.total)}
-            description={`${quoteStats.accepted} accepted`}
+            description={lang === "de"
+              ? `${quoteStats.accepted} angenommen`
+              : `${quoteStats.accepted} принято`}
             icon={<FileSpreadsheet className="size-5" />}
           />
           <StatCard
@@ -1071,11 +1315,13 @@ export function ContractsPage() {
         ) : null}
 
         <SectionCard
-          title="Agency service catalog"
-          description="Internal pricing catalog for agency-level services and future auto-billing flows."
+          title={text.agencyServiceTitle}
+          description={text.agencyServiceDescription}
           action={
             <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
-              {agencyServiceStats.active} active / {agencyServiceStats.total} total
+              {lang === "de"
+                ? `${agencyServiceStats.active} aktiv / ${agencyServiceStats.total} gesamt`
+                : `${agencyServiceStats.active} активных / ${agencyServiceStats.total} всего`}
             </Badge>
           }
         >
@@ -1095,7 +1341,7 @@ export function ContractsPage() {
                       )
                     }
                     className="h-11 rounded-2xl border-slate-200 bg-slate-50 pl-9"
-                    placeholder="Search by key, service name or description"
+                    placeholder={text.agencyServiceSearchPlaceholder}
                   />
                 </div>
                 <select
@@ -1108,9 +1354,9 @@ export function ContractsPage() {
                   }
                   className={selectClassName}
                 >
-                  <option value="true">Active only</option>
-                  <option value="">All statuses</option>
-                  <option value="false">Inactive only</option>
+                  <option value="true">{text.activeOnly}</option>
+                  <option value="">{text.allStatuses}</option>
+                  <option value="false">{text.inactiveOnly}</option>
                 </select>
                 <Button
                   type="button"
@@ -1123,9 +1369,9 @@ export function ContractsPage() {
               </div>
 
               <div className="grid gap-3 sm:grid-cols-3">
-                <MiniMetric label="Catalog items" value={String(agencyServiceStats.total)} />
-                <MiniMetric label="Active" value={String(agencyServiceStats.active)} />
-                <MiniMetric label="Priced" value={String(agencyServiceStats.priced)} />
+                <MiniMetric label={text.catalogItems} value={String(agencyServiceStats.total)} />
+                <MiniMetric label={text.activeLabel} value={String(agencyServiceStats.active)} />
+                <MiniMetric label={text.priced} value={String(agencyServiceStats.priced)} />
               </div>
 
               {agencyServicesLoading ? (
@@ -1134,8 +1380,8 @@ export function ContractsPage() {
                 <Banner tone="error">{agencyServicesError}</Banner>
               ) : agencyServices.length === 0 ? (
                 <EmptyState
-                  title="No catalog items"
-                  description="Create reusable agency pricing positions such as interpreter hours or coordination packages."
+                  title={text.noCatalogItems}
+                  description={text.noCatalogItemsDescription}
                 />
               ) : (
                 <div className="grid gap-3 xl:grid-cols-2">
@@ -1166,7 +1412,7 @@ export function ContractsPage() {
                                 : "border-slate-200 bg-slate-100 text-slate-600",
                             )}
                           >
-                            {item.is_active ? "active" : "inactive"}
+                            {item.is_active ? text.activeState : text.inactiveState}
                           </Badge>
                           {permissions.canManageCatalog ? (
                             <Button
@@ -1176,7 +1422,7 @@ export function ContractsPage() {
                               className="rounded-xl"
                               onClick={() => handleEditAgencyService(item)}
                             >
-                              Edit
+                              {t.common_edit}
                             </Button>
                           ) : null}
                         </div>
@@ -1184,25 +1430,25 @@ export function ContractsPage() {
 
                       <div className="mt-4 grid gap-3 sm:grid-cols-3">
                         <MiniMetric
-                          label="Unit price"
+                          label={text.unitPrice}
                           value={formatCurrency(item.unit_price)}
                         />
-                        <MiniMetric label="Unit" value={item.unit_label} />
+                        <MiniMetric label={text.unit} value={item.unit_label} />
                         <MiniMetric
-                          label="VAT"
+                          label={t.invoices_vat}
                           value={`${valueToInput(item.vat_rate) || "0"}%`}
                         />
                         <MiniMetric
-                          label="Valid from"
-                          value={formatDate(item.valid_from)}
+                          label={t.providers_service_valid_from}
+                          value={formatDate(item.valid_from, locale, t.common_not_set)}
                         />
                         <MiniMetric
-                          label="Valid to"
-                          value={formatDate(item.valid_to)}
+                          label={t.providers_service_valid_to}
+                          value={formatDate(item.valid_to, locale, t.common_not_set)}
                         />
                         <MiniMetric
-                          label="Updated"
-                          value={formatDateTime(item.updated_at)}
+                          label={text.updated}
+                          value={formatDateTime(item.updated_at, locale, t.common_not_set)}
                         />
                       </div>
                     </div>
@@ -1219,10 +1465,10 @@ export function ContractsPage() {
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <h3 className="text-sm font-semibold text-slate-950">
-                      {agencyServiceForm.id ? "Edit catalog item" : "New catalog item"}
+                      {agencyServiceForm.id ? text.editCatalogItem : text.newCatalogItem}
                     </h3>
                     <p className="mt-1 text-sm text-slate-600">
-                      Use stable service keys like <code>interpreter_hours</code> for future automation.
+                      {text.catalogHelp}
                     </p>
                   </div>
                   {agencyServiceForm.id ? (
@@ -1233,7 +1479,7 @@ export function ContractsPage() {
                       className="rounded-xl"
                       onClick={resetAgencyServiceForm}
                     >
-                      Cancel edit
+                      {text.cancelEdit}
                     </Button>
                   ) : null}
                 </div>
@@ -1245,7 +1491,7 @@ export function ContractsPage() {
                 ) : null}
 
                 <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                  <Field label="Service key">
+                  <Field label={text.serviceKey}>
                     <Input
                       required
                       value={agencyServiceForm.serviceKey}
@@ -1257,7 +1503,7 @@ export function ContractsPage() {
                       }
                     />
                   </Field>
-                  <Field label="Service name">
+                  <Field label={text.serviceName}>
                     <Input
                       required
                       value={agencyServiceForm.serviceName}
@@ -1269,7 +1515,7 @@ export function ContractsPage() {
                       }
                     />
                   </Field>
-                  <Field label="Unit label">
+                  <Field label={text.unitLabel}>
                     <Input
                       value={agencyServiceForm.unitLabel}
                       onChange={(event) =>
@@ -1280,7 +1526,7 @@ export function ContractsPage() {
                       }
                     />
                   </Field>
-                  <Field label="Currency">
+                  <Field label={text.currency}>
                     <Input
                       value={agencyServiceForm.currency}
                       onChange={(event) =>
@@ -1291,7 +1537,7 @@ export function ContractsPage() {
                       }
                     />
                   </Field>
-                  <Field label="Unit price">
+                  <Field label={text.unitPrice}>
                     <Input
                       required
                       type="number"
@@ -1306,7 +1552,7 @@ export function ContractsPage() {
                       }
                     />
                   </Field>
-                  <Field label="VAT %">
+                  <Field label={text.vatPercent}>
                     <Input
                       type="number"
                       step="0.01"
@@ -1321,7 +1567,7 @@ export function ContractsPage() {
                       }
                     />
                   </Field>
-                  <Field label="Valid from">
+                  <Field label={t.providers_service_valid_from}>
                     <Input
                       required
                       type="date"
@@ -1334,7 +1580,7 @@ export function ContractsPage() {
                       }
                     />
                   </Field>
-                  <Field label="Valid to">
+                  <Field label={t.providers_service_valid_to}>
                     <Input
                       type="date"
                       value={agencyServiceForm.validTo}
@@ -1346,7 +1592,7 @@ export function ContractsPage() {
                       }
                     />
                   </Field>
-                  <Field label="Description" className="sm:col-span-2">
+                  <Field label={text.description} className="sm:col-span-2">
                     <textarea
                       className={textareaClassName}
                       value={agencyServiceForm.description}
@@ -1370,7 +1616,7 @@ export function ContractsPage() {
                       }
                       className="size-4 rounded border-slate-300"
                     />
-                    Item is active and can be used by downstream workflows
+                    {text.itemIsActive}
                   </label>
                 </div>
 
@@ -1383,7 +1629,7 @@ export function ContractsPage() {
                     {agencyServiceBusy ? (
                       <LoaderCircle className="mr-2 size-4 animate-spin" />
                     ) : null}
-                    {agencyServiceForm.id ? "Save catalog item" : "Create catalog item"}
+                    {agencyServiceForm.id ? text.saveCatalogItem : text.createCatalogItem}
                   </Button>
                 </div>
               </form>
@@ -1402,17 +1648,17 @@ export function ContractsPage() {
         >
           <TabsList variant="line" className="rounded-2xl border border-slate-200 bg-white p-1 shadow-sm">
             <TabsTrigger value="contracts" className="rounded-xl px-4 data-active:bg-slate-950 data-active:text-white">
-              Framework contracts
+              {text.contractsTab}
             </TabsTrigger>
             <TabsTrigger value="quotes" className="rounded-xl px-4 data-active:bg-slate-950 data-active:text-white">
-              Quotes
+              {text.quotesTab}
             </TabsTrigger>
           </TabsList>
 
           <TabsContent value="contracts">
             <div className="space-y-5">
               <SectionCard
-                title={t.contracts_title}
+                title={text.quotesTab}
                 description={t.contracts_subtitle}
               >
                 <div className="grid gap-3 lg:grid-cols-[minmax(0,1.4fr)_minmax(220px,1fr)_minmax(180px,0.8fr)_auto]">
@@ -1438,7 +1684,7 @@ export function ContractsPage() {
                     }}
                     className={selectClassName}
                   >
-                    <option value="">All patients</option>
+                    <option value="">{lang === "de" ? "Alle Patienten" : "Все пациенты"}</option>
                     {patients.map((patient) => (
                       <option key={patient.id} value={patient.id}>
                         {patientOptionLabel(patient)}
@@ -1455,7 +1701,7 @@ export function ContractsPage() {
                     <option value="">{t.providers_all}</option>
                     {CONTRACT_STATUSES.map((status) => (
                       <option key={status} value={status}>
-                        {status}
+                        {contractStatusLabel(status)}
                       </option>
                     ))}
                   </select>
@@ -1470,7 +1716,7 @@ export function ContractsPage() {
                       });
                     }}
                   >
-                    Reset
+                    {t.access_reset}
                   </Button>
                 </div>
               </SectionCard>
@@ -1487,7 +1733,7 @@ export function ContractsPage() {
                     permissions.canCreateContract ? (
                       <Button type="button" onClick={() => setCreateContractOpen(true)}>
                         <Plus className="mr-2 size-4" />
-                        Create contract
+                        {text.createContract}
                       </Button>
                     ) : null
                   }
@@ -1521,7 +1767,7 @@ export function ContractsPage() {
 
                         <div className="mt-4 flex flex-wrap gap-2">
                           <Badge variant="outline" className={cn("rounded-full", contractStatusClassName(contract.status))}>
-                            {contract.status}
+                            {contractStatusLabel(contract.status)}
                           </Badge>
                           <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
                             {contract.signed_at ? t.contracts_signed : t.contracts_draft}
@@ -1529,10 +1775,10 @@ export function ContractsPage() {
                         </div>
 
                         <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                          <MiniMetric label={t.providers_service_valid_from} value={formatDate(contract.valid_from)} />
-                          <MiniMetric label={t.providers_service_valid_to} value={formatDate(contract.valid_to)} />
-                          <MiniMetric label={t.contracts_signed_at} value={formatDateTime(contract.signed_at)} />
-                          <MiniMetric label={t.common_loading} value={formatDateTime(contract.updated_at)} />
+                          <MiniMetric label={t.providers_service_valid_from} value={formatDate(contract.valid_from, locale, t.common_not_set)} />
+                          <MiniMetric label={t.providers_service_valid_to} value={formatDate(contract.valid_to, locale, t.common_not_set)} />
+                          <MiniMetric label={t.contracts_signed_at} value={formatDateTime(contract.signed_at, locale, t.common_not_set)} />
+                          <MiniMetric label={text.updatedAt} value={formatDateTime(contract.updated_at, locale, t.common_not_set)} />
                         </div>
                       </button>
                     );
@@ -1578,7 +1824,7 @@ export function ContractsPage() {
                     }}
                     className={selectClassName}
                   >
-                    <option value="">All patients</option>
+                    <option value="">{lang === "de" ? "Alle Patienten" : "Все пациенты"}</option>
                     {patients.map((patient) => (
                       <option key={patient.id} value={patient.id}>
                         {patientOptionLabel(patient)}
@@ -1594,7 +1840,7 @@ export function ContractsPage() {
                     }}
                     className={selectClassName}
                   >
-                    <option value="">All orders</option>
+                    <option value="">{lang === "de" ? "Alle Aufträge" : "Все заказы"}</option>
                     {filteredOrderOptions.map((order) => (
                       <option key={order.id} value={order.id}>
                         {`${order.order_number} · ${order.patient_pid}`}
@@ -1611,7 +1857,7 @@ export function ContractsPage() {
                     <option value="">{t.providers_all}</option>
                     {QUOTE_STATUSES.map((status) => (
                       <option key={status} value={status}>
-                        {status}
+                        {quoteStatusLabel(status)}
                       </option>
                     ))}
                   </select>
@@ -1627,7 +1873,7 @@ export function ContractsPage() {
                       });
                     }}
                   >
-                    Reset
+                    {t.access_reset}
                   </Button>
                 </div>
               </SectionCard>
@@ -1644,7 +1890,7 @@ export function ContractsPage() {
                     permissions.canCreateQuote ? (
                       <Button type="button" onClick={() => setCreateQuoteOpen(true)}>
                         <Plus className="mr-2 size-4" />
-                        Create quote
+                        {text.createQuote}
                       </Button>
                     ) : null
                   }
@@ -1678,7 +1924,7 @@ export function ContractsPage() {
 
                         <div className="mt-4 flex flex-wrap gap-2">
                           <Badge variant="outline" className={cn("rounded-full", quoteStatusClassName(quote.status))}>
-                            {quote.status}
+                            {quoteStatusLabel(quote.status)}
                           </Badge>
                           <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
                             {formatCurrency(quote.total_gross)}
@@ -1686,10 +1932,10 @@ export function ContractsPage() {
                         </div>
 
                         <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                          <MiniMetric label={t.providers_service_valid_to} value={formatDate(quote.valid_until)} />
+                          <MiniMetric label={t.providers_service_valid_to} value={formatDate(quote.valid_until, locale, t.common_not_set)} />
                           <MiniMetric label={t.invoices_paid} value={formatCurrency(quote.paid_amount)} />
-                          <MiniMetric label={t.patients_created} value={formatDateTime(quote.created_at)} />
-                          <MiniMetric label={t.invoices_paid_at} value={formatDateTime(quote.paid_at)} />
+                          <MiniMetric label={t.patients_created} value={formatDateTime(quote.created_at, locale, t.common_not_set)} />
+                          <MiniMetric label={t.invoices_paid_at} value={formatDateTime(quote.paid_at, locale, t.common_not_set)} />
                         </div>
                       </button>
                     );
@@ -1704,9 +1950,9 @@ export function ContractsPage() {
       <Dialog open={createContractOpen} onOpenChange={setCreateContractOpen}>
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>{t.contracts_new}</DialogTitle>
+            <DialogTitle>{text.newContract}</DialogTitle>
             <DialogDescription>
-              Set the patient-bound commercial base before building quotes and execution orders.
+              {text.createContractDescription}
             </DialogDescription>
           </DialogHeader>
           <form className="space-y-5" onSubmit={handleCreateContract}>
@@ -1721,7 +1967,7 @@ export function ContractsPage() {
                   }
                   className={selectClassName}
                 >
-                  <option value="">Select patient</option>
+                  <option value="">{text.selectPatient}</option>
                   {patients.map((patient) => (
                     <option key={patient.id} value={patient.id}>
                       {patientOptionLabel(patient)}
@@ -1742,7 +1988,7 @@ export function ContractsPage() {
                 >
                   {CONTRACT_STATUSES.map((status) => (
                     <option key={status} value={status}>
-                      {status}
+                      {contractStatusLabel(status)}
                     </option>
                   ))}
                 </select>
@@ -1787,11 +2033,11 @@ export function ContractsPage() {
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setCreateContractOpen(false)}>
-                Cancel
+                {t.common_cancel}
               </Button>
               <Button type="submit" disabled={createContractBusy}>
                 {createContractBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : <Plus className="mr-2 size-4" />}
-                Create contract
+                {text.createContract}
               </Button>
             </DialogFooter>
           </form>
@@ -1801,9 +2047,9 @@ export function ContractsPage() {
       <Dialog open={createQuoteOpen} onOpenChange={setCreateQuoteOpen}>
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>{t.contracts_new}</DialogTitle>
+            <DialogTitle>{text.newQuote}</DialogTitle>
             <DialogDescription>
-              Generate a quote from current order services. Totals are calculated from order lines on the backend.
+              {text.createQuoteDescription}
             </DialogDescription>
           </DialogHeader>
           <form className="space-y-5" onSubmit={handleCreateQuote}>
@@ -1819,7 +2065,7 @@ export function ContractsPage() {
                   className={selectClassName}
                   disabled={optionsLoading}
                 >
-                  <option value="">{optionsLoading ? "Loading orders..." : "Select order"}</option>
+                  <option value="">{optionsLoading ? text.loadingOrders : text.selectOrder}</option>
                   {filteredOrderOptions.map((order) => (
                     <option key={order.id} value={order.id}>
                       {`${order.order_number} · ${order.patient_pid} · ${order.patient_name}`}
@@ -1840,7 +2086,7 @@ export function ContractsPage() {
                 <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
                   {selectedCreateOrder
                     ? `${selectedCreateOrder.order_number} · ${selectedCreateOrder.patient_pid} · ${formatCurrency(selectedCreateOrder.total_estimated)}`
-                    : "Choose an order"}
+                    : text.chooseOrder}
                 </div>
               </Field>
               <Field label={t.contracts_notes} className="sm:col-span-2">
@@ -1856,11 +2102,11 @@ export function ContractsPage() {
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setCreateQuoteOpen(false)}>
-                Cancel
+                {t.common_cancel}
               </Button>
               <Button type="submit" disabled={createQuoteBusy || !createQuoteForm.orderId}>
                 {createQuoteBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : <Plus className="mr-2 size-4" />}
-                Create quote
+                {text.createQuote}
               </Button>
             </DialogFooter>
           </form>
@@ -1879,10 +2125,10 @@ export function ContractsPage() {
         }}
       >
         <SheetContent side="right" className="w-full overflow-y-auto border-l border-slate-200 p-0 sm:max-w-3xl">
-          <SheetHeader className="border-b border-slate-200 px-6 py-5">
-            <SheetTitle>{contractDetail ? `${contractDetail.contract_number} / ${contractDetail.patient_name}` : t.contracts_framework}</SheetTitle>
-            <SheetDescription>Contract status, validity and linked commercial context for the selected patient.</SheetDescription>
-          </SheetHeader>
+            <SheetHeader className="border-b border-slate-200 px-6 py-5">
+              <SheetTitle>{contractDetail ? `${contractDetail.contract_number} / ${contractDetail.patient_name}` : t.contracts_framework}</SheetTitle>
+            <SheetDescription>{text.contractSheetDescription}</SheetDescription>
+            </SheetHeader>
           <div className="space-y-6 px-6 py-6">
             {contractDetailLoading ? (
               <LoadingState label={t.common_loading} />
@@ -1894,16 +2140,16 @@ export function ContractsPage() {
               <>
                 <SectionCard
                   title={t.contracts_title}
-                  description="Patient-bound agreement details and current lifecycle."
-                  action={<Badge variant="outline" className={cn("rounded-full", contractStatusClassName(contractDetail.status))}>{contractDetail.status}</Badge>}
+                  description={text.contractOverviewDescription}
+                  action={<Badge variant="outline" className={cn("rounded-full", contractStatusClassName(contractDetail.status))}>{contractStatusLabel(contractDetail.status)}</Badge>}
                 >
                   <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                     <DetailField label={t.contracts_patient} value={`${contractDetail.patient_name} (${contractDetail.patient_pid})`} />
-                    <DetailField label={t.patients_created} value={formatDateTime(contractDetail.created_at)} />
-                    <DetailField label={t.common_loading} value={formatDateTime(contractDetail.updated_at)} />
-                    <DetailField label={t.contracts_signed_at} value={formatDateTime(contractDetail.signed_at)} />
-                    <DetailField label={t.providers_service_valid_from} value={formatDate(contractDetail.valid_from)} />
-                    <DetailField label={t.providers_service_valid_to} value={formatDate(contractDetail.valid_to)} />
+                    <DetailField label={t.patients_created} value={formatDateTime(contractDetail.created_at, locale, t.common_not_set)} />
+                    <DetailField label={text.updatedAt} value={formatDateTime(contractDetail.updated_at, locale, t.common_not_set)} />
+                    <DetailField label={t.contracts_signed_at} value={formatDateTime(contractDetail.signed_at, locale, t.common_not_set)} />
+                    <DetailField label={t.providers_service_valid_from} value={formatDate(contractDetail.valid_from, locale, t.common_not_set)} />
+                    <DetailField label={t.providers_service_valid_to} value={formatDate(contractDetail.valid_to, locale, t.common_not_set)} />
                     <DetailField
                       label={t.contracts_notes}
                       value={contractDetail.conditions && Object.keys(contractDetail.conditions).length > 0 ? JSON.stringify(contractDetail.conditions, null, 2) : t.common_not_set}
@@ -1911,11 +2157,11 @@ export function ContractsPage() {
                   </div>
                 </SectionCard>
 
-                <SectionCard title={t.providers_linked_patients} description={t.contracts_subtitle}>
+                <SectionCard title={t.providers_linked_patients} description={text.linkedContractDescription}>
                   <div className="flex flex-wrap gap-2">
-                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => staffGo(`/patients?patient=${contractDetail.patient_id}`)}>Patient</Button>
-                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => staffGo(`/orders?patient=${contractDetail.patient_id}`)}>Orders</Button>
-                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => staffGo(`/documents?patient=${contractDetail.patient_id}`)}>Documents</Button>
+                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => staffGo(`/patients?patient=${contractDetail.patient_id}`)}>{t.contracts_patient}</Button>
+                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => staffGo(`/orders?patient=${contractDetail.patient_id}`)}>{text.orders}</Button>
+                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => staffGo(`/documents?patient=${contractDetail.patient_id}`)}>{text.documents}</Button>
                   </div>
                 </SectionCard>
 
@@ -1931,7 +2177,7 @@ export function ContractsPage() {
                         className={selectClassName}
                       >
                         {CONTRACT_STATUSES.map((status) => (
-                          <option key={status} value={status}>{status}</option>
+                          <option key={status} value={status}>{contractStatusLabel(status)}</option>
                         ))}
                       </select>
                     </Field>
@@ -1951,7 +2197,7 @@ export function ContractsPage() {
                   <div className="mt-4 flex justify-end">
                     <Button type="button" onClick={() => void handleSaveContractStatus()} disabled={contractStatusBusy || !permissions.canManageContract}>
                       {contractStatusBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
-                      Save contract
+                      {text.saveContract}
                     </Button>
                   </div>
                 </SectionCard>
@@ -1974,8 +2220,8 @@ export function ContractsPage() {
       >
         <SheetContent side="right" className="w-full overflow-y-auto border-l border-slate-200 p-0 sm:max-w-3xl">
           <SheetHeader className="border-b border-slate-200 px-6 py-5">
-            <SheetTitle>{quoteDetail ? `${quoteDetail.quote_number} / ${quoteDetail.patient_name}` : t.contracts_title}</SheetTitle>
-            <SheetDescription>Quote totals, line items and payment state for the selected order.</SheetDescription>
+            <SheetTitle>{quoteDetail ? `${quoteDetail.quote_number} / ${quoteDetail.patient_name}` : text.quotesTab}</SheetTitle>
+            <SheetDescription>{text.quoteSheetDescription}</SheetDescription>
           </SheetHeader>
           <div className="space-y-6 px-6 py-6">
             {quoteDetailLoading ? (
@@ -1987,21 +2233,21 @@ export function ContractsPage() {
             ) : (
               <>
                 <SectionCard
-                  title={t.contracts_title}
-                  description="Commercial totals and scope inherited from the linked order."
-                  action={<Badge variant="outline" className={cn("rounded-full", quoteStatusClassName(quoteDetail.status))}>{quoteDetail.status}</Badge>}
+                  title={text.quotesTab}
+                  description={text.quoteOverviewDescription}
+                  action={<Badge variant="outline" className={cn("rounded-full", quoteStatusClassName(quoteDetail.status))}>{quoteStatusLabel(quoteDetail.status)}</Badge>}
                 >
                   <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                     <DetailField label={t.contracts_patient} value={`${quoteDetail.patient_name} (${quoteDetail.patient_pid})`} />
                     <DetailField label={t.orders_title} value={quoteDetail.order_number} />
-                    <DetailField label={t.providers_service_valid_to} value={formatDate(quoteDetail.valid_until)} />
-                    <DetailField label={t.invoices_paid_at} value={formatDateTime(quoteDetail.paid_at)} />
+                    <DetailField label={t.providers_service_valid_to} value={formatDate(quoteDetail.valid_until, locale, t.common_not_set)} />
+                    <DetailField label={t.invoices_paid_at} value={formatDateTime(quoteDetail.paid_at, locale, t.common_not_set)} />
                     <DetailField label={t.invoices_subtotal} value={formatCurrency(quoteDetail.total_net)} />
-                    <DetailField label="VAT total" value={formatCurrency(quoteDetail.total_vat)} />
-                    <DetailField label="Gross total" value={formatCurrency(quoteDetail.total_gross)} />
-                    <DetailField label={t.invoices_paid_at} value={formatCurrency(quoteDetail.paid_amount)} />
+                    <DetailField label={text.vatTotal} value={formatCurrency(quoteDetail.total_vat)} />
+                    <DetailField label={text.grossTotal} value={formatCurrency(quoteDetail.total_gross)} />
+                    <DetailField label={t.invoices_paid} value={formatCurrency(quoteDetail.paid_amount)} />
                     <DetailField
-                      label="Snapshot version"
+                      label={text.snapshotVersion}
                       value={
                         quoteDetail.current_version_number
                           ? `${quoteDetail.current_version_number} / ${quoteDetail.version_count ?? quoteDetail.current_version_number}`
@@ -2012,16 +2258,16 @@ export function ContractsPage() {
                   </div>
                 </SectionCard>
 
-                <SectionCard title={t.providers_linked_patients} description="Jump back into patient, order or document scope with the current quote context.">
+                <SectionCard title={t.providers_linked_patients} description={text.linkedQuoteDescription}>
                   <div className="flex flex-wrap gap-2">
-                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => staffGo(`/patients?patient=${quoteDetail.patient_id}`)}>Patient</Button>
-                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => staffGo(`/orders?order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`)}>Order</Button>
-                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => staffGo(`/invoices?quote=${quoteDetail.id}&order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`)}>Invoices</Button>
-                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => staffGo(`/documents?order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`)}>Documents</Button>
+                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => staffGo(`/patients?patient=${quoteDetail.patient_id}`)}>{t.contracts_patient}</Button>
+                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => staffGo(`/orders?order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`)}>{text.order}</Button>
+                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => staffGo(`/invoices?quote=${quoteDetail.id}&order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`)}>{text.invoices}</Button>
+                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => staffGo(`/documents?order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`)}>{text.documents}</Button>
                   </div>
                 </SectionCard>
 
-                <SectionCard title="Quote lifecycle" description="Move the quote through sending and payment confirmation stages.">
+                <SectionCard title={text.quoteLifecycle} description={text.quoteLifecycleDescription}>
                   {quoteStatusError ? <Banner tone="error">{quoteStatusError}</Banner> : null}
                   <div className="grid gap-4 sm:grid-cols-2">
                     <Field label={t.users_status}>
@@ -2033,7 +2279,7 @@ export function ContractsPage() {
                         className={selectClassName}
                       >
                         {QUOTE_STATUSES.map((status) => (
-                          <option key={status} value={status}>{status}</option>
+                          <option key={status} value={status}>{quoteStatusLabel(status)}</option>
                         ))}
                       </select>
                     </Field>
@@ -2047,14 +2293,14 @@ export function ContractsPage() {
                   <div className="mt-4 flex justify-end">
                     <Button type="button" onClick={() => void handleSaveQuoteStatus()} disabled={quoteStatusBusy || !permissions.canManageQuote}>
                       {quoteStatusBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
-                      Save quote
+                      {text.saveQuote}
                     </Button>
                   </div>
                 </SectionCard>
 
-                <SectionCard title="Line items" description="Net, VAT and gross values as stored in the quote snapshot.">
+                <SectionCard title={text.lineItems} description={text.lineItemsDescription}>
                   {!quoteDetail.line_items || quoteDetail.line_items.length === 0 ? (
-                    <EmptyState title="No line items" description="This quote does not contain any materialized line items yet." />
+                    <EmptyState title={text.noLineItems} description={text.noLineItemsDescription} />
                   ) : (
                     <div className="space-y-3">
                       {quoteDetail.line_items.map((line, index) => (
@@ -2063,24 +2309,24 @@ export function ContractsPage() {
                             <div>
                               <h3 className="text-sm font-semibold text-slate-900">{line.description}</h3>
                               <p className="mt-1 text-xs text-slate-500">
-                                Qty {line.quantity} · Unit {formatCurrency(line.unit_price)}
+                                {text.quantity} {line.quantity} · {text.unit} {formatCurrency(line.unit_price)}
                               </p>
                             </div>
                             <div className="flex flex-wrap gap-2">
                               <Badge variant="outline" className="rounded-full border-slate-200 bg-white text-slate-700">
-                                VAT {line.vat_rate}%
+                                {t.invoices_vat} {line.vat_rate}%
                               </Badge>
                               {line.is_cost_passthrough ? (
                                 <Badge variant="outline" className="rounded-full border-orange-200 bg-orange-50 text-orange-700">
-                                  Cost passthrough
+                                  {t.orders_cost_pass_through_badge}
                                 </Badge>
                               ) : null}
                             </div>
                           </div>
                           <div className="mt-4 grid gap-3 md:grid-cols-3">
-                            <MiniMetric label="Net" value={formatCurrency(line.line_net)} />
-                            <MiniMetric label="VAT" value={formatCurrency(line.line_vat)} />
-                            <MiniMetric label="Gross" value={formatCurrency(line.line_gross)} />
+                            <MiniMetric label={text.net} value={formatCurrency(line.line_net)} />
+                            <MiniMetric label={t.invoices_vat} value={formatCurrency(line.line_vat)} />
+                            <MiniMetric label={text.gross} value={formatCurrency(line.line_gross)} />
                           </div>
                           {line.notes ? (
                             <div className="mt-3 text-sm text-slate-600">{line.notes}</div>
@@ -2091,13 +2337,13 @@ export function ContractsPage() {
                   )}
                 </SectionCard>
 
-                <SectionCard title="Version history" description="Immutable quote snapshots for lifecycle and payment-state changes.">
+                <SectionCard title={text.versionHistory} description={text.versionHistoryDescription}>
                   {quoteVersionsLoading ? (
                     <LoadingState label={t.common_loading} />
                   ) : quoteVersionsError ? (
                     <Banner tone="error">{quoteVersionsError}</Banner>
                   ) : quoteVersions.length === 0 ? (
-                    <EmptyState title="No versions" description="No stored quote snapshots are available yet." />
+                    <EmptyState title={text.noVersions} description={text.noVersionsDescription} />
                   ) : (
                     <div className="space-y-3">
                       {quoteVersions.map((version) => (
@@ -2106,24 +2352,24 @@ export function ContractsPage() {
                             <div>
                               <div className="flex flex-wrap items-center gap-2">
                                 <h3 className="text-sm font-semibold text-slate-900">
-                                  Version {version.version_number}
+                                  {text.version} {version.version_number}
                                 </h3>
                                 <Badge variant="outline" className={cn("rounded-full", quoteStatusClassName(version.status))}>
-                                  {version.status}
+                                  {quoteStatusLabel(version.status)}
                                 </Badge>
                               </div>
                               <p className="mt-1 text-xs text-slate-500">
-                                {formatDateTime(version.created_at)} · {version.created_by_name} ({version.created_by_role})
+                                {formatDateTime(version.created_at, locale, t.common_not_set)} · {version.created_by_name} ({roleLabel(version.created_by_role)})
                               </p>
                               <p className="mt-2 text-sm text-slate-600">
-                                {(version.change_reason || "snapshot").replaceAll("_", " ")} · {version.line_item_count} line items
+                                {(version.change_reason || text.snapshotFallback).replaceAll("_", " ")} · {version.line_item_count} {text.lineItemsCount}
                               </p>
                             </div>
                             <div className="grid min-w-[220px] gap-3 md:grid-cols-2">
-                              <MiniMetric label="Gross" value={formatCurrency(version.total_gross)} />
+                              <MiniMetric label={text.gross} value={formatCurrency(version.total_gross)} />
                               <MiniMetric label={t.invoices_paid} value={formatCurrency(version.paid_amount)} />
-                              <MiniMetric label={t.providers_service_valid_to} value={formatDate(version.valid_until)} />
-                              <MiniMetric label={t.invoices_paid_at} value={formatDateTime(version.paid_at)} />
+                              <MiniMetric label={t.providers_service_valid_to} value={formatDate(version.valid_until, locale, t.common_not_set)} />
+                              <MiniMetric label={t.invoices_paid_at} value={formatDateTime(version.paid_at, locale, t.common_not_set)} />
                             </div>
                           </div>
                           {version.notes ? (
