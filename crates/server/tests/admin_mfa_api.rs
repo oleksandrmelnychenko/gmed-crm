@@ -1,3 +1,5 @@
+mod support;
+
 use axum::body::Body;
 use axum::http::Request;
 use axum::http::StatusCode;
@@ -7,29 +9,35 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 use gmed_server::auth::jwt;
-use gmed_server::settings::{SettingsCache, TokenSettings};
-use gmed_server::state::AppState;
-
 const TEST_SECRET: &str = "test-secret-at-least-32-characters-long!!";
 
-async fn test_app() -> Option<axum::Router> {
-    Some(test_context().await?.0)
+struct TestContext {
+    suite: support::TestSuiteContext,
+    it_admin_id: Uuid,
+}
+
+impl std::ops::Deref for TestContext {
+    type Target = axum::Router;
+
+    fn deref(&self) -> &Self::Target {
+        &self.suite.app
+    }
+}
+
+async fn test_app() -> Option<TestContext> {
+    test_context().await
 }
 
 /// Returns `(router, it_admin_user_id)`. Tests that exercise routes which
 /// audit-log the actor (e.g. settings updates) need a real user row so the
 /// `users(id)` foreign keys resolve.
-async fn test_context() -> Option<(axum::Router, Uuid)> {
-    let db_url = match std::env::var("DATABASE_URL") {
-        Ok(url) => url,
-        Err(_) => return None,
-    };
-    let pool = gmed_db::create_pool(&db_url).await.ok()?;
-    gmed_db::run_migrations(&pool).await.ok()?;
-    let it_admin_id = seed_user(&pool, "admin_mfa_api", "it_admin").await;
-    let settings_cache = SettingsCache::new(TokenSettings::default());
-    let state = AppState::new(pool, TEST_SECRET, settings_cache);
-    Some((gmed_server::build_app(state), it_admin_id))
+async fn test_context() -> Option<TestContext> {
+    let ctx = support::suite_context(TEST_SECRET).await?;
+    let it_admin_id = seed_user(&ctx.pool, "admin_mfa_api", "it_admin").await;
+    Some(TestContext {
+        suite: ctx,
+        it_admin_id,
+    })
 }
 
 async fn seed_user(pool: &PgPool, tag: &str, role: &str) -> Uuid {
@@ -175,10 +183,10 @@ async fn settings_update_validates_bounds() {
 
 #[tokio::test]
 async fn settings_update_valid_value() {
-    let Some((app, admin_id)) = test_context().await else {
+    let Some(app) = test_context().await else {
         return;
     };
-    let admin = auth_header_for("it_admin", admin_id);
+    let admin = auth_header_for("it_admin", app.it_admin_id);
 
     let (status, body) = json_request(
         &app,
@@ -205,10 +213,10 @@ async fn settings_update_valid_value() {
 
 #[tokio::test]
 async fn settings_update_accepts_agency_profile_values() {
-    let Some((app, admin_id)) = test_context().await else {
+    let Some(app) = test_context().await else {
         return;
     };
-    let admin = auth_header_for("it_admin", admin_id);
+    let admin = auth_header_for("it_admin", app.it_admin_id);
 
     let (status, body) = json_request(
         &app,
@@ -463,12 +471,20 @@ async fn mfa_reject_nonexistent_returns_not_found() {
 
 #[tokio::test]
 async fn check_pending_nonexistent_returns_not_found() {
-    let Some(app) = test_app().await else { return };
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let app = ctx.app.clone();
     let fake = uuid::Uuid::new_v4();
     let req = Request::builder()
         .uri(format!("/api/v1/auth/pending/{fake}"))
         .body(Body::empty())
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    let status = resp.status();
+    let bytes = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let body = String::from_utf8_lossy(&bytes);
+    assert_eq!(status, StatusCode::NOT_FOUND, "response body: {body}");
 }

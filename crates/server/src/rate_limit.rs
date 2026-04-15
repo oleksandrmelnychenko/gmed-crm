@@ -56,10 +56,21 @@ const GENERAL_BURST: u32 = 100;
 /// a steady-state of 100 requests per minute after the initial burst.
 const GENERAL_REFILL: Duration = Duration::from_millis(600);
 
+fn limiter_disabled_for_e2e() -> bool {
+    std::env::var("ENABLE_E2E_SUPPORT")
+        .ok()
+        .as_deref()
+        .is_some_and(|value| matches!(value, "1" | "true" | "TRUE" | "yes" | "YES"))
+}
+
 fn build_and_wrap<S>(router: Router<S>, burst: u32, refill: Duration) -> Router<S>
 where
     S: Clone + Send + Sync + 'static,
 {
+    if limiter_disabled_for_e2e() {
+        return router;
+    }
+
     // TODO(aws-alb): when fronted by ALB, swap PeerIpKeyExtractor for
     // SmartIpKeyExtractor and configure the trusted proxy count.
     let config = GovernorConfigBuilder::default()
