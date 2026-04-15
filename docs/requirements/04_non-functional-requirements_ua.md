@@ -1,6 +1,8 @@
 # Нефункціональні вимоги
 
 > Канонічний перелік нефункціональних вимог, узгоджений на основі тих самих джерел, що й функціональний scope (`docs/00_source-of-truth_ua.md`: PDF process map, PDF anamnese, Excel stories/RBAC/KPI) та архітектурних матеріалів. Функціональні user stories див. `docs/requirements/03_product-backlog_ua.md` (синхронізація з Excel: `python scripts/generate_product_backlog_from_excel.py`).
+>
+> **Важливо:** цей файл фіксує цільові вимоги, а не стверджує, що кожен нефункціональний пункт already доведений у runtime. Для current-state verification і regression evidence див. `docs/testing/current-state-gap-audit_ua.md`, `docs/testing/source-workspace-regression-matrix.md` та суміжні testing docs.
 
 ## 1. Призначення документа
 

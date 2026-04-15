@@ -192,6 +192,27 @@
   Covers:
   browser-level document workspace can open the template dialog, pick a patient-bound template, submit generation and surface the new generated version in the staff detail sheet.
 
+- `confirmed_appointment_auto_sends_only_flagged_provider_template_once_to_patient_portal`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:63`
+  `docs/backlog/04_implementation-tasks_ua.md:43`
+  Covers:
+  provider-specific preparation templates flagged for auto-send generate exactly one appointment-bound PDF on `medical appointment -> confirmed`, release it to the patient portal, persist one `appointment_provider_template_deliveries` row and do not duplicate document/share delivery on repeated confirmation.
+
+- `patient manager can create an auto-send provider template and the patient portal receives exactly one preparation document on repeated confirmation`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:63`
+  `docs/backlog/04_implementation-tasks_ua.md:43`
+  Covers:
+  browser-level clinic template editor can create an `auto_send_on_confirmed_appointment` provider template, and repeated appointment confirmation still yields exactly one patient-visible preparation packet in the portal for that template.
+
+- `patient can confirm receipt for an auto-sent provider preparation document`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:63`
+  `docs/backlog/04_implementation-tasks_ua.md:43`
+  Covers:
+  patient portal browser flow can see the auto-sent provider preparation packet after repeated appointment confirmation, surface exactly one receipt card for that generated document and confirm the release without duplicating portal visibility.
+
 - `document_templates_default_to_patient_language_when_omitted`
   Source:
   `docs/requirements/03_product-backlog_ua.md:69`

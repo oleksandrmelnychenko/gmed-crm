@@ -6,7 +6,7 @@
 - `1 (Update 2) User Story Salesforce.xlsx`
 - нормалізованих markdown-артефактів у `docs/requirements/*` і `docs/backlog/*`
 
-Важлива межа: це покриває **реалізований current-state billing layer**, тобто `order_leistungen`, billing handoff, `quotes`, `invoices`, `Mahnwesen`, `concierge_services`, patient-portal invoice visibility і financial document access. Поза цим current-state все ще лишаються окремі фінансові сценарії на кшталт `DATEV`, `E-Rechnung`, real payment-provider checkout, tax/accounting export і частина advanced settlement logic.
+Важлива межа: це покриває **реалізований current-state billing layer**, тобто `order_leistungen`, billing handoff, `quotes`, `invoices`, `Mahnwesen`, `concierge_services`, patient-portal invoice visibility, internal cash-based `accounting_entries` ledger / EÜR export і financial document access. Поза цим current-state все ще лишаються окремі фінансові сценарії на кшталт `DATEV`, `E-Rechnung`, real payment-provider checkout і частина advanced settlement logic.
 
 > **Трасованість:** `03_product-backlog_ua.md` синхронізується з Excel скриптом `generate_product_backlog_from_excel.py`; посилання `:рядок` на цей файл у матриці нижче можуть застаріти — шукайте відповідний **Excel ряд.** у беклозі (EPIC 9) або аудит `user-stories-excel-backlog-audit_ua.md`.
 
@@ -198,6 +198,13 @@
   Covers:
   completed concierge execution creates an explicit billing handoff task.
 
+- `completed_medical_appointment_auto_creates_order_leistung_from_agency_catalog`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:125`
+  `docs/requirements/03_product-backlog_ua.md:126`
+  Covers:
+  completed medical appointments with an order context and active `agency_service_catalog` row for `treatment_organization` auto-create one delivered `Organisation der Behandlung` line in `order_leistungen` without duplicating on repeated completion.
+
 - `concierge_service_update_and_completion_flow_sets_ready_for_billing`
   Source:
   `docs/requirements/03_product-backlog_ua.md:186`
@@ -220,10 +227,31 @@
   Covers:
   billing role can read invoice-like financial documents but is blocked from medical findings.
 
+- `paid_invoice_and_external_invoice_materialize_accounting_ledger_without_duplicates`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:239`
+  `docs/requirements/03_product-backlog_ua.md:244`
+  `docs/requirements/03_product-backlog_ua.md:245`
+  Covers:
+  paid customer invoices materialize internal ledger rows split into `service_revenue` and `cost_passthrough_revenue`, paid external provider invoices materialize `provider_expense`, and repeated payment/status updates do not duplicate cash-ledger entries.
+
+- `ceo_assistant_can_read_accounting_ledger_export_and_sales_cannot`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:14`
+  `docs/backlog/03_kpi-catalog_ua.md:61`
+  Covers:
+  `ceo_assistant` can read and export the internal accounting ledger / EÜR CSV in read-only mode, while `sales` stays denied from both read and export surfaces.
+
+- `invoice_list_returns_page_metadata_and_slices_results`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:245`
+  Covers:
+  billing invoice list now returns explicit `page / per_page / total / total_pages` metadata and slices results server-side, so the finance workspace can show `Page N of M` instead of a blind flat list.
+
 ## Not automated yet
 
 - anti-duplication logic across multiple invoices for one order
-- DATEV export and tax/accounting compliance
+- DATEV export and external tax/accounting compliance handoff
 - automatic attachment of external cost receipts to `Kostenübernahme`
 - final invoice deduction of `Vorkasse / Kostenvoranschlag` payments
 - real payment-provider checkout / settlement confirmation beyond payment-proof handoff

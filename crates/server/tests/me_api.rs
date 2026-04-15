@@ -1,3 +1,5 @@
+mod support;
+
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use serde_json::{Value, json};
@@ -6,33 +8,51 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 use gmed_server::auth::jwt;
-use gmed_server::settings::{SettingsCache, TokenSettings};
-use gmed_server::state::AppState;
-
 const TEST_SECRET: &str = "test-secret-at-least-32-characters-long!!";
 
 async fn test_context() -> Option<(axum::Router, PgPool, Uuid)> {
-    let db_url = match std::env::var("DATABASE_URL") {
-        Ok(url) => url,
-        Err(_) => return None,
-    };
+    let ctx = support::suite_context(TEST_SECRET).await?;
+    Some((ctx.app, ctx.pool, ctx.admin_id))
+}
 
-    let pool = gmed_db::create_pool(&db_url).await.ok()?;
-    gmed_db::run_migrations(&pool).await.ok()?;
+async fn wait_for_patient_audit_action(
+    pool: &PgPool,
+    patient_id: Uuid,
+    action: &str,
+    minimum_count: i64,
+) -> i64 {
+    support::wait_until(
+        &format!("patient audit action '{action}' for {patient_id}"),
+        || async move {
+            let count: i64 = sqlx::query_scalar(
+                r#"SELECT count(*)
+                   FROM audit_log
+                   WHERE entity_type = 'patient'
+                     AND entity_id = $1
+                     AND action = $2"#,
+            )
+            .bind(patient_id)
+            .bind(action)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+            count >= minimum_count
+        },
+    )
+    .await;
 
-    let admin_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE email = $1")
-        .bind("admin@gmed.de")
-        .fetch_one(&pool)
-        .await
-        .ok()?;
-
-    let state = AppState::new(
-        pool.clone(),
-        TEST_SECRET,
-        SettingsCache::new(TokenSettings::default()),
-    );
-
-    Some((gmed_server::build_app(state), pool, admin_id))
+    sqlx::query_scalar(
+        r#"SELECT count(*)
+           FROM audit_log
+           WHERE entity_type = 'patient'
+             AND entity_id = $1
+             AND action = $2"#,
+    )
+    .bind(patient_id)
+    .bind(action)
+    .fetch_one(pool)
+    .await
+    .unwrap()
 }
 
 async fn json_request(
@@ -336,17 +356,8 @@ async fn patient_can_submit_privacy_request_for_self_and_pm_gets_notification() 
     .unwrap();
     assert_eq!(notifications, 1);
 
-    let audit_count: i64 = sqlx::query_scalar(
-        r#"SELECT count(*)
-           FROM audit_log
-           WHERE entity_type = 'patient'
-             AND entity_id = $1
-             AND action = 'privacy_request_created'"#,
-    )
-    .bind(patient_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let audit_count =
+        wait_for_patient_audit_action(&pool, patient_id, "privacy_request_created", 1).await;
     assert_eq!(audit_count, 1);
 }
 
@@ -372,17 +383,8 @@ async fn patient_can_export_own_data_via_me_export() {
     let orders = body["orders"].as_array().expect("orders export array");
     assert!(orders.iter().any(|item| item["id"] == order_id.to_string()));
 
-    let audit_count: i64 = sqlx::query_scalar(
-        r#"SELECT count(*)
-           FROM audit_log
-           WHERE entity_type = 'patient'
-             AND entity_id = $1
-             AND action = 'dsgvo_data_export'"#,
-    )
-    .bind(patient_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let audit_count =
+        wait_for_patient_audit_action(&pool, patient_id, "dsgvo_data_export", 1).await;
     assert!(audit_count >= 1);
 }
 
@@ -407,17 +409,8 @@ async fn patient_can_download_own_data_export_bundle_as_zip() {
         "zip bundle should start with PK signature"
     );
 
-    let audit_count: i64 = sqlx::query_scalar(
-        r#"SELECT count(*)
-           FROM audit_log
-           WHERE entity_type = 'patient'
-             AND entity_id = $1
-             AND action = 'dsgvo_data_export'"#,
-    )
-    .bind(patient_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let audit_count =
+        wait_for_patient_audit_action(&pool, patient_id, "dsgvo_data_export", 1).await;
     assert!(audit_count >= 1);
 }
 
@@ -577,15 +570,17 @@ async fn patient_can_see_required_document_alerts_in_portal_scope() {
 
     seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
 
+    let document_id = Uuid::new_v4();
     sqlx::query(
         r#"INSERT INTO documents (
-                patient_id, auto_name, original_filename, art, category, status, visibility,
-                is_medical, mime_type, file_size, created_by
+                id, patient_id, auto_name, original_filename, art, category, status, visibility,
+                is_medical, mime_type, file_size, version_root_document_id, version_number, uploaded_by
            ) VALUES (
-                $1, 'Passport scan', 'passport.pdf', 'passport', 'identity', 'active', 'internal',
-                false, 'application/pdf', 1024, $2
+                $1, $2, 'Passport scan', 'passport.pdf', 'passport', 'identity', 'active', 'internal',
+                false, 'application/pdf', 1024, $1, 1, $3
            )"#,
     )
+    .bind(document_id)
     .bind(patient_id)
     .bind(admin_id)
     .execute(&pool)

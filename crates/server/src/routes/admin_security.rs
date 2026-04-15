@@ -6,6 +6,7 @@ use axum::{
     routing::{get, post},
 };
 use serde::Deserialize;
+use sqlx::Row;
 use uuid::Uuid;
 
 use crate::audit;
@@ -25,6 +26,7 @@ pub fn router() -> Router<AppState> {
         .route("/admin/maintenance", post(toggle_maintenance))
         .route("/admin/health", get(system_health))
         .route("/admin/login-geo", get(login_geo_history))
+        .route("/admin/audit-analytics", get(audit_analytics))
 }
 
 async fn list_ips(
@@ -360,6 +362,190 @@ async fn login_geo_history(
             err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
         }
     }
+}
+
+async fn audit_analytics(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::ItAdmin]) {
+        return e;
+    }
+
+    let summary = match sqlx::query(
+        r#"SELECT
+                count(*) FILTER (
+                    WHERE action = 'login_failure'
+                      AND created_at >= now() - interval '24 hours'
+                ) AS failed_logins_24h,
+                count(*) FILTER (
+                    WHERE action = 'login_blocked'
+                      AND created_at >= now() - interval '24 hours'
+                ) AS blocked_logins_24h,
+                count(*) FILTER (
+                    WHERE action = 'refresh_token_theft'
+                      AND created_at >= now() - interval '30 days'
+                ) AS token_theft_30d,
+                count(*) FILTER (
+                    WHERE created_at >= now() - interval '7 days'
+                      AND COALESCE(context->>'is_ceo_access', 'false') = 'true'
+                ) AS executive_sensitive_access_7d,
+                count(*) FILTER (
+                    WHERE created_at >= now() - interval '7 days'
+                      AND entity_type IN ('patient', 'document', 'message_conversation', 'message_attachment')
+                      AND action <> 'http_request'
+                      AND (
+                            EXTRACT(HOUR FROM created_at AT TIME ZONE 'UTC') >= 22
+                         OR EXTRACT(HOUR FROM created_at AT TIME ZONE 'UTC') < 6
+                      )
+                ) AS off_hours_sensitive_access_7d
+           FROM audit_log"#,
+    )
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(row) => serde_json::json!({
+            "failed_logins_24h": row.try_get::<i64, _>("failed_logins_24h").unwrap_or(0),
+            "blocked_logins_24h": row.try_get::<i64, _>("blocked_logins_24h").unwrap_or(0),
+            "token_theft_30d": row.try_get::<i64, _>("token_theft_30d").unwrap_or(0),
+            "executive_sensitive_access_7d": row.try_get::<i64, _>("executive_sensitive_access_7d").unwrap_or(0),
+            "off_hours_sensitive_access_7d": row.try_get::<i64, _>("off_hours_sensitive_access_7d").unwrap_or(0),
+        }),
+        Err(e) => {
+            tracing::error!(error = %e, "load audit analytics summary");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load audit analytics",
+            );
+        }
+    };
+
+    let recent_events = match sqlx::query(
+        r#"SELECT al.id, al.user_id, al.action, al.entity_type, al.entity_id, al.context,
+                  al.ip_address, al.created_at,
+                  u.name AS user_name, u.role AS user_role
+           FROM audit_log al
+           LEFT JOIN users u ON u.id = al.user_id
+           WHERE al.action IN ('login_failure', 'login_blocked', 'refresh_token_theft', 'refresh_family_revoked')
+              OR COALESCE(al.context->>'is_ceo_access', 'false') = 'true'
+              OR (
+                    al.entity_type IN ('patient', 'document', 'message_conversation', 'message_attachment')
+                AND al.action <> 'http_request'
+                AND (
+                        EXTRACT(HOUR FROM al.created_at AT TIME ZONE 'UTC') >= 22
+                     OR EXTRACT(HOUR FROM al.created_at AT TIME ZONE 'UTC') < 6
+                )
+              )
+           ORDER BY al.created_at DESC
+           LIMIT 25"#,
+    )
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows
+            .into_iter()
+            .map(|row| {
+                let action = row.try_get::<String, _>("action").unwrap_or_default();
+                let context = row
+                    .try_get::<Option<serde_json::Value>, _>("context")
+                    .unwrap_or_default()
+                    .unwrap_or_else(|| serde_json::json!({}));
+                let reason = if action == "refresh_token_theft" {
+                    "Refresh token theft detected"
+                } else if action == "login_blocked" {
+                    "Blocked login attempt"
+                } else if action == "login_failure" {
+                    "Failed login attempt"
+                } else if action == "refresh_family_revoked" {
+                    "Refresh attempted on revoked session family"
+                } else if context
+                    .get("is_ceo_access")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false)
+                {
+                    "Executive access to sensitive communication surface"
+                } else {
+                    "Off-hours sensitive read"
+                };
+
+                serde_json::json!({
+                    "id": row.try_get::<i64, _>("id").unwrap_or_default(),
+                    "user_id": row.try_get::<Option<Uuid>, _>("user_id").unwrap_or_default(),
+                    "user_name": row.try_get::<Option<String>, _>("user_name").unwrap_or_default(),
+                    "user_role": row.try_get::<Option<String>, _>("user_role").unwrap_or_default(),
+                    "action": action,
+                    "entity_type": row.try_get::<String, _>("entity_type").unwrap_or_default(),
+                    "entity_id": row.try_get::<Option<Uuid>, _>("entity_id").unwrap_or_default(),
+                    "reason": reason,
+                    "route": context.get("route").and_then(serde_json::Value::as_str),
+                    "status": context.get("status").and_then(serde_json::Value::as_i64),
+                    "ip_hash": row.try_get::<Option<String>, _>("ip_address").unwrap_or_default(),
+                    "created_at": row
+                        .try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
+                        .map(|value| value.to_rfc3339())
+                        .unwrap_or_default(),
+                    "context": context,
+                })
+            })
+            .collect::<Vec<_>>(),
+        Err(e) => {
+            tracing::error!(error = %e, "load audit analytics suspicious events");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load audit analytics",
+            );
+        }
+    };
+
+    let top_sensitive_readers = match sqlx::query(
+        r#"SELECT al.user_id, u.name AS user_name, u.role AS user_role,
+                  count(*) AS event_count,
+                  count(DISTINCT al.entity_id) AS distinct_entities
+           FROM audit_log al
+           JOIN users u ON u.id = al.user_id
+           WHERE al.user_id IS NOT NULL
+             AND al.created_at >= now() - interval '24 hours'
+             AND (
+                    COALESCE(al.context->>'is_ceo_access', 'false') = 'true'
+                 OR (
+                        al.entity_type IN ('patient', 'document', 'message_conversation', 'message_attachment')
+                    AND al.action <> 'http_request'
+                 )
+             )
+           GROUP BY al.user_id, u.name, u.role
+           ORDER BY event_count DESC, distinct_entities DESC, u.name
+           LIMIT 10"#,
+    )
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows
+            .into_iter()
+            .map(|row| {
+                serde_json::json!({
+                    "user_id": row.try_get::<Uuid, _>("user_id").unwrap_or_default(),
+                    "user_name": row.try_get::<String, _>("user_name").unwrap_or_default(),
+                    "user_role": row.try_get::<String, _>("user_role").unwrap_or_default(),
+                    "event_count": row.try_get::<i64, _>("event_count").unwrap_or(0),
+                    "distinct_entities": row.try_get::<i64, _>("distinct_entities").unwrap_or(0),
+                })
+            })
+            .collect::<Vec<_>>(),
+        Err(e) => {
+            tracing::error!(error = %e, "load audit analytics top readers");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load audit analytics",
+            );
+        }
+    };
+
+    Json(serde_json::json!({
+        "summary": summary,
+        "recent_suspicious_events": recent_events,
+        "top_sensitive_readers": top_sensitive_readers,
+    }))
+    .into_response()
 }
 
 fn err(status: StatusCode, message: &str) -> axum::response::Response {

@@ -1693,10 +1693,10 @@ async fn load_billing_kpis(state: &AppState) -> Result<Value, sqlx::Error> {
                     ),
                     0
                 ) AS outstanding_receivables_total,
-                dm.delivered_gross,
-                dm.cost_passthrough_gross,
-                ipm.self_pay_gross,
-                ipm.invoice_gross_total
+                MAX(dm.delivered_gross) AS delivered_gross,
+                MAX(dm.cost_passthrough_gross) AS cost_passthrough_gross,
+                MAX(ipm.self_pay_gross) AS self_pay_gross,
+                MAX(ipm.invoice_gross_total) AS invoice_gross_total
            FROM invoice_scope i
            LEFT JOIN service_anchor sa ON sa.invoice_id = i.id
            CROSS JOIN delivered_mix dm

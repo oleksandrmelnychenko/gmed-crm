@@ -35,6 +35,41 @@ interface GeoLogin {
   is_revoked: boolean;
 }
 
+interface AuditAnalyticsSummary {
+  failed_logins_24h: number;
+  blocked_logins_24h: number;
+  token_theft_30d: number;
+  executive_sensitive_access_7d: number;
+  off_hours_sensitive_access_7d: number;
+}
+
+interface AuditAnalyticsEvent {
+  id: number;
+  user_name: string | null;
+  user_role: string | null;
+  action: string;
+  entity_type: string;
+  reason: string;
+  route: string | null;
+  status: number | null;
+  ip_hash: string | null;
+  created_at: string;
+}
+
+interface AuditAnalyticsReader {
+  user_id: string;
+  user_name: string;
+  user_role: string;
+  event_count: number;
+  distinct_entities: number;
+}
+
+interface AuditAnalyticsPayload {
+  summary: AuditAnalyticsSummary;
+  recent_suspicious_events: AuditAnalyticsEvent[];
+  top_sensitive_readers: AuditAnalyticsReader[];
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -57,6 +92,8 @@ export function AdminSecurityPage() {
 
   const [ips, setIps] = useState<IpEntry[]>([]);
   const [geo, setGeo] = useState<GeoLogin[]>([]);
+  const [auditAnalytics, setAuditAnalytics] =
+    useState<AuditAnalyticsPayload | null>(null);
   const [loading, setLoading] = useState(true);
 
   // Add IP form
@@ -70,13 +107,15 @@ export function AdminSecurityPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [ipList, geoList, settings] = await Promise.all([
+      const [ipList, geoList, analyticsPayload, settings] = await Promise.all([
         apiFetch<IpEntry[]>("/admin/ip-whitelist"),
         apiFetch<GeoLogin[]>("/admin/login-geo"),
+        apiFetch<AuditAnalyticsPayload>("/admin/audit-analytics").catch(() => null),
         apiFetch<{ key: string; value: string }[]>("/admin/settings"),
       ]);
       setIps(ipList);
       setGeo(geoList);
+      setAuditAnalytics(analyticsPayload);
 
       for (const s of settings) {
         if (s.key === "maintenance_mode") {
@@ -174,6 +213,143 @@ export function AdminSecurityPage() {
                 {t.security_maintenance} ON
               </Badge>
             )}
+          </div>
+
+          {/* Audit analytics */}
+          <div className="space-y-4">
+            <div className="bg-white rounded-xl border p-4">
+              <h2 className="text-lg font-medium">{t.security_audit_analytics}</h2>
+              <p className="text-muted-foreground mt-1 text-sm">
+                Failed logins, executive-sensitive access and off-hours reads from the append-only
+                audit trail.
+              </p>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+              <div className="bg-white rounded-xl border p-4">
+                <div className="text-muted-foreground text-xs">{t.security_audit_failed_logins}</div>
+                <div className="mt-2 text-2xl font-semibold">
+                  {auditAnalytics?.summary.failed_logins_24h ?? 0}
+                </div>
+              </div>
+              <div className="bg-white rounded-xl border p-4">
+                <div className="text-muted-foreground text-xs">{t.security_audit_blocked_logins}</div>
+                <div className="mt-2 text-2xl font-semibold">
+                  {auditAnalytics?.summary.blocked_logins_24h ?? 0}
+                </div>
+              </div>
+              <div className="bg-white rounded-xl border p-4">
+                <div className="text-muted-foreground text-xs">{t.security_audit_token_theft}</div>
+                <div className="mt-2 text-2xl font-semibold">
+                  {auditAnalytics?.summary.token_theft_30d ?? 0}
+                </div>
+              </div>
+              <div className="bg-white rounded-xl border p-4">
+                <div className="text-muted-foreground text-xs">{t.security_audit_executive_access}</div>
+                <div className="mt-2 text-2xl font-semibold">
+                  {auditAnalytics?.summary.executive_sensitive_access_7d ?? 0}
+                </div>
+              </div>
+              <div className="bg-white rounded-xl border p-4">
+                <div className="text-muted-foreground text-xs">{t.security_audit_off_hours}</div>
+                <div className="mt-2 text-2xl font-semibold">
+                  {auditAnalytics?.summary.off_hours_sensitive_access_7d ?? 0}
+                </div>
+              </div>
+            </div>
+
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(0,0.9fr)]">
+              <div className="bg-white rounded-xl border">
+                <div className="p-4 border-b">
+                  <h2 className="text-lg font-medium">
+                    {t.security_audit_recent} ({auditAnalytics?.recent_suspicious_events.length ?? 0})
+                  </h2>
+                </div>
+                {auditAnalytics?.recent_suspicious_events.length ? (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>{t.activity_time}</TableHead>
+                        <TableHead>{t.activity_user}</TableHead>
+                        <TableHead>Reason</TableHead>
+                        <TableHead>Route</TableHead>
+                        <TableHead>{t.common_ip}</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {auditAnalytics.recent_suspicious_events.map((event) => (
+                        <TableRow key={event.id}>
+                          <TableCell className="font-mono text-muted-foreground text-xs whitespace-nowrap">
+                            {compactDt(event.created_at)}
+                          </TableCell>
+                          <TableCell>
+                            <div className="text-sm font-medium leading-tight">
+                              {event.user_name ?? "Anonymous"}
+                            </div>
+                            <div className="text-muted-foreground text-[11px]">
+                              {event.user_role ?? event.action}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="text-sm">{event.reason}</div>
+                            <div className="text-muted-foreground text-[11px]">
+                              {event.entity_type} · {event.action}
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-muted-foreground max-w-[240px] truncate text-xs">
+                            {event.route ?? "—"}
+                          </TableCell>
+                          <TableCell className="font-mono text-xs">
+                            {event.ip_hash ?? "—"}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                ) : (
+                  <p className="text-muted-foreground py-8 text-center text-sm">
+                    No suspicious audit patterns detected.
+                  </p>
+                )}
+              </div>
+
+              <div className="bg-white rounded-xl border">
+                <div className="p-4 border-b">
+                  <h2 className="text-lg font-medium">{t.security_audit_top_readers}</h2>
+                </div>
+                {auditAnalytics?.top_sensitive_readers.length ? (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>{t.activity_user}</TableHead>
+                        <TableHead>Events</TableHead>
+                        <TableHead>Distinct entities</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {auditAnalytics.top_sensitive_readers.map((reader) => (
+                        <TableRow key={reader.user_id}>
+                          <TableCell>
+                            <div className="text-sm font-medium leading-tight">
+                              {reader.user_name}
+                            </div>
+                            <div className="text-muted-foreground text-[11px]">
+                              {reader.user_role}
+                            </div>
+                          </TableCell>
+                          <TableCell>{reader.event_count}</TableCell>
+                          <TableCell>{reader.distinct_entities}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                ) : (
+                  <p className="text-muted-foreground py-8 text-center text-sm">
+                    No outlier readers in the last 24 hours.
+                  </p>
+                )}
+              </div>
+            </div>
           </div>
 
           {/* IP whitelist */}

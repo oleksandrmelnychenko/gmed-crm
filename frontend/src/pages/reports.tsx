@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState, type ElementType } from "react";
-import { Link } from "react-router-dom";
 import {
   Activity,
   BarChart3,
@@ -13,6 +12,7 @@ import {
   Wallet,
 } from "lucide-react";
 
+import { StaffLink } from "@/components/staff-link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { apiFetch, getAccessToken } from "@/lib/api";
@@ -989,9 +989,9 @@ export function ReportsPage() {
                             >
                               {selectedClinicId === item.provider_id ? "Clear drill-down" : "Drill into doctors"}
                             </Button>
-                            <Link to={`/providers?provider=${item.provider_id}`}>
+                            <StaffLink to={`/providers?provider=${item.provider_id}`}>
                               <Button variant="outline" size="sm">Open provider</Button>
-                            </Link>
+                            </StaffLink>
                           </div>
                         </article>
                       ))
@@ -1165,9 +1165,9 @@ export function ReportsPage() {
                             </div>
                           </div>
                           <div className="mt-4 flex flex-wrap gap-2">
-                            <Link to={`/providers?provider=${item.provider_id}`}>
+                            <StaffLink to={`/providers?provider=${item.provider_id}`}>
                               <Button variant="outline" size="sm">Open provider</Button>
-                            </Link>
+                            </StaffLink>
                           </div>
                         </article>
                       ))
@@ -1369,9 +1369,9 @@ export function ReportsPage() {
                             </div>
                           ) : null}
                           <div className="mt-4 flex flex-wrap gap-2">
-                            <Link to={`/providers?provider=${item.provider_id}`}>
+                            <StaffLink to={`/providers?provider=${item.provider_id}`}>
                               <Button variant="outline" size="sm">Open provider</Button>
-                            </Link>
+                            </StaffLink>
                           </div>
                         </article>
                       ))

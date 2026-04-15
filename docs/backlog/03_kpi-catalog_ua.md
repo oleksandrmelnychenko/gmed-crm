@@ -1,6 +1,8 @@
 # KPI Catalog (UA)
 
 > **Джерело правди:** аркуш `KPIs` у `docs/1 (Update 2) User Story Salesforce.xlsx`. При розбіжності пріоритет має Excel. Ієрархія джерел: `docs/00_source-of-truth_ua.md`.
+>
+> **Важливо:** це catalog вимірювань і звітних очікувань, а не обіцянка, що кожен KPI already винесений у dashboard/runtime. Поточну реалізацію звітів і analytics треба звіряти з `docs/testing/current-state-gap-audit_ua.md` та regression matrices.
 
 ## Відповідність аркушу KPIs
 

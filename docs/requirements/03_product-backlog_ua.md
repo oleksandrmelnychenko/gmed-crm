@@ -1,6 +1,8 @@
 # Функціональний scope за епіками
 
 > **Джерело правди:** аркуш `User Stories` у `docs/1 (Update 2) User Story Salesforce.xlsx` (EPIC, Rolle, User Story, Beschreibung, Security/Compliance, Priority). Кожен пункт нижче відповідає **одному рядку** цього аркуша (номер рядка вказано). Колонки *User Story* та *Beschreibung* наведені **німецькою** як у джерелі (трасованість). Повний український переклад кожного абзацу можна додати підпунктом *UA* після узгодження з клієнтом. Ієрархія джерел: `docs/00_source-of-truth_ua.md`.
+>
+> **Важливо:** це канонічний **scope-документ**, а не live-status зріз реалізації. Навіть якщо конкретний user story already реалізований у коді, він лишається тут як вимога. Поточний verified current-state див. у `docs/testing/current-state-gap-audit_ua.md` і `docs/testing/full-docs-backlog-reconciliation_ua.md`.
 
 <!--
   Порядковий аудит Excel ↔ цей файл: docs/testing/user-stories-excel-backlog-audit_ua.md

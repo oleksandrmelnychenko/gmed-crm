@@ -1,5 +1,4 @@
 import { startTransition, useEffect, useMemo, useState, type ElementType } from "react";
-import { Link, useNavigate } from "react-router-dom";
 import {
   ArrowRight,
   Bell,
@@ -14,6 +13,7 @@ import {
   Users,
 } from "lucide-react";
 
+import { StaffLink } from "@/components/staff-link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { apiFetch } from "@/lib/api";
@@ -21,6 +21,7 @@ import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { PatientDashboardPage } from "@/pages/patient-dashboard";
 import { npsBandLabel, type PortalFeedbackSummary } from "@/pages/patient-portal.shared";
+import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
 
 type OverviewStats = { patients: number; leads: number; orders: number; appointments: number; cases: number; users: number };
@@ -301,7 +302,7 @@ function StaffDashboardPage() {
   const { user } = useAuth();
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
-  const navigate = useNavigate();
+  const { staffGo, canStaffPath } = useStaffNavigate();
   const role = user?.role ?? "";
   const executive = role === "ceo" || role === "ceo_assistant";
 
@@ -413,9 +414,9 @@ function StaffDashboardPage() {
             { label: t.dash_total_appointments, value: overview.appointments, href: "/appointments", icon: CalendarDays, tone: "bg-emerald-100 text-emerald-700" },
             { label: t.cases_title, value: overview.cases, href: "/cases", icon: BriefcaseMedical, tone: "bg-slate-100 text-slate-700" },
             { label: t.users_title, value: overview.users, href: "/admin/users", icon: Building2, tone: "bg-slate-100 text-slate-700" },
-          ]
+          ].filter((item) => canStaffPath(item.href))
         : [],
-    [overview, t]
+    [canStaffPath, overview, t]
   );
   const executiveMetrics = useMemo(
     () =>
@@ -538,12 +539,12 @@ function StaffDashboardPage() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Link to="/appointments">
+            <StaffLink to="/appointments">
               <Button variant="outline" className="border-white/15 bg-white/8 text-white hover:bg-white/12 hover:text-white">Open calendar</Button>
-            </Link>
-            <Link to="/patients">
+            </StaffLink>
+            <StaffLink to="/patients">
               <Button variant="outline" className="border-white/15 bg-white/8 text-white hover:bg-white/12 hover:text-white">Patients</Button>
-            </Link>
+            </StaffLink>
             <Button variant="outline" className="border-white/15 bg-white/8 text-white hover:bg-white/12 hover:text-white" onClick={() => setVersion((value) => value + 1)}>
               <RefreshCw className={cn("mr-2 size-4", refreshing && "animate-spin")} />
               Refresh
@@ -555,13 +556,13 @@ function StaffDashboardPage() {
       {metrics.length > 0 ? (
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
           {metrics.map((item) => (
-            <Link key={item.label} to={item.href} className="rounded-[1.5rem] border border-white/90 bg-white/88 p-4 shadow-sm backdrop-blur transition-transform duration-150 hover:-translate-y-0.5">
+            <StaffLink key={item.label} to={item.href} className="rounded-[1.5rem] border border-white/90 bg-white/88 p-4 shadow-sm backdrop-blur transition-transform duration-150 hover:-translate-y-0.5">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">{item.label}</span>
                 <span className={cn("rounded-2xl p-2", item.tone)}><item.icon className="size-4" /></span>
               </div>
               <p className="mt-4 text-3xl font-semibold tracking-tight text-slate-950">{item.value}</p>
-            </Link>
+            </StaffLink>
           ))}
         </section>
       ) : null}
@@ -934,7 +935,7 @@ function StaffDashboardPage() {
                   <button
                     key={`${alert.patient_id}-${alert.severity}`}
                     type="button"
-                    onClick={() => navigate(`/patients/${alert.patient_id}?tab=workflow`)}
+                    onClick={() => staffGo(`/patients/${alert.patient_id}?tab=workflow`)}
                     className="w-full rounded-[1.5rem] border border-slate-200 bg-white px-4 py-4 text-left shadow-sm transition-colors hover:border-sky-200 hover:bg-sky-50/40"
                   >
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -1009,7 +1010,7 @@ function StaffDashboardPage() {
                   <button
                     key={`${alert.order_id}-${alert.severity}`}
                     type="button"
-                    onClick={() => navigate(`/orders?order=${alert.order_id}`)}
+                    onClick={() => staffGo(`/orders?order=${alert.order_id}`)}
                     className="w-full rounded-[1.5rem] border border-slate-200 bg-white px-4 py-4 text-left shadow-sm transition-colors hover:border-amber-200 hover:bg-amber-50/30"
                   >
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -1069,7 +1070,7 @@ function StaffDashboardPage() {
                       <p className="mt-3 text-xs text-slate-500">{dueLabel(task.due_date)}</p>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      {taskHref(task) ? <Button variant="outline" size="sm" onClick={() => navigate(taskHref(task) ?? "/")}>Open</Button> : null}
+                      {taskHref(task) ? <Button variant="outline" size="sm" onClick={() => staffGo(taskHref(task) ?? "/")}>Open</Button> : null}
                       {task.status === "open" ? <Button size="sm" disabled={busyTaskId === task.id} onClick={() => void updateTask(task.id, "in_progress")}>{busyTaskId === task.id ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}Start</Button> : null}
                       {task.status !== "completed" && task.status !== "cancelled" ? <Button variant="outline" size="sm" disabled={busyTaskId === task.id} onClick={() => void updateTask(task.id, "completed")}>{busyTaskId === task.id ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}Complete</Button> : null}
                     </div>
@@ -1122,7 +1123,7 @@ function StaffDashboardPage() {
             <p className="mt-1 text-sm text-slate-500">Nearest slots from the live appointment board.</p>
             <div className="mt-5 space-y-3">
               {upcoming.length > 0 ? upcoming.slice(0, 6).map((item) => (
-                <button key={item.id} type="button" onClick={() => navigate(`/appointments?appointment=${item.id}`)} className="w-full rounded-[1.5rem] border border-slate-200 bg-white px-4 py-4 text-left shadow-sm transition-colors hover:border-sky-200 hover:bg-sky-50/40">
+                <button key={item.id} type="button" onClick={() => staffGo(`/appointments?appointment=${item.id}`)} className="w-full rounded-[1.5rem] border border-slate-200 bg-white px-4 py-4 text-left shadow-sm transition-colors hover:border-sky-200 hover:bg-sky-50/40">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
@@ -1144,7 +1145,7 @@ function StaffDashboardPage() {
             <p className="mt-1 text-sm text-slate-500">Unread workflow signals routed from backend events.</p>
             <div className="mt-5 space-y-3">
               {unread.length > 0 ? unread.map((item) => (
-                <button key={item.id} type="button" onClick={() => navigate(notificationHref(item) ?? "/")} className="w-full rounded-[1.5rem] border border-slate-200 bg-white px-4 py-4 text-left shadow-sm transition-colors hover:border-violet-200 hover:bg-violet-50/40">
+                <button key={item.id} type="button" onClick={() => staffGo(notificationHref(item) ?? "/")} className="w-full rounded-[1.5rem] border border-slate-200 bg-white px-4 py-4 text-left shadow-sm transition-colors hover:border-violet-200 hover:bg-violet-50/40">
                   <div className="flex items-start gap-3">
                     <span className="rounded-2xl border border-violet-200 bg-violet-50 p-2 text-violet-700"><Bell className="size-4" /></span>
                     <div className="min-w-0 flex-1">
@@ -1162,8 +1163,8 @@ function StaffDashboardPage() {
             <h2 className="text-base font-semibold text-slate-950">Quick links</h2>
             <p className="mt-1 text-sm text-slate-500">Jump directly into the highest-value workspaces.</p>
             <div className="mt-5 grid gap-3">
-              <Link to="/patients" className="flex items-center justify-between rounded-[1.5rem] border border-slate-200 bg-white px-4 py-4 shadow-sm transition-colors hover:border-sky-200 hover:bg-sky-50/40"><div className="flex items-center gap-3"><span className="rounded-2xl bg-sky-100 p-2 text-sky-700"><Users className="size-4" /></span><div><p className="text-sm font-semibold text-slate-950">Patient registry</p><p className="text-sm text-slate-500">Profiles, assignments and care context</p></div></div><ArrowRight className="size-4 text-slate-400" /></Link>
-              <Link to="/providers" className="flex items-center justify-between rounded-[1.5rem] border border-slate-200 bg-white px-4 py-4 shadow-sm transition-colors hover:border-emerald-200 hover:bg-emerald-50/40"><div className="flex items-center gap-3"><span className="rounded-2xl bg-emerald-100 p-2 text-emerald-700"><Building2 className="size-4" /></span><div><p className="text-sm font-semibold text-slate-950">Clinic network</p><p className="text-sm text-slate-500">Providers, doctors, services and linked patients</p></div></div><ArrowRight className="size-4 text-slate-400" /></Link>
+              <StaffLink to="/patients" className="flex items-center justify-between rounded-[1.5rem] border border-slate-200 bg-white px-4 py-4 shadow-sm transition-colors hover:border-sky-200 hover:bg-sky-50/40"><div className="flex items-center gap-3"><span className="rounded-2xl bg-sky-100 p-2 text-sky-700"><Users className="size-4" /></span><div><p className="text-sm font-semibold text-slate-950">Patient registry</p><p className="text-sm text-slate-500">Profiles, assignments and care context</p></div></div><ArrowRight className="size-4 text-slate-400" /></StaffLink>
+              <StaffLink to="/providers" className="flex items-center justify-between rounded-[1.5rem] border border-slate-200 bg-white px-4 py-4 shadow-sm transition-colors hover:border-emerald-200 hover:bg-emerald-50/40"><div className="flex items-center gap-3"><span className="rounded-2xl bg-emerald-100 p-2 text-emerald-700"><Building2 className="size-4" /></span><div><p className="text-sm font-semibold text-slate-950">Clinic network</p><p className="text-sm text-slate-500">Providers, doctors, services and linked patients</p></div></div><ArrowRight className="size-4 text-slate-400" /></StaffLink>
             </div>
           </div>
         </div>

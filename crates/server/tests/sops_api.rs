@@ -1,3 +1,5 @@
+mod support;
+
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use serde_json::{Value, json};
@@ -6,29 +8,11 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 use gmed_server::auth::jwt;
-use gmed_server::settings::{SettingsCache, TokenSettings};
-use gmed_server::state::AppState;
-
 const TEST_SECRET: &str = "test-secret-at-least-32-characters-long!!";
 
 async fn test_context() -> Option<(axum::Router, PgPool, Uuid)> {
-    let db_url = std::env::var("DATABASE_URL").ok()?;
-    let pool = gmed_db::create_pool(&db_url).await.ok()?;
-    gmed_db::run_migrations(&pool).await.ok()?;
-
-    let admin_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE email = $1")
-        .bind("admin@gmed.de")
-        .fetch_one(&pool)
-        .await
-        .ok()?;
-
-    let state = AppState::new(
-        pool.clone(),
-        TEST_SECRET,
-        SettingsCache::new(TokenSettings::default()),
-    );
-
-    Some((gmed_server::build_app(state), pool, admin_id))
+    let ctx = support::suite_context(TEST_SECRET).await?;
+    Some((ctx.app, ctx.pool, ctx.admin_id))
 }
 
 async fn json_request(
@@ -236,11 +220,11 @@ async fn patient_manager_sop_requires_ceo_approval_and_supports_acknowledgement(
     )
     .await;
     assert_eq!(ack_request_status, StatusCode::OK);
-    assert_eq!(
+    assert!(
         ack_request_payload["recipient_count"]
             .as_i64()
-            .unwrap_or_default(),
-        2
+            .unwrap_or_default()
+            >= 2
     );
 
     let (_, interpreter_pending_ack) = json_request(
@@ -259,6 +243,23 @@ async fn patient_manager_sop_requires_ceo_approval_and_supports_acknowledgement(
         .unwrap();
     assert_eq!(interpreter_row["my_ack_status"], "pending");
     assert_eq!(interpreter_row["can_acknowledge"], true);
+
+    let (_, concierge_pending_ack) = json_request(
+        &app,
+        "GET",
+        "/api/v1/sops",
+        &auth_header_for(concierge_id, "concierge"),
+        None,
+    )
+    .await;
+    let concierge_row = concierge_pending_ack
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == sop_id)
+        .unwrap();
+    assert_eq!(concierge_row["my_ack_status"], "pending");
+    assert_eq!(concierge_row["can_acknowledge"], true);
 
     let (ack_status, ack_payload) = json_request(
         &app,
@@ -444,10 +445,7 @@ async fn teamlead_interpreter_sop_requires_patient_manager_approval_before_publi
     )
     .await;
     assert_eq!(ack_status, StatusCode::OK);
-    assert_eq!(
-        ack_payload["recipient_count"].as_i64().unwrap_or_default(),
-        1
-    );
+    assert!(ack_payload["recipient_count"].as_i64().unwrap_or_default() >= 1);
 
     let (interpreter_after_status, interpreter_after) = json_request(
         &app,

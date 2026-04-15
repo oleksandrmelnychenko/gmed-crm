@@ -54,6 +54,18 @@
   Covers:
   executive analytics endpoint stays limited to `ceo` and `ceo_assistant` instead of leaking the full cross-workspace read model to patient managers.
 
+- `audit_analytics_requires_it_admin`
+  Source:
+  `docs/requirements/04_non-functional-requirements_ua.md:119`
+  Covers:
+  suspicious-access analytics under `/admin/audit-analytics` stay limited to `it_admin` and do not leak audit-derived security signals to operational roles.
+
+- `audit_analytics_surfaces_summary_recent_events_and_top_readers`
+  Source:
+  `docs/requirements/04_non-functional-requirements_ua.md:119`
+  Covers:
+  admin security analytics aggregate failed/blocked login signals, token-theft alerts, executive-sensitive access, off-hours sensitive reads, recent suspicious events and top sensitive readers from the append-only `audit_log`.
+
 - `ceo_can_open_risk_analysis_workspace`
   Source:
   `docs/backlog/02_rbac-matrix_ua.md:15`
@@ -208,6 +220,19 @@
   Covers:
   `sales` and `concierge` remain outside the commercial workspace entirely: contracts/quotes list routes and the patient-profile contract tab reject them instead of leaking patient-bound financial state.
 
+- `agency_service_catalog_supports_create_read_only_visibility_and_update`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:126`
+  Covers:
+  the contracts workspace now has a separate agency-level pricing catalog with stable service keys, VAT and validity windows; `ceo` can create entries, `ceo_assistant` stays read-only, and `billing` can maintain downstream billing-ready pricing rows such as `interpreter_hours`.
+
+- `sales_and_concierge_cannot_access_agency_service_catalog`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:12`
+  `docs/backlog/02_rbac-matrix_ua.md:18`
+  Covers:
+  agency-internal pricing catalog does not leak into non-commercial/non-finance roles: `sales` and `concierge` stay blocked from both list and mutation routes.
+
 ### Invoices and dunning
 
 - `ceo_assistant_can_read_but_cannot_mutate_invoice_workspace`
@@ -223,6 +248,35 @@
   `docs/backlog/02_rbac-matrix_ua.md:14`
   Covers:
   `sales` and `concierge` stay outside patient-bound finance surfaces: invoice workspace routes and nested patient invoice list reject them instead of exposing billing state.
+
+- `external_invoices_round_trip_through_order_detail_and_status_update`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:88`
+  `docs/backlog/04_implementation-tasks_ua.md:154`
+  Covers:
+  order-bound external invoices can be registered with provider link, number, amount split, due date and notes, are visible inside order detail for billing/PM, and can move through the explicit status lifecycle up to `paid`.
+
+- `external_invoice_deadline_scheduler_marks_overdue_and_notifies_billing`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:93`
+  `docs/backlog/04_implementation-tasks_ua.md:154`
+  Covers:
+  overdue inbound external invoices are auto-marked as `overdue` once the due date passes and create billing notifications without duplicate alerts on the next scheduler sweep.
+
+- `paid_invoice_and_external_invoice_materialize_accounting_ledger_without_duplicates`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:239`
+  `docs/requirements/03_product-backlog_ua.md:244`
+  `docs/requirements/03_product-backlog_ua.md:245`
+  Covers:
+  internal cash-based accounting ledger materializes `service_revenue`, `cost_passthrough_revenue` and `provider_expense` entries from paid customer invoices and paid external provider invoices, while repeated status updates do not duplicate ledger rows.
+
+- `ceo_assistant_can_read_accounting_ledger_export_and_sales_cannot`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:14`
+  `docs/backlog/03_kpi-catalog_ua.md:61`
+  Covers:
+  `ceo_assistant` can open and export the internal EÜR/accounting ledger in read-only mode together with billing, while `sales` stays denied from the ledger read/export surfaces.
 
 - `ceo_assistant_patient_profile_shell_hides_operational_tabs`
   Source:
@@ -264,6 +318,30 @@
   Covers:
   provider card and doctor card expose legal/tax registry fields, doctor languages/licensing, linked patients and the full interaction chain from appointments, order services and provider-scoped concierge operations.
 
+- `patient_manager_can_store_and_update_provider_templates_via_provider_detail`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:63`
+  Covers:
+  provider detail exposes clinic-level template CRUD backed by `provider_templates`, so patient managers can store and update partner-specific document templates instead of relying on static built-ins only.
+
+- `documents_catalog_includes_provider_templates_and_generation_uses_provider_context`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:63`
+  Covers:
+  `/documents/templates` now includes provider-scoped templates with `template_kind=provider`, and template generation uses the selected provider/doctor context when rendering the resulting document payload.
+
+- `confirmed_appointment_auto_sends_only_flagged_provider_template_once_to_patient_portal`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:63`
+  Covers:
+  only provider templates flagged with `auto_send_on_confirmed_appointment` auto-generate a preparation PDF when a medical appointment is confirmed, release it to the patient portal with confirmation tracking, materialize one `appointment_provider_template_deliveries` row and dedupe repeated confirms by `appointment+template` while marking `order_planning_preparation.preparation_documents_status=sent`.
+
+- `patient can confirm receipt for an auto-sent provider preparation document`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:63`
+  Covers:
+  patient-side browser path can open the portal documents workspace after provider auto-send, see exactly one generated preparation packet for the appointment/template pair and confirm receipt through the standard portal release flow.
+
 - `patients_list_supports_provider_and_doctor_filters_across_appointments_and_orders`
   Source:
   `docs/requirements/03_product-backlog_ua.md:33`
@@ -284,6 +362,20 @@
   `docs/requirements/03_product-backlog_ua.md:37`
   Covers:
   case intake exposes a doctor registry list for patient managers, `Overview` can persist a real referring doctor link, and `Operationen` / `Medikamente` can store real `provider_doctors` links (`zuweiser_doctor_id`, `arzt_id`, `verordnender_arzt_id`) while preserving a text fallback label for legacy history.
+
+- `case_text_snippets_support_create_list_update`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:34`
+  `docs/backlog/04_implementation-tasks_ua.md:104`
+  Covers:
+  case workspace exposes a reusable anamnesis text-snippet library with create/list/update lifecycle, active/inactive state and placeholder-ready snippet bodies for narrative authoring.
+
+- `interpreter_cannot_manage_case_text_snippets`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:11`
+  `docs/requirements/03_product-backlog_ua.md:34`
+  Covers:
+  anamnesis text-snippet management stays limited to case-management roles and does not leak create/read access to interpreter users.
 
 - `case_cardiology_subflow_round_trip_works`
   Source:
@@ -349,6 +441,12 @@
   Covers:
   patient timeline aggregates appointments, cases, orders, services, documents, contracts and invoices in descending event order.
 
+- `patient_service_report_aggregates_order_leistungen_and_respects_rbac`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:61`
+  Covers:
+  `/patients/{id}/service-report` returns patient-scoped `order_leistungen` summary plus provider/doctor/order metadata for `ceo / ceo_assistant / patient_manager / billing`, while interpreter roles stay blocked.
+
 - `filterPatientTimelineItems`
   Source:
   `docs/requirements/03_product-backlog_ua.md:17`
@@ -363,6 +461,69 @@
   `docs/diagrams/system-diagrams.md:85`
   Covers:
   patient profile persists structured legal and compliance state for DSGVO, Schweigepflicht, identity verification, document completeness, contract readiness and operational functional labels such as `vip` / `high_risk`.
+
+- `patient_vitals_round_trip_and_clinical_warnings_flow_through_profile`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:15`
+  `docs/requirements/02_anamnese-flow_ua.md:43`
+  Covers:
+  patient profile update flow persists `clinical_warnings`, patient-manager vitals route accepts measured blood pressure / heart rate / weight / height entries with timestamp, auto-computes BMI when height and weight are present, and the vitals history endpoint returns rows newest-first for the same patient shell.
+
+- `billing_cannot_access_patient_vitals_routes`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:11`
+  `docs/backlog/02_rbac-matrix_ua.md:14`
+  Covers:
+  finance roles stay outside the clinical vitals surface: `billing` cannot list or create patient vital measurements even by direct route access.
+
+- `patient_card_entries_round_trip_and_appear_in_timeline`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:17`
+  `docs/requirements/02_anamnese-flow_ua.md:48`
+  Covers:
+  patient-manager can create categorized `patient_card_entries` with entry date, source and free-text content; the list endpoint returns entries newest-first and the same rows appear in the unified patient timeline as `card_entry` events instead of living in a detached side-log.
+
+- `billing_cannot_access_patient_card_entries_routes`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:11`
+  `docs/backlog/02_rbac-matrix_ua.md:14`
+  Covers:
+  finance roles stay outside the clinical card-log surface: `billing` cannot list or create patient card entries even by direct route access.
+
+- `patient_medical_orders_round_trip_status_update_and_timeline`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:17`
+  `docs/requirements/02_anamnese-flow_ua.md:49`
+  Covers:
+  patient-manager can create structured patient medical orders with order type, title, instructions, due date and source, update the lifecycle to `completed`, and see the same order reflected in the unified patient timeline as a `medical_order` event.
+
+- `billing_cannot_access_patient_medical_orders_routes`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:11`
+  `docs/backlog/02_rbac-matrix_ua.md:14`
+  Covers:
+  finance roles stay outside the clinical medical-order surface: `billing` cannot list or create patient medical orders even by direct route access.
+
+- `patient_risk_scores_round_trip_and_timeline`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:17`
+  `docs/requirements/02_anamnese-flow_ua.md:49`
+  Covers:
+  patient-manager can record append-only patient risk scores with score type, numeric value, optional scale, interpretation, source and structured JSON inputs, and the same scores appear in the unified patient timeline as `risk_score` events.
+
+- `billing_cannot_access_patient_risk_scores_routes`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:11`
+  `docs/backlog/02_rbac-matrix_ua.md:14`
+  Covers:
+  finance roles stay outside the clinical risk-scoring surface: `billing` cannot list or create patient risk scores even by direct route access.
+
+- `permanent_medication_expiry_scheduler_creates_confirmation_work_without_duplicates`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:17`
+  `docs/requirements/02_anamnese-flow_ua.md:46`
+  Covers:
+  permanent medication entries can persist `expiry_date`, the medication-expiry scheduler creates exactly one pending confirmation event plus in-app notification after the date passes, and PM/CEO review can confirm that pending expiry without duplicate re-notification on the next scheduler run.
 
 - `patient_document_alerts_report_missing_required_documents`
   Source:
@@ -439,6 +600,13 @@
   `docs/backlog/04_implementation-tasks_ua.md:83`
   Covers:
   patient portal exposes the same required-document evaluator through `/me/document-alerts`, including missing document labels and completion status for the configured minimum document pack.
+
+- `patient dashboard shows required document alerts from the live backend`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:87`
+  `docs/backlog/04_implementation-tasks_ua.md:83`
+  Covers:
+  browser-level patient dashboard renders the live required-document alert card, shows concrete missing document labels such as `Reisepass` and `Einverständniserklärung`, and deep-links the patient into the self-service documents workspace through the same UI path used in production.
 
 - `patient_manager_can_fetch_patient_label_payload`
   Source:
@@ -742,7 +910,7 @@
   `docs/backlog/04_implementation-tasks_ua.md:281`
   `docs/backlog/04_implementation-tasks_ua.md:283`
   Covers:
-  portal appointment request moves through `requested -> approved -> converted`, disappears from the patient-manager requested queue after review, appears in the approved and then converted staff queue slices with review/conversion metadata, and the patient sees both the converted request history row and the scheduled non-internal visit in the portal workspace.
+  portal appointment request moves through `requested -> approved -> converted`, disappears from the patient-manager requested queue after review, appears in the approved and then converted staff queue slices with review/conversion metadata, and the patient sees both the converted request history row and the scheduled non-internal visit in the portal workspace, including `care_path_kind` propagation from request to scheduled visit.
 
 - `rejected_request_stays_in_patient_history_and_never_creates_appointment`
   Source:
@@ -764,6 +932,29 @@
   `docs/backlog/01_mvp-backlog_ua.md:40`
   Covers:
   patient timeline includes compliance audit events such as legal-status updates and DSGVO data exports.
+
+- `patient manager can inspect patient timeline and print the patient sticker`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:15`
+  `docs/requirements/03_product-backlog_ua.md:151`
+  `docs/backlog/04_implementation-tasks_ua.md:24`
+  Covers:
+  browser-level patient profile lets the assigned patient manager verify required-document alerts in the Documents tab, fetch the print-ready patient-label payload from the same authenticated shell context, switch to Timeline, filter by document events and see the released discharge-note history entry.
+
+- `patient manager can manage relations review appointments and complete patient workflow items`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:13`
+  `docs/backlog/04_implementation-tasks_ua.md:21`
+  `docs/backlog/04_implementation-tasks_ua.md:126`
+  Covers:
+  browser-level patient profile lets the patient manager review linked appointments, create a new emergency-contact relation and complete a patient workflow checklist item through the same tabs and forms used in the staff shell.
+
+- `patient manager can create a reusable anamnesis text snippet and insert its rendered content into the narrative`
+  Source:
+  `docs/requirements/02_anamnese-flow_ua.md:82`
+  `docs/backlog/01_mvp-backlog_ua.md:24`
+  Covers:
+  browser-level case workspace lets the patient manager create an active text snippet with placeholders, preview the rendered patient/case values, insert it into the narrative anamnesis field and persist the final rendered overview through the regular case editor.
 
 ### Orders
 
@@ -794,6 +985,19 @@
   `docs/backlog/04_implementation-tasks_ua.md:243`
   Covers:
   appointment list filtering by context fields and calendar date window.
+
+- `medical_appointments_support_care_path_kind_round_trip_and_filtering`
+  Source:
+  `docs/requirements/02_anamnese-flow_ua.md:81`
+  `docs/requirements/03_product-backlog_ua.md:213`
+  Covers:
+  staff appointments support explicit `care_path_kind` values (`preventive / control / followup`) for medical slots, preserve the value in detail/read paths, allow update from one care-path state to another and support list filtering by `care_path_kind`.
+
+- `non_medical_appointments_reject_non_regular_care_path_kind`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:213`
+  Covers:
+  non-medical and internal appointments cannot accept preventive/control/followup care-path semantics; invalid `care_path_kind` combinations are rejected with `422` instead of leaking impossible schedule states into the workspace.
 
 - `appointment_conflicts_endpoint_reports_patient_and_interpreter_overlaps`
   Source:
@@ -878,6 +1082,13 @@
   `docs/backlog/04_implementation-tasks_ua.md:60`
   Covers:
   recurring appointment edit can change the cadence/count of the whole active series, regenerate future dates and append extra occurrences without rebuilding the workflow from scratch.
+
+- `patient_manager_can_reshape_whole_series_without_self_conflict`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:213`
+  `docs/backlog/04_implementation-tasks_ua.md:60`
+  Covers:
+  whole-series recurring reshapes no longer fail on transient same-series overlap states; schedule constraints are deferred inside the batch update so the final series can be rewritten atomically without false patient-conflict errors.
 
 - `patient_manager_can_trim_following_series_via_recurrence_rule`
   Source:
@@ -988,6 +1199,13 @@
   Covers:
   only assigned interpreter may send `accepted / discussion_requested / declined` appointment response.
 
+- `assigned_teamlead_can_update_interpreter_response`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:214`
+  `docs/requirements/03_product-backlog_ua.md:215`
+  Covers:
+  `teamlead_interpreter` can use the same response endpoint when the appointment is explicitly assigned to that teamlead as the interpreter, while unrelated users stay blocked.
+
 ### Operational workflows around visits
 
 - `appointments_report_endpoint_returns_latest_report_state`
@@ -999,6 +1217,59 @@
   `docs/backlog/04_implementation-tasks_ua.md:218`
   Covers:
   latest interpreter report state remains visible after submit and approval.
+
+- `approved_interpreter_report_auto_creates_order_leistung_from_agency_catalog`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:106`
+  Covers:
+  approving an interpreter report with an appointment-bound order and active `agency_service_catalog` entry auto-creates one billing line in `order_leistungen`, links it back through `source_interpreter_report_id`, and exposes the synced billing projection in the report endpoint.
+
+- `interpreter submits a report, the patient manager approves it and the order receives an auto-billed interpreter line`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:106`
+  Covers:
+  browser-level staff flow proves the same path live: create `interpreter_hours` catalog entry, assign interpreter, submit report, approve it, then see the synced billing projection on the appointment and the auto-billed interpreter line in order detail.
+
+- `completed_medical_appointment_auto_creates_order_leistung_from_agency_catalog`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:125`
+  `docs/requirements/03_product-backlog_ua.md:126`
+  Covers:
+  completing an appointment-bound medical visit with an active `agency_service_catalog` entry for `treatment_organization` auto-creates one delivered billing line `Organisation der Behandlung`, links it back through `source_medical_appointment_id`, and dedupes repeated completion calls.
+
+- `completing a medical appointment auto-creates the treatment-organization leistung and shows it in order detail`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:125`
+  `docs/requirements/03_product-backlog_ua.md:126`
+  Covers:
+  browser-level staff flow proves the medical path live: complete the medical appointment in UI, then see the delivered `Organisation der Behandlung` line materialized in order detail.
+
+- `interpreter_report_billing_scheduler_backfills_after_catalog_setup_without_duplicates`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:106`
+  Covers:
+  approved interpreter reports that initially miss the `interpreter_hours` catalog entry stay in `missing_catalog`, then the scheduler backfills exactly one billing line once the catalog row appears, without creating duplicates on later runs.
+
+- `approved_interpreter_report_without_order_exposes_missing_order_billing_projection`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:106`
+  Covers:
+  approved interpreter reports without an appointment-bound order stay in `missing_order` projection state and do not silently create orphan billing lines.
+
+- `cost_passthrough_leistung_auto_links_single_supporting_document`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:249`
+  `docs/requirements/03_product-backlog_ua.md:257`
+  Covers:
+  a cost pass-through order line auto-links the only active receipt/provider-invoice document on the same order, persists `external_document_id`, and surfaces the linked document metadata back through order detail.
+
+- `invoice_detail_includes_supporting_documents_for_cost_passthrough_line_items`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:249`
+  `docs/requirements/03_product-backlog_ua.md:257`
+  `docs/requirements/03_product-backlog_ua.md:509`
+  Covers:
+  quote and invoice materialization preserve the linked supporting document for cost pass-through items, and invoice detail exposes that receipt/provider-invoice back to billing users through `supporting_documents`.
 
 - `attention_endpoint_flags_past_visit_with_unprocessed_follow_up`
   Source:
@@ -1143,18 +1414,25 @@
   `docs/requirements/01_process-mapping_ua.md:48`
   `docs/backlog/04_implementation-tasks_ua.md:142`
   Covers:
-  local DB-backed backend integration keeps `conversion_ready` present on the leads list payload as a real boolean, so the card-level convert gate does not regress into blind POST/422 behavior.
+  suite-provisioned temp-DB backend integration keeps `conversion_ready` present on the leads list payload as a real boolean, so the card-level convert gate does not regress into blind POST/422 behavior.
   Note:
-  this test executes only with live `DATABASE_URL`; under `SQLX_OFFLINE=true` CI the suite compiles but the test body returns early without a database.
+  the suite now provisions and drops its own database when `TEST_DATABASE_ADMIN_URL` or `DATABASE_URL` points at a reachable PostgreSQL server. If a URL is present but provisioning fails, the suite now fails hard instead of silently returning early.
 
 - `list_leads_conversion_ready_is_false_for_converted_lead`
   Source:
   `docs/requirements/01_process-mapping_ua.md:48`
   `docs/backlog/04_implementation-tasks_ua.md:142`
   Covers:
-  local DB-backed backend integration drives a lead through `update -> qualify -> convert` and verifies that the resulting `converted` list row still reports `conversion_ready=false`.
+  suite-provisioned temp-DB backend integration drives a lead through `update -> qualify -> convert` and verifies that the resulting `converted` list row still reports `conversion_ready=false`.
   Note:
-  this test executes only with live `DATABASE_URL`; under `SQLX_OFFLINE=true` CI the suite compiles but the test body returns early without a database.
+  the suite now provisions and drops its own database when `TEST_DATABASE_ADMIN_URL` or `DATABASE_URL` points at a reachable PostgreSQL server. If a URL is present but provisioning fails, the suite now fails hard instead of silently returning early.
+
+- `converted_patient_id_forces_conversion_ready_false`
+  Source:
+  `docs/requirements/01_process-mapping_ua.md:48`
+  `docs/backlog/04_implementation-tasks_ua.md:142`
+  Covers:
+  pure backend unit coverage for the core readiness evaluator keeps `converted_patient_id` as a hard blocking reason for conversion, even when the live DB-backed list integration is skipped.
 
 - `failed_lead_resolution_requires_controlled_flow_and_records_history`
   Source:
@@ -1212,6 +1490,14 @@
   `docs/backlog/04_implementation-tasks_ua.md:141`
   Covers:
   creating a new order for an existing customer is blocked until base data, compliance, identity, required documents and contract readiness all pass the explicit re-check.
+
+- `patient manager sees existing customer re-check blockers in create-order flow`
+  Source:
+  `docs/requirements/01_process-mapping_ua.md:75`
+  `docs/requirements/01_process-mapping_ua.md:80`
+  `docs/backlog/04_implementation-tasks_ua.md:141`
+  Covers:
+  browser-level create-order dialog for an existing customer surfaces the `Existing customer re-check` block, shows missing-required-document blockers and keeps the submit action disabled until the re-check is satisfied.
 
 - `planning_preparation_blocks_execution_until_plan_slots_and_handoffs_are_ready`
   Source:

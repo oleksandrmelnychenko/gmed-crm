@@ -1,3 +1,5 @@
+mod support;
+
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use serde_json::{Value, json};
@@ -7,33 +9,54 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 use gmed_server::auth::jwt;
-use gmed_server::settings::{SettingsCache, TokenSettings};
-use gmed_server::state::AppState;
-
 const TEST_SECRET: &str = "test-secret-at-least-32-characters-long!!";
 
 async fn test_context() -> Option<(axum::Router, PgPool, Uuid)> {
-    let db_url = match std::env::var("DATABASE_URL") {
-        Ok(url) => url,
-        Err(_) => return None,
-    };
+    let ctx = support::suite_context(TEST_SECRET).await?;
+    Some((ctx.app, ctx.pool, ctx.admin_id))
+}
 
-    let pool = gmed_db::create_pool(&db_url).await.ok()?;
-    gmed_db::run_migrations(&pool).await.ok()?;
+async fn wait_for_patient_audit_actions(
+    pool: &PgPool,
+    patient_id: Uuid,
+    expected_count: i64,
+    actions: &[&str],
+) -> i64 {
+    support::wait_until(
+        &format!(
+            "patient audit actions for {patient_id}: {}",
+            actions.join(",")
+        ),
+        || async move {
+            let count: i64 = sqlx::query_scalar(
+                r#"SELECT count(*)
+                   FROM audit_log
+                   WHERE entity_type = 'patient'
+                     AND entity_id = $1
+                     AND action = ANY($2)"#,
+            )
+            .bind(patient_id)
+            .bind(actions)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+            count >= expected_count
+        },
+    )
+    .await;
 
-    let admin_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE email = $1")
-        .bind("admin@gmed.de")
-        .fetch_one(&pool)
-        .await
-        .ok()?;
-
-    let state = AppState::new(
-        pool.clone(),
-        TEST_SECRET,
-        SettingsCache::new(TokenSettings::default()),
-    );
-
-    Some((gmed_server::build_app(state), pool, admin_id))
+    sqlx::query_scalar(
+        r#"SELECT count(*)
+           FROM audit_log
+           WHERE entity_type = 'patient'
+             AND entity_id = $1
+             AND action = ANY($2)"#,
+    )
+    .bind(patient_id)
+    .bind(actions)
+    .fetch_one(pool)
+    .await
+    .unwrap()
 }
 
 async fn json_request(
@@ -156,16 +179,19 @@ async fn seed_document(
     tag: &str,
     visibility: &str,
 ) -> Uuid {
+    let document_id = Uuid::new_v4();
     sqlx::query_scalar(
         r#"INSERT INTO documents (
-                patient_id, auto_name, original_filename, art, category, status, visibility,
-                is_medical, mime_type, file_size, uploaded_by, notes
+                id, patient_id, auto_name, original_filename, art, category, status, visibility,
+                is_medical, mime_type, file_size, version_root_document_id, version_number,
+                uploaded_by, notes
            ) VALUES (
-                $1, $2, $3, 'medical_report', 'report', 'active', $4,
-                true, 'application/pdf', 1024, $5, $6
+                $1, $2, $3, $4, 'medical_report', 'report', 'active', $5,
+                true, 'application/pdf', 1024, $1, 1, $6, $7
            )
            RETURNING id"#,
     )
+    .bind(document_id)
     .bind(patient_id)
     .bind(format!("Document {tag}"))
     .bind(format!("{tag}.pdf"))
@@ -253,17 +279,13 @@ async fn patient_manager_can_manage_patient_consents_and_export_contains_history
             .any(|item| item["granted"] == true && item["expires_at"].is_string())
     );
 
-    let audit_count: i64 = sqlx::query_scalar(
-        r#"SELECT count(*)
-           FROM audit_log
-           WHERE entity_type = 'patient'
-             AND entity_id = $1
-             AND action IN ('consent_granted', 'consent_revoked')"#,
+    let audit_count = wait_for_patient_audit_actions(
+        &pool,
+        patient_id,
+        2,
+        &["consent_granted", "consent_revoked"],
     )
-    .bind(patient_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    .await;
     assert_eq!(audit_count, 2);
 }
 
@@ -628,22 +650,18 @@ async fn patient_manager_erasure_request_can_be_reviewed_and_executed() {
     );
     assert!(!attachment_path.exists());
 
-    let audit_count: i64 = sqlx::query_scalar(
-        r#"SELECT count(*)
-           FROM audit_log
-           WHERE entity_type = 'patient'
-             AND entity_id = $1
-             AND action IN (
-                 'privacy_request_created',
-                 'privacy_request_reviewed',
-                 'privacy_request_executed',
-                 'dsgvo_anonymize'
-             )"#,
+    let audit_count = wait_for_patient_audit_actions(
+        &pool,
+        patient_id,
+        4,
+        &[
+            "privacy_request_created",
+            "privacy_request_reviewed",
+            "privacy_request_executed",
+            "dsgvo_anonymize",
+        ],
     )
-    .bind(patient_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    .await;
     assert_eq!(audit_count, 4);
 }
 
@@ -938,7 +956,11 @@ async fn third_party_revoke_request_can_be_executed_by_patient_manager_and_revok
         None,
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "allowed peers response: {peers_body:?}"
+    );
     let peers = peers_body.as_array().expect("allowed peers");
     assert!(
         peers.iter().any(|item| item["id"] == pm_id.to_string()),
@@ -975,6 +997,22 @@ async fn third_party_revoke_request_can_be_executed_by_patient_manager_and_revok
         "patient-manager chat should stay operational after third_party_revoke execution"
     );
 
+    support::wait_until("third_party_revoke consent_revoked audit", || async {
+        let count: i64 = sqlx::query_scalar(
+            r#"SELECT count(*)
+               FROM audit_log
+               WHERE entity_type = 'patient'
+                 AND entity_id = $1
+                 AND action = 'consent_revoked'
+                 AND context->>'mode' = 'third_party_revoke'"#,
+        )
+        .bind(patient_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        count >= 1
+    })
+    .await;
     let consent_revoke_audits: i64 = sqlx::query_scalar(
         r#"SELECT count(*)
            FROM audit_log
@@ -989,6 +1027,25 @@ async fn third_party_revoke_request_can_be_executed_by_patient_manager_and_revok
     .unwrap();
     assert_eq!(consent_revoke_audits, 1);
 
+    support::wait_until(
+        "third_party_revoke revoke_document_share_bundle audit",
+        || async {
+            let count: i64 = sqlx::query_scalar(
+                r#"SELECT count(*)
+               FROM audit_log
+               WHERE entity_type = 'patient'
+                 AND entity_id = $1
+                 AND action = 'revoke_document_share_bundle'
+                 AND context->>'mode' = 'third_party_revoke'"#,
+            )
+            .bind(patient_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            count >= 1
+        },
+    )
+    .await;
     let document_share_revoke_audits: i64 = sqlx::query_scalar(
         r#"SELECT count(*)
            FROM audit_log

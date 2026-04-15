@@ -1,47 +1,87 @@
 //! Integration tests for the Leads API endpoints.
 //!
-//! These tests require a running PostgreSQL database.
-//! Set DATABASE_URL environment variable before running.
-//! Skipped in CI (SQLX_OFFLINE=true) — run locally with:
-//!   DATABASE_URL=postgres://... cargo test -p gmed-server --test leads_api
+//! These tests provision a temporary PostgreSQL database, run migrations,
+//! execute the suite, and drop the database on teardown.
+
+mod support;
 
 use axum::body::Body;
 use axum::http::Request;
 use axum::http::StatusCode;
 use serde_json::{Value, json};
+use sqlx::PgPool;
 use tower::ServiceExt;
+use uuid::Uuid;
 
 use gmed_server::auth::jwt;
-use gmed_server::settings::{SettingsCache, TokenSettings};
-use gmed_server::state::AppState;
-
 const TEST_SECRET: &str = "test-secret-at-least-32-characters-long!!";
 
-/// Build a test app connected to a real database.
-/// Returns None if DATABASE_URL is not set (CI).
-async fn test_app() -> Option<axum::Router> {
-    let db_url = match std::env::var("DATABASE_URL") {
-        Ok(url) => url,
-        Err(_) => return None,
-    };
-
-    let pool = gmed_db::create_pool(&db_url).await.ok()?;
-    gmed_db::run_migrations(&pool).await.ok()?;
-
-    let settings_cache = SettingsCache::new(TokenSettings::default());
-    let state = AppState::new(pool, TEST_SECRET, settings_cache);
-    Some(gmed_server::build_app(state))
+struct TestApp {
+    suite: support::TestSuiteContext,
+    sales_id: Uuid,
+    patient_manager_id: Uuid,
+    billing_id: Uuid,
+    interpreter_id: Uuid,
+    ceo_id: Uuid,
 }
 
-fn auth_header(role: &str) -> String {
-    let token = jwt::issue_access_token(
-        TEST_SECRET,
-        uuid::Uuid::new_v4(),
-        role,
-        uuid::Uuid::new_v4(),
+impl std::ops::Deref for TestApp {
+    type Target = axum::Router;
+
+    fn deref(&self) -> &Self::Target {
+        &self.suite.app
+    }
+}
+
+impl TestApp {
+    fn router(&self) -> axum::Router {
+        self.suite.app.clone()
+    }
+
+    fn auth_header(&self, role: &str) -> String {
+        let user_id = match role {
+            "sales" => self.sales_id,
+            "patient_manager" => self.patient_manager_id,
+            "billing" => self.billing_id,
+            "interpreter" => self.interpreter_id,
+            "ceo" => self.ceo_id,
+            other => panic!("unexpected test role: {other}"),
+        };
+        let token = jwt::issue_access_token(TEST_SECRET, user_id, role, Uuid::new_v4()).unwrap();
+        format!("Bearer {token}")
+    }
+}
+
+async fn seed_user(pool: &PgPool, tag: &str, role: &str) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO users (email, password_hash, name, role)
+           VALUES ($1, $2, $3, $4)
+           RETURNING id"#,
     )
-    .unwrap();
-    format!("Bearer {token}")
+    .bind(format!("{tag}-{role}@example.com"))
+    .bind("test-password-hash")
+    .bind(format!("{role} {tag}"))
+    .bind(role)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+async fn test_app() -> Option<TestApp> {
+    let suite = support::suite_context(TEST_SECRET).await?;
+    let sales_id = seed_user(&suite.pool, "leads-api", "sales").await;
+    let patient_manager_id = seed_user(&suite.pool, "leads-api", "patient_manager").await;
+    let billing_id = seed_user(&suite.pool, "leads-api", "billing").await;
+    let interpreter_id = seed_user(&suite.pool, "leads-api", "interpreter").await;
+    let ceo_id = seed_user(&suite.pool, "leads-api", "ceo").await;
+    Some(TestApp {
+        suite,
+        sales_id,
+        patient_manager_id,
+        billing_id,
+        interpreter_id,
+        ceo_id,
+    })
 }
 
 async fn json_request(
@@ -73,6 +113,32 @@ async fn json_request(
     (status, value)
 }
 
+async fn make_lead_ready_for_qualification(
+    app: &axum::Router,
+    bearer: &str,
+    lead_id: &str,
+) -> Value {
+    let (status, body) = json_request(
+        app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/update"),
+        bearer,
+        Some(json!({
+            "email": format!("ready-{lead_id}@example.com"),
+            "phone": "+49123456789",
+            "primary_language": "de",
+            "date_of_birth": "1990-01-01",
+            "legal_sex": "female",
+            "compliance_status": "signed",
+            "consent_healthcare": true,
+            "consent_privacy_practices": true
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    body
+}
+
 // ── Auth / RBAC tests ───────────────────────────────────────
 
 #[tokio::test]
@@ -84,7 +150,7 @@ async fn leads_list_requires_auth() {
         .body(Body::empty())
         .unwrap();
 
-    let resp = app.oneshot(req).await.unwrap();
+    let resp = app.router().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 }
 
@@ -96,7 +162,7 @@ async fn leads_list_forbidden_for_interpreter() {
         &app,
         "GET",
         "/api/v1/leads",
-        &auth_header("interpreter"),
+        &app.auth_header("interpreter"),
         None,
     )
     .await;
@@ -107,8 +173,14 @@ async fn leads_list_forbidden_for_interpreter() {
 async fn leads_list_forbidden_for_billing() {
     let Some(app) = test_app().await else { return };
 
-    let (status, _) =
-        json_request(&app, "GET", "/api/v1/leads", &auth_header("billing"), None).await;
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        "/api/v1/leads",
+        &app.auth_header("billing"),
+        None,
+    )
+    .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
@@ -116,8 +188,14 @@ async fn leads_list_forbidden_for_billing() {
 async fn leads_list_ok_for_sales() {
     let Some(app) = test_app().await else { return };
 
-    let (status, body) =
-        json_request(&app, "GET", "/api/v1/leads", &auth_header("sales"), None).await;
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/leads",
+        &app.auth_header("sales"),
+        None,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     assert!(body.is_array());
 }
@@ -130,7 +208,7 @@ async fn leads_list_ok_for_patient_manager() {
         &app,
         "GET",
         "/api/v1/leads",
-        &auth_header("patient_manager"),
+        &app.auth_header("patient_manager"),
         None,
     )
     .await;
@@ -143,7 +221,7 @@ async fn leads_list_ok_for_ceo() {
     let Some(app) = test_app().await else { return };
 
     let (status, body) =
-        json_request(&app, "GET", "/api/v1/leads", &auth_header("ceo"), None).await;
+        json_request(&app, "GET", "/api/v1/leads", &app.auth_header("ceo"), None).await;
     assert_eq!(status, StatusCode::OK);
     assert!(body.is_array());
 }
@@ -158,7 +236,7 @@ async fn create_lead_requires_name() {
         &app,
         "POST",
         "/api/v1/leads",
-        &auth_header("sales"),
+        &app.auth_header("sales"),
         Some(json!({ "first_name": "", "last_name": "" })),
     )
     .await;
@@ -175,7 +253,7 @@ async fn create_and_get_lead() {
         &app,
         "POST",
         "/api/v1/leads",
-        &auth_header("sales"),
+        &app.auth_header("sales"),
         Some(json!({
             "first_name": "Test",
             "last_name": "Lead",
@@ -194,7 +272,7 @@ async fn create_and_get_lead() {
         &app,
         "GET",
         &format!("/api/v1/leads/{lead_id}"),
-        &auth_header("sales"),
+        &app.auth_header("sales"),
         None,
     )
     .await;
@@ -208,24 +286,27 @@ async fn create_and_get_lead() {
 #[tokio::test]
 async fn qualify_lead_flow() {
     let Some(app) = test_app().await else { return };
+    let sales = app.auth_header("sales");
 
     // Create lead
     let (_, body) = json_request(
         &app,
         "POST",
         "/api/v1/leads",
-        &auth_header("sales"),
+        &sales,
         Some(json!({ "first_name": "Qualify", "last_name": "Test" })),
     )
     .await;
     let lead_id = body["id"].as_str().unwrap();
+
+    make_lead_ready_for_qualification(&app, &sales, lead_id).await;
 
     // Qualify
     let (status, _) = json_request(
         &app,
         "POST",
         &format!("/api/v1/leads/{lead_id}/qualify"),
-        &auth_header("sales"),
+        &sales,
         Some(json!({ "status": "qualified" })),
     )
     .await;
@@ -236,7 +317,7 @@ async fn qualify_lead_flow() {
         &app,
         "GET",
         &format!("/api/v1/leads/{lead_id}"),
-        &auth_header("sales"),
+        &sales,
         None,
     )
     .await;
@@ -251,7 +332,7 @@ async fn qualify_lead_invalid_status_rejected() {
         &app,
         "POST",
         "/api/v1/leads",
-        &auth_header("sales"),
+        &app.auth_header("sales"),
         Some(json!({ "first_name": "Bad", "last_name": "Status" })),
     )
     .await;
@@ -261,7 +342,7 @@ async fn qualify_lead_invalid_status_rejected() {
         &app,
         "POST",
         &format!("/api/v1/leads/{lead_id}/qualify"),
-        &auth_header("sales"),
+        &app.auth_header("sales"),
         Some(json!({ "status": "invalid_status" })),
     )
     .await;
@@ -271,29 +352,40 @@ async fn qualify_lead_invalid_status_rejected() {
 #[tokio::test]
 async fn convert_lead_requires_qualified() {
     let Some(app) = test_app().await else { return };
+    let pm = app.auth_header("patient_manager");
 
     // Create lead (status = new)
     let (_, body) = json_request(
         &app,
         "POST",
         "/api/v1/leads",
-        &auth_header("patient_manager"),
+        &pm,
         Some(json!({ "first_name": "Convert", "last_name": "Fail" })),
     )
     .await;
     let lead_id = body["id"].as_str().unwrap();
+
+    make_lead_ready_for_qualification(&app, &pm, lead_id).await;
 
     // Try to convert without qualifying first
     let (status, body) = json_request(
         &app,
         "POST",
         &format!("/api/v1/leads/{lead_id}/convert"),
-        &auth_header("patient_manager"),
+        &pm,
         None,
     )
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert!(body["message"].as_str().unwrap().contains("qualified"));
+    assert_eq!(body["message"], "Lead is not conversion-ready");
+    assert!(
+        body["blocking_reasons"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|value| value == "Lead must be qualified before conversion"),
+        "blocking reasons should mention missing qualification; body was {body}"
+    );
 }
 
 #[tokio::test]
@@ -305,7 +397,7 @@ async fn convert_lead_requires_patient_manager() {
         &app,
         "POST",
         "/api/v1/leads",
-        &auth_header("sales"),
+        &app.auth_header("sales"),
         Some(json!({ "first_name": "Convert", "last_name": "Rbac" })),
     )
     .await;
@@ -315,7 +407,7 @@ async fn convert_lead_requires_patient_manager() {
         &app,
         "POST",
         &format!("/api/v1/leads/{lead_id}/qualify"),
-        &auth_header("sales"),
+        &app.auth_header("sales"),
         Some(json!({ "status": "qualified" })),
     )
     .await;
@@ -325,7 +417,7 @@ async fn convert_lead_requires_patient_manager() {
         &app,
         "POST",
         &format!("/api/v1/leads/{lead_id}/convert"),
-        &auth_header("sales"),
+        &app.auth_header("sales"),
         None,
     )
     .await;
@@ -335,7 +427,7 @@ async fn convert_lead_requires_patient_manager() {
 #[tokio::test]
 async fn full_lead_lifecycle() {
     let Some(app) = test_app().await else { return };
-    let pm = auth_header("patient_manager");
+    let pm = app.auth_header("patient_manager");
 
     // 1. Create
     let (status, body) = json_request(
@@ -359,6 +451,9 @@ async fn full_lead_lifecycle() {
     // 2. Appears in list
     let (_, list) = json_request(&app, "GET", "/api/v1/leads", &pm, None).await;
     assert!(list.as_array().unwrap().iter().any(|l| l["id"] == lead_id));
+
+    // 2.5. Make the lead qualification-ready
+    make_lead_ready_for_qualification(&app, &pm, &lead_id).await;
 
     // 3. Qualify
     let (status, _) = json_request(
@@ -407,7 +502,7 @@ async fn stats_leads_returns_data() {
         &app,
         "GET",
         "/api/v1/stats/leads",
-        &auth_header("sales"),
+        &app.auth_header("sales"),
         None,
     )
     .await;
@@ -427,7 +522,7 @@ async fn stats_leads_monthly_returns_array() {
         &app,
         "GET",
         "/api/v1/stats/leads/monthly",
-        &auth_header("sales"),
+        &app.auth_header("sales"),
         None,
     )
     .await;
@@ -443,7 +538,7 @@ async fn stats_leads_by_status_returns_array() {
         &app,
         "GET",
         "/api/v1/stats/leads/by-status",
-        &auth_header("sales"),
+        &app.auth_header("sales"),
         None,
     )
     .await;
@@ -459,7 +554,7 @@ async fn stats_forbidden_for_interpreter() {
         &app,
         "GET",
         "/api/v1/stats/leads",
-        &auth_header("interpreter"),
+        &app.auth_header("interpreter"),
         None,
     )
     .await;
@@ -477,7 +572,7 @@ async fn get_nonexistent_lead_returns_404() {
         &app,
         "GET",
         &format!("/api/v1/leads/{fake_id}"),
-        &auth_header("sales"),
+        &app.auth_header("sales"),
         None,
     )
     .await;
@@ -493,7 +588,7 @@ async fn list_leads_exposes_conversion_ready_field() {
     // the field from the list serializer would silently re-enable
     // the button on incomplete leads, so pin the contract here.
     let Some(app) = test_app().await else { return };
-    let pm = auth_header("patient_manager");
+    let pm = app.auth_header("patient_manager");
 
     // Create a bare-minimum lead — no DOB, no legal_sex, no consents.
     // This lead can never pass the conversion_ready gate, so the list
@@ -552,7 +647,7 @@ async fn list_leads_conversion_ready_is_false_for_converted_lead() {
     // as not-ready. The UI uses this to hide the Convert button
     // entirely on the `converted` stage card.
     let Some(app) = test_app().await else { return };
-    let pm = auth_header("patient_manager");
+    let pm = app.auth_header("patient_manager");
 
     let (status, created) = json_request(
         &app,
@@ -610,7 +705,8 @@ async fn list_leads_conversion_ready_is_false_for_converted_lead() {
     assert_eq!(status, StatusCode::OK);
     assert!(convert_body["patient_id"].is_string());
 
-    let (status, list) = json_request(&app, "GET", "/api/v1/leads?status=converted", &pm, None).await;
+    let (status, list) =
+        json_request(&app, "GET", "/api/v1/leads?status=converted", &pm, None).await;
     assert_eq!(status, StatusCode::OK);
 
     let entry = list

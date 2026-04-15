@@ -1,3 +1,5 @@
+mod support;
+
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use serde_json::{Value, json};
@@ -6,29 +8,11 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 use gmed_server::auth::jwt;
-use gmed_server::settings::{SettingsCache, TokenSettings};
-use gmed_server::state::AppState;
-
 const TEST_SECRET: &str = "test-secret-at-least-32-characters-long!!";
 
 async fn test_context() -> Option<(axum::Router, PgPool, Uuid)> {
-    let db_url = std::env::var("DATABASE_URL").ok()?;
-    let pool = gmed_db::create_pool(&db_url).await.ok()?;
-    gmed_db::run_migrations(&pool).await.ok()?;
-
-    let admin_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE email = $1")
-        .bind("admin@gmed.de")
-        .fetch_one(&pool)
-        .await
-        .ok()?;
-
-    let state = AppState::new(
-        pool.clone(),
-        TEST_SECRET,
-        SettingsCache::new(TokenSettings::default()),
-    );
-    let app = gmed_server::build_app(state);
-    Some((app, pool, admin_id))
+    let ctx = support::suite_context(TEST_SECRET).await?;
+    Some((ctx.app, ctx.pool, ctx.admin_id))
 }
 
 async fn json_request(
@@ -209,6 +193,59 @@ async fn order_phase_progression_backfills_new_workflow_groups() {
     let pm_bearer = auth_header_for(pm_id, "patient_manager");
     let patient_id = create_patient(&app, &pm_bearer, &tag).await;
     let order_id = create_order(&app, &pm_bearer, patient_id).await;
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/phase"),
+        &pm_bearer,
+        Some(json!({ "phase": "intake" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/process-gates"),
+        &pm_bearer,
+        Some(json!({
+            "package_coverage_status": "covered",
+            "package_coverage_note": "Workflow phase coverage test"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/planning-preparation"),
+        &pm_bearer,
+        Some(json!({
+            "treatment_plan_status": "finalized",
+            "preparation_documents_status": "sent"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    sqlx::query(
+        r#"INSERT INTO appointments (
+                patient_id, order_id, appointment_type, title, date,
+                status, checklist_phase, created_by
+           ) VALUES (
+                $1, $2, 'medical', $3, CURRENT_DATE + 5,
+                'confirmed', 'preparation', $4
+           )"#,
+    )
+    .bind(patient_id)
+    .bind(order_id)
+    .bind(format!("Workflow prep {tag}"))
+    .bind(pm_id)
+    .execute(&pool)
+    .await
+    .unwrap();
 
     let (status, _) = json_request(
         &app,

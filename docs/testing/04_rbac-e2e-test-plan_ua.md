@@ -1,403 +1,420 @@
-# RBAC end-to-end test plan
+# RBAC / E2E verification plan
+
+> Документ більше **не описує greenfield-план "з нуля"**. Репозиторій уже має великий current-state шар інтеграційних, browser і helper-тестів. Нижче зафіксовано: що верифікаційно вже існує, що є джерелом правди, і який залишився **реальний** hardening backlog по RBAC.
 
 ## 1. Мета і scope
 
-Цей документ описує план поетапного покриття **ролей, прав доступу і ізоляції даних** інтеграційними та E2E-тестами. Це *не* unit-рівень — кожен сценарій хоче працювати проти живої (ефемерної) Postgres-БД, проходити повний HTTP pipeline (`require_auth` → `audit::middleware` → route → `check_access`) і робити assertions на реальних запитах/відповідях.
+Цей документ задає порядок і правила для перевірки **ролей, прав доступу, assignment-scoping, share/release lifecycle і UI-shell обмежень**.
 
-### Чому саме RBAC першим
+Фокус:
+- backend route-level RBAC;
+- field/data-sensitivity isolation;
+- patient-bound / assignment-bound visibility;
+- browser-level `hide / disable / redirect` поведінка;
+- hardening решти клітинок матриці, які ще не мають explicit regression coverage.
 
-1. **Security baseline** — жоден інший аспект не має такого впливу на ISO 27001 / GDPR. Помилка у RBAC = PII витік = штраф.
-2. **Клієнтський контракт** — замовник сам надіслав `docs/1 (Update 2) User Story Salesforce.xlsx` з **окремою RBAC Matrix вкладкою**. Це обовʼязкова таблиця повноважень, не моя інтерпретація.
-3. **Найкращий ROI у регресіях** — типові баги у flow (кнопка не прогрузилась, PDF битий) знаходяться на dev середовищі. А RBAC-баги зазвичай виявляються *в проді*, коли хтось випадково побачив чужого пацієнта.
+Чому RBAC стоїть першим:
+1. Це security baseline для GDPR / ISO 27001.
+2. Це один з небагатьох шарів, де помилка майже завжди означає витік, а не просто UX-баг.
+3. Current-state продукт уже широкий; без щільної RBAC-регресії будь-яка нова фіча легко ламає доступи в суміжних workspace-ах.
 
 ## 2. Джерела істини
 
-Порядок авторитету — який документ перемагає коли вони розходяться:
+Порядок авторитету не задається цим файлом довільно. Канонічне правило вже зафіксоване в [00_source-of-truth_ua.md](C:/Users/123/Downloads/dev/docs/00_source-of-truth_ua.md).
 
-1. **`docs/1 (Update 2) User Story Salesforce.xlsx` → вкладка `RBAC Matrix`** — замовник, 10 ролей × 12 data domains. Найвищий авторитет.
-2. **`docs/1 (Update 2) User Story Salesforce.xlsx` → вкладка `User Stories`** (184 stories, 24 epics) — контекст і винятки матриці.
-3. **[`crates/domain/src/role.rs`](../../crates/domain/src/role.rs)** — enum `Role`, його методи (`has_full_access`, `can_see_medical_data`, `can_see_financial_data`, `can_assign_patients`). Цей код — **поточна реалізація**; якщо розходиться з матрицею, матриця перемагає → код адаптуємо.
-4. **[`crates/domain/src/access/policy.rs`](../../crates/domain/src/access/policy.rs)** — pure `check_access(context) → AccessDecision`. Unit-тести вже є (see tests at the bottom of the file). Інтеграційні тести доповнюють їх HTTP-рівнем.
-5. **[`docs/Process Mapping (Kundenjourney allg.)(in Bearbeitung).pdf`](../Process%20Mapping%20(Kundenjourney%20allg.)(in%20Bearbeitung).pdf)** — workflow constraints (хто кого передає на кому кроці). Використовується для побудови happy-path сценаріїв, не для RBAC як такого.
+Практичний порядок для RBAC:
+1. Оригінальні клієнтські файли в `docs/`:
+   - [1 (Update 2) User Story Salesforce.xlsx](C:/Users/123/Downloads/dev/docs/1%20(Update%202)%20User%20Story%20Salesforce.xlsx)
+   - [Process Mapping (Kundenjourney allg.)(in Bearbeitung).pdf](C:/Users/123/Downloads/dev/docs/Process%20Mapping%20(Kundenjourney%20allg.)(in%20Bearbeitung).pdf)
+2. Канонічні похідні UA-документи:
+   - [02_rbac-matrix_ua.md](C:/Users/123/Downloads/dev/docs/backlog/02_rbac-matrix_ua.md)
+   - [03_product-backlog_ua.md](C:/Users/123/Downloads/dev/docs/requirements/03_product-backlog_ua.md)
+   - [01_process-mapping_ua.md](C:/Users/123/Downloads/dev/docs/requirements/01_process-mapping_ua.md)
+3. Поточна реалізація:
+   - [role.rs](C:/Users/123/Downloads/dev/crates/domain/src/role.rs)
+   - [policy.rs](C:/Users/123/Downloads/dev/crates/domain/src/access/policy.rs)
+   - route-level policy helpers у server crate
+4. Current-state evidence:
+   - [source-workspace-regression-matrix.md](C:/Users/123/Downloads/dev/docs/testing/source-workspace-regression-matrix.md)
+   - [source-documents-regression-matrix.md](C:/Users/123/Downloads/dev/docs/testing/source-documents-regression-matrix.md)
+   - [source-billing-regression-matrix.md](C:/Users/123/Downloads/dev/docs/testing/source-billing-regression-matrix.md)
+   - [current-state-gap-audit_ua.md](C:/Users/123/Downloads/dev/docs/testing/current-state-gap-audit_ua.md)
+5. План доведення staff UI + маршрутів до single source of truth (меню = guard):
+   - [ui-rbac-route-guard-plan_ua.md](C:/Users/123/Downloads/dev/docs/testing/ui-rbac-route-guard-plan_ua.md)
 
-## 3. RBAC Matrix (нормалізована)
+Правило просте:
+- якщо код розходиться з оригіналом клієнта, адаптуємо код і тести;
+- якщо secondary-doc розходиться з current-state кодом, спочатку з'ясовуємо чи це stale planning text, чи справжній product gap.
 
-Колонки відображаються на реальні доменні обʼєкти у коді. Символи: ✅ full, 🟡 conditional, 👁️ read-only, ❌ denied, 🎯 scoped (own patients / assigned only).
+## 3. Нормалізована RBAC semantics
 
-| Roll (UA)              | Role enum            | Patient data | Documents | Medical info | Appointments | Finance | Comms | Templates | Interp. hrs | VIP svcs | Feedback | SOPs/Learn | Reports |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| CEO                    | `Ceo`                | ✅           | ✅        | ✅           | ✅           | ✅      | ✅    | ✅        | 👁️          | 👁️       | ✅       | ✅          | ✅       |
-| CEO Assistant          | `CeoAssistant`       | 👁️           | 👁️🟡       | 👁️🟡          | CEO only     | 👁️🟡     | 🟡    | 👁️         | ❌           | 👁️       | 👁️        | partial      | partial  |
-| Patient Manager        | `PatientManager`     | 🎯           | 🎯        | 🎯           | 🎯           | 🎯      | 🟡    | 🎯         | 👁️✍️         | 👁️✍️      | ✅       | 🎯           | partial  |
-| Teamlead Interpreter   | `TeamleadInterpreter`| 👁️🎯 team    | transl.   | relevant     | interp plan  | ❌      | team  | transl.    | ✅           | ❌        | team fb   | team SOPs    | team KPI |
-| Interpreter            | `Interpreter`        | 👁️ basic    | released  | scoped to job| 👁️           | ❌      | job   | transl.    | 🎯 own       | ❌        | own       | own SOPs     | ❌        |
-| Concierge              | `Concierge`          | travel/svc   | svc docs  | ❌           | svc plan     | ❌      | svc   | svc        | ❌           | ✅        | svc fb    | own SOPs     | ❌        |
-| Billing (Abrechnung)   | `Billing`            | basic        | invoice   | ❌           | ❌           | ✅      | + PM/CEO | invoice | released  | needed   | ❌        | own SOPs     | finance  |
-| Sales (Vertrieb)       | `Sales`              | ❌           | ❌        | ❌           | partial agg  | agg     | partner| CRM       | ❌           | ❌        | ❌        | own SOPs     | market   |
-| IT Admin               | `ItAdmin`            | ❌ (test)    | ❌        | ❌           | ❌           | ❌      | PM+Bill+CEO | manage | ❌         | ❌        | ❌        | technical    | ❌        |
-| Patient                | `Patient`            | own released | own rel.  | own released | own rel.     | own inv | portal | sign own | ❌           | book     | own      | ❌           | own      |
+Для naming і coverage ми користуємось нормалізованими позначками, але **не дублюємо всю Excel-таблицю** вдруге в цьому файлі. Точне клієнтське формулювання вже є в [02_rbac-matrix_ua.md](C:/Users/123/Downloads/dev/docs/backlog/02_rbac-matrix_ua.md).
 
-**Легенда детальна:**
-- `🎯` = "assigned only" — у policy.rs це `is_assigned: bool` + role вимагає assignment (`require_assignment = true` у таблиці)
-- `👁️` = read-only (GET дозволений, POST/PUT/PATCH/DELETE заборонений)
-- `🟡` = після release/freigabe (read working тільки з `ShareStatus::ReleasedInternal` / `ReleasedExternal` / `PatientVisible`)
-- `✍️` = write дозволено
-- `partial` = scoped subset, не всі поля — потребує уточнення у клієнта
-- `agg` = тільки агрегати, без per-patient drill-down
+У тест-плані використовуємо такі коди:
+- `✅ full` — read/write/manage без assignment обмеження;
+- `👁️ read-only` — читання дозволено, мутації ні;
+- `🎯 assigned-only` — потрібен patient/order/team assignment;
+- `🟡 conditional` — доступ виникає тільки після `release / freigabe / share_status`;
+- `✍️ write` — окремо дозволені mutation routes;
+- `❌ denied` — доступ заборонений;
+- `agg` — лише агрегати, без per-patient drill-down.
+
+Окремо:
+- `Role` мапиться на [role.rs](C:/Users/123/Downloads/dev/crates/domain/src/role.rs);
+- `share/release` мапиться на [share_status.rs](C:/Users/123/Downloads/dev/crates/domain/src/access/share_status.rs);
+- sensitivity gating мапиться на [policy.rs](C:/Users/123/Downloads/dev/crates/domain/src/access/policy.rs).
 
 ## 4. Тестова піраміда
 
-Кожен сценарій попадає в один з трьох шарів:
+### 4.1. Rust integration tests
 
-### 4.1. Rust integration tests — `crates/server/tests/*_api.rs`
+Основний доказ для backend RBAC.
 
-**Гарантують:** HTTP → auth middleware → route → `check_access` → DB. Повний backend stack з ефемерною Postgres через `TestSuiteContext` ([`crates/server/tests/support/mod.rs`](../../crates/server/tests/support/mod.rs)).
+Що перевіряють:
+- `auth middleware -> route -> policy -> DB`;
+- role/assignment/share-status isolation;
+- deny-path без data leakage;
+- lifecycle transitions, якщо вони впливають на доступ.
 
-**Коли писати:** для *кожної* комірки матриці — одна позитивна і одна негативна асерція. Це де живе *джерело істини* для RBAC. Якщо інтеграційний тест пройшов, можна вважати що backend дотримується контракту.
+Де живуть:
+- `crates/server/tests/*_api.rs`
+- harness: [support/mod.rs](C:/Users/123/Downloads/dev/crates/server/tests/support/mod.rs)
 
-**Швидкість:** ~100-300 мс на тест, повна паралелізація через `#[tokio::test]`, ~500 тестів = ~3-5 хв у CI.
+Current-state:
+- це вже головний verification layer, не майбутній;
+- у repo вже велика кількість `*_api.rs` regression tests по workspace, documents, invoices, contracts, compliance, stats, messaging, appointments, feedback.
 
-### 4.2. Playwright E2E — `frontend/tests/e2e/*.spec.ts`
+### 4.2. Playwright E2E
 
-**Гарантують:** UI shell — чи приховано кнопку "Convert", чи видно таби "Invoices", чи є hover-tooltip на disabled action. Зараз тести використовують `installStaffApiMocks` (mock API), не живий backend.
+Потрібні там, де важливий саме UI shell:
+- таб прихований;
+- кнопка disabled;
+- deep-link нормалізується;
+- route visible/hidden по ролі;
+- portal/staff shell не показує зайвий surface.
 
-**Коли писати:** тільки для UI-visible RBAC — "tab не відрендерений", "кнопка disabled", "banner не показується для ролі X". Якщо backend повертає 403 а UI правильно його обробляє — це Playwright. Якщо треба довести що backend *сам* повертає 403 — це Rust integration.
+Current-state:
+- browser smoke/live already покриває patient portal, staff shell, documents release/revoke, template generation, recurring appointments (whole-series cancel + whole-series recurrence reshape), secure chat, lead conversion gate, patient profile role shell.
+- browser live additionally покриває forbidden deep-link normalization для `patient_manager`, `ceo_assistant`, `billing`, `interpreter`, `patient` у [rbac-denied-routes.live.spec.ts](C:/Users/123/Downloads/dev/frontend/tests/e2e-live/rbac-denied-routes.live.spec.ts).
+- На поточному freeze зрізі browser coverage теж повністю зелена: `frontend npm run test:e2e` = `22/22`, `frontend npm run test:e2e:live` = `47/47`.
 
-**Швидкість:** ~2-5 сек на тест, обмежена паралелізація. Fixture — повна кількість mock routes. Варто мати ~20-30 ключових, не 500.
-
-### 4.3. Vitest frontend unit — `frontend/src/**/*.test.ts`
-
-**Гарантують:** pure helpers типу `computeLeadConversionGate`. Вже є 32 тести (8 додано у попередній ітерації).
-
-**Коли писати:** для будь-якої логіки, яка вирішує "показувати/приховувати" на основі ролі + даних. Якщо можна винести у pure function — треба винести.
+### 4.3. Vitest frontend unit
 
-## 5. Головні принципи coverage
+Потрібні для pure helper логіки:
+- `show/hide`;
+- `disabled reason`;
+- tab normalization;
+- route resolution;
+- role-based derived state.
 
-Кожна комірка матриці → **дві асерції**:
+Правило:
+- якщо логіку можна винести в pure helper, краще спочатку винести, а потім покрити unit-тестом.
 
-**(1) Positive:** "Роль X *може* зробити Y над ресурсом R".
-```rust
-#[tokio::test]
-async fn pm_can_read_assigned_patient() {
-    // given: PM assigned to patient P1
-    // when: GET /patients/P1 with PM token
-    // then: 200, payload contains medical fields
-}
-```
-
-**(2) Negative:** "Роль X *не може* зробити Y над ресурсом R".
-```rust
-#[tokio::test]
-async fn pm_cannot_read_other_patient() {
-    // given: PM assigned to P1; P2 exists unassigned
-    // when: GET /patients/P2 with PM token
-    // then: 403 OR 404 (dont leak existence)
-    //       body does not contain medical fields
-}
-```
-
-**Чому обидві** — тільки позитивні тести не ловлять ослаблення; тільки негативні не ловлять зломи функціональності. Обовʼязково обидва типи.
-
-## 6. Фази впровадження
-
-Порядок — від найвищого ризику до найнижчого. Кожна фаза — окремий PR.
-
-### 🔴 Phase 1: Auth + session hygiene (10-15 тестів)
-
-Фундамент. Без цього решта тестів взагалі не має сенсу.
-
-- [ ] `auth_login_with_valid_password_issues_tokens`
-- [ ] `auth_login_wrong_password_returns_401`
-- [ ] `auth_login_unknown_email_returns_401_with_same_timing`
-- [ ] `auth_login_inactive_user_returns_403`
-- [ ] `auth_login_locked_user_returns_403`
-- [ ] `auth_login_auto_locks_after_5_wrong_attempts`
-- [ ] `auth_refresh_rotates_tokens_and_blacklists_old`
-- [ ] `auth_refresh_theft_detection_revokes_entire_family`
-- [ ] `auth_logout_blacklists_current_access_token`
-- [ ] `auth_logout_all_revokes_all_user_families`
-- [ ] `auth_request_without_token_returns_401_on_protected`
-- [ ] `auth_request_with_expired_token_returns_401`
-- [ ] `auth_request_with_revoked_token_returns_401`
-- [ ] `auth_mfa_pending_login_blocks_token_issue`
-- [ ] `auth_mfa_approved_pending_completes_login`
-
-**Harness:** `crates/server/tests/auth_sessions_api.rs` (вже існує — треба розширити).
-
-### 🔴 Phase 2: Per-role smoke (20 тестів, по 2 на роль)
-
-Швидкий sanity check, що кожна з 10 ролей може залогінитись і побачити *щось* / *нічого* згідно з матрицею.
-
-Шаблон:
-```
-role_{X}_sees_own_surface_on_dashboard  → positive
-role_{X}_cannot_access_foreign_surface → negative (typical endpoint from another role)
-```
-
-10 × 2 = 20 тестів. Приклад пар:
-- CEO: `ceo_can_list_all_patients` / `ceo_can_list_all_invoices`
-- Sales: `sales_can_list_leads` / `sales_cannot_list_patients`
-- Interpreter: `interpreter_can_list_own_assignments` / `interpreter_cannot_list_invoices`
-- Billing: `billing_can_list_invoices` / `billing_cannot_list_medical_cases`
-- Patient: `patient_can_read_own_documents_released` / `patient_cannot_list_other_patients`
-
-### 🟠 Phase 3: Patient data RBAC (~40 тестів)
-
-Колонка "Patientendaten" × 10 ролей × 4 operations (read/create/update/delete).
-
-Ключові сценарії:
-- [ ] `pm_can_read_own_assigned_patient_full_data`
-- [ ] `pm_cannot_read_unassigned_patient`
-- [ ] `pm_can_create_patient_and_is_auto_assigned`
-- [ ] `pm_can_update_own_assigned_patient`
-- [ ] `pm_cannot_update_unassigned_patient`
-- [ ] `pm_cannot_delete_patient` (delete reserved for compliance flow, not direct)
-- [ ] `ceo_can_read_any_patient`
-- [ ] `ceo_can_update_any_patient`
-- [ ] `ceo_assistant_can_read_patient_identity_only_after_release`
-- [ ] `ceo_assistant_cannot_read_medical_before_release`
-- [ ] `concierge_can_read_patient_service_and_travel_fields`
-- [ ] `concierge_cannot_read_patient_medical_fields` — **field-level filter test**, not just endpoint block
-- [ ] `billing_can_read_patient_basic_data`
-- [ ] `billing_cannot_read_patient_medical_fields`
-- [ ] `sales_cannot_list_patients`
-- [ ] `it_admin_cannot_read_production_patient_fields` (only test fixtures allowed)
-- [ ] `interpreter_can_read_assigned_patient_basic_data`
-- [ ] `interpreter_cannot_read_financial_fields`
-- [ ] `patient_can_read_own_data_only`
-- [ ] `patient_cannot_read_other_patient_data` (existence leak test)
-
-**Fixture потрібний:** `seed_patient_with_assignments(pool, patient_name, assigned_to_user_ids)` — helper, що створює пацієнта і встановлює patient_assignments для заданих ролей.
-
-### 🟠 Phase 4: Document / release flow (~30 тестів)
-
-Колонка "Dokumente & Scans" × 10 ролей × {upload, read_internal, read_released, share_to_provider, release_to_portal, revoke_release}.
-
-Критична частина: **ShareStatus lifecycle** (`InternalOnly` → `ReleasedInternal` → `ReleasedExternal` → `PatientVisible`).
-
-- [ ] `pm_can_upload_document_to_assigned_patient`
-- [ ] `pm_cannot_upload_document_to_unassigned_patient`
-- [ ] `pm_can_release_document_to_patient_portal`
-- [ ] `pm_can_revoke_document_release`
-- [ ] `interpreter_sees_document_only_after_released_internal`
-- [ ] `interpreter_does_not_see_internal_only_document`
-- [ ] `patient_sees_document_only_after_patient_visible`
-- [ ] `patient_cannot_upgrade_share_status_via_api` (direct tamper test)
-- [ ] `patient_can_sign_document_addressed_to_self_only`
-- [ ] `billing_can_read_invoice_documents`
-- [ ] `billing_cannot_read_medical_documents_even_if_released`
-- [ ] `concierge_can_read_service_category_documents_only`
-- [ ] `ceo_can_read_any_document_any_status`
-- [ ] `sales_cannot_read_any_document`
-- [ ] `document_share_to_provider_requires_share_status_released_external`
-- [ ] `document_share_to_non_medical_provider_blocks_medical_docs`
-- [ ] `document_audit_log_contains_every_view_access` — **audit coverage test**, проходить навіть якщо RBAC правильний
-
-### 🟠 Phase 5: Appointment + interpreter assignment (~25 тестів)
-
-"Termine" + "Dolmetscherberichte & Stunden" колонки. Має бути тісно повʼязаний з Phase 3 (приписаність до пацієнта).
-
-- [ ] `pm_can_create_appointment_for_assigned_patient`
-- [ ] `pm_cannot_create_appointment_for_unassigned_patient`
-- [ ] `pm_can_assign_interpreter_to_own_appointment`
-- [ ] `pm_cannot_assign_interpreter_to_appointment_of_other_pm`
-- [ ] `interpreter_can_read_own_assigned_appointment`
-- [ ] `interpreter_cannot_read_unassigned_appointment`
-- [ ] `interpreter_can_submit_own_hours`
-- [ ] `interpreter_cannot_submit_hours_for_other_interpreter`
-- [ ] `teamlead_interpreter_can_approve_team_hours`
-- [ ] `teamlead_interpreter_cannot_approve_hours_from_other_team`
-- [ ] `ceo_can_see_all_appointments_all_teams`
-- [ ] `concierge_can_read_appointment_service_fields_only`
-- [ ] `billing_cannot_read_appointments`
-- [ ] `patient_portal_can_request_appointment_but_not_finalize`
-- [ ] `patient_portal_request_creates_pending_status_only`
-- [ ] `appointment_series_split_preserves_per_occurrence_permissions`
-- [ ] `cancel_appointment_series_requires_pm_or_ceo`
-
-### 🟠 Phase 6: Financial isolation (~25 тестів)
-
-Колонка "Finanzen" — сама чутлива після medical, бо штраф від Finanzamt за misreport. Тут все крутиться навколо `role.can_see_financial_data()`.
-
-- [ ] `billing_sees_all_invoices_all_patients`
-- [ ] `billing_can_create_invoice`
-- [ ] `billing_can_update_invoice_status`
-- [ ] `billing_cannot_see_medical_case_contents`
-- [ ] `pm_sees_only_own_patient_invoices`
-- [ ] `pm_cannot_update_invoice_financial_fields` (може лише prep)
-- [ ] `ceo_sees_all_invoices`
-- [ ] `ceo_sees_all_dunning_events`
-- [ ] `sales_sees_only_aggregated_revenue_kpis_no_per_patient`
-- [ ] `interpreter_cannot_see_any_invoice`
-- [ ] `concierge_cannot_see_any_invoice`
-- [ ] `patient_sees_only_own_invoices`
-- [ ] `patient_cannot_see_other_patient_invoices_via_scoped_url`
-- [ ] `patient_can_download_own_invoice_pdf`
-- [ ] `patient_cannot_download_other_patient_invoice_pdf`
-- [ ] `invoice_create_denies_19pct_vat_override_for_medical_service` — **regulatory check**: примусово валідує §4 UStG класифікацію (TODO: ця вимога ще не у коді, треба спочатку додати)
-
-### 🟡 Phase 7: Lead → Patient conversion (~15 тестів)
-
-Вже частково покрито, але треба добити:
-
-- [ ] `sales_can_create_lead`
-- [ ] `sales_cannot_convert_lead_to_patient`
-- [ ] `sales_can_qualify_lead`
-- [ ] `pm_can_convert_qualified_lead`
-- [ ] `pm_cannot_convert_unqualified_lead`
-- [ ] `pm_cannot_convert_lead_missing_dob`
-- [ ] `pm_cannot_convert_lead_missing_consent_healthcare`
-- [ ] `pm_cannot_convert_lead_missing_consent_privacy`
-- [ ] `pm_cannot_convert_already_converted_lead`
-- [ ] `pm_cannot_convert_failed_lead`
-- [ ] `converted_lead_auto_assigns_pm_to_new_patient`
-- [ ] `converted_lead_bootstraps_default_workflow_checklist`
-- [ ] `converted_lead_emits_audit_log_event`
-- [ ] `convert_lead_requires_first_vorkasse_paid` — **TODO before writing**: process-map гап, зараз не enforced
-- [ ] `list_leads_conversion_ready_reflects_missing_fields_per_field` — пара вже є, треба розширити
-
-### 🟡 Phase 8: Communication + messaging (~20 тестів)
-
-Колонка "Kommunikation". Особливо важливо — E2E encryption і share scope.
-
-- [ ] `pm_can_message_assigned_patient`
-- [ ] `pm_cannot_message_unassigned_patient`
-- [ ] `patient_portal_can_read_own_messages_only`
-- [ ] `patient_portal_cannot_read_other_patient_messages`
-- [ ] `interpreter_can_read_job_related_messages_only`
-- [ ] `billing_can_message_pm_and_ceo_only`
-- [ ] `concierge_can_message_service_scope_only`
-- [ ] `sales_can_message_partner_providers_only`
-- [ ] `message_encryption_roundtrip_preserves_content`
-- [ ] `message_attachment_scan_blocks_malicious_upload`
-- [ ] `message_redaction_via_dsgvo_request_clears_body`
-
-### 🟡 Phase 9: Admin, compliance, system (~20 тестів)
-
-- [ ] `it_admin_can_manage_users_but_not_read_patient_data`
-- [ ] `it_admin_can_reset_password_without_reading_profile`
-- [ ] `it_admin_can_manage_ip_whitelist`
-- [ ] `it_admin_cannot_read_audit_log_content` (вважається compliance data)
-- [ ] `ceo_can_read_audit_log`
-- [ ] `dsgvo_export_creates_patient_archive`
-- [ ] `dsgvo_export_requires_pm_or_ceo_role`
-- [ ] `dsgvo_anonymize_is_irreversible_and_logged`
-- [ ] `privacy_request_workflow_requires_review_before_execute`
-- [ ] `consent_revoke_invalidates_scoped_access`
-- [ ] `auto_purge_stale_lead_respects_retention`
-- [ ] `auto_purge_emits_audit_log_event`
-
-### 🟢 Phase 10: UI shell checks via Playwright (~20 тестів)
-
-Тільки те що *не* перевіряється на рівні HTTP. Кожен тест мокає роль через `installStaffApiMocks`.
-
-- [ ] `ceo_sees_full_nav` — бачить всі нав-таби
-- [ ] `ceo_assistant_hides_medical_tabs_on_patient_profile` (вже є)
-- [ ] `sales_sees_leads_nav_but_not_patients_nav`
-- [ ] `billing_sees_invoices_nav_but_not_medical_cases_nav`
-- [ ] `interpreter_sees_assignments_nav_only`
-- [ ] `concierge_sees_services_nav_only`
-- [ ] `pm_lead_card_convert_blocked_disabled_with_tooltip` (вже є)
-- [ ] `pm_lead_card_convert_ready_enabled` (вже є)
-- [ ] `it_admin_sees_user_management_nav_only`
-- [ ] `patient_portal_sees_documents_invoices_appointments_nav`
-- [ ] `patient_portal_does_not_see_any_staff_nav`
-
-## 7. Спільні fixtures і seed helpers (до Phase 1)
-
-Перед стартом Phase 1 треба добудувати `crates/server/tests/support/mod.rs`:
-
-```rust
-pub async fn seed_user_with_password(pool: &PgPool, role: &str, password: &str) -> (Uuid, String)
-pub async fn login_as(app: &Router, email: &str, password: &str) -> String /* bearer */
-pub async fn issue_token_for(user_id: Uuid, role: &str) -> String /* bypass password */
-pub async fn seed_patient_with_assignments(
-    pool: &PgPool,
-    label: &str,
-    assignee_ids: &[(Uuid, &str)],
-) -> Uuid
-pub async fn seed_lead(pool: &PgPool, overrides: LeadSeedOverrides) -> Uuid
-pub async fn seed_invoice_for_patient(pool: &PgPool, patient_id: Uuid) -> Uuid
-pub async fn seed_document(pool: &PgPool, patient_id: Uuid, share_status: &str) -> Uuid
-pub async fn seed_appointment(
-    pool: &PgPool,
-    patient_id: Uuid,
-    interpreter_id: Option<Uuid>,
-) -> Uuid
-```
-
-Усі fixture-функції мають дотримуватись трьох правил:
-
-1. **Ідемпотентні до БД:** ніколи не пишуть у global state. Кожен тест має свою ефемерну БД через `TestSuiteContext`.
-2. **Повертають ідентифікатори, не DTO:** щоб тест сам вирішував що перевіряти на тому ресурсі.
-3. **Не залежать один від одного:** `seed_appointment` не викликає `seed_patient` всередині. Тест явно передає patient_id.
-
-## 8. Відкриті питання клієнту
-
-Матриця має 4 позиції, які потребують уточнення **до того** як писати тести. Інакше тест напишемо, а аудитор скаже "це не те".
-
-1. **Sales + Finanzen = "Auswertung und Analyse".** Чи це per-invoice read-only, чи тільки агрегати (revenue by month, etc.)? Я зараз інтерпретую як **тільки агрегати**. Треба підтвердити.
-2. **Sales + Termine = "Teilzugriff zur Auswertung".** Аналогічно — per-appointment read чи агрегати? Імовірно агрегати (booking velocity), але треба підтвердити.
-3. **CEO + Dolmetscherberichte = "Lesen" (read-only).** Тобто CEO не може *скасувати* або *виправити* interpreter hours? Мені це дивно — CEO зазвичай має full. Може у замовника це означає "не підписує власноруч". Треба уточнити.
-4. **IT-Admin + Patientendaten = "Testdaten only".** Чи є технічна відмінність між "production row" і "test row"? Зараз у схемі її немає — усі `patients` рядки однакові. Потрібне рішення:
-   - (a) Додати колонку `is_test_data BOOLEAN DEFAULT FALSE` і блокувати IT-Admin доступ до `FALSE` рядків.
-   - (b) Винести test data у окрему схему / namespace.
-   - (c) Трактувати це як **заборонено взагалі** для IT-Admin у production.
-   - Моя рекомендація: **(c)** — заборонити IT-Admin читати будь-які patient-рядки у production, використовувати окреме staging оточення для test data. Простіше і безпечніше.
-
-**Ці 4 питання мають піти замовнику перед Phase 3.** Phase 1 і 2 не залежать від них.
-
-## 9. Підрахунок
-
-| Фаза | Тестів | Тип | Орієнтовні дні | Залежності |
-|---|---|---|---|---|
-| 1 — Auth | 15 | Rust integration | 2-3 | support helpers |
-| 2 — Per-role smoke | 20 | Rust integration | 2 | Phase 1 |
-| 3 — Patient data RBAC | 40 | Rust integration | 5-6 | Phase 1, client Q1-Q4 |
-| 4 — Documents / release | 30 | Rust integration | 4-5 | Phase 3 |
-| 5 — Appointments / interpreter | 25 | Rust integration | 3-4 | Phase 3 |
-| 6 — Financial isolation | 25 | Rust integration | 3-4 | Phase 3, client Q1 |
-| 7 — Lead conversion | 15 | Rust integration | 2 | Phase 1 |
-| 8 — Communication / messaging | 20 | Rust integration | 3 | Phase 3 |
-| 9 — Admin / compliance | 20 | Rust integration | 3 | Phase 1 |
-| 10 — UI shell (Playwright) | 20 | Playwright | 3-4 | Phase 2 |
-| **Всього** | **~230** | — | **30-37 днів** | — |
-
-Це близько **7-8 тижнів** роботи для одного інженера, працюючого full-time тільки над тестами. Якщо розпаралелити з іншою роботою — 3-4 місяці календарного часу.
-
-**ROI-оптимальна точка:** після Phase 3 (patient data RBAC) — це ~75 тестів і ~10 днів. Закриває 80% compliance-критичного ризику. Phase 4-9 — довантаження до full coverage.
+## 4.4. Канонічний test infra baseline
+
+Цей файл більше не виходить з припущення, що harness ще треба придумати. Current-state baseline уже існує і має бути canonicalized, а не дубльований.
+
+Rust integration baseline:
+
+- [support/mod.rs](C:/Users/123/Downloads/dev/crates/server/tests/support/mod.rs)
+
+Frontend live/browser baseline:
+
+- [playwright.live.config.ts](C:/Users/123/Downloads/dev/frontend/playwright.live.config.ts)
+- [tests/e2e-live/](C:/Users/123/Downloads/dev/frontend/tests/e2e-live/)
+
+Database provisioning semantics:
+
+- `E2E_DATABASE_URL` або `DATABASE_URL` -> external DB
+- інакше Docker fallback
+- якщо ні external DB, ні Docker недоступні, Rust integration suites через `suite_context(...)` skip-аються, а не валять baseline panic-ом
+
+Практичне правило:
+
+- нові dedicated `*_api.rs` suites спираються на `support/mod.rs`;
+- нові DB-backed browser proofs ідуть у `tests/e2e-live/`;
+- якщо є overlap з existing umbrella suite, перед merge треба явно визначити `keep / merge / drop`, а не просто додавати ще один паралельний файл;
+- повний normalization / commit-slicing inventory ведеться в [worktree-stabilization-inventory_ua.md](C:/Users/123/Downloads/dev/docs/testing/worktree-stabilization-inventory_ua.md).
+
+## 5. Принцип coverage
+
+Для кожної high-risk клітинки матриці потрібні мінімум дві асерції:
+
+1. Positive:
+   роль може зробити дозволену дію над дозволеним ресурсом.
+
+2. Negative:
+   роль не може зробити ту саму дію над чужим або нерозкритим ресурсом.
+
+Додаткові вимоги:
+- deny-path не повинен протікати полями;
+- для patient-bound ресурсів перевіряємо і direct URL path, і list filtering;
+- для UI shell перевіряємо не тільки hidden nav, а й forbidden deep-link;
+- release-based доступи завжди тестуємо на обох станах: до release і після.
+
+## 6. Current-state coverage і реальний залишок
+
+### Phase 1. Auth + session hygiene
+
+Статус: `integration + live API coverage complete` (UI-only MFA wizard не дублюється окремим сценарієм, бо approve йде через admin API)
+
+Вже підтверджено:
+- `logout` revoke current access token;
+- `logout-all` revoke all token families;
+- protected routes повертають `401` після revoke;
+- login happy path (seeded `admin@gmed.de` + Argon2-користувачі), `unknown_email` / `wrong_password`, validation errors;
+- inactive user (`forbidden`) і `locked_until` / auto-lockout після `max_failed_login_attempts`;
+- refresh rotation, reuse старого refresh → `token_theft_detected`, подальший refresh у тій же родині → `session_revoked`;
+- refresh validation / `invalid_token` для невідомого refresh;
+- MFA: `mfa_pending` на login, `GET /auth/pending/{id}` (`pending` → `approved` / `rejected`), approve через `POST /admin/mfa/pending/{id}/approve`, видача токенів і успішний `GET /auth/sessions`.
+
+Джерело:
+- [auth_sessions_api.rs](C:/Users/123/Downloads/dev/crates/server/tests/auth_sessions_api.rs)
+- Live API smoke: [auth-sessions.live.spec.ts](C:/Users/123/Downloads/dev/frontend/tests/e2e-live/auth-sessions.live.spec.ts) (wrong password, login + refresh + theft на реальному бекенді з bootstrap)
+
+Що лишається опційно (нижчий ROI):
+- окремий Playwright **UI**-сценарій для форми логіна + MFA pending (зараз покрито HTTP + Rust);
+- refresh rotation / **theft** unit edge cases поза happy path, якщо з’являться нові policy knobs;
+- явні тести на `refresh` з простроченим refresh (потрібна маніпуляція часу/expiry у harness).
+
+### Phase 2. Per-role smoke
+
+Статус: `partial-high-risk covered`
+
+Вже підтверджено:
+- `sales` deny на patient/documents/chat/internal analytics surfaces;
+- `CEO Assistant` read-only commercial scope;
+- deny на appointments для `sales`, `billing`, `ceo_assistant`, `it_admin`;
+- deny на feedback для нерелевантних ролей;
+- operational/dashboard/report access для релевантних ролей.
+
+Що ще лишилось:
+- системно пройти по решті ролей у форматі `sees own` / `denied foreign`;
+- добити пару broad shell smoke-сценаріїв по навігації.
+
+### Phase 3. Patient data RBAC
+
+Статус: `partial baseline exists`
+
+Вже підтверджено:
+- assignment-based patient visibility;
+- `ceo_assistant` field-filtered/read-only scope;
+- `patient_manager` patient-bound export/privacy/label flows;
+- patient-profile shell не обходить backend policy через tabs/deep-links.
+
+Що лишилось:
+- більш повна create/update/delete матриця;
+- додаткові field-level assertions для `concierge`, `billing`, `interpreter`;
+- систематичний deny matrix по foreign patient detail/update paths.
+
+### Phase 4. Documents / release / translation / provider-share
+
+Статус: `strong current-state coverage`
+
+Вже підтверджено:
+- internal vs released vs patient-visible document access;
+- portal release/revoke;
+- provider share/revoke;
+- translation request history / read-only executive scope;
+- `patient_manager` assignment-bound share routes;
+- browser smoke для release/revoke, template generation, patient receipt confirmation, self-upload/re-download.
+
+Що лишилось:
+- не базова RBAC відсутність, а лише ущільнення audit/log/deny-path сценаріїв.
+
+### Phase 5. Appointments / interpreter
+
+Статус: `strong current-state coverage`
+
+Вже підтверджено:
+- role-gated appointment workspace;
+- recurring series lifecycle;
+- interpreter/teamlead visibility boundaries;
+- portal appointment requests;
+- mobile agenda / interpreter shell;
+- browser smoke на recurring operations.
+
+Що лишилось:
+- глибше покриття hour-approval/team-bound edge-cases;
+- додаткові deny-path tests по team separation.
+
+### Phase 6. Financial isolation
+
+Статус: `strong current-state coverage`
+
+Вже підтверджено:
+- invoices RBAC;
+- patient own invoice surface;
+- `CEO` full, `CEO Assistant` read-only, `billing` manage, `sales/concierge` deny;
+- sales-safe aggregate-only analytics;
+- billing KPI/report layer.
+
+Що лишилось:
+- exhaustiveness на решту CRUD клітинок;
+- regulatory/tax assertions лише там, де сама бізнес-логіка вже реально існує.
+
+### Phase 7. Lead conversion
+
+Статус: `partial-high coverage`
+
+Вже підтверджено:
+- readiness gates;
+- failed lead flow;
+- blocked vs ready convert state на browser-level;
+- order / re-check dependencies.
+
+Що лишилось:
+- розширити matrix по кожному missing-field reason;
+- якщо продукт окремо зафіксує нові gateway rules, додати explicit route tests під них.
+
+### Phase 8. Communication / messaging
+
+Статус: `strong current-state coverage`
+
+Вже підтверджено:
+- patient/staff chat scope;
+- allowed-peer filtering;
+- `sales` deny на internal chat;
+- secure text + attachment browser flows;
+- portal messaging scope.
+
+Що лишилось:
+- глибше покриття redaction / malicious upload / per-role mutation edges.
+
+### Phase 9. Admin / compliance
+
+Статус: `strong current-state coverage`
+
+Вже підтверджено:
+- privacy request workflow;
+- consent revoke;
+- export / anonymize;
+- `it_admin` deny на production patient data surfaces;
+- audit/compliance role boundaries.
+
+Що лишилось:
+- додаткові explicit tests на audit-log content boundaries;
+- auto-purge / retention scheduler coverage там, де route або job already існує.
+
+### Phase 10. UI shell
+
+Статус: `strong current-state coverage`
+
+Вже підтверджено:
+- patient profile shell;
+- lead convert gating;
+- documents/invoices/contracts read-only surfaces;
+- patient portal nav;
+- recurring appointments browser flow, включно з whole-series rule reshape;
+- secure chat browser flow.
+
+Що лишилось:
+- не новий shell, а поступове добивання решти hidden/disabled cells з RBAC matrix.
+
+## 7. Fixtures і helpers
+
+Current-state уже інший, ніж описувався в старому плані.
+
+Що є зараз:
+- [support/mod.rs](C:/Users/123/Downloads/dev/crates/server/tests/support/mod.rs) уже піднімає `suite_context`;
+- harness сам резолвить БД через:
+  - `TEST_DATABASE_ADMIN_URL`,
+  - або `DATABASE_URL`,
+  - або Docker fallback (`postgres:16-alpine`);
+- seeded admin already є через міграції.
+
+Що **не відповідає** старому формулюванню:
+- repo зараз **не має** одного централізованого набору `seed_*` helper-ів у `support/mod.rs`;
+- натомість seed-функції розподілені по конкретних `*_api.rs` файлах.
+
+Що варто робити далі:
+- не блокувати нові тести великим refactor-ом;
+- поступово витягувати у shared layer ті helper-и, які вже повторюються в 3+ test files.
+
+Перші кандидати на консолідацію:
+- `seed_user_with_password`
+- `login_as`
+- `issue_token_for`
+- `seed_patient_with_assignments`
+- `seed_lead`
+- `seed_invoice_for_patient`
+- `seed_document`
+- `seed_appointment`
+
+Правила для shared fixtures:
+1. Повертають `id`, а не готові DTO.
+2. Не викликають приховано інші seed-функції без явної потреби тесту.
+3. Працюють із `TestSuiteContext` без глобального mutable state.
+
+## 8. Відкриті бізнес-неоднозначності
+
+Ці питання не блокують поточний baseline, але важливі для **exhaustive matrix hardening**:
+
+1. `Sales + Finanzen = Auswertung und Analyse`
+   Поточна безпечна інтерпретація: лише агрегати, не per-invoice read.
+
+2. `Sales + Termine = Teilzugriff zur Auswertung`
+   Поточна безпечна інтерпретація: тільки aggregate/velocity view, не per-appointment detail.
+
+3. `CEO + Dolmetscherberichte = Lesen`
+   Якщо замовник реально хоче жорсткий read-only even for CEO, це треба явно перевірити проти current route policy, бо багато current-state executive surfaces уже ширші.
+
+4. `IT-Admin + Patientendaten = Testdaten only`
+   У current schema немає технічної межі між test/prod rows. Безпечна current-state інтерпретація: повний deny на production patient rows.
+
+## 9. ROI і порядок добивки
+
+Початковий оцінний "230 тестів / 30-37 днів" був би релевантний для greenfield-проєкту. Для цього repo він уже застарілий.
+
+Реальний порядок зараз такий:
+1. Добити auth/session matrix.
+2. Добити systematic per-role smoke там, де coverage ще implicit, а не explicit.
+3. Ущільнити patient/data field-level deny assertions.
+4. Ущільнити browser shell coverage для решти roles/cells.
+5. Паралельно витягувати shared fixtures з повторюваних test files.
+
+Оптимальна точка ROI:
+- не переписувати все "по фазах з нуля";
+- добивати тільки решту клітинок, яких ще немає в regression matrices.
 
 ## 10. Як запускати
 
 ```bash
-# Однократно — стартувати Postgres для тестів (docker-compose.yml вже є)
+# опційно: якщо хочеш зафіксований локальний postgres
 docker compose up -d db
 
-# Змінні
+# env vars, якщо не використовуєш docker fallback з harness
 export DATABASE_URL=postgres://gmed:gmed@localhost:5432/gmed
 export TEST_DATABASE_ADMIN_URL=postgres://gmed:gmed@localhost:5432/postgres
 
-# Один файл
+# окремий Rust integration file
 cargo test -p gmed-server --test auth_sessions_api
 
-# Весь RBAC набір
-cargo test -p gmed-server --test '*_api'
+# усі server integration tests
+cargo test -p gmed-server --tests
 
-# Playwright
+# frontend unit
+npm --prefix frontend run test
+
+# browser
 npm --prefix frontend run test:e2e
 ```
 
-**CI:** існуючий `cargo test --workspace` з `SQLX_OFFLINE=true` не виконує ці тести (вони silently skip через відсутність `TEST_DATABASE_ADMIN_URL`). Треба додати окремий job `rust-integration` який підіймає Postgres через `services:` у GitHub Actions і ганяє тести. Це окрема задача **T-1xx** до Phase 1.
+Важливий current-state факт:
+- CI в [ci.yml](C:/Users/123/Downloads/dev/.github/workflows/ci.yml) уже виконує `cargo test --workspace`;
+- integration tests **більше не залежать тільки від** `TEST_DATABASE_ADMIN_URL`, бо [support/mod.rs](C:/Users/123/Downloads/dev/crates/server/tests/support/mod.rs) має `DATABASE_URL` і Docker fallback.
 
-## 11. Посилання
+Що все ще можна покращити:
+- додати окремий `rust-integration` job з explicit Postgres service;
+- це не тому, що тести зараз "silently skip", а для детермінізму, швидшого cold start і яснішої ізоляції CI failure-ів.
 
-- [RBAC Matrix Excel](../1%20(Update%202)%20User%20Story%20Salesforce.xlsx) — вкладка `RBAC Matrix`
-- [User Stories Excel](../1%20(Update%202)%20User%20Story%20Salesforce.xlsx) — вкладка `User Stories`, 184 items, 24 epics
-- [Role enum](../../crates/domain/src/role.rs)
-- [Access policy function](../../crates/domain/src/access/policy.rs) + її unit tests
-- [Data sensitivity classification](../../crates/domain/src/access/data_sensitivity.rs)
-- [ShareStatus lifecycle](../../crates/domain/src/access/share_status.rs)
-- [TestSuiteContext harness](../../crates/server/tests/support/mod.rs)
-- [Process map PDF](../Process%20Mapping%20(Kundenjourney%20allg.)(in%20Bearbeitung).pdf) — workflow contextual constraints
-- [Audit policy doc](../engineering/02_audit-migration-policy_ua.md) — audit assertions baseline
-- [Lead retention policy doc](../engineering/03_lead-retention-policy_ua.md) — retention assertions baseline
+## 11. Пов’язані документи
+
+- [00_source-of-truth_ua.md](C:/Users/123/Downloads/dev/docs/00_source-of-truth_ua.md)
+- [02_rbac-matrix_ua.md](C:/Users/123/Downloads/dev/docs/backlog/02_rbac-matrix_ua.md)
+- [03_kpi-catalog_ua.md](C:/Users/123/Downloads/dev/docs/backlog/03_kpi-catalog_ua.md)
+- [current-state-gap-audit_ua.md](C:/Users/123/Downloads/dev/docs/testing/current-state-gap-audit_ua.md)
+- [full-docs-backlog-reconciliation_ua.md](C:/Users/123/Downloads/dev/docs/testing/full-docs-backlog-reconciliation_ua.md)
+- [source-workspace-regression-matrix.md](C:/Users/123/Downloads/dev/docs/testing/source-workspace-regression-matrix.md)
+- [source-documents-regression-matrix.md](C:/Users/123/Downloads/dev/docs/testing/source-documents-regression-matrix.md)
+- [source-billing-regression-matrix.md](C:/Users/123/Downloads/dev/docs/testing/source-billing-regression-matrix.md)

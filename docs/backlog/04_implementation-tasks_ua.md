@@ -40,6 +40,8 @@
 
 ### 1.4 Service Providers
 
+> Current-state note (2026-04-15): цей блок як checklist уже відстає від коду. У runtime вже є provider registry enrichments, `Provider <-> Patient` interaction detail (`linked_patients + interactions`), clinic-level `provider_templates` і auto-send partner preparation packets on `medical appointment -> confirmed`; пункти нижче треба читати як decomposition inventory, а не як live-status.
+
 - [ ] **T-026** CRUD справи клініки/лікаря
 - [ ] **T-027** Каталог послуг із цінами
 - [ ] **T-028** Пошук медичних service providers
@@ -59,6 +61,8 @@
 - [ ] **T-039** `Execution` flow
 
 ### 1.6 Терміни та календар
+
+> Current-state note (2026-04-15): appointments/calendar slice у runtime вже суттєво ширший за цей checklist: recurring series create/update/cancel, true split for `this and following`, bulk scope actions, lineage surfacing, overlap hardening і live browser coverage для whole-series cancel + recurrence-rule reshape уже є. Секцію нижче тримати як planning inventory.
 
 - [ ] **T-040** CRUD медичних термінів
 - [ ] **T-041** Зв'язки: `Patient <-> Service Provider <-> Staff <-> Order`

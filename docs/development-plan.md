@@ -183,6 +183,8 @@ Monitoring: CloudWatch + Sentry
 
 ### Sprint 7 (тижні 13–14): Service Providers & Templates
 
+> Current-state note (2026-04-15): repo вже пішов далі за цей початковий спринтовий план. У коді є provider registry enrichments, provider/patient interaction detail і clinic-level partner templates (`provider_templates`) з generation flow. Цей спринт нижче треба читати як початковий rollout plan, а не як live-status.
+
 - [ ] Модель `Provider`: назва, адреса, тип (medical/non_medical), контакти
 - [ ] `ProviderDoctor[]`: лікарі в клініці
 - [ ] `ServiceCatalog[]`: послуги з цінами + історія цін
@@ -191,7 +193,7 @@ Monitoring: CloudWatch + Sentry
 - [ ] Зв'язки Provider ↔ Patient (інтеракційна історія)
 - [ ] Фільтр пацієнтів за клінікою/лікарем
 - [ ] Шаблони документів: модель `Template`, генерація з текстових блоків
-- [ ] Textbausteine з Ausfüllfunktion (merge fields)
+- [x] Textbausteine з Ausfüllfunktion (merge fields) (`case_text_snippets` current-state)
 - [ ] Генерація Patientenaufkleber (наклейки)
 
 **Мілстоун R1:** Повний intake-цикл. Можна: створити ліда → кваліфікувати → конвертувати в пацієнта → зібрати повний анамнез → створити замовлення → підключити клініку.
@@ -203,6 +205,8 @@ Monitoring: CloudWatch + Sentry
 > Мета: можна планувати терміни, управляти документами, координувати перекладачів.
 
 ### Sprint 8 (тижні 15–16): Appointments & Calendar
+
+> Current-state note (2026-04-15): appointments runtime already covers more than the original plan here: recurring create/update/cancel, true split semantics, scope-aware bulk actions, overlap constraints and live Playwright coverage for whole-series cancellation plus recurrence-rule reshape. Список нижче не є актуальним статусом реалізації.
 
 - [ ] Модель `Appointment`: patient, provider, order, interpreter, type, date/time, location, category
 - [ ] Типи: medical / non_medical / internal
@@ -265,6 +269,8 @@ Monitoring: CloudWatch + Sentry
 ## 6. Release 3: Finance (Спрінти 12–14, тижні 23–28)
 
 > Мета: повний білінговий цикл від послуги до DATEV-експорту.
+>
+> Current-state note (2026-04-15): runtime уже значно далі за цей початковий rollout plan. У коді вже є quotes/invoices/dunning/VAT, patient-portal invoices, `external_invoices`, internal cash-based `accounting_entries` ledger / EÜR export, supporting-document auto-link для cost passthrough і order-level finance reports. Реально незакритими тут лишаються переважно зовнішні handoff/integration slices (`DATEV`, `E-Rechnung`, payment provider), а не базовий internal finance runtime.
 
 ### Sprint 12 (тижні 23–24): Invoicing Core
 
@@ -312,6 +318,8 @@ Monitoring: CloudWatch + Sentry
 ## 7. Release 4: Portal & Analytics (Спрінти 15–17, тижні 29–34)
 
 > Мета: портал пацієнта, KPI-дашборди, CEO-модуль.
+>
+> Current-state note (2026-04-15): patient portal, KPI/reports/risk-analysis/forecasting, secure chat, privacy/export flow і executive read models уже current-state. Цей блок нижче треба читати як ранній rollout plan; фактично відкритими тут лишаються `AI / pseudonymization handoff`, `eIDAS/QES` і зовнішній payment-provider checkout, а не сам базовий portal/analytics slice.
 
 ### Sprint 15 (тижні 29–30): Patient Portal
 

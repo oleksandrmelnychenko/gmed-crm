@@ -1,6 +1,8 @@
 # RBAC Matrix (UA)
 
 > **Джерело правди:** аркуш `RBAC Matrix` у `docs/1 (Update 2) User Story Salesforce.xlsx`. При розбіжності пріоритет має Excel. Ієрархія джерел: `docs/00_source-of-truth_ua.md`.
+>
+> **Важливо:** це канонічна продуктова матриця доступів, а не твердження про точний current-state FE/BE route wiring у кожному build. Для фактичного verified RBAC snapshot див. `docs/testing/ui-rbac-route-guard-plan_ua.md`, `docs/testing/phase-f-ssot-drift-audit.md` і `docs/testing/04_rbac-e2e-test-plan_ua.md`.
 
 ## Відповідність Excel
 

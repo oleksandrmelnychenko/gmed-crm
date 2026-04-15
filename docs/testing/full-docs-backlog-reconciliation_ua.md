@@ -1,6 +1,6 @@
 # Full Docs / Backlog Reconciliation (UA)
 
-> Повна звірка документації в `docs/` з поточним станом репозиторію станом на **2026-04-13**. Це не заміняє канонічні вимоги; файл потрібен, щоб розвести: `source-of-truth`, planning docs, current-state код і явні gaps.
+> Повна звірка документації в `docs/` з поточним станом репозиторію станом на **2026-04-15**. Це не заміняє канонічні вимоги; файл потрібен, щоб розвести: `source-of-truth`, planning docs, current-state код і явні gaps.
 
 ## 1. Методика звірки
 
@@ -52,6 +52,8 @@
 - order lifecycle `discovery -> intake -> execution -> closure -> follow-up`
 - planning / preparation / execution / follow-up readiness
 - appointments, interpreter / concierge handoff, checklists, timeline
+- approved interpreter reports now auto-create agency-priced `order_leistungen` through `agency_service_catalog` (`interpreter_hours`), and scheduler backfill closes historic `missing_catalog` cases without duplicates; live browser proof now also covers the staff path `assign -> submit -> approve -> auto-billed line visible in order detail`
+- completed medical appointments now auto-create the time-bound `Organisation der Behandlung` billing line through `agency_service_catalog` (`treatment_organization`), keep provenance via `source_medical_appointment_id`, and dedupe repeated completion; live browser proof covers `complete appointment -> order detail shows the auto-billed line`
 - billing release / package coverage / debt hold / failed-lead resolution
 
 Незакрито відносно process map:
@@ -71,6 +73,12 @@
 - repeatable sections: preconditions, allergies, operations, medications, symptoms, pain, vegetative, vaccination
 - doctor FK links for `Zuweiser`, `Arzt`, `Verordnender Arzt`
 - dedicated `Cardiology`, `Gastroenterology`, `Orthopedics`, `Neurology`, `Pulmonology` and `Urology` sub-flows
+- patient-level `clinical_warnings` and time-series vital measurements with `measured_at`, blood pressure, heart rate, weight, height and BMI
+- patient-level `Karteikartenzeilen` / `patient_card_entries` stream with category, source, author and timeline integration
+- patient-level `medical_orders / therapy_orders` slice with structured order type, instructions, due date and status lifecycle
+- patient-level `risk_scores` slice with structured score type, numeric value, optional scale, interpretation and JSON inputs
+- dedicated `case_text_snippets` library for anamnesis authoring with reusable placeholder-aware text blocks and direct insertion into `aktuelle_anamnese`
+- medication expiry review loop with `expiry_date`, scheduler-created confirmation events and explicit PM/CEO confirmation flow for expired permanent medication
 - section history via `case_versions`
 - explicit `case_uuid`, retention metadata and append-only clinical history
 
@@ -82,6 +90,7 @@
 Незакрито:
 
 - подальші specialty branches тепер є вже розширенням specialty library, а не незакритим базовим pattern gap
+- appointment cycle already має explicit `care_path_kind` semantics (`regular / preventive / control / followup`) для staff appointments, patient portal request flow і convert-time propagation; окремий preventive-only program model лишається лише optional extension, не gap
 
 ### 3.3 `docs/requirements/03_product-backlog_ua.md`
 
@@ -320,15 +329,16 @@ Target-state, але не повністю підтверджено:
 | Домен | Статус | Примітка |
 |------|--------|----------|
 | Identity / RBAC / Audit | Mostly confirmed | ролі, assignments, MFA/admin, audit, compliance routes є |
-| Patient Registry | Confirmed | profile, tabs, timeline, relations, labels, consents, privacy |
-| Medical Case / Anamnesis | Mostly confirmed | structured sections, FK doctors, 6 specialty sub-flows, history, retention |
-| Providers / Clinics / Doctors | Mostly confirmed | registry, doctors, enrichments, clinic/doctor reports |
+| Patient Registry | Confirmed | profile, tabs, timeline, relations, labels, consents, privacy, live browser proof for label/timeline/re-check surfaces |
+| Medical Case / Anamnesis | Mostly confirmed | structured sections, FK doctors, 6 specialty sub-flows, anamnesis text snippets, history, retention |
+| Providers / Clinics / Doctors | Mostly confirmed | registry, doctors, enrichments, linked-patient/interactions detail, provider-specific templates, clinic/doctor reports |
 | Leads / CRM | Mostly confirmed | qualification, conversion, failed-flow, readiness gates |
 | Orders / Process Engine | Mostly confirmed | lifecycle, billing/package/debt gates, planning/execution/follow-up |
 | Appointments / Calendar | Confirmed | medical + non-medical, conflicts, recurrence, true split lineage, scope-aware bulk actions, portal requests and DB-level overlap constraints |
 | Documents / Sharing | Confirmed | upload, release, OCR/translation workspace, policy checks |
-| Billing / Finance | Partial | quotes, invoices, dunning, VAT, portal invoices, provider cost-intelligence reports and sales-safe medical-provider revenue reports є; DATEV/E-Rechnung/payments gap |
-| Portal | Confirmed | documents, invoices, privacy, services, appointments, feedback, chat |
+| Billing / Finance | Partial | quotes, invoices, dunning, VAT, portal invoices, external inbound invoice tracking with overdue alerts, internal cash-based `accounting_entries` ledger / EÜR export, provider cost-intelligence reports and sales-safe medical-provider revenue reports є; DATEV/E-Rechnung/payments gap |
+| Commercial catalog | Confirmed | agency-level pricing catalog now exists separately from provider `service_catalog`, with role-scoped read/manage access in the contracts workspace |
+| Portal | Confirmed | documents, invoices, privacy, services, appointments, feedback, chat, required-document alerts and live self-service browser proof |
 | Messaging | Confirmed | text + attachment E2E, allowed-peer scope, portal/staff chat flows і audit/regression coverage зібрані |
 | Feedback / NPS | Confirmed | portal submission + staff review + ranking |
 | SOP / Learning | Confirmed | library, approval flow, acknowledgement |
@@ -340,20 +350,32 @@ Target-state, але не повністю підтверджено:
 
 Цей блок спеціально **не включає** `DATEV`, payment-provider checkout, `E-Rechnung`, `eIDAS/QES` та інші зовнішні інтеграції.
 
-### 8.1 Product / domain gaps
+### 8.1 Still real in-scope gaps
 
-- Явних blocking product gaps без зовнішніх інтеграцій у core current-state scope зараз не видно.
-- У clinical intake specialty-subflow pattern уже закритий як reusable pattern; подальші branches — це extension work по бібліотеці specialty sections, а не missing базовий workflow.
+- `AI / pseudonymization -> AI handoff` усе ще лишається окремим незакритим workflow: privacy/anonymization mechanics уже є, але bounded pipeline для AI-ready export, role-scoped access і audit trail поверх них не реалізований.
+- У clinical domain ще може знадобитися richer preventive/control program model поверх current `care_path_kind`, якщо source scope вимагатиме окрему preventive orchestration semantics. На поточному current-state це вже не blocker, а potential domain extension.
+
+### 8.2 Partial / optional tails
+
 - `RBAC` матриця загалом збігається з кодом; high-risk boundaries вже покриті regression tests, а незакритим лишається тільки поступове добивання exhaustive matrix coverage.
 - KPI / reports / forecasting уже покривають current-state executive, provider, billing і sales layers; подальша робота тут — це catalog expansion і stronger regression granularity, а не missing базовий analytics slice.
-- `AI / pseudonymization` як окремий прикладний workflow усе ще лишається gap; privacy/anonymization mechanics уже є, але AI-ready handoff поверх них не реалізований.
+- Current-state freeze verification уже зелений: `cargo test --workspace`, `frontend npm test`, `frontend npm run lint`, `frontend npm run build`, `frontend npm run test:e2e` (`22/22`) і `frontend npm run test:e2e:live` (`47/47`) пройшли на цьому зрізі коду. Подальша робота тут — це тільки ущільнення regression inventory, а не закриття “непідтвердженого” продукту.
+- `docs/backlog/04_implementation-tasks_ua.md` і `docs/development-plan.md` треба читати як planning-only; після останніх runtime хвиль вони більше не є live-status документами.
+- Найбільший поточний engineering risk не в product coverage, а у mixed worktree / commit hygiene: verified freeze already green, але дерево все ще треба тримати розкладеним по bounded commits / PR slices.
 
-### 8.2 Platform / verification gaps
+### 8.3 Not real gaps anymore
 
-- Current-state freeze verification уже зелений: `cargo test --workspace`, `frontend npm test`, `frontend npm run build` і `frontend npm run test:e2e` пройшли на цьому зрізі коду.
-- Частина foundation/non-functional scope не верифікується з самого repo: backup/recovery, DR, TLS/perimeter hardening, production ops.
-- `docs/backlog/04_implementation-tasks_ua.md` і `docs/development-plan.md` не синхронізовані з кодом як live-status документи; їх треба читати як planning-only.
-- Найбільший поточний engineering risk не в verification coverage, а у все ще великому dirty worktree: freeze pass уже зелений, але дерево лишається змішаним і його все ще треба розвести по bounded commits / PR slices.
+- patient-level clinical enrichment (`vitals`, `clinical_warnings`, `card log`, `medical orders`, `risk scores`)
+- `assign_patient` / `revoke_assignment` notifications
+- provider `rating_gte` filter
+- medication auto-expire confirmation loop
+- provider-specific templates і partner preparation auto-send
+- external inbound invoice tracking
+- internal cash-based `accounting_entries` ledger / EÜR export
+- `agency_service_catalog`
+- patient service report
+- anamnesis `case_text_snippets`
+- audit analytics dashboard
 
 ## 9. Документи, що зараз найбільш корисні як live status
 
@@ -381,11 +403,11 @@ Target-state, але не повністю підтверджено:
 
 ### Найбільші реальні gaps після повної звірки
 
-- blocking non-AI/non-integration product gaps у core scope зараз не видно
-- залишаються stabilization / inventory і подальше ущільнення regression coverage
-- базовий browser-level `E2E` harness уже є і не обмежується навігацією: Playwright покриває staff shell (`dashboard -> patients -> appointments -> documents -> invoices`), staff document portal release/revoke flow, staff template-based document generation flow, provider share/revoke з cover message, staff file-delete lifecycle, staff translation-workspace request/save/complete flow, staff feedback review flow, patient portal (`dashboard -> documents -> invoices -> appointments -> services -> feedback -> chat`), patient invoice payment-proof upload, patient data export + privacy request submission, portal document receipt confirmation, portal self-upload + re-download loop, portal appointment-request submit, portal concierge-service request/cancel, portal appointment-linked feedback submit, recurring appointment whole-series cancellation з detail drawer, staff secure chat text-send + secure attachment-send flows і окремий patient-portal secure chat flow з encrypted text + attachment, unread-state clearing і allowed-peer picker filtering через browser keyring/mock envelope path; окремо backend regression уже цементує `logout` / `logout-all` session revocation semantics, `portal feedback -> staff review -> patient history`, `portal feedback notifications -> assigned roles only` і `portal service request -> assigned staff notifications/queue only + portal status reflection`. На цьому зрізі весь consolidated freeze pass зелений, тому незакритим лишається вже не наявність browser/session coverage, а тільки подальше optional-ущільнення mutation-сценаріїв.
-- `Documents / Sharing` уже підтверджені end-to-end: upload/release, OCR/translation workspace, policy checks, file delete lifecycle, provider cover-message trail і patient-requested third-party revoke workflow тепер автоматизовані regression tests
 - `AI / pseudonymization -> AI handoff`
+- optional domain extension around richer preventive/control program semantics, if source scope ever needs more than the current `care_path_kind` layer on generic appointment rows
+- stabilization / inventory і подальше ущільнення regression coverage
+- базовий browser-level `E2E` harness уже є і не обмежується навігацією: Playwright покриває staff shell (`dashboard -> patients -> appointments -> documents -> invoices`), staff document portal release/revoke flow, staff template-based document generation flow, provider share/revoke з cover message, staff file-delete lifecycle, staff translation-workspace request/save/complete flow, staff feedback review flow, case text snippet create/preview/insert/save flow всередині анамнезу, interpreter report `assign -> submit -> approve -> auto-billed order line` flow, patient portal (`dashboard -> documents -> invoices -> appointments -> services -> feedback -> chat`), patient dashboard required-document alerts, patient invoice payment-proof upload, patient data export + privacy request submission, portal document receipt confirmation, provider-template auto-send receipt confirmation, portal self-upload + re-download loop, portal appointment-request submit, portal concierge-service request/cancel, portal appointment-linked feedback submit, patient-profile timeline/document filtering plus authenticated patient-sticker fetch, patient-profile relations/workflow completion, create-order existing-customer re-check blockers, recurring appointment whole-series cancellation і whole-series recurrence-rule reshape з detail drawer, staff secure chat text-send + secure attachment-send flows і окремий patient-portal secure chat flow з encrypted text + attachment, unread-state clearing і allowed-peer picker filtering через browser keyring/mock envelope path; окремо backend regression уже цементує `logout` / `logout-all` session revocation semantics, `portal feedback -> staff review -> patient history`, `portal feedback notifications -> assigned roles only`, `portal service request -> assigned staff notifications/queue only + portal status reflection` і same-series recurring reshape без false self-conflict. На цьому зрізі весь consolidated freeze pass зелений, включно з live DB-backed Playwright suite, тому незакритим лишається вже не наявність browser/session coverage, а тільки подальше optional-ущільнення mutation-сценаріїв.
+- `Documents / Sharing` уже підтверджені end-to-end: upload/release, OCR/translation workspace, policy checks, file delete lifecycle, provider cover-message trail і patient-requested third-party revoke workflow тепер автоматизовані regression tests
 
 ### Окремо: інтеграційні gaps
 

@@ -45,22 +45,35 @@
 
 - `testing/user-stories-excel-backlog-audit_ua.md` - аудит 1:1 між Excel `User Stories` і `requirements/03_product-backlog_ua.md`
 - `testing/full-docs-backlog-reconciliation_ua.md` - повна звірка `requirements/`, `backlog/`, `architecture/`, planning docs і current-state коду
+- `testing/04_rbac-e2e-test-plan_ua.md` - current-state RBAC / browser verification plan і правила coverage
 - `testing/source-workspace-regression-matrix.md` - regression coverage по workspace slices
 - `testing/source-billing-regression-matrix.md` - regression coverage по billing slice
 - `testing/source-documents-regression-matrix.md` - regression coverage по documents slice
 - `testing/current-state-gap-audit_ua.md` - робочий зріз того, що вже є в коді, а що ще лишається gap відносно source scope
 - `testing/worktree-stabilization-inventory_ua.md` - інвентаризація незведеного worktree перед фінальним stabilization pass
+- `testing/ui-rbac-route-guard-plan_ua.md` - план доведення staff shell і route guards до single source of truth
 
 ### Поточний Freeze Status
 
-Станом на `2026-04-13` current-state зріз підтверджений повним freeze pass:
+Станом на `2026-04-15` current-state зріз підтверджений повним freeze pass:
 
+- `cargo fmt --all`
+- `cargo clippy --workspace --all-targets -- -D warnings`
 - `cargo test --workspace`
 - `frontend npm test`
+- `frontend npm run lint`
 - `frontend npm run build`
-- `frontend npm run test:e2e`
+- `frontend npm run test:e2e` (`22/22`)
+- `frontend npm run test:e2e:live` (`47/47`)
 
 Детальний status і незакриті інтеграційні/engineering tails дивись у `testing/full-docs-backlog-reconciliation_ua.md` і `testing/current-state-gap-audit_ua.md`.
+Для normalization / commit slicing / canonical test infra дивись `testing/worktree-stabilization-inventory_ua.md`.
+
+Коротко по residual current-state на цьому зрізі:
+
+- внутрішній core product уже практично закритий;
+- реальний незакритий in-scope slice зараз переважно `AI / pseudonymization -> AI handoff`;
+- решта великих незакритих пунктів це вже зовнішні інтеграції (`DATEV`, `E-Rechnung`, payment provider, `eIDAS/QES`) або engineering/stabilization tails.
 
 ## Як читати документацію
 
