@@ -2,19 +2,20 @@ use axum::{
     Json, Router,
     body::Body,
     extract::{Extension, Path, Query, State},
-    http::StatusCode,
+    http::{StatusCode, header},
     response::IntoResponse,
     routing::{get, post},
 };
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::{DateTime, Datelike, NaiveDate, Utc};
 use printpdf::{
     Color, Mm, Op, ParsedFont, PdfDocument, PdfFontHandle, PdfPage, PdfSaveOptions, PdfWarnMsg,
     Point, Pt, Rgb, TextItem,
 };
 use rust_decimal::Decimal;
 use serde::Deserialize;
-use serde_json::{Number as JsonNumber, Value};
+use serde_json::{Number as JsonNumber, Value, json};
 use sqlx::Row;
+use std::collections::BTreeMap;
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -49,6 +50,11 @@ pub fn router() -> Router<AppState> {
             "/me/invoices/{invoice_id}/pdf",
             get(download_my_invoice_pdf),
         )
+        .route("/invoices/accounting-ledger", get(get_accounting_ledger))
+        .route(
+            "/invoices/accounting-ledger/export",
+            get(export_accounting_ledger),
+        )
         .route("/invoices", get(list_invoices))
         .route("/invoices/{invoice_id}", get(get_invoice))
         .route("/invoices/{invoice_id}/pdf", get(download_invoice_pdf))
@@ -71,11 +77,18 @@ struct ListInvoicesQuery {
     quote_id: Option<Uuid>,
     status: Option<String>,
     invoice_type: Option<String>,
+    page: Option<usize>,
+    per_page: Option<usize>,
 }
 
 #[derive(Deserialize)]
 struct ListMyInvoicesQuery {
     status: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct AccountingLedgerQuery {
+    year: Option<i32>,
 }
 
 #[derive(Deserialize)]
@@ -139,6 +152,49 @@ struct InvoiceDunningContext {
     due_date: Option<NaiveDate>,
     total_gross: Decimal,
     paid_amount: Decimal,
+}
+
+struct InvoiceAccountingContext {
+    invoice_id: Uuid,
+    order_id: Uuid,
+    patient_id: Uuid,
+    invoice_number: String,
+    paid_amount: Decimal,
+    paid_at: Option<DateTime<Utc>>,
+    total_vat: Decimal,
+    total_gross: Decimal,
+    currency: String,
+    line_items: Value,
+}
+
+struct ExternalInvoiceAccountingContext {
+    external_invoice_id: Uuid,
+    order_id: Uuid,
+    patient_id: Uuid,
+    external_invoice_number: String,
+    status: String,
+    paid_at: Option<DateTime<Utc>>,
+    amount_vat: Decimal,
+    amount_gross: Decimal,
+    currency: String,
+}
+
+struct AccountingEntryInsert<'a> {
+    entry_kind: &'a str,
+    direction: &'a str,
+    category: &'a str,
+    source_invoice_id: Option<Uuid>,
+    source_external_invoice_id: Option<Uuid>,
+    order_id: Uuid,
+    patient_id: Uuid,
+    entry_date: NaiveDate,
+    description: String,
+    amount_net: Decimal,
+    amount_vat: Decimal,
+    amount_gross: Decimal,
+    currency: &'a str,
+    metadata: Value,
+    created_by: Option<Uuid>,
 }
 
 struct AutoDunningCandidate {
@@ -248,6 +304,26 @@ fn can_manage_invoice_finance(role: Role) -> bool {
     matches!(role, Role::Ceo | Role::Billing)
 }
 
+fn can_read_accounting_ledger(role: Role) -> bool {
+    matches!(role, Role::Ceo | Role::CeoAssistant | Role::Billing)
+}
+
+fn normalize_invoice_list_page(page: Option<usize>) -> Result<usize, &'static str> {
+    match page {
+        Some(0) => Err("Invalid invoice page"),
+        Some(value) => Ok(value),
+        None => Ok(1),
+    }
+}
+
+fn normalize_invoice_list_per_page(per_page: Option<usize>) -> Result<usize, &'static str> {
+    match per_page {
+        Some(0) => Err("Invalid invoice page size"),
+        Some(value) => Ok(value.min(50)),
+        None => Ok(12),
+    }
+}
+
 fn is_valid_invoice_type(value: &str) -> bool {
     matches!(value, "advance" | "interim" | "final")
 }
@@ -284,6 +360,50 @@ fn decimal_to_string(value: Decimal) -> String {
     value.round_dp(2).normalize().to_string()
 }
 
+fn round_accounting_money(value: Decimal) -> Decimal {
+    value.round_dp(2)
+}
+
+fn value_to_decimal(value: &Value) -> Decimal {
+    match value {
+        Value::String(text) => Decimal::from_str(text).unwrap_or(Decimal::ZERO),
+        Value::Number(number) => Decimal::from_str(&number.to_string()).unwrap_or(Decimal::ZERO),
+        _ => Decimal::ZERO,
+    }
+}
+
+fn proportional_share(amount: Decimal, part: Decimal, total: Decimal) -> Decimal {
+    if amount == Decimal::ZERO || part == Decimal::ZERO || total == Decimal::ZERO {
+        Decimal::ZERO
+    } else {
+        round_accounting_money(amount * part / total)
+    }
+}
+
+fn invoice_passthrough_totals(line_items: &Value) -> (Decimal, Decimal, Decimal) {
+    let Some(items) = line_items.as_array() else {
+        return (Decimal::ZERO, Decimal::ZERO, Decimal::ZERO);
+    };
+
+    items.iter().fold(
+        (Decimal::ZERO, Decimal::ZERO, Decimal::ZERO),
+        |(net, vat, gross), item| {
+            let is_cost_passthrough = item
+                .get("is_cost_passthrough")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            if !is_cost_passthrough {
+                return (net, vat, gross);
+            }
+            (
+                net + value_to_decimal(item.get("line_net").unwrap_or(&Value::Null)),
+                vat + value_to_decimal(item.get("line_vat").unwrap_or(&Value::Null)),
+                gross + value_to_decimal(item.get("line_gross").unwrap_or(&Value::Null)),
+            )
+        },
+    )
+}
+
 async fn write_invoice_audit(
     state: &AppState,
     user_id: Uuid,
@@ -298,6 +418,300 @@ async fn write_invoice_audit(
         Some(invoice_id),
         context,
     ));
+}
+
+async fn insert_accounting_entry(
+    state: &AppState,
+    entry: AccountingEntryInsert<'_>,
+) -> Result<(), sqlx::Error> {
+    if entry.amount_gross == Decimal::ZERO
+        && entry.amount_net == Decimal::ZERO
+        && entry.amount_vat == Decimal::ZERO
+    {
+        return Ok(());
+    }
+
+    sqlx::query(
+        r#"INSERT INTO accounting_entries (
+                entry_kind, direction, category, source_invoice_id, source_external_invoice_id,
+                order_id, patient_id, entry_date, description,
+                amount_net, amount_vat, amount_gross, currency, metadata, created_by
+           ) VALUES (
+                $1, $2, $3, $4, $5,
+                $6, $7, $8, $9,
+                $10, $11, $12, $13, $14, $15
+           )"#,
+    )
+    .bind(entry.entry_kind)
+    .bind(entry.direction)
+    .bind(entry.category)
+    .bind(entry.source_invoice_id)
+    .bind(entry.source_external_invoice_id)
+    .bind(entry.order_id)
+    .bind(entry.patient_id)
+    .bind(entry.entry_date)
+    .bind(entry.description)
+    .bind(round_accounting_money(entry.amount_net))
+    .bind(round_accounting_money(entry.amount_vat))
+    .bind(round_accounting_money(entry.amount_gross))
+    .bind(entry.currency)
+    .bind(entry.metadata)
+    .bind(entry.created_by)
+    .execute(&state.db)
+    .await?;
+
+    Ok(())
+}
+
+async fn load_invoice_accounting_context(
+    state: &AppState,
+    invoice_id: Uuid,
+) -> Result<Option<InvoiceAccountingContext>, sqlx::Error> {
+    sqlx::query(
+        r#"SELECT id, order_id, patient_id, invoice_number, paid_amount, paid_at,
+                  total_vat, total_gross, line_items
+           FROM invoices
+           WHERE id = $1"#,
+    )
+    .bind(invoice_id)
+    .fetch_optional(&state.db)
+    .await
+    .map(|row| {
+        row.map(|row| InvoiceAccountingContext {
+            invoice_id: row.try_get::<Uuid, _>("id").unwrap_or_default(),
+            order_id: row.try_get::<Uuid, _>("order_id").unwrap_or_default(),
+            patient_id: row.try_get::<Uuid, _>("patient_id").unwrap_or_default(),
+            invoice_number: row
+                .try_get::<String, _>("invoice_number")
+                .unwrap_or_default(),
+            paid_amount: row
+                .try_get::<Decimal, _>("paid_amount")
+                .unwrap_or(Decimal::ZERO),
+            paid_at: row
+                .try_get::<Option<DateTime<Utc>>, _>("paid_at")
+                .unwrap_or_default(),
+            total_vat: row
+                .try_get::<Decimal, _>("total_vat")
+                .unwrap_or(Decimal::ZERO),
+            total_gross: row
+                .try_get::<Decimal, _>("total_gross")
+                .unwrap_or(Decimal::ZERO),
+            currency: "EUR".to_string(),
+            line_items: row
+                .try_get::<Value, _>("line_items")
+                .unwrap_or_else(|_| serde_json::json!([])),
+        })
+    })
+}
+
+async fn load_external_invoice_accounting_context(
+    state: &AppState,
+    external_invoice_id: Uuid,
+) -> Result<Option<ExternalInvoiceAccountingContext>, sqlx::Error> {
+    sqlx::query(
+        r#"SELECT id, order_id, patient_id, external_invoice_number, status, paid_at,
+                  amount_vat, amount_gross, currency
+           FROM external_invoices
+           WHERE id = $1"#,
+    )
+    .bind(external_invoice_id)
+    .fetch_optional(&state.db)
+    .await
+    .map(|row| {
+        row.map(|row| ExternalInvoiceAccountingContext {
+            external_invoice_id: row.try_get::<Uuid, _>("id").unwrap_or_default(),
+            order_id: row.try_get::<Uuid, _>("order_id").unwrap_or_default(),
+            patient_id: row.try_get::<Uuid, _>("patient_id").unwrap_or_default(),
+            external_invoice_number: row
+                .try_get::<String, _>("external_invoice_number")
+                .unwrap_or_default(),
+            status: row.try_get::<String, _>("status").unwrap_or_default(),
+            paid_at: row
+                .try_get::<Option<DateTime<Utc>>, _>("paid_at")
+                .unwrap_or_default(),
+            amount_vat: row
+                .try_get::<Decimal, _>("amount_vat")
+                .unwrap_or(Decimal::ZERO),
+            amount_gross: row
+                .try_get::<Decimal, _>("amount_gross")
+                .unwrap_or(Decimal::ZERO),
+            currency: row
+                .try_get::<String, _>("currency")
+                .unwrap_or_else(|_| "EUR".to_string()),
+        })
+    })
+}
+
+async fn total_accounted_invoice_gross(
+    state: &AppState,
+    invoice_id: Uuid,
+) -> Result<Decimal, sqlx::Error> {
+    sqlx::query_scalar(
+        r#"SELECT COALESCE(SUM(amount_gross), 0)
+           FROM accounting_entries
+           WHERE source_invoice_id = $1
+             AND entry_kind = 'invoice_payment'"#,
+    )
+    .bind(invoice_id)
+    .fetch_one(&state.db)
+    .await
+}
+
+async fn total_accounted_external_invoice_gross(
+    state: &AppState,
+    external_invoice_id: Uuid,
+) -> Result<Decimal, sqlx::Error> {
+    sqlx::query_scalar(
+        r#"SELECT COALESCE(SUM(amount_gross), 0)
+           FROM accounting_entries
+           WHERE source_external_invoice_id = $1
+             AND entry_kind = 'external_invoice_payment'"#,
+    )
+    .bind(external_invoice_id)
+    .fetch_one(&state.db)
+    .await
+}
+
+async fn sync_invoice_accounting_entries_from_current_state(
+    state: &AppState,
+    invoice_id: Uuid,
+    actor_id: Option<Uuid>,
+) -> Result<(), sqlx::Error> {
+    let Some(context) = load_invoice_accounting_context(state, invoice_id).await? else {
+        return Ok(());
+    };
+
+    let already_accounted = total_accounted_invoice_gross(state, invoice_id).await?;
+    let delta_gross = round_accounting_money(context.paid_amount - already_accounted);
+    if delta_gross == Decimal::ZERO {
+        return Ok(());
+    }
+
+    let (_, passthrough_vat_total, passthrough_gross_total) =
+        invoice_passthrough_totals(&context.line_items);
+    let service_vat_total = context.total_vat - passthrough_vat_total;
+
+    let passthrough_gross =
+        proportional_share(delta_gross, passthrough_gross_total, context.total_gross);
+    let passthrough_vat =
+        proportional_share(delta_gross, passthrough_vat_total, context.total_gross);
+    let passthrough_net = passthrough_gross - passthrough_vat;
+
+    let service_gross = delta_gross - passthrough_gross;
+    let service_vat = proportional_share(delta_gross, service_vat_total, context.total_gross);
+    let service_net = service_gross - service_vat;
+
+    let entry_date = context.paid_at.unwrap_or_else(Utc::now).date_naive();
+
+    insert_accounting_entry(
+        state,
+        AccountingEntryInsert {
+            entry_kind: "invoice_payment",
+            direction: "income",
+            category: "service_revenue",
+            source_invoice_id: Some(context.invoice_id),
+            source_external_invoice_id: None,
+            order_id: context.order_id,
+            patient_id: context.patient_id,
+            entry_date,
+            description: format!("Invoice payment {}", context.invoice_number),
+            amount_net: service_net,
+            amount_vat: service_vat,
+            amount_gross: service_gross,
+            currency: &context.currency,
+            metadata: serde_json::json!({
+            "invoice_number": context.invoice_number,
+            "payment_delta_gross": decimal_to_string(delta_gross),
+            }),
+            created_by: actor_id,
+        },
+    )
+    .await?;
+
+    insert_accounting_entry(
+        state,
+        AccountingEntryInsert {
+            entry_kind: "invoice_payment",
+            direction: "income",
+            category: "cost_passthrough_revenue",
+            source_invoice_id: Some(context.invoice_id),
+            source_external_invoice_id: None,
+            order_id: context.order_id,
+            patient_id: context.patient_id,
+            entry_date,
+            description: format!("Cost passthrough payment {}", context.invoice_number),
+            amount_net: passthrough_net,
+            amount_vat: passthrough_vat,
+            amount_gross: passthrough_gross,
+            currency: &context.currency,
+            metadata: serde_json::json!({
+            "invoice_number": context.invoice_number,
+            "payment_delta_gross": decimal_to_string(delta_gross),
+            }),
+            created_by: actor_id,
+        },
+    )
+    .await?;
+
+    Ok(())
+}
+
+pub async fn sync_external_invoice_accounting_entries_from_current_state(
+    state: &AppState,
+    external_invoice_id: Uuid,
+    actor_id: Option<Uuid>,
+) -> Result<(), sqlx::Error> {
+    let Some(context) =
+        load_external_invoice_accounting_context(state, external_invoice_id).await?
+    else {
+        return Ok(());
+    };
+
+    let already_accounted =
+        total_accounted_external_invoice_gross(state, external_invoice_id).await?;
+    let target_gross = if context.status == "paid" {
+        context.amount_gross
+    } else {
+        Decimal::ZERO
+    };
+    let delta_gross = round_accounting_money(target_gross - already_accounted);
+    if delta_gross == Decimal::ZERO {
+        return Ok(());
+    }
+
+    let delta_vat = proportional_share(delta_gross, context.amount_vat, context.amount_gross);
+    let delta_net = delta_gross - delta_vat;
+    let entry_date = context.paid_at.unwrap_or_else(Utc::now).date_naive();
+
+    insert_accounting_entry(
+        state,
+        AccountingEntryInsert {
+            entry_kind: "external_invoice_payment",
+            direction: "expense",
+            category: "provider_expense",
+            source_invoice_id: None,
+            source_external_invoice_id: Some(context.external_invoice_id),
+            order_id: context.order_id,
+            patient_id: context.patient_id,
+            entry_date,
+            description: format!(
+                "External invoice payment {}",
+                context.external_invoice_number
+            ),
+            amount_net: delta_net,
+            amount_vat: delta_vat,
+            amount_gross: delta_gross,
+            currency: &context.currency,
+            metadata: serde_json::json!({
+            "external_invoice_number": context.external_invoice_number,
+            "payment_delta_gross": decimal_to_string(delta_gross),
+            }),
+            created_by: actor_id,
+        },
+    )
+    .await?;
+
+    Ok(())
 }
 
 fn validate_dunning_level_transition(
@@ -693,6 +1107,10 @@ fn append_invoice_pdf_text_line(
     ops.push(Op::EndTextSection);
 }
 
+fn invoice_pdf_footer_line(footer_text: &str, page_number: usize, total_pages: usize) -> String {
+    format!("{footer_text} · Page {page_number} of {total_pages}")
+}
+
 impl InvoicePdfLayout {
     fn new(footer_text: String, regular_font: PdfFontHandle, bold_font: PdfFontHandle) -> Self {
         Self {
@@ -714,16 +1132,6 @@ impl InvoicePdfLayout {
         if self.page_ops.is_empty() {
             return;
         }
-
-        append_invoice_pdf_text_line(
-            &mut self.page_ops,
-            &format!("{} · Page {}", self.footer_text, self.page_number),
-            INVOICE_PDF_LEFT_MARGIN_MM,
-            INVOICE_PDF_BOTTOM_MARGIN_MM,
-            8.0,
-            &self.regular_font,
-            InvoicePdfColor::Muted,
-        );
 
         self.pages.push(PdfPage::new(
             Mm(INVOICE_PDF_PAGE_WIDTH_MM),
@@ -797,6 +1205,20 @@ impl InvoicePdfLayout {
 
     fn finish(mut self) -> Vec<PdfPage> {
         self.finish_page();
+        let total_pages = self.pages.len();
+        let footer_text = self.footer_text.clone();
+        let regular_font = self.regular_font.clone();
+        for (index, page) in self.pages.iter_mut().enumerate() {
+            append_invoice_pdf_text_line(
+                &mut page.ops,
+                &invoice_pdf_footer_line(&footer_text, index + 1, total_pages),
+                INVOICE_PDF_LEFT_MARGIN_MM,
+                INVOICE_PDF_BOTTOM_MARGIN_MM,
+                8.0,
+                &regular_font,
+                InvoicePdfColor::Muted,
+            );
+        }
         self.pages
     }
 }
@@ -1080,6 +1502,24 @@ fn extract_source_line_ids(line_items: &Value) -> Vec<Uuid> {
 
     for item in items {
         let Some(raw) = item.get("source_order_leistung_id").and_then(Value::as_str) else {
+            continue;
+        };
+        if let Ok(id) = Uuid::parse_str(raw) {
+            ids.push(id);
+        }
+    }
+
+    ids
+}
+
+fn extract_external_document_ids(line_items: &Value) -> Vec<Uuid> {
+    let mut ids = Vec::new();
+    let Some(items) = line_items.as_array() else {
+        return ids;
+    };
+
+    for item in items {
+        let Some(raw) = item.get("external_document_id").and_then(Value::as_str) else {
             continue;
         };
         if let Ok(id) = Uuid::parse_str(raw) {
@@ -1400,6 +1840,54 @@ async fn load_invoice_detail(
     let paid_amount = row
         .try_get::<Decimal, _>("paid_amount")
         .unwrap_or(Decimal::ZERO);
+    let line_items = row
+        .try_get::<Value, _>("line_items")
+        .unwrap_or_else(|_| serde_json::json!([]));
+    let direct_document_ids = extract_external_document_ids(&line_items);
+    let source_line_ids = extract_source_line_ids(&line_items);
+
+    let supporting_documents = if direct_document_ids.is_empty() && source_line_ids.is_empty() {
+        Vec::new()
+    } else {
+        sqlx::query(
+            r#"SELECT DISTINCT d.id, d.auto_name, d.original_filename, d.art, d.category
+               FROM documents d
+               WHERE d.status <> 'archived'
+                 AND d.file_deleted_at IS NULL
+                 AND (
+                        d.id = ANY($1)
+                     OR d.id IN (
+                            SELECT ol.external_document_id
+                            FROM order_leistungen ol
+                            WHERE ol.external_document_id IS NOT NULL
+                              AND ol.id = ANY($2)
+                        )
+                 )
+               ORDER BY d.auto_name, d.id DESC"#,
+        )
+        .bind(&direct_document_ids)
+        .bind(&source_line_ids)
+        .fetch_all(&state.db)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "load invoice supporting documents");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load invoice supporting documents",
+            )
+        })?
+        .into_iter()
+        .map(|doc| {
+            serde_json::json!({
+                "id": doc.try_get::<Uuid, _>("id").unwrap_or_default(),
+                "auto_name": doc.try_get::<String, _>("auto_name").unwrap_or_default(),
+                "original_filename": doc.try_get::<Option<String>, _>("original_filename").unwrap_or_default(),
+                "art": doc.try_get::<String, _>("art").unwrap_or_default(),
+                "category": doc.try_get::<Option<String>, _>("category").unwrap_or_default(),
+            })
+        })
+        .collect::<Vec<_>>()
+    };
 
     Ok(Some(serde_json::json!({
         "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
@@ -1426,7 +1914,8 @@ async fn load_invoice_detail(
         "paid_amount": decimal_to_string(paid_amount),
         "balance_due": decimal_to_string((total_gross - paid_amount).max(Decimal::ZERO)),
         "paid_at": row.try_get::<Option<DateTime<Utc>>, _>("paid_at").unwrap_or_default().map(|v| v.to_rfc3339()),
-        "line_items": row.try_get::<Value, _>("line_items").unwrap_or_else(|_| serde_json::json!([])),
+        "line_items": line_items,
+        "supporting_documents": supporting_documents,
         "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
         "created_at": row.try_get::<DateTime<Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
         "updated_at": row.try_get::<DateTime<Utc>, _>("updated_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
@@ -2153,6 +2642,260 @@ async fn get_my_invoice(
     Json(invoice).into_response()
 }
 
+fn accounting_ledger_year(query: &AccountingLedgerQuery) -> i32 {
+    query.year.unwrap_or_else(|| Utc::now().year())
+}
+
+fn csv_escape(value: &str) -> String {
+    if value.contains([',', '"', '\n']) {
+        format!("\"{}\"", value.replace('"', "\"\""))
+    } else {
+        value.to_string()
+    }
+}
+
+async fn get_accounting_ledger(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Query(query): Query<AccountingLedgerQuery>,
+) -> axum::response::Response {
+    if !can_read_accounting_ledger(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+
+    let year = accounting_ledger_year(&query);
+    let rows = match sqlx::query(
+        r#"SELECT ae.id, ae.entry_date, ae.direction, ae.category, ae.description,
+                  ae.amount_net, ae.amount_vat, ae.amount_gross, ae.currency,
+                  i.invoice_number, ei.external_invoice_number, o.order_number,
+                  p.patient_id AS patient_pid, p.first_name, p.last_name
+           FROM accounting_entries ae
+           LEFT JOIN invoices i ON i.id = ae.source_invoice_id
+           LEFT JOIN external_invoices ei ON ei.id = ae.source_external_invoice_id
+           LEFT JOIN orders o ON o.id = ae.order_id
+           LEFT JOIN patients p ON p.id = ae.patient_id
+           WHERE EXTRACT(YEAR FROM ae.entry_date) = $1
+           ORDER BY ae.entry_date DESC, ae.created_at DESC"#,
+    )
+    .bind(year)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::error!(error = %error, year, "load accounting ledger");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load accounting ledger",
+            );
+        }
+    };
+
+    let mut income_gross = Decimal::ZERO;
+    let mut expense_gross = Decimal::ZERO;
+    let mut service_revenue_gross = Decimal::ZERO;
+    let mut cost_passthrough_revenue_gross = Decimal::ZERO;
+    let mut provider_expense_gross = Decimal::ZERO;
+    let mut monthly: BTreeMap<String, (Decimal, Decimal)> = BTreeMap::new();
+    let mut entries = Vec::with_capacity(rows.len());
+
+    for row in rows {
+        let entry_date: NaiveDate = row
+            .try_get("entry_date")
+            .unwrap_or_else(|_| Utc::now().date_naive());
+        let direction: String = row.try_get("direction").unwrap_or_default();
+        let category: String = row.try_get("category").unwrap_or_default();
+        let amount_gross: Decimal = row.try_get("amount_gross").unwrap_or(Decimal::ZERO);
+        let amount_net: Decimal = row.try_get("amount_net").unwrap_or(Decimal::ZERO);
+        let amount_vat: Decimal = row.try_get("amount_vat").unwrap_or(Decimal::ZERO);
+        let period = entry_date.format("%Y-%m").to_string();
+        let month_bucket = monthly
+            .entry(period)
+            .or_insert((Decimal::ZERO, Decimal::ZERO));
+
+        if direction == "income" {
+            income_gross += amount_gross;
+            month_bucket.0 += amount_gross;
+        } else {
+            expense_gross += amount_gross;
+            month_bucket.1 += amount_gross;
+        }
+
+        match category.as_str() {
+            "service_revenue" => service_revenue_gross += amount_gross,
+            "cost_passthrough_revenue" => cost_passthrough_revenue_gross += amount_gross,
+            "provider_expense" => provider_expense_gross += amount_gross,
+            _ => {}
+        }
+
+        let patient_name = [
+            row.try_get::<Option<String>, _>("first_name")
+                .unwrap_or_default(),
+            row.try_get::<Option<String>, _>("last_name")
+                .unwrap_or_default(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" ");
+
+        entries.push(serde_json::json!({
+            "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+            "entry_date": entry_date.to_string(),
+            "direction": direction,
+            "category": category,
+            "description": row.try_get::<String, _>("description").unwrap_or_default(),
+            "amount_net": decimal_to_string(amount_net),
+            "amount_vat": decimal_to_string(amount_vat),
+            "amount_gross": decimal_to_string(amount_gross),
+            "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
+            "invoice_number": row.try_get::<Option<String>, _>("invoice_number").unwrap_or_default(),
+            "external_invoice_number": row.try_get::<Option<String>, _>("external_invoice_number").unwrap_or_default(),
+            "order_number": row.try_get::<Option<String>, _>("order_number").unwrap_or_default(),
+            "patient_pid": row.try_get::<Option<String>, _>("patient_pid").unwrap_or_default(),
+            "patient_name": if patient_name.is_empty() { None::<String> } else { Some(patient_name) },
+        }));
+    }
+
+    let monthly_json = monthly
+        .into_iter()
+        .map(|(period, (income, expense))| {
+            serde_json::json!({
+                "period": period,
+                "income_gross": decimal_to_string(income),
+                "expense_gross": decimal_to_string(expense),
+                "net_surplus": decimal_to_string(income - expense),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    Json(serde_json::json!({
+        "year": year,
+        "summary": {
+            "income_gross": decimal_to_string(income_gross),
+            "expense_gross": decimal_to_string(expense_gross),
+            "net_surplus": decimal_to_string(income_gross - expense_gross),
+            "service_revenue_gross": decimal_to_string(service_revenue_gross),
+            "cost_passthrough_revenue_gross": decimal_to_string(cost_passthrough_revenue_gross),
+            "provider_expense_gross": decimal_to_string(provider_expense_gross),
+        },
+        "monthly": monthly_json,
+        "entries": entries,
+    }))
+    .into_response()
+}
+
+async fn export_accounting_ledger(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Query(query): Query<AccountingLedgerQuery>,
+) -> axum::response::Response {
+    if !can_read_accounting_ledger(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+
+    let year = accounting_ledger_year(&query);
+    let rows = match sqlx::query(
+        r#"SELECT ae.entry_date, ae.direction, ae.category, ae.description,
+                  ae.amount_net, ae.amount_vat, ae.amount_gross, ae.currency,
+                  i.invoice_number, ei.external_invoice_number, o.order_number,
+                  p.patient_id AS patient_pid, p.first_name, p.last_name
+           FROM accounting_entries ae
+           LEFT JOIN invoices i ON i.id = ae.source_invoice_id
+           LEFT JOIN external_invoices ei ON ei.id = ae.source_external_invoice_id
+           LEFT JOIN orders o ON o.id = ae.order_id
+           LEFT JOIN patients p ON p.id = ae.patient_id
+           WHERE EXTRACT(YEAR FROM ae.entry_date) = $1
+           ORDER BY ae.entry_date DESC, ae.created_at DESC"#,
+    )
+    .bind(year)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::error!(error = %error, year, "export accounting ledger");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to export accounting ledger",
+            );
+        }
+    };
+
+    let mut csv = String::from(
+        "entry_date,direction,category,description,invoice_number,external_invoice_number,order_number,patient_pid,patient_name,amount_net,amount_vat,amount_gross,currency\n",
+    );
+
+    for row in rows {
+        let patient_name = [
+            row.try_get::<Option<String>, _>("first_name")
+                .unwrap_or_default(),
+            row.try_get::<Option<String>, _>("last_name")
+                .unwrap_or_default(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" ");
+        let entry_date: NaiveDate = row
+            .try_get("entry_date")
+            .unwrap_or_else(|_| Utc::now().date_naive());
+        let amount_net: Decimal = row.try_get("amount_net").unwrap_or(Decimal::ZERO);
+        let amount_vat: Decimal = row.try_get("amount_vat").unwrap_or(Decimal::ZERO);
+        let amount_gross: Decimal = row.try_get("amount_gross").unwrap_or(Decimal::ZERO);
+
+        let line = [
+            csv_escape(&entry_date.to_string()),
+            csv_escape(&row.try_get::<String, _>("direction").unwrap_or_default()),
+            csv_escape(&row.try_get::<String, _>("category").unwrap_or_default()),
+            csv_escape(&row.try_get::<String, _>("description").unwrap_or_default()),
+            csv_escape(
+                &row.try_get::<Option<String>, _>("invoice_number")
+                    .unwrap_or_default()
+                    .unwrap_or_default(),
+            ),
+            csv_escape(
+                &row.try_get::<Option<String>, _>("external_invoice_number")
+                    .unwrap_or_default()
+                    .unwrap_or_default(),
+            ),
+            csv_escape(
+                &row.try_get::<Option<String>, _>("order_number")
+                    .unwrap_or_default()
+                    .unwrap_or_default(),
+            ),
+            csv_escape(
+                &row.try_get::<Option<String>, _>("patient_pid")
+                    .unwrap_or_default()
+                    .unwrap_or_default(),
+            ),
+            csv_escape(&patient_name),
+            csv_escape(&decimal_to_string(amount_net)),
+            csv_escape(&decimal_to_string(amount_vat)),
+            csv_escape(&decimal_to_string(amount_gross)),
+            csv_escape(
+                &row.try_get::<String, _>("currency")
+                    .unwrap_or_else(|_| "EUR".to_string()),
+            ),
+        ]
+        .join(",");
+        csv.push_str(&line);
+        csv.push('\n');
+    }
+
+    (
+        [
+            (header::CONTENT_TYPE, "text/csv; charset=utf-8"),
+            (
+                header::CONTENT_DISPOSITION,
+                &format!("attachment; filename=\"accounting-ledger-{year}.csv\""),
+            ),
+        ],
+        csv,
+    )
+        .into_response()
+}
+
 async fn list_invoices(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -2172,6 +2915,14 @@ async fn list_invoices(
     {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid invoice type");
     }
+    let page = match normalize_invoice_list_page(query.page) {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    let per_page = match normalize_invoice_list_per_page(query.per_page) {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
 
     match sqlx::query(
         r#"SELECT i.id, i.quote_id, i.order_id, i.patient_id, i.invoice_number, i.invoice_type,
@@ -2249,7 +3000,24 @@ async fn list_invoices(
                     "updated_at": row.try_get::<DateTime<Utc>, _>("updated_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
                 }));
             }
-            Json(items).into_response()
+            let total = items.len();
+            let total_pages = total.div_ceil(per_page).max(1);
+            let page = page.min(total_pages);
+            let offset = (page - 1) * per_page;
+            let items = items
+                .into_iter()
+                .skip(offset)
+                .take(per_page)
+                .collect::<Vec<_>>();
+
+            Json(json!({
+                "items": items,
+                "page": page,
+                "per_page": per_page,
+                "total": total,
+                "total_pages": total_pages,
+            }))
+            .into_response()
         }
         Err(e) => {
             tracing::error!(error = %e, "list invoices");
@@ -2790,6 +3558,20 @@ async fn update_invoice_status(
     .await
     {
         Ok(result) if result.rows_affected() > 0 => {
+            if let Err(error) = sync_invoice_accounting_entries_from_current_state(
+                &state,
+                invoice_id,
+                Some(auth.user_id),
+            )
+            .await
+            {
+                tracing::error!(error = %error, invoice_id = %invoice_id, "sync invoice accounting entries");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to update invoice accounting ledger",
+                );
+            }
+
             state.audit_sender.try_send(audit::domain_event(
                 "update_invoice_status",
                 Some(auth.user_id),
@@ -2816,5 +3598,15 @@ async fn update_invoice_status(
                 "Failed to update invoice",
             )
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::invoice_pdf_footer_line;
+
+    #[test]
+    fn invoice_footer_includes_current_and_total_pages() {
+        assert_eq!(invoice_pdf_footer_line("GMED", 2, 5), "GMED · Page 2 of 5");
     }
 }

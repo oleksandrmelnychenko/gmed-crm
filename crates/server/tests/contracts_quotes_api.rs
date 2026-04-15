@@ -1,3 +1,5 @@
+mod support;
+
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use serde_json::{Value, json};
@@ -6,35 +8,13 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 use gmed_server::auth::jwt;
-use gmed_server::settings::{SettingsCache, TokenSettings};
-use gmed_server::state::AppState;
-
 const TEST_SECRET: &str = "test-secret-at-least-32-characters-long!!";
 
 async fn test_context() -> Option<(axum::Router, PgPool, Uuid, String)> {
-    let db_url = match std::env::var("DATABASE_URL") {
-        Ok(url) => url,
-        Err(_) => return None,
-    };
+    let ctx = support::suite_context(TEST_SECRET).await?;
+    let token = jwt::issue_access_token(TEST_SECRET, ctx.admin_id, "ceo", Uuid::new_v4()).ok()?;
 
-    let pool = gmed_db::create_pool(&db_url).await.ok()?;
-    gmed_db::run_migrations(&pool).await.ok()?;
-
-    let admin_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE email = $1")
-        .bind("admin@gmed.de")
-        .fetch_one(&pool)
-        .await
-        .ok()?;
-
-    let state = AppState::new(
-        pool.clone(),
-        TEST_SECRET,
-        SettingsCache::new(TokenSettings::default()),
-    );
-    let app = gmed_server::build_app(state);
-    let token = jwt::issue_access_token(TEST_SECRET, admin_id, "ceo", Uuid::new_v4()).ok()?;
-
-    Some((app, pool, admin_id, format!("Bearer {token}")))
+    Some((ctx.app, ctx.pool, ctx.admin_id, format!("Bearer {token}")))
 }
 
 async fn json_request(
@@ -746,21 +726,6 @@ async fn ceo_assistant_can_read_but_cannot_mutate_contracts_and_quotes() {
     let (status, body) = json_request(
         &app,
         "POST",
-        "/api/v1/framework-contracts",
-        &pm_bearer,
-        Some(json!({
-            "patient_id": patient_id,
-            "status": "sent",
-            "valid_from": "2026-05-01"
-        })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED);
-    let contract_id = body["id"].as_str().unwrap().to_string();
-
-    let (status, body) = json_request(
-        &app,
-        "POST",
         "/api/v1/orders",
         &pm_bearer,
         Some(json!({
@@ -801,6 +766,21 @@ async fn ceo_assistant_can_read_but_cannot_mutate_contracts_and_quotes() {
     .await;
     assert_eq!(status, StatusCode::CREATED);
     let quote_id = body["id"].as_str().unwrap().to_string();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/framework-contracts",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "status": "sent",
+            "valid_from": "2026-05-01"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let contract_id = body["id"].as_str().unwrap().to_string();
 
     let (status, body) = json_request(
         &app,
@@ -930,4 +910,139 @@ async fn sales_and_concierge_cannot_access_contracts_or_quotes_workspaces() {
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn agency_service_catalog_supports_create_read_only_visibility_and_update() {
+    let Some((app, pool, _admin_id, bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("agency-catalog");
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let assistant_id = seed_user(&pool, &tag, "ceo_assistant").await;
+    let billing_bearer = auth_header_for(billing_id, "billing");
+    let assistant_bearer = auth_header_for(assistant_id, "ceo_assistant");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/agency-services",
+        &bearer,
+        Some(json!({
+            "service_key": format!("interpreter_hours_{tag}"),
+            "service_name": format!("Interpreter hours {tag}"),
+            "description": "Approved interpreter work billed per hour",
+            "unit_label": "hour",
+            "unit_price": 89.5,
+            "currency": "EUR",
+            "vat_rate": 19.0,
+            "is_active": true,
+            "valid_from": "2026-04-01"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let service_id = body["id"].as_str().unwrap().to_string();
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/agency-services?search={tag}"),
+        &assistant_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body.as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["id"], service_id);
+    assert_eq!(items[0]["unit_label"], "hour");
+    assert_eq!(items[0]["unit_price"].as_str(), Some("89.5"));
+    assert_eq!(items[0]["is_active"], true);
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/agency-services/{service_id}/update"),
+        &assistant_bearer,
+        Some(json!({
+            "service_key": format!("interpreter_hours_{tag}"),
+            "service_name": "Should not update",
+            "unit_price": 91.0,
+            "valid_from": "2026-04-01"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/agency-services/{service_id}/update"),
+        &billing_bearer,
+        Some(json!({
+            "service_key": format!("interpreter_hours_{tag}"),
+            "service_name": format!("Interpreter hours {tag}"),
+            "description": "Approved interpreter work billed per hour",
+            "unit_label": "hour",
+            "unit_price": 95.0,
+            "currency": "EUR",
+            "vat_rate": 7.0,
+            "is_active": false,
+            "valid_from": "2026-04-01",
+            "valid_to": "2026-12-31"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/agency-services?search={tag}"),
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body.as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["unit_price"].as_str(), Some("95"));
+    assert_eq!(items[0]["vat_rate"].as_str(), Some("7"));
+    assert_eq!(items[0]["is_active"], false);
+    assert_eq!(items[0]["valid_to"], "2026-12-31");
+}
+
+#[tokio::test]
+async fn sales_and_concierge_cannot_access_agency_service_catalog() {
+    let Some((app, pool, _admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("agency-catalog-deny");
+    let sales_id = seed_user(&pool, &tag, "sales").await;
+    let concierge_id = seed_user(&pool, &tag, "concierge").await;
+    let sales_bearer = auth_header_for(sales_id, "sales");
+    let concierge_bearer = auth_header_for(concierge_id, "concierge");
+
+    for bearer in [&sales_bearer, &concierge_bearer] {
+        let (status, _) = json_request(&app, "GET", "/api/v1/agency-services", bearer, None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+
+        let (status, _) = json_request(
+            &app,
+            "POST",
+            "/api/v1/agency-services",
+            bearer,
+            Some(json!({
+                "service_key": "test_service",
+                "service_name": "Test service",
+                "unit_price": 10.0,
+                "valid_from": "2026-04-01"
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
 }

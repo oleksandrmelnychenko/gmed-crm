@@ -8,7 +8,7 @@ use axum::{
 use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -20,6 +20,14 @@ use gmed_domain::role::Role;
 
 pub fn router() -> Router<AppState> {
     Router::new()
+        .route(
+            "/agency-services",
+            get(list_agency_services).post(create_agency_service),
+        )
+        .route(
+            "/agency-services/{service_id}/update",
+            post(update_agency_service),
+        )
         .route(
             "/framework-contracts",
             get(list_framework_contracts).post(create_framework_contract),
@@ -47,6 +55,12 @@ struct ListFrameworkContractsQuery {
     search: Option<String>,
     patient_id: Option<Uuid>,
     status: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ListAgencyServicesQuery {
+    search: Option<String>,
+    active_only: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -84,6 +98,7 @@ struct QuoteLineItemInput {
     vat_rate: Option<f64>,
     is_cost_passthrough: Option<bool>,
     source_order_leistung_id: Option<Uuid>,
+    external_document_id: Option<Uuid>,
     provider_id: Option<Uuid>,
     doctor_id: Option<Uuid>,
     notes: Option<String>,
@@ -103,6 +118,33 @@ struct UpdateQuoteStatusRequest {
     notes: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct UpsertAgencyServiceRequest {
+    service_key: String,
+    service_name: String,
+    description: Option<String>,
+    unit_label: Option<String>,
+    unit_price: f64,
+    currency: Option<String>,
+    vat_rate: Option<f64>,
+    is_active: Option<bool>,
+    valid_from: String,
+    valid_to: Option<String>,
+}
+
+struct NormalizedAgencyServicePayload {
+    service_key: String,
+    service_name: String,
+    description: Option<String>,
+    unit_label: String,
+    unit_price: Decimal,
+    currency: String,
+    vat_rate: Decimal,
+    is_active: bool,
+    valid_from: NaiveDate,
+    valid_to: Option<NaiveDate>,
+}
+
 #[derive(Serialize, Clone)]
 struct QuoteLineItem {
     description: String,
@@ -114,6 +156,7 @@ struct QuoteLineItem {
     line_vat: String,
     line_gross: String,
     source_order_leistung_id: Option<Uuid>,
+    external_document_id: Option<Uuid>,
     provider_id: Option<Uuid>,
     doctor_id: Option<Uuid>,
     notes: Option<String>,
@@ -190,6 +233,91 @@ fn parse_optional_datetime(value: Option<&str>) -> Result<Option<DateTime<Utc>>,
 
 fn decimal_to_string(value: Decimal) -> String {
     value.round_dp(2).normalize().to_string()
+}
+
+fn normalize_agency_service_key(value: &str) -> Result<String, &'static str> {
+    let trimmed = value.trim().to_lowercase();
+    if trimmed.is_empty() {
+        return Err("Service key is required");
+    }
+    if trimmed.len() > 80 {
+        return Err("Service key cannot exceed 80 characters");
+    }
+    if !trimmed
+        .chars()
+        .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_' || ch == '-')
+    {
+        return Err("Service key may contain only lowercase letters, digits, '_' and '-'");
+    }
+    Ok(trimmed)
+}
+
+fn normalize_agency_service_payload(
+    body: UpsertAgencyServiceRequest,
+) -> Result<NormalizedAgencyServicePayload, &'static str> {
+    let service_key = normalize_agency_service_key(&body.service_key)?;
+    let service_name = body.service_name.trim();
+    if service_name.is_empty() {
+        return Err("Service name is required");
+    }
+    if service_name.len() > 160 {
+        return Err("Service name cannot exceed 160 characters");
+    }
+
+    let description = body
+        .description
+        .and_then(|value| (!value.trim().is_empty()).then(|| value.trim().to_string()));
+    let unit_label = body
+        .unit_label
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "unit".to_string());
+    if unit_label.len() > 48 {
+        return Err("Unit label cannot exceed 48 characters");
+    }
+
+    if !body.unit_price.is_finite() || body.unit_price < 0.0 {
+        return Err("Unit price must be a valid non-negative number");
+    }
+    let unit_price =
+        Decimal::try_from(body.unit_price).map_err(|_| "Unit price must be a valid number")?;
+
+    let vat_input = body.vat_rate.unwrap_or(19.0);
+    if !vat_input.is_finite() || !(0.0..=100.0).contains(&vat_input) {
+        return Err("VAT rate must be between 0 and 100");
+    }
+    let vat_rate = Decimal::try_from(vat_input).map_err(|_| "VAT rate must be a valid number")?;
+
+    let currency = body
+        .currency
+        .map(|value| value.trim().to_uppercase())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "EUR".to_string());
+    if currency.len() > 8 {
+        return Err("Currency cannot exceed 8 characters");
+    }
+
+    let valid_from =
+        parse_optional_date(Some(body.valid_from.as_str()))?.ok_or("Valid-from is required")?;
+    let valid_to = parse_optional_date(body.valid_to.as_deref())?;
+    if let Some(valid_to) = valid_to
+        && valid_to < valid_from
+    {
+        return Err("Valid-to cannot be earlier than valid-from");
+    }
+
+    Ok(NormalizedAgencyServicePayload {
+        service_key,
+        service_name: service_name.to_string(),
+        description,
+        unit_label,
+        unit_price,
+        currency,
+        vat_rate,
+        is_active: body.is_active.unwrap_or(true),
+        valid_from,
+        valid_to,
+    })
 }
 
 async fn insert_quote_version_snapshot(
@@ -269,6 +397,28 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
         .into_response()
 }
 
+async fn audit(
+    state: &AppState,
+    user_id: Uuid,
+    action: &str,
+    entity_type: &str,
+    entity_id: Option<Uuid>,
+    new_value: Option<serde_json::Value>,
+) -> Result<(), sqlx::Error> {
+    let context = match new_value {
+        Some(value) => serde_json::json!({ "new_value": value }),
+        None => serde_json::json!({}),
+    };
+    state.audit_sender.try_send(audit::domain_event(
+        action.to_string(),
+        Some(user_id),
+        entity_type.to_string(),
+        entity_id,
+        context,
+    ));
+    Ok(())
+}
+
 fn can_read_contracts(role: Role) -> bool {
     matches!(
         role,
@@ -278,6 +428,222 @@ fn can_read_contracts(role: Role) -> bool {
 
 fn can_manage_contracts(role: Role) -> bool {
     matches!(role, Role::Ceo | Role::PatientManager | Role::Billing)
+}
+
+async fn list_agency_services(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Query(query): Query<ListAgencyServicesQuery>,
+) -> axum::response::Response {
+    if !can_read_contracts(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+
+    match sqlx::query(
+        r#"SELECT id, service_key, service_name, description, unit_label, unit_price,
+                  currency, vat_rate, is_active, valid_from, valid_to, created_at, updated_at
+           FROM agency_service_catalog
+           WHERE (
+                    $1::TEXT IS NULL
+                    OR service_key ILIKE $1
+                    OR service_name ILIKE $1
+                    OR COALESCE(description, '') ILIKE $1
+                 )
+             AND ($2::BOOL IS NULL OR is_active = $2)
+           ORDER BY is_active DESC, valid_from DESC, service_name ASC"#,
+    )
+    .bind(
+        query
+            .search
+            .as_ref()
+            .map(|value| format!("%{}%", value.trim()))
+            .filter(|value| value != "%%"),
+    )
+    .bind(query.active_only)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => {
+            let items: Vec<Value> = rows
+                .into_iter()
+                .map(|row| {
+                    json!({
+                        "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                        "service_key": row.try_get::<String, _>("service_key").unwrap_or_default(),
+                        "service_name": row.try_get::<String, _>("service_name").unwrap_or_default(),
+                        "description": row.try_get::<Option<String>, _>("description").unwrap_or_default(),
+                        "unit_label": row.try_get::<String, _>("unit_label").unwrap_or_else(|_| "unit".to_string()),
+                        "unit_price": row.try_get::<Decimal, _>("unit_price").unwrap_or(Decimal::ZERO),
+                        "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
+                        "vat_rate": row.try_get::<Decimal, _>("vat_rate").unwrap_or(Decimal::ZERO),
+                        "is_active": row.try_get::<bool, _>("is_active").unwrap_or(true),
+                        "valid_from": row.try_get::<NaiveDate, _>("valid_from").ok().map(|value| value.to_string()),
+                        "valid_to": row.try_get::<Option<NaiveDate>, _>("valid_to").unwrap_or_default().map(|value| value.to_string()),
+                        "created_at": row.try_get::<DateTime<Utc>, _>("created_at").ok().map(|value| value.to_rfc3339()),
+                        "updated_at": row.try_get::<DateTime<Utc>, _>("updated_at").ok().map(|value| value.to_rfc3339()),
+                    })
+                })
+                .collect();
+            Json(items).into_response()
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "list agency services");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to list agency services",
+            )
+        }
+    }
+}
+
+async fn create_agency_service(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Json(body): Json<UpsertAgencyServiceRequest>,
+) -> axum::response::Response {
+    if !can_manage_contracts(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+
+    let payload = match normalize_agency_service_payload(body) {
+        Ok(payload) => payload,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+
+    match sqlx::query(
+        r#"INSERT INTO agency_service_catalog (
+                service_key, service_name, description, unit_label, unit_price,
+                currency, vat_rate, is_active, valid_from, valid_to, created_by, updated_by
+           ) VALUES (
+                $1, $2, $3, $4, $5,
+                $6, $7, $8, $9, $10, $11, $11
+           )
+           RETURNING id, created_at, updated_at"#,
+    )
+    .bind(payload.service_key)
+    .bind(payload.service_name)
+    .bind(payload.description)
+    .bind(payload.unit_label)
+    .bind(payload.unit_price)
+    .bind(payload.currency)
+    .bind(payload.vat_rate)
+    .bind(payload.is_active)
+    .bind(payload.valid_from)
+    .bind(payload.valid_to)
+    .bind(auth.user_id)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(row) => {
+            let service_id = row.try_get::<Uuid, _>("id").unwrap_or_default();
+            let _ = audit(
+                &state,
+                auth.user_id,
+                "create_agency_service",
+                "agency_service_catalog",
+                Some(service_id),
+                Some(json!({ "service_id": service_id })),
+            )
+            .await;
+            (
+                StatusCode::CREATED,
+                Json(json!({
+                    "id": service_id,
+                    "created_at": row.try_get::<DateTime<Utc>, _>("created_at").ok().map(|value| value.to_rfc3339()),
+                    "updated_at": row.try_get::<DateTime<Utc>, _>("updated_at").ok().map(|value| value.to_rfc3339()),
+                })),
+            )
+                .into_response()
+        }
+        Err(e)
+            if e.to_string()
+                .contains("agency_service_catalog_service_key_key") =>
+        {
+            err(StatusCode::CONFLICT, "Agency service key already exists")
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "create agency service");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create agency service",
+            )
+        }
+    }
+}
+
+async fn update_agency_service(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(service_id): Path<Uuid>,
+    Json(body): Json<UpsertAgencyServiceRequest>,
+) -> axum::response::Response {
+    if !can_manage_contracts(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+
+    let payload = match normalize_agency_service_payload(body) {
+        Ok(payload) => payload,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+
+    match sqlx::query(
+        r#"UPDATE agency_service_catalog
+           SET service_key = $2,
+               service_name = $3,
+               description = $4,
+               unit_label = $5,
+               unit_price = $6,
+               currency = $7,
+               vat_rate = $8,
+               is_active = $9,
+               valid_from = $10,
+               valid_to = $11,
+               updated_by = $12,
+               updated_at = now()
+           WHERE id = $1"#,
+    )
+    .bind(service_id)
+    .bind(payload.service_key)
+    .bind(payload.service_name)
+    .bind(payload.description)
+    .bind(payload.unit_label)
+    .bind(payload.unit_price)
+    .bind(payload.currency)
+    .bind(payload.vat_rate)
+    .bind(payload.is_active)
+    .bind(payload.valid_from)
+    .bind(payload.valid_to)
+    .bind(auth.user_id)
+    .execute(&state.db)
+    .await
+    {
+        Ok(result) if result.rows_affected() > 0 => {
+            let _ = audit(
+                &state,
+                auth.user_id,
+                "update_agency_service",
+                "agency_service_catalog",
+                Some(service_id),
+                Some(json!({ "service_id": service_id })),
+            )
+            .await;
+            Json(json!({ "ok": true })).into_response()
+        }
+        Ok(_) => err(StatusCode::NOT_FOUND, "Agency service not found"),
+        Err(e)
+            if e.to_string()
+                .contains("agency_service_catalog_service_key_key") =>
+        {
+            err(StatusCode::CONFLICT, "Agency service key already exists")
+        }
+        Err(e) => {
+            tracing::error!(error = %e, service_id = %service_id, "update agency service");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update agency service",
+            )
+        }
+    }
 }
 
 async fn can_access_patient(
@@ -750,6 +1116,7 @@ fn normalize_custom_line_items(
             line_vat: decimal_to_string(line_vat),
             line_gross: decimal_to_string(line_gross),
             source_order_leistung_id: item.source_order_leistung_id,
+            external_document_id: item.external_document_id,
             provider_id: item.provider_id,
             doctor_id: item.doctor_id,
             notes: item.notes.clone(),
@@ -765,7 +1132,7 @@ async fn load_quote_line_items_from_order(
 ) -> Result<Vec<QuoteLineItem>, axum::response::Response> {
     let rows = sqlx::query(
         r#"SELECT id, description, quantity, unit_price, vat_rate, is_cost_passthrough,
-                  provider_id, doctor_id, notes
+                  external_document_id, provider_id, doctor_id, notes
            FROM order_leistungen
            WHERE order_id = $1
              AND status <> 'invoiced'
@@ -810,6 +1177,9 @@ async fn load_quote_line_items_from_order(
             line_vat: decimal_to_string(line_vat),
             line_gross: decimal_to_string(line_gross),
             source_order_leistung_id: Some(row.try_get::<Uuid, _>("id").unwrap_or_default()),
+            external_document_id: row
+                .try_get::<Option<Uuid>, _>("external_document_id")
+                .unwrap_or_default(),
             provider_id: row
                 .try_get::<Option<Uuid>, _>("provider_id")
                 .unwrap_or_default(),

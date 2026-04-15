@@ -7,7 +7,7 @@ import {
   type FormEvent,
   type ReactNode,
 } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { CalendarClock, ChevronRight, Download, LoaderCircle, Plus, RefreshCw, Search, Wallet } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -19,6 +19,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { apiFetch, getAccessToken } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
+import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { PatientInvoicesPage } from "@/pages/patient-invoices";
 import { cn } from "@/lib/utils";
 
@@ -34,7 +35,16 @@ type InvoiceLineItem = {
   line_net: string;
   line_vat: string;
   line_gross: string;
+  external_document_id?: string | null;
   notes?: string | null;
+};
+
+type SupportingDocument = {
+  id: string;
+  auto_name: string;
+  original_filename?: string | null;
+  art?: string | null;
+  category?: string | null;
 };
 
 type InvoiceItem = {
@@ -62,6 +72,15 @@ type InvoiceItem = {
   created_at: string;
   updated_at: string;
   line_items?: InvoiceLineItem[];
+  supporting_documents?: SupportingDocument[];
+};
+
+type InvoiceListResponse = {
+  items: InvoiceItem[];
+  page: number;
+  per_page: number;
+  total: number;
+  total_pages: number;
 };
 
 type DunningEvent = {
@@ -77,6 +96,42 @@ type DunningEvent = {
   created_by_role?: string;
 };
 
+type AccountingEntry = {
+  id: string;
+  entry_date: string;
+  direction: string;
+  category: string;
+  description: string;
+  amount_net: string;
+  amount_vat: string;
+  amount_gross: string;
+  currency: string;
+  invoice_number?: string | null;
+  external_invoice_number?: string | null;
+  order_number?: string | null;
+  patient_pid?: string | null;
+  patient_name?: string | null;
+};
+
+type AccountingLedgerPayload = {
+  year: number;
+  summary: {
+    income_gross: string;
+    expense_gross: string;
+    net_surplus: string;
+    service_revenue_gross: string;
+    cost_passthrough_revenue_gross: string;
+    provider_expense_gross: string;
+  };
+  monthly: Array<{
+    period: string;
+    income_gross: string;
+    expense_gross: string;
+    net_surplus: string;
+  }>;
+  entries: AccountingEntry[];
+};
+
 type PatientOption = { id: string; patient_id: string; first_name?: string; last_name?: string };
 type OrderOption = { id: string; order_number: string; patient_id: string; patient_name: string; patient_pid: string };
 type QuoteOption = { id: string; order_id: string; order_number: string; patient_id: string; patient_name: string; patient_pid: string; quote_number: string; total_gross: unknown };
@@ -89,6 +144,15 @@ type DunningForm = { note: string };
 const INVOICE_TYPES: InvoiceType[] = ["advance", "interim", "final"];
 const INVOICE_STATUSES: InvoiceStatus[] = ["draft", "sent", "partially_paid", "paid", "overdue", "cancelled"];
 const DEFAULT_FILTERS: Filters = { search: "", patientId: "", orderId: "", quoteId: "", status: "", invoiceType: "" };
+const DEFAULT_INVOICE_PAGE_SIZE = 12;
+const EMPTY_ACCOUNTING_SUMMARY: AccountingLedgerPayload["summary"] = {
+  income_gross: "0.00",
+  expense_gross: "0.00",
+  net_surplus: "0.00",
+  service_revenue_gross: "0.00",
+  cost_passthrough_revenue_gross: "0.00",
+  provider_expense_gross: "0.00",
+};
 const selectClassName = "h-10 w-full rounded-xl border border-input bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100";
 const textareaClassName = "min-h-[104px] w-full rounded-xl border border-input bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100";
 
@@ -101,10 +165,11 @@ function permissions(role?: string) {
       role === "billing",
     canCreate: role === "ceo" || role === "patient_manager" || role === "billing",
     canManage: role === "ceo" || role === "billing",
+    canAccounting: role === "ceo" || role === "ceo_assistant" || role === "billing",
   };
 }
 
-function buildInvoicesPath(filters: Filters) {
+function buildInvoicesPath(filters: Filters, page: number, perPage = DEFAULT_INVOICE_PAGE_SIZE) {
   const params = new URLSearchParams();
   if (filters.search.trim()) params.set("search", filters.search.trim());
   if (filters.patientId) params.set("patient_id", filters.patientId);
@@ -112,6 +177,8 @@ function buildInvoicesPath(filters: Filters) {
   if (filters.quoteId) params.set("quote_id", filters.quoteId);
   if (filters.status) params.set("status", filters.status);
   if (filters.invoiceType) params.set("invoice_type", filters.invoiceType);
+  params.set("page", String(page));
+  params.set("per_page", String(perPage));
   return params.size ? `/invoices?${params.toString()}` : "/invoices";
 }
 
@@ -155,7 +222,7 @@ function formatCurrency(value: unknown) {
   return new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(numeric);
 }
 
-async function fetchInvoicePdfBlob(path: string) {
+async function fetchProtectedBlob(path: string) {
   const token = getAccessToken();
   const response = await fetch(`/api/v1${path}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
@@ -180,16 +247,28 @@ function openPdfBlobPreview(blob: Blob) {
 }
 
 async function openInvoicePdfPreview(invoiceId: string) {
-  const blob = await fetchInvoicePdfBlob(`/invoices/${invoiceId}/pdf`);
+  const blob = await fetchProtectedBlob(`/invoices/${invoiceId}/pdf`);
   openPdfBlobPreview(blob);
 }
 
 async function downloadInvoicePdf(invoiceId: string, filename: string) {
-  const blob = await fetchInvoicePdfBlob(`/invoices/${invoiceId}/pdf`);
+  const blob = await fetchProtectedBlob(`/invoices/${invoiceId}/pdf`);
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
   link.download = filename || "invoice.pdf";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function downloadAccountingLedgerExport(year: string) {
+  const blob = await fetchProtectedBlob(`/invoices/accounting-ledger/export?year=${year}`);
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `accounting-ledger-${year}.csv`;
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -226,11 +305,12 @@ function nextDunningLevel(events: DunningEvent[]) {
 
 function StaffInvoicesPage() {
   const { t } = useLang();
-  const navigate = useNavigate();
+  const { staffGo } = useStaffNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
   const access = permissions(user?.role);
   const canLoadOrderOptions = user?.role === "patient_manager" || user?.role === "billing";
+  const currentYear = String(new Date().getFullYear());
   const canLoadQuoteOptions =
     user?.role === "ceo" ||
     user?.role === "ceo_assistant" ||
@@ -241,9 +321,13 @@ function StaffInvoicesPage() {
   const initialOrderId = searchParams.get("order") ?? "";
   const initialQuoteId = searchParams.get("quote") ?? "";
   const initialInvoiceId = searchParams.get("invoice") ?? "";
+  const initialPage = Math.max(1, Number(searchParams.get("page") ?? "1") || 1);
 
   const [filters, setFilters] = useState<Filters>({ ...DEFAULT_FILTERS, patientId: initialPatientId, orderId: initialOrderId, quoteId: initialQuoteId });
   const [invoices, setInvoices] = useState<InvoiceItem[]>([]);
+  const [invoicePage, setInvoicePage] = useState(initialPage);
+  const [invoiceTotal, setInvoiceTotal] = useState(0);
+  const [invoiceTotalPages, setInvoiceTotalPages] = useState(1);
   const [patients, setPatients] = useState<PatientOption[]>([]);
   const [orders, setOrders] = useState<OrderOption[]>([]);
   const [quotes, setQuotes] = useState<QuoteOption[]>([]);
@@ -266,6 +350,10 @@ function StaffInvoicesPage() {
   const [dunningBusy, setDunningBusy] = useState(false);
   const [dunningError, setDunningError] = useState<string | null>(null);
   const [dunningForm, setDunningForm] = useState<DunningForm>({ note: "" });
+  const [accountingYear, setAccountingYear] = useState(currentYear);
+  const [accountingLedger, setAccountingLedger] = useState<AccountingLedgerPayload | null>(null);
+  const [accountingBusy, setAccountingBusy] = useState(false);
+  const [accountingError, setAccountingError] = useState<string | null>(null);
 
   const deferredSearch = useDeferredValue(filters.search);
   const effectiveFilters = useMemo(() => ({ ...filters, search: deferredSearch }), [filters, deferredSearch]);
@@ -293,9 +381,12 @@ function StaffInvoicesPage() {
     const sent = invoices.filter((invoice) => invoice.status === "sent").length;
     const gross = invoices.reduce((sum, invoice) => sum + Number(invoice.total_gross ?? 0), 0);
     const balance = invoices.reduce((sum, invoice) => sum + Number(invoice.balance_due ?? 0), 0);
-    return { total: invoices.length, paid, sent, gross, balance };
-  }, [invoices]);
+    return { total: invoiceTotal, paid, sent, gross, balance };
+  }, [invoiceTotal, invoices]);
   const nextDunning = useMemo(() => nextDunningLevel(dunningEvents), [dunningEvents]);
+  const accountingSummary = accountingLedger?.summary ?? EMPTY_ACCOUNTING_SUMMARY;
+  const accountingEntries = Array.isArray(accountingLedger?.entries) ? accountingLedger.entries : [];
+  const accountingMonthly = Array.isArray(accountingLedger?.monthly) ? accountingLedger.monthly : [];
 
   useEffect(() => {
     let ignore = false;
@@ -326,9 +417,20 @@ function StaffInvoicesPage() {
     async function loadInvoices() {
       setListBusy(true);
       try {
-        const data = await apiFetch<InvoiceItem[]>(buildInvoicesPath(effectiveFilters));
+        const data = await apiFetch<InvoiceListResponse>(
+          buildInvoicesPath(effectiveFilters, invoicePage),
+        );
         if (!ignore) {
-          setInvoices(data);
+          setInvoices(Array.isArray(data.items) ? data.items : []);
+          setInvoiceTotal(typeof data.total === "number" ? data.total : 0);
+          setInvoiceTotalPages(
+            typeof data.total_pages === "number" && data.total_pages > 0
+              ? data.total_pages
+              : 1,
+          );
+          if (typeof data.page === "number" && data.page > 0) {
+            setInvoicePage(data.page);
+          }
           setListError(null);
         }
       } catch (error) {
@@ -341,7 +443,17 @@ function StaffInvoicesPage() {
     return () => {
       ignore = true;
     };
-  }, [effectiveFilters, reloadToken, t.common_error]);
+  }, [effectiveFilters, invoicePage, reloadToken, t.common_error]);
+
+  useEffect(() => {
+    setSearchParams(
+      (current) =>
+        buildSearchParams(current, {
+          page: invoicePage > 1 ? String(invoicePage) : null,
+        }),
+      { replace: true },
+    );
+  }, [invoicePage, setSearchParams]);
 
   useEffect(() => {
     if (!selectedInvoiceId) {
@@ -377,6 +489,40 @@ function StaffInvoicesPage() {
       ignore = true;
     };
   }, [selectedInvoiceId, reloadToken, t.common_error]);
+
+  useEffect(() => {
+    if (!access.canAccounting) {
+      setAccountingLedger(null);
+      setAccountingError(null);
+      setAccountingBusy(false);
+      return;
+    }
+    let ignore = false;
+    async function loadAccountingLedger() {
+      setAccountingBusy(true);
+      try {
+        const data = await apiFetch<AccountingLedgerPayload>(
+          `/invoices/accounting-ledger?year=${encodeURIComponent(accountingYear)}`,
+        );
+        if (!ignore) {
+          setAccountingLedger(data);
+          setAccountingError(null);
+        }
+      } catch (error) {
+        if (!ignore) {
+          setAccountingError(
+            error instanceof Error ? error.message : t.common_error,
+          );
+        }
+      } finally {
+        if (!ignore) setAccountingBusy(false);
+      }
+    }
+    void loadAccountingLedger();
+    return () => {
+      ignore = true;
+    };
+  }, [access.canAccounting, accountingYear, reloadToken, t.common_error]);
 
   async function handleCreateInvoice(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -498,17 +644,165 @@ function StaffInvoicesPage() {
           <StatCard label="Quotes ready" value={String(filteredQuotes.length)} description="Available quote contexts" icon={<Plus className="size-5" />} />
         </div>
 
+        {access.canAccounting ? (
+          <SectionCard
+            title="Accounting ledger"
+            description="Cash-based EÜR read model built from invoice payments and paid external invoices."
+            action={
+              <div className="flex flex-wrap items-center gap-2">
+                <Input
+                  type="number"
+                  min="2020"
+                  max="2100"
+                  value={accountingYear}
+                  onChange={(event) => setAccountingYear(event.target.value || currentYear)}
+                  className="h-10 w-28 rounded-2xl border-slate-200 bg-slate-50"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="rounded-2xl"
+                  onClick={() => setReloadToken((current) => current + 1)}
+                >
+                  <RefreshCw className="mr-2 size-4" />
+                  Refresh ledger
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="rounded-2xl"
+                  onClick={() =>
+                    void downloadAccountingLedgerExport(accountingYear).catch((error) =>
+                      setAccountingError(
+                        error instanceof Error ? error.message : t.common_error,
+                      ),
+                    )
+                  }
+                >
+                  <Download className="mr-2 size-4" />
+                  Export CSV
+                </Button>
+              </div>
+            }
+          >
+            {accountingBusy ? (
+              <LoadingState label={t.common_loading} />
+            ) : accountingError ? (
+              <Banner tone="error">{accountingError}</Banner>
+            ) : accountingLedger ? (
+              <div className="space-y-4">
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <MiniMetric
+                    label="Cash income"
+                    value={formatCurrency(accountingSummary.income_gross)}
+                  />
+                  <MiniMetric
+                    label="Cash expense"
+                    value={formatCurrency(accountingSummary.expense_gross)}
+                  />
+                  <MiniMetric
+                    label="EÜR surplus"
+                    value={formatCurrency(accountingSummary.net_surplus)}
+                  />
+                  <MiniMetric
+                    label="Cost passthrough revenue"
+                    value={formatCurrency(accountingSummary.cost_passthrough_revenue_gross)}
+                  />
+                </div>
+                <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+                  <div className="space-y-3">
+                    {accountingEntries.slice(0, 8).length === 0 ? (
+                      <EmptyState
+                        title="No accounting entries"
+                        description="Once invoices are paid or external invoices are settled, cash-ledger rows appear here."
+                      />
+                    ) : (
+                      accountingEntries.slice(0, 8).map((entry) => (
+                        <div
+                          key={entry.id}
+                          className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <div className="text-sm font-semibold text-slate-900">
+                                {entry.description}
+                              </div>
+                              <div className="mt-1 text-xs text-slate-500">
+                                {`${formatDate(entry.entry_date)} · ${entry.order_number ?? "No order"} · ${entry.patient_name ?? "No patient"}`}
+                              </div>
+                            </div>
+                            <Badge
+                              variant="outline"
+                              className={cn(
+                                "rounded-full",
+                                entry.direction === "income"
+                                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                  : "border-rose-200 bg-rose-50 text-rose-700",
+                              )}
+                            >
+                              {entry.direction}
+                            </Badge>
+                          </div>
+                          <div className="mt-3 grid gap-3 md:grid-cols-3">
+                            <MiniMetric label="Net" value={formatCurrency(entry.amount_net)} />
+                            <MiniMetric label={t.invoices_vat} value={formatCurrency(entry.amount_vat)} />
+                            <MiniMetric label="Gross" value={formatCurrency(entry.amount_gross)} />
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      Monthly EÜR
+                    </div>
+                    <div className="mt-3 space-y-3">
+                      {accountingMonthly.length === 0 ? (
+                        <p className="text-sm text-slate-500">
+                          No cash movement recorded for {accountingYear}.
+                        </p>
+                      ) : (
+                        accountingMonthly.map((month) => (
+                          <div
+                            key={month.period}
+                            className="rounded-xl border border-slate-200 bg-white px-4 py-3"
+                          >
+                            <div className="text-sm font-semibold text-slate-900">
+                              {month.period}
+                            </div>
+                            <div className="mt-2 grid gap-2 text-sm text-slate-600">
+                              <div>{`Income ${formatCurrency(month.income_gross)}`}</div>
+                              <div>{`Expense ${formatCurrency(month.expense_gross)}`}</div>
+                              <div className="font-medium text-slate-900">
+                                {`Surplus ${formatCurrency(month.net_surplus)}`}
+                              </div>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </SectionCard>
+        ) : null}
+
         {optionsError ? <Banner tone="error">{optionsError}</Banner> : null}
 
         <SectionCard title={t.invoices_title} description={t.invoices_subtitle}>
           <div className="grid gap-3 lg:grid-cols-[minmax(0,1.1fr)_minmax(220px,1fr)_minmax(220px,1fr)_minmax(220px,1fr)_minmax(180px,0.8fr)_minmax(180px,0.8fr)_auto]">
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
-              <Input value={filters.search} onChange={(event) => startTransition(() => setFilters((current) => ({ ...current, search: event.target.value })))} className="h-11 rounded-2xl border-slate-200 bg-slate-50 pl-9" placeholder="Search invoice, quote, order or patient" />
+              <Input value={filters.search} onChange={(event) => startTransition(() => {
+                setFilters((current) => ({ ...current, search: event.target.value }));
+                setInvoicePage(1);
+              })} className="h-11 rounded-2xl border-slate-200 bg-slate-50 pl-9" placeholder="Search invoice, quote, order or patient" />
             </div>
             <select value={filters.patientId} onChange={(event) => {
               const patientId = event.target.value;
               setFilters((current) => ({ ...current, patientId, orderId: current.orderId && orders.some((order) => order.id === current.orderId && order.patient_id === patientId) ? current.orderId : "", quoteId: current.quoteId && quotes.some((quote) => quote.id === current.quoteId && quote.patient_id === patientId) ? current.quoteId : "" }));
+              setInvoicePage(1);
               syncQuery({ patient: patientId || null, order: null, quote: null });
             }} className={selectClassName}>
               <option value="">{t.providers_all}</option>
@@ -517,6 +811,7 @@ function StaffInvoicesPage() {
             <select value={filters.orderId} onChange={(event) => {
               const orderId = event.target.value;
               setFilters((current) => ({ ...current, orderId, quoteId: current.quoteId && quotes.some((quote) => quote.id === current.quoteId && quote.order_id === orderId) ? current.quoteId : "" }));
+              setInvoicePage(1);
               syncQuery({ order: orderId || null, quote: null });
             }} className={selectClassName}>
               <option value="">All orders</option>
@@ -525,20 +820,30 @@ function StaffInvoicesPage() {
             <select value={filters.quoteId} onChange={(event) => {
               const quoteId = event.target.value;
               setFilters((current) => ({ ...current, quoteId }));
+              setInvoicePage(1);
               syncQuery({ quote: quoteId || null });
             }} className={selectClassName}>
               <option value="">All quotes</option>
               {filteredQuotes.map((quote) => <option key={quote.id} value={quote.id}>{`${quote.quote_number} · ${quote.order_number} · ${quote.patient_pid}`}</option>)}
             </select>
-            <select value={filters.status} onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value }))} className={selectClassName}>
+            <select value={filters.status} onChange={(event) => {
+              setFilters((current) => ({ ...current, status: event.target.value }));
+              setInvoicePage(1);
+            }} className={selectClassName}>
               <option value="">{t.providers_all}</option>
               {INVOICE_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
             </select>
-            <select value={filters.invoiceType} onChange={(event) => setFilters((current) => ({ ...current, invoiceType: event.target.value }))} className={selectClassName}>
+            <select value={filters.invoiceType} onChange={(event) => {
+              setFilters((current) => ({ ...current, invoiceType: event.target.value }));
+              setInvoicePage(1);
+            }} className={selectClassName}>
               <option value="">{t.providers_all}</option>
               {INVOICE_TYPES.map((invoiceType) => <option key={invoiceType} value={invoiceType}>{invoiceType}</option>)}
             </select>
-            <Button type="button" variant="outline" className="h-11 rounded-2xl" onClick={() => setFilters({ ...DEFAULT_FILTERS, patientId: searchParams.get("patient") ?? "", orderId: searchParams.get("order") ?? "", quoteId: searchParams.get("quote") ?? "" })}>{t.access_reset}</Button>
+            <Button type="button" variant="outline" className="h-11 rounded-2xl" onClick={() => {
+              setFilters({ ...DEFAULT_FILTERS, patientId: searchParams.get("patient") ?? "", orderId: searchParams.get("order") ?? "", quoteId: searchParams.get("quote") ?? "" });
+              setInvoicePage(1);
+            }}>{t.access_reset}</Button>
           </div>
         </SectionCard>
 
@@ -549,33 +854,62 @@ function StaffInvoicesPage() {
         ) : invoices.length === 0 ? (
           <EmptyState title={t.common_not_set} description="Create the first invoice from a live quote snapshot." action={access.canCreate ? <Button type="button" onClick={() => setCreateOpen(true)}><Plus className="mr-2 size-4" />{t.invoices_new}</Button> : null} />
         ) : (
-          <div className="grid gap-4 xl:grid-cols-2">
-            {invoices.map((invoice) => {
-              const isSelected = selectedInvoiceId === invoice.id;
-              return (
-                <button key={invoice.id} type="button" onClick={() => openInvoice(invoice.id)} className={cn("rounded-[1.6rem] border bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md", isSelected ? "border-sky-300 ring-4 ring-sky-100" : "border-slate-200")}>
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <div className="font-mono text-xs font-semibold tracking-[0.16em] text-slate-500">{invoice.invoice_number}</div>
-                      <h2 className="mt-2 text-lg font-semibold text-slate-950">{invoice.patient_name}</h2>
-                      <p className="mt-1 text-sm text-slate-500">{`${invoice.order_number} · ${invoice.patient_pid}`}</p>
+          <div className="space-y-4">
+            <div className="grid gap-4 xl:grid-cols-2">
+              {invoices.map((invoice) => {
+                const isSelected = selectedInvoiceId === invoice.id;
+                return (
+                  <button key={invoice.id} type="button" onClick={() => openInvoice(invoice.id)} className={cn("rounded-[1.6rem] border bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md", isSelected ? "border-sky-300 ring-4 ring-sky-100" : "border-slate-200")}>
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <div className="font-mono text-xs font-semibold tracking-[0.16em] text-slate-500">{invoice.invoice_number}</div>
+                        <h2 className="mt-2 text-lg font-semibold text-slate-950">{invoice.patient_name}</h2>
+                        <p className="mt-1 text-sm text-slate-500">{`${invoice.order_number} · ${invoice.patient_pid}`}</p>
+                      </div>
+                      <ChevronRight className="mt-1 size-4 text-slate-400" />
                     </div>
-                    <ChevronRight className="mt-1 size-4 text-slate-400" />
-                  </div>
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <Badge variant="outline" className={cn("rounded-full", statusBadgeClass(invoice.status))}>{invoice.status}</Badge>
-                    <Badge variant="outline" className={cn("rounded-full", typeBadgeClass(invoice.invoice_type))}>{invoice.invoice_type}</Badge>
-                    <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">{formatCurrency(invoice.total_gross)}</Badge>
-                  </div>
-                  <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                    <MiniMetric label={t.contracts_type} value={invoice.quote_number ?? t.common_not_set} />
-                    <MiniMetric label={t.invoices_due_at} value={formatDate(invoice.due_date)} />
-                    <MiniMetric label="Paid" value={formatCurrency(invoice.paid_amount)} />
-                    <MiniMetric label="Balance" value={formatCurrency(invoice.balance_due)} />
-                  </div>
-                </button>
-              );
-            })}
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <Badge variant="outline" className={cn("rounded-full", statusBadgeClass(invoice.status))}>{invoice.status}</Badge>
+                      <Badge variant="outline" className={cn("rounded-full", typeBadgeClass(invoice.invoice_type))}>{invoice.invoice_type}</Badge>
+                      <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">{formatCurrency(invoice.total_gross)}</Badge>
+                    </div>
+                    <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                      <MiniMetric label={t.contracts_type} value={invoice.quote_number ?? t.common_not_set} />
+                      <MiniMetric label={t.invoices_due_at} value={formatDate(invoice.due_date)} />
+                      <MiniMetric label="Paid" value={formatCurrency(invoice.paid_amount)} />
+                      <MiniMetric label="Balance" value={formatCurrency(invoice.balance_due)} />
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="text-sm text-slate-600">
+                {`Page ${invoicePage} of ${invoiceTotalPages} · ${invoiceTotal} invoices`}
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="rounded-2xl"
+                  disabled={listBusy || invoicePage <= 1}
+                  onClick={() => setInvoicePage((current) => Math.max(1, current - 1))}
+                >
+                  Previous
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="rounded-2xl"
+                  disabled={listBusy || invoicePage >= invoiceTotalPages}
+                  onClick={() =>
+                    setInvoicePage((current) => Math.min(invoiceTotalPages, current + 1))
+                  }
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -696,10 +1030,10 @@ function StaffInvoicesPage() {
 
                 <SectionCard title={t.providers_linked_patients} description={t.common_search}>
                   <div className="flex flex-wrap gap-2">
-                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => navigate(`/patients?patient=${detail.patient_id}`)}>Patient</Button>
-                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => navigate(`/orders?order=${detail.order_id}&patient=${detail.patient_id}`)}>Order</Button>
-                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => navigate(`/contracts?quote=${detail.quote_id ?? ""}&order=${detail.order_id}&patient=${detail.patient_id}&tab=quotes`)}>Quotes</Button>
-                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => navigate(`/documents?order=${detail.order_id}&patient=${detail.patient_id}`)}>Documents</Button>
+                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => staffGo(`/patients?patient=${detail.patient_id}`)}>Patient</Button>
+                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => staffGo(`/orders?order=${detail.order_id}&patient=${detail.patient_id}`)}>Order</Button>
+                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => staffGo(`/contracts?quote=${detail.quote_id ?? ""}&order=${detail.order_id}&patient=${detail.patient_id}&tab=quotes`)}>Quotes</Button>
+                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => staffGo(`/documents?order=${detail.order_id}&patient=${detail.patient_id}`)}>Documents</Button>
                   </div>
                 </SectionCard>
 
@@ -792,6 +1126,52 @@ function StaffInvoicesPage() {
                             <MiniMetric label="Gross" value={formatCurrency(line.line_gross)} />
                           </div>
                           {line.notes ? <div className="mt-3 text-sm text-slate-600">{line.notes}</div> : null}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </SectionCard>
+
+                <SectionCard
+                  title="Supporting documents"
+                  description="Receipts and provider invoices linked to cost pass-through line items."
+                >
+                  {!detail.supporting_documents || detail.supporting_documents.length === 0 ? (
+                    <EmptyState
+                      title="No supporting documents"
+                      description="This invoice does not expose any linked receipt or provider invoice."
+                    />
+                  ) : (
+                    <div className="space-y-3">
+                      {detail.supporting_documents.map((document) => (
+                        <div
+                          key={document.id}
+                          className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <h3 className="text-sm font-semibold text-slate-900">
+                                {document.auto_name || document.original_filename || document.id}
+                              </h3>
+                              <p className="mt-1 text-xs text-slate-500">
+                                {[document.art, document.category, document.original_filename]
+                                  .filter(Boolean)
+                                  .join(" · ") || "Linked order document"}
+                              </p>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="rounded-2xl"
+                              onClick={() =>
+                                staffGo(
+                                  `/documents?order=${detail.order_id}&patient=${detail.patient_id}`,
+                                )
+                              }
+                            >
+                              Open documents
+                            </Button>
+                          </div>
                         </div>
                       ))}
                     </div>

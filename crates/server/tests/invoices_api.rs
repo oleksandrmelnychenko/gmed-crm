@@ -1,3 +1,5 @@
+mod support;
+
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use serde_json::{Value, json};
@@ -5,35 +7,15 @@ use sqlx::{PgPool, Row};
 use tower::ServiceExt;
 use uuid::Uuid;
 
+use gmed_server::audit;
 use gmed_server::auth::jwt;
 use gmed_server::settings::{SettingsCache, TokenSettings};
 use gmed_server::state::AppState;
-
 const TEST_SECRET: &str = "test-secret-at-least-32-characters-long!!";
 
 async fn test_context() -> Option<(axum::Router, PgPool, Uuid)> {
-    let db_url = match std::env::var("DATABASE_URL") {
-        Ok(url) => url,
-        Err(_) => return None,
-    };
-
-    let pool = gmed_db::create_pool(&db_url).await.ok()?;
-    gmed_db::run_migrations(&pool).await.ok()?;
-
-    let admin_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE email = $1")
-        .bind("admin@gmed.de")
-        .fetch_one(&pool)
-        .await
-        .ok()?;
-
-    let state = AppState::new(
-        pool.clone(),
-        TEST_SECRET,
-        SettingsCache::new(TokenSettings::default()),
-    );
-    let app = gmed_server::build_app(state);
-
-    Some((app, pool, admin_id))
+    let ctx = support::suite_context(TEST_SECRET).await?;
+    Some((ctx.app, ctx.pool, ctx.admin_id))
 }
 
 async fn json_request(
@@ -229,6 +211,62 @@ async fn seed_order_leistung(
     .unwrap()
 }
 
+async fn seed_order_leistung_finance(
+    pool: &PgPool,
+    order_id: Uuid,
+    description: &str,
+    unit_price: f64,
+    vat_rate: f64,
+    is_cost_passthrough: bool,
+    status: &str,
+) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO order_leistungen (
+                order_id, description, quantity, unit_price, vat_rate, is_cost_passthrough, status
+           ) VALUES (
+                $1, $2, 1, $3, $4, $5, $6
+           ) RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(description)
+    .bind(unit_price)
+    .bind(vat_rate)
+    .bind(is_cost_passthrough)
+    .bind(status)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+async fn seed_supporting_document(
+    pool: &PgPool,
+    document_id: Uuid,
+    patient_id: Uuid,
+    order_id: Uuid,
+    uploaded_by: Uuid,
+    auto_name: &str,
+    original_filename: &str,
+) {
+    sqlx::query(
+        r#"INSERT INTO documents (
+                id, patient_id, order_id, auto_name, original_filename, art, category,
+                status, visibility, is_medical, version_root_document_id, version_number, uploaded_by
+           ) VALUES (
+                $1, $2, $3, $4, $5, 'receipt', 'payment',
+                'active', 'released_internal', false, $1, 1, $6
+           )"#,
+    )
+    .bind(document_id)
+    .bind(patient_id)
+    .bind(order_id)
+    .bind(auto_name)
+    .bind(original_filename)
+    .bind(uploaded_by)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
 async fn create_quote(app: &axum::Router, bearer: &str, order_id: Uuid) -> Value {
     let (status, body) = json_request(
         app,
@@ -330,7 +368,59 @@ async fn invoice_creation_from_quote_marks_order_services_invoiced() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body.as_array().unwrap().len(), 1);
+    assert_eq!(body["items"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn invoice_list_returns_page_metadata_and_slices_results() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("invoice-pagination");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+
+    let billing_bearer = auth_header_for(billing_id, "billing");
+
+    for index in 0..3 {
+        let order_id = seed_order(&pool, patient_id, admin_id, &format!("{tag}-{index}")).await;
+        seed_order_leistung(
+            &pool,
+            order_id,
+            &format!("Paged line {index}"),
+            100.0 + f64::from(index),
+            "approved",
+        )
+        .await;
+        let quote = create_quote(&app, &billing_bearer, order_id).await;
+        let quote_id = quote["id"].as_str().unwrap();
+        let _invoice = create_invoice(
+            &app,
+            &billing_bearer,
+            quote_id,
+            "final",
+            &format!("2026-05-{}", 10 + index),
+        )
+        .await;
+    }
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/invoices?patient_id={patient_id}&page=2&per_page=2"),
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["page"], 2);
+    assert_eq!(body["per_page"], 2);
+    assert_eq!(body["total"], 3);
+    assert_eq!(body["total_pages"], 2);
+    assert_eq!(body["items"].as_array().unwrap().len(), 1);
 }
 
 #[tokio::test]
@@ -419,6 +509,86 @@ async fn advance_invoice_does_not_consume_order_services() {
             .await
             .unwrap();
     assert_eq!(current_status, "approved");
+}
+
+#[tokio::test]
+async fn invoice_detail_includes_supporting_documents_for_cost_passthrough_line_items() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("invoice-supporting-doc");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    let supporting_document_id = Uuid::new_v4();
+    seed_supporting_document(
+        &pool,
+        supporting_document_id,
+        patient_id,
+        order_id,
+        admin_id,
+        "Clinic receipt",
+        "receipt.pdf",
+    )
+    .await;
+
+    let leistung_id = seed_order_leistung_finance(
+        &pool,
+        order_id,
+        "Clinic passthrough",
+        80.0,
+        0.0,
+        true,
+        "approved",
+    )
+    .await;
+    sqlx::query("UPDATE order_leistungen SET external_document_id = $2 WHERE id = $1")
+        .bind(leistung_id)
+        .bind(supporting_document_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let billing_bearer = auth_header_for(billing_id, "billing");
+    let quote = create_quote(&app, &pm_bearer, order_id).await;
+    let quote_id = quote["id"].as_str().unwrap();
+    let invoice = create_invoice(&app, &billing_bearer, quote_id, "final", "2026-05-31").await;
+    let invoice_id = invoice["id"].as_str().unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/invoices/{invoice_id}"),
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let line_items = body["line_items"].as_array().expect("line items array");
+    assert_eq!(line_items.len(), 1);
+    assert_eq!(
+        line_items[0]["external_document_id"],
+        supporting_document_id.to_string()
+    );
+
+    let supporting_documents = body["supporting_documents"]
+        .as_array()
+        .expect("supporting documents array");
+    assert_eq!(supporting_documents.len(), 1);
+    assert_eq!(
+        supporting_documents[0]["id"],
+        supporting_document_id.to_string()
+    );
+    assert_eq!(supporting_documents[0]["auto_name"], "Clinic receipt");
+    assert_eq!(supporting_documents[0]["original_filename"], "receipt.pdf");
+    assert_eq!(supporting_documents[0]["art"], "receipt");
+    assert_eq!(supporting_documents[0]["category"], "payment");
 }
 
 #[tokio::test]
@@ -591,6 +761,264 @@ async fn billing_can_update_invoice_payment_state_and_interpreter_cannot_access_
         .unwrap();
     let status_value: String = row.try_get("status").unwrap();
     assert_eq!(status_value, "paid");
+}
+
+#[tokio::test]
+async fn paid_invoice_and_external_invoice_materialize_accounting_ledger_without_duplicates() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("accounting-ledger");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let provider_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO providers (name, provider_type, address_city, fachbereich, address_country)
+           VALUES ($1, 'medical', 'Berlin', 'Cardiology', 'DE')
+           RETURNING id"#,
+    )
+    .bind(format!("Clinic {tag}"))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    seed_order_leistung_finance(
+        &pool,
+        order_id,
+        "Medical service",
+        100.0,
+        19.0,
+        false,
+        "approved",
+    )
+    .await;
+    seed_order_leistung_finance(
+        &pool,
+        order_id,
+        "Clinic passthrough",
+        50.0,
+        0.0,
+        true,
+        "approved",
+    )
+    .await;
+
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let billing_bearer = auth_header_for(billing_id, "billing");
+    let quote = create_quote(&app, &pm_bearer, order_id).await;
+    let quote_id = quote["id"].as_str().unwrap();
+
+    let (status, invoice) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{quote_id}/invoices"),
+        &billing_bearer,
+        Some(json!({ "invoice_type": "final", "due_date": "2026-05-20" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let invoice_id = invoice["id"].as_str().unwrap();
+    let total_gross: f64 = invoice["total_gross"].as_str().unwrap().parse().unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/status"),
+        &billing_bearer,
+        Some(json!({
+            "status": "paid",
+            "paid_amount": total_gross,
+            "notes": "Cash received"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "invoice update body: {:?}", body);
+
+    let (status, external_invoice_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/external-invoices"),
+        &billing_bearer,
+        Some(json!({
+            "provider_id": provider_id,
+            "external_invoice_number": format!("EXT-{tag}"),
+            "invoice_date": "2026-04-10",
+            "due_date": "2026-04-25",
+            "amount_net": 50.0,
+            "amount_vat": 10.0,
+            "amount_gross": 60.0,
+            "currency": "EUR",
+            "status": "received",
+            "notes": "Clinic bill"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let external_invoice_id = external_invoice_body["id"].as_str().unwrap();
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/external-invoices/{external_invoice_id}/update"),
+        &billing_bearer,
+        Some(json!({
+            "status": "paid"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, ledger) = json_request(
+        &app,
+        "GET",
+        "/api/v1/invoices/accounting-ledger?year=2026",
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let entries = ledger["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), 3);
+    let categories = entries
+        .iter()
+        .map(|entry| entry["category"].as_str().unwrap().to_string())
+        .collect::<Vec<_>>();
+    assert!(categories.contains(&"service_revenue".to_string()));
+    assert!(categories.contains(&"cost_passthrough_revenue".to_string()));
+    assert!(categories.contains(&"provider_expense".to_string()));
+    assert_eq!(ledger["summary"]["income_gross"], invoice["total_gross"]);
+    assert_eq!(ledger["summary"]["expense_gross"], "60");
+    assert_eq!(ledger["summary"]["cost_passthrough_revenue_gross"], "50");
+    assert_eq!(ledger["summary"]["provider_expense_gross"], "60");
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/status"),
+        &billing_bearer,
+        Some(json!({
+            "status": "paid",
+            "paid_amount": total_gross
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/external-invoices/{external_invoice_id}/update"),
+        &billing_bearer,
+        Some(json!({
+            "status": "paid"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, ledger) = json_request(
+        &app,
+        "GET",
+        "/api/v1/invoices/accounting-ledger?year=2026",
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(ledger["entries"].as_array().unwrap().len(), 3);
+}
+
+#[tokio::test]
+async fn ceo_assistant_can_read_accounting_ledger_export_and_sales_cannot() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("accounting-ledger-rbac");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let ceo_assistant_id = seed_user(&pool, &tag, "ceo_assistant").await;
+    let sales_id = seed_user(&pool, &tag, "sales").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    seed_order_leistung(&pool, order_id, "Accounting scope line", 120.0, "approved").await;
+
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let billing_bearer = auth_header_for(billing_id, "billing");
+    let assistant_bearer = auth_header_for(ceo_assistant_id, "ceo_assistant");
+    let sales_bearer = auth_header_for(sales_id, "sales");
+    let quote = create_quote(&app, &pm_bearer, order_id).await;
+    let quote_id = quote["id"].as_str().unwrap();
+
+    let invoice = create_invoice(&app, &billing_bearer, quote_id, "final", "2026-05-22").await;
+    let invoice_id = invoice["id"].as_str().unwrap();
+    let total_gross: f64 = invoice["total_gross"].as_str().unwrap().parse().unwrap();
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/status"),
+        &billing_bearer,
+        Some(json!({
+            "status": "paid",
+            "paid_amount": total_gross
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/invoices/accounting-ledger?year=2026",
+        &assistant_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["entries"].as_array().unwrap().len(), 1);
+
+    let (status, headers, bytes) = binary_request(
+        &app,
+        "GET",
+        "/api/v1/invoices/accounting-ledger/export?year=2026",
+        &assistant_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        headers
+            .get("content-type")
+            .and_then(|value| value.to_str().ok()),
+        Some("text/csv; charset=utf-8")
+    );
+    let csv = String::from_utf8(bytes).unwrap();
+    assert!(csv.contains("entry_date,direction,category"));
+    assert!(csv.contains(invoice["invoice_number"].as_str().unwrap()));
+
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        "/api/v1/invoices/accounting-ledger?year=2026",
+        &sales_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, _, _) = binary_request(
+        &app,
+        "GET",
+        "/api/v1/invoices/accounting-ledger/export?year=2026",
+        &sales_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]
@@ -851,7 +1279,7 @@ async fn auto_dunning_scheduler_marks_overdue_and_advances_reminder_levels() {
     sqlx::query(
         r#"INSERT INTO invoice_dunning_events (
                 invoice_id, level, note, due_date_snapshot, balance_due, created_by, sent_at, created_at
-           ) VALUES ($1, 'first', 'Seeded first reminder', $2, $3, $4, now() - interval '8 days', now() - interval '8 days')"#,
+           ) VALUES ($1, 'first', 'Seeded first reminder', $2, $3, $4, now() - interval '15 days', now() - interval '15 days')"#,
     )
     .bind(invoice_second_id)
     .bind(Some(chrono::NaiveDate::from_ymd_opt(2026, 2, 20).unwrap()))
@@ -897,8 +1325,8 @@ async fn auto_dunning_scheduler_marks_overdue_and_advances_reminder_levels() {
         r#"INSERT INTO invoice_dunning_events (
                 invoice_id, level, note, due_date_snapshot, balance_due, created_by, sent_at, created_at
            ) VALUES
-                ($1, 'first', 'Seeded first reminder', $2, $3, $4, now() - interval '16 days', now() - interval '16 days'),
-                ($1, 'second', 'Seeded second reminder', $2, $3, $4, now() - interval '8 days', now() - interval '8 days')"#,
+                ($1, 'first', 'Seeded first reminder', $2, $3, $4, now() - interval '45 days', now() - interval '45 days'),
+                ($1, 'second', 'Seeded second reminder', $2, $3, $4, now() - interval '29 days', now() - interval '29 days')"#,
     )
     .bind(invoice_collections_id)
     .bind(Some(chrono::NaiveDate::from_ymd_opt(2026, 2, 10).unwrap()))
@@ -912,7 +1340,11 @@ async fn auto_dunning_scheduler_marks_overdue_and_advances_reminder_levels() {
         pool.clone(),
         TEST_SECRET,
         SettingsCache::new(TokenSettings::default()),
-    );
+    )
+    .with_audit_sender(audit::spawn_writer(
+        pool.clone(),
+        "test-audit-ip-salt".to_string(),
+    ));
     let summary = gmed_server::routes::invoices::run_auto_dunning_scheduler_once(&state)
         .await
         .unwrap();
@@ -978,6 +1410,23 @@ async fn auto_dunning_scheduler_marks_overdue_and_advances_reminder_levels() {
     .unwrap();
     assert_eq!(auto_notes.len(), 3);
 
+    support::wait_until("auto dunning audit rows", || async {
+        let count: i64 = sqlx::query_scalar(
+            "SELECT count(*)::bigint
+             FROM audit_log
+             WHERE action = 'auto_create_invoice_dunning_event'
+               AND entity_type = 'invoice'
+               AND entity_id IN ($1, $2, $3)",
+        )
+        .bind(invoice_first_id)
+        .bind(invoice_second_id)
+        .bind(invoice_collections_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        count >= 3
+    })
+    .await;
     let auto_dunning_audit_count: i64 = sqlx::query_scalar(
         "SELECT count(*)::bigint
          FROM audit_log
@@ -1073,6 +1522,16 @@ async fn patient_can_download_own_invoice_pdf() {
     let quote_id = quote["id"].as_str().unwrap();
     let invoice = create_invoice(&app, &billing_bearer, quote_id, "final", "2026-05-30").await;
     let invoice_id = invoice["id"].as_str().unwrap();
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/status"),
+        &billing_bearer,
+        Some(json!({ "status": "sent" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["status"], "sent");
 
     let (status, headers, bytes) = binary_request(
         &app,
@@ -1114,7 +1573,7 @@ async fn ceo_assistant_can_read_but_cannot_mutate_invoice_workspace() {
         order_id,
         "Assistant-visible invoice line",
         210.0,
-        "planned",
+        "approved",
     )
     .await;
     let quote = create_quote(&app, &billing_bearer, order_id).await;
@@ -1131,7 +1590,7 @@ async fn ceo_assistant_can_read_but_cannot_mutate_invoice_workspace() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body.as_array().unwrap().len(), 1);
+    assert_eq!(body["items"].as_array().unwrap().len(), 1);
 
     let (status, body) = json_request(
         &app,

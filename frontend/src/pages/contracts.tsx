@@ -7,7 +7,7 @@ import {
   type FormEvent,
   type ReactNode,
 } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import {
   CalendarClock,
   ChevronRight,
@@ -44,6 +44,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
+import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
 
 type ContractsTab = "contracts" | "quotes";
@@ -184,12 +185,48 @@ type QuoteStatusFormState = {
   notes: string;
 };
 
+type AgencyServiceItem = {
+  id: string;
+  service_key: string;
+  service_name: string;
+  description: string | null;
+  unit_label: string;
+  unit_price: unknown;
+  currency: string;
+  vat_rate: unknown;
+  is_active: boolean;
+  valid_from: string | null;
+  valid_to: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+type AgencyServiceFilters = {
+  search: string;
+  activeOnly: string;
+};
+
+type AgencyServiceFormState = {
+  id: string;
+  serviceKey: string;
+  serviceName: string;
+  description: string;
+  unitLabel: string;
+  unitPrice: string;
+  currency: string;
+  vatRate: string;
+  isActive: boolean;
+  validFrom: string;
+  validTo: string;
+};
+
 type ContractsPermissions = {
   canViewPage: boolean;
   canCreateContract: boolean;
   canManageContract: boolean;
   canCreateQuote: boolean;
   canManageQuote: boolean;
+  canManageCatalog: boolean;
 };
 
 const CONTRACT_STATUSES: ContractStatus[] = [
@@ -217,6 +254,10 @@ const DEFAULT_QUOTE_FILTERS: QuoteFilters = {
   orderId: "",
   status: "",
 };
+const DEFAULT_AGENCY_SERVICE_FILTERS: AgencyServiceFilters = {
+  search: "",
+  activeOnly: "true",
+};
 const selectClassName =
   "h-10 w-full rounded-xl border border-input bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100";
 const textareaClassName =
@@ -235,6 +276,7 @@ function contractsPermissions(role?: string): ContractsPermissions {
     canManageContract: canManage,
     canCreateQuote: canManage,
     canManageQuote: canManage,
+    canManageCatalog: canManage,
   };
 }
 
@@ -253,6 +295,14 @@ function buildQuotesPath(filters: QuoteFilters) {
   if (filters.orderId) params.set("order_id", filters.orderId);
   if (filters.status) params.set("status", filters.status);
   return params.size ? `/quotes?${params.toString()}` : "/quotes";
+}
+
+function buildAgencyServicesPath(filters: AgencyServiceFilters) {
+  const params = new URLSearchParams();
+  if (filters.search.trim()) params.set("search", filters.search.trim());
+  if (filters.activeOnly === "true") params.set("active_only", "true");
+  if (filters.activeOnly === "false") params.set("active_only", "false");
+  return params.size ? `/agency-services?${params.toString()}` : "/agency-services";
 }
 
 function blankContractForm(patientId = ""): ContractFormState {
@@ -274,6 +324,22 @@ function blankQuoteForm(orderId = ""): QuoteFormState {
   };
 }
 
+function blankAgencyServiceForm(): AgencyServiceFormState {
+  return {
+    id: "",
+    serviceKey: "",
+    serviceName: "",
+    description: "",
+    unitLabel: "unit",
+    unitPrice: "",
+    currency: "EUR",
+    vatRate: "19",
+    isActive: true,
+    validFrom: "",
+    validTo: "",
+  };
+}
+
 function contractToStatusForm(contract: ContractItem): ContractStatusFormState {
   return {
     status: (contract.status as ContractStatus) ?? "draft",
@@ -289,6 +355,22 @@ function quoteToStatusForm(quote: QuoteItem): QuoteStatusFormState {
     status: (quote.status as QuoteStatus) ?? "draft",
     paidAmount: valueToInput(quote.paid_amount),
     notes: quote.notes ?? "",
+  };
+}
+
+function agencyServiceToForm(service: AgencyServiceItem): AgencyServiceFormState {
+  return {
+    id: service.id,
+    serviceKey: service.service_key,
+    serviceName: service.service_name,
+    description: service.description ?? "",
+    unitLabel: service.unit_label,
+    unitPrice: valueToInput(service.unit_price),
+    currency: service.currency,
+    vatRate: valueToInput(service.vat_rate),
+    isActive: service.is_active,
+    validFrom: service.valid_from ?? "",
+    validTo: service.valid_to ?? "",
   };
 }
 
@@ -395,7 +477,7 @@ function buildSearchParams(
 export function ContractsPage() {
   const { user } = useAuth();
   const { t } = useLang();
-  const navigate = useNavigate();
+  const { staffGo } = useStaffNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const permissions = contractsPermissions(user?.role);
 
@@ -420,13 +502,16 @@ export function ContractsPage() {
   });
   const [contracts, setContracts] = useState<ContractItem[]>([]);
   const [quotes, setQuotes] = useState<QuoteItem[]>([]);
+  const [agencyServices, setAgencyServices] = useState<AgencyServiceItem[]>([]);
   const [patients, setPatients] = useState<PatientOption[]>([]);
   const [orders, setOrders] = useState<OrderOption[]>([]);
   const [contractsLoading, setContractsLoading] = useState(false);
   const [quotesLoading, setQuotesLoading] = useState(false);
+  const [agencyServicesLoading, setAgencyServicesLoading] = useState(false);
   const [optionsLoading, setOptionsLoading] = useState(false);
   const [contractsError, setContractsError] = useState<string | null>(null);
   const [quotesError, setQuotesError] = useState<string | null>(null);
+  const [agencyServicesError, setAgencyServicesError] = useState<string | null>(null);
   const [optionsError, setOptionsError] = useState<string | null>(null);
   const [selectedContractId, setSelectedContractId] = useState(initialContractId);
   const [selectedQuoteId, setSelectedQuoteId] = useState(initialQuoteId);
@@ -441,6 +526,7 @@ export function ContractsPage() {
   const [quoteVersionsError, setQuoteVersionsError] = useState<string | null>(null);
   const [contractsReloadToken, setContractsReloadToken] = useState(0);
   const [quotesReloadToken, setQuotesReloadToken] = useState(0);
+  const [agencyServicesReloadToken, setAgencyServicesReloadToken] = useState(0);
   const [createContractOpen, setCreateContractOpen] = useState(false);
   const [createQuoteOpen, setCreateQuoteOpen] = useState(false);
   const [createContractForm, setCreateContractForm] = useState<ContractFormState>(
@@ -453,6 +539,14 @@ export function ContractsPage() {
   const [createQuoteBusy, setCreateQuoteBusy] = useState(false);
   const [createContractError, setCreateContractError] = useState<string | null>(null);
   const [createQuoteError, setCreateQuoteError] = useState<string | null>(null);
+  const [agencyServiceFilters, setAgencyServiceFilters] = useState<AgencyServiceFilters>(
+    DEFAULT_AGENCY_SERVICE_FILTERS,
+  );
+  const [agencyServiceForm, setAgencyServiceForm] = useState<AgencyServiceFormState>(
+    blankAgencyServiceForm(),
+  );
+  const [agencyServiceBusy, setAgencyServiceBusy] = useState(false);
+  const [agencyServiceFormError, setAgencyServiceFormError] = useState<string | null>(null);
   const [contractStatusForm, setContractStatusForm] = useState<ContractStatusFormState>(
     contractToStatusForm({
       id: "",
@@ -481,6 +575,7 @@ export function ContractsPage() {
 
   const deferredContractSearch = useDeferredValue(contractFilters.search);
   const deferredQuoteSearch = useDeferredValue(quoteFilters.search);
+  const deferredAgencyServiceSearch = useDeferredValue(agencyServiceFilters.search);
 
   const contractQuery = useMemo(
     () => ({ ...contractFilters, search: deferredContractSearch }),
@@ -489,6 +584,10 @@ export function ContractsPage() {
   const quoteQuery = useMemo(
     () => ({ ...quoteFilters, search: deferredQuoteSearch }),
     [quoteFilters, deferredQuoteSearch],
+  );
+  const agencyServiceQuery = useMemo(
+    () => ({ ...agencyServiceFilters, search: deferredAgencyServiceSearch }),
+    [agencyServiceFilters, deferredAgencyServiceSearch],
   );
 
   const syncQuery = (patch: Record<string, string | null | undefined>) => {
@@ -512,6 +611,12 @@ export function ContractsPage() {
     const paid = quotes.reduce((sum, item) => sum + Number(item.paid_amount ?? 0), 0);
     return { total: quotes.length, accepted, gross, paid };
   }, [quotes]);
+
+  const agencyServiceStats = useMemo(() => {
+    const active = agencyServices.filter((item) => item.is_active).length;
+    const priced = agencyServices.filter((item) => Number(item.unit_price ?? 0) > 0).length;
+    return { total: agencyServices.length, active, priced };
+  }, [agencyServices]);
 
   const selectedCreateOrder = useMemo(
     () => orders.find((order) => order.id === createQuoteForm.orderId) ?? null,
@@ -583,6 +688,32 @@ export function ContractsPage() {
       ignore = true;
     };
   }, [quoteQuery, quotesReloadToken, t.common_error]);
+
+  useEffect(() => {
+    let ignore = false;
+    async function loadAgencyServices() {
+      setAgencyServicesLoading(true);
+      setAgencyServicesError(null);
+      try {
+        const data = await apiFetch<AgencyServiceItem[]>(
+          buildAgencyServicesPath(agencyServiceQuery),
+        );
+        if (!ignore) setAgencyServices(data);
+      } catch (error) {
+        if (!ignore) {
+          setAgencyServicesError(
+            error instanceof Error ? error.message : t.common_error,
+          );
+        }
+      } finally {
+        if (!ignore) setAgencyServicesLoading(false);
+      }
+    }
+    void loadAgencyServices();
+    return () => {
+      ignore = true;
+    };
+  }, [agencyServiceQuery, agencyServicesReloadToken, t.common_error]);
 
   useEffect(() => {
     if (!selectedContractId) {
@@ -718,6 +849,54 @@ export function ContractsPage() {
     } finally {
       setCreateQuoteBusy(false);
     }
+  }
+
+  async function handleSaveAgencyService(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setAgencyServiceBusy(true);
+    setAgencyServiceFormError(null);
+    try {
+      const payload = {
+        service_key: agencyServiceForm.serviceKey,
+        service_name: agencyServiceForm.serviceName,
+        description: toOptional(agencyServiceForm.description),
+        unit_label: toOptional(agencyServiceForm.unitLabel),
+        unit_price: Number(agencyServiceForm.unitPrice),
+        currency: toOptional(agencyServiceForm.currency),
+        vat_rate: toOptional(agencyServiceForm.vatRate)
+          ? Number(agencyServiceForm.vatRate)
+          : null,
+        is_active: agencyServiceForm.isActive,
+        valid_from: agencyServiceForm.validFrom,
+        valid_to: toOptional(agencyServiceForm.validTo),
+      };
+
+      const path = agencyServiceForm.id
+        ? `/agency-services/${agencyServiceForm.id}/update`
+        : "/agency-services";
+      await apiFetch(path, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      setAgencyServiceForm(blankAgencyServiceForm());
+      setAgencyServicesReloadToken((current) => current + 1);
+    } catch (error) {
+      setAgencyServiceFormError(
+        error instanceof Error ? error.message : t.common_error,
+      );
+    } finally {
+      setAgencyServiceBusy(false);
+    }
+  }
+
+  function handleEditAgencyService(service: AgencyServiceItem) {
+    setAgencyServiceFormError(null);
+    setAgencyServiceForm(agencyServiceToForm(service));
+  }
+
+  function resetAgencyServiceForm() {
+    setAgencyServiceFormError(null);
+    setAgencyServiceForm(blankAgencyServiceForm());
   }
 
   async function handleSaveContractStatus() {
@@ -890,6 +1069,327 @@ export function ContractsPage() {
             {optionsError}
           </div>
         ) : null}
+
+        <SectionCard
+          title="Agency service catalog"
+          description="Internal pricing catalog for agency-level services and future auto-billing flows."
+          action={
+            <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
+              {agencyServiceStats.active} active / {agencyServiceStats.total} total
+            </Badge>
+          }
+        >
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,0.9fr)]">
+            <div className="space-y-4">
+              <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px_auto]">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+                  <Input
+                    value={agencyServiceFilters.search}
+                    onChange={(event) =>
+                      startTransition(() =>
+                        setAgencyServiceFilters((current) => ({
+                          ...current,
+                          search: event.target.value,
+                        })),
+                      )
+                    }
+                    className="h-11 rounded-2xl border-slate-200 bg-slate-50 pl-9"
+                    placeholder="Search by key, service name or description"
+                  />
+                </div>
+                <select
+                  value={agencyServiceFilters.activeOnly}
+                  onChange={(event) =>
+                    setAgencyServiceFilters((current) => ({
+                      ...current,
+                      activeOnly: event.target.value,
+                    }))
+                  }
+                  className={selectClassName}
+                >
+                  <option value="true">Active only</option>
+                  <option value="">All statuses</option>
+                  <option value="false">Inactive only</option>
+                </select>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11 rounded-2xl"
+                  onClick={() => setAgencyServiceFilters(DEFAULT_AGENCY_SERVICE_FILTERS)}
+                >
+                  Reset
+                </Button>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-3">
+                <MiniMetric label="Catalog items" value={String(agencyServiceStats.total)} />
+                <MiniMetric label="Active" value={String(agencyServiceStats.active)} />
+                <MiniMetric label="Priced" value={String(agencyServiceStats.priced)} />
+              </div>
+
+              {agencyServicesLoading ? (
+                <LoadingState label={t.common_loading} />
+              ) : agencyServicesError ? (
+                <Banner tone="error">{agencyServicesError}</Banner>
+              ) : agencyServices.length === 0 ? (
+                <EmptyState
+                  title="No catalog items"
+                  description="Create reusable agency pricing positions such as interpreter hours or coordination packages."
+                />
+              ) : (
+                <div className="grid gap-3 xl:grid-cols-2">
+                  {agencyServices.map((item) => (
+                    <div
+                      key={item.id}
+                      className="rounded-[1.6rem] border border-slate-200 bg-slate-50 p-4"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                            {item.service_key}
+                          </div>
+                          <h3 className="mt-2 text-base font-semibold text-slate-950">
+                            {item.service_name}
+                          </h3>
+                          <p className="mt-1 text-sm text-slate-600">
+                            {item.description || t.common_not_set}
+                          </p>
+                        </div>
+                        <div className="flex flex-col items-end gap-2">
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "rounded-full",
+                              item.is_active
+                                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                : "border-slate-200 bg-slate-100 text-slate-600",
+                            )}
+                          >
+                            {item.is_active ? "active" : "inactive"}
+                          </Badge>
+                          {permissions.canManageCatalog ? (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="rounded-xl"
+                              onClick={() => handleEditAgencyService(item)}
+                            >
+                              Edit
+                            </Button>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                        <MiniMetric
+                          label="Unit price"
+                          value={formatCurrency(item.unit_price)}
+                        />
+                        <MiniMetric label="Unit" value={item.unit_label} />
+                        <MiniMetric
+                          label="VAT"
+                          value={`${valueToInput(item.vat_rate) || "0"}%`}
+                        />
+                        <MiniMetric
+                          label="Valid from"
+                          value={formatDate(item.valid_from)}
+                        />
+                        <MiniMetric
+                          label="Valid to"
+                          value={formatDate(item.valid_to)}
+                        />
+                        <MiniMetric
+                          label="Updated"
+                          value={formatDateTime(item.updated_at)}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {permissions.canManageCatalog ? (
+              <form
+                onSubmit={handleSaveAgencyService}
+                className="rounded-[1.6rem] border border-slate-200 bg-slate-50 p-5"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-950">
+                      {agencyServiceForm.id ? "Edit catalog item" : "New catalog item"}
+                    </h3>
+                    <p className="mt-1 text-sm text-slate-600">
+                      Use stable service keys like <code>interpreter_hours</code> for future automation.
+                    </p>
+                  </div>
+                  {agencyServiceForm.id ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="rounded-xl"
+                      onClick={resetAgencyServiceForm}
+                    >
+                      Cancel edit
+                    </Button>
+                  ) : null}
+                </div>
+
+                {agencyServiceFormError ? (
+                  <div className="mt-4">
+                    <Banner tone="error">{agencyServiceFormError}</Banner>
+                  </div>
+                ) : null}
+
+                <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                  <Field label="Service key">
+                    <Input
+                      required
+                      value={agencyServiceForm.serviceKey}
+                      onChange={(event) =>
+                        setAgencyServiceForm((current) => ({
+                          ...current,
+                          serviceKey: event.target.value,
+                        }))
+                      }
+                    />
+                  </Field>
+                  <Field label="Service name">
+                    <Input
+                      required
+                      value={agencyServiceForm.serviceName}
+                      onChange={(event) =>
+                        setAgencyServiceForm((current) => ({
+                          ...current,
+                          serviceName: event.target.value,
+                        }))
+                      }
+                    />
+                  </Field>
+                  <Field label="Unit label">
+                    <Input
+                      value={agencyServiceForm.unitLabel}
+                      onChange={(event) =>
+                        setAgencyServiceForm((current) => ({
+                          ...current,
+                          unitLabel: event.target.value,
+                        }))
+                      }
+                    />
+                  </Field>
+                  <Field label="Currency">
+                    <Input
+                      value={agencyServiceForm.currency}
+                      onChange={(event) =>
+                        setAgencyServiceForm((current) => ({
+                          ...current,
+                          currency: event.target.value,
+                        }))
+                      }
+                    />
+                  </Field>
+                  <Field label="Unit price">
+                    <Input
+                      required
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={agencyServiceForm.unitPrice}
+                      onChange={(event) =>
+                        setAgencyServiceForm((current) => ({
+                          ...current,
+                          unitPrice: event.target.value,
+                        }))
+                      }
+                    />
+                  </Field>
+                  <Field label="VAT %">
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max="100"
+                      value={agencyServiceForm.vatRate}
+                      onChange={(event) =>
+                        setAgencyServiceForm((current) => ({
+                          ...current,
+                          vatRate: event.target.value,
+                        }))
+                      }
+                    />
+                  </Field>
+                  <Field label="Valid from">
+                    <Input
+                      required
+                      type="date"
+                      value={agencyServiceForm.validFrom}
+                      onChange={(event) =>
+                        setAgencyServiceForm((current) => ({
+                          ...current,
+                          validFrom: event.target.value,
+                        }))
+                      }
+                    />
+                  </Field>
+                  <Field label="Valid to">
+                    <Input
+                      type="date"
+                      value={agencyServiceForm.validTo}
+                      onChange={(event) =>
+                        setAgencyServiceForm((current) => ({
+                          ...current,
+                          validTo: event.target.value,
+                        }))
+                      }
+                    />
+                  </Field>
+                  <Field label="Description" className="sm:col-span-2">
+                    <textarea
+                      className={textareaClassName}
+                      value={agencyServiceForm.description}
+                      onChange={(event) =>
+                        setAgencyServiceForm((current) => ({
+                          ...current,
+                          description: event.target.value,
+                        }))
+                      }
+                    />
+                  </Field>
+                  <label className="sm:col-span-2 flex items-center gap-2 text-sm text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={agencyServiceForm.isActive}
+                      onChange={(event) =>
+                        setAgencyServiceForm((current) => ({
+                          ...current,
+                          isActive: event.target.checked,
+                        }))
+                      }
+                      className="size-4 rounded border-slate-300"
+                    />
+                    Item is active and can be used by downstream workflows
+                  </label>
+                </div>
+
+                <div className="mt-4 flex justify-end">
+                  <Button
+                    type="submit"
+                    className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+                    disabled={agencyServiceBusy}
+                  >
+                    {agencyServiceBusy ? (
+                      <LoaderCircle className="mr-2 size-4 animate-spin" />
+                    ) : null}
+                    {agencyServiceForm.id ? "Save catalog item" : "Create catalog item"}
+                  </Button>
+                </div>
+              </form>
+            ) : null}
+          </div>
+        </SectionCard>
 
         <Tabs
           value={activeTab}
@@ -1413,9 +1913,9 @@ export function ContractsPage() {
 
                 <SectionCard title={t.providers_linked_patients} description={t.contracts_subtitle}>
                   <div className="flex flex-wrap gap-2">
-                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => navigate(`/patients?patient=${contractDetail.patient_id}`)}>Patient</Button>
-                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => navigate(`/orders?patient=${contractDetail.patient_id}`)}>Orders</Button>
-                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => navigate(`/documents?patient=${contractDetail.patient_id}`)}>Documents</Button>
+                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => staffGo(`/patients?patient=${contractDetail.patient_id}`)}>Patient</Button>
+                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => staffGo(`/orders?patient=${contractDetail.patient_id}`)}>Orders</Button>
+                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => staffGo(`/documents?patient=${contractDetail.patient_id}`)}>Documents</Button>
                   </div>
                 </SectionCard>
 
@@ -1514,10 +2014,10 @@ export function ContractsPage() {
 
                 <SectionCard title={t.providers_linked_patients} description="Jump back into patient, order or document scope with the current quote context.">
                   <div className="flex flex-wrap gap-2">
-                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => navigate(`/patients?patient=${quoteDetail.patient_id}`)}>Patient</Button>
-                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => navigate(`/orders?order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`)}>Order</Button>
-                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => navigate(`/invoices?quote=${quoteDetail.id}&order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`)}>Invoices</Button>
-                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => navigate(`/documents?order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`)}>Documents</Button>
+                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => staffGo(`/patients?patient=${quoteDetail.patient_id}`)}>Patient</Button>
+                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => staffGo(`/orders?order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`)}>Order</Button>
+                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => staffGo(`/invoices?quote=${quoteDetail.id}&order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`)}>Invoices</Button>
+                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => staffGo(`/documents?order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`)}>Documents</Button>
                   </div>
                 </SectionCard>
 
