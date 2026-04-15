@@ -22,6 +22,22 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/patients", get(list_patients).post(create_patient))
         .route("/patients/{patient_id}", get(get_patient))
+        .route(
+            "/patients/{patient_id}/vitals",
+            get(list_patient_vitals).post(create_patient_vital_measurement),
+        )
+        .route(
+            "/patients/{patient_id}/card-entries",
+            get(list_patient_card_entries).post(create_patient_card_entry),
+        )
+        .route(
+            "/patients/{patient_id}/medical-orders",
+            get(list_patient_medical_orders).post(create_patient_medical_order),
+        )
+        .route(
+            "/patients/{patient_id}/risk-scores",
+            get(list_patient_risk_scores).post(create_patient_risk_score),
+        )
         .route("/patients/{patient_id}/recheck", get(get_patient_recheck))
         .route("/patients/{patient_id}/assignments", get(list_assignments))
         .route("/patients/{patient_id}/cases", get(list_patient_cases))
@@ -47,6 +63,10 @@ pub fn router() -> Router<AppState> {
             get(list_patient_invoices),
         )
         .route(
+            "/patients/{patient_id}/service-report",
+            get(get_patient_service_report),
+        )
+        .route(
             "/patients/{patient_id}/relations",
             get(list_relations).post(create_relation),
         )
@@ -55,6 +75,10 @@ pub fn router() -> Router<AppState> {
         .route("/patients/{patient_id}/update", post(update_patient))
         .route("/patients/{patient_id}/assign", post(assign_patient))
         .route("/patients/{patient_id}/revoke", post(revoke_assignment))
+        .route(
+            "/patients/{patient_id}/medical-orders/{medical_order_id}/update",
+            post(update_patient_medical_order),
+        )
         .route(
             "/patients/{patient_id}/relations/{relation_id}/update",
             post(update_relation),
@@ -127,7 +151,60 @@ struct UpdatePatientRequest {
     emergency_contact_phone: Option<String>,
     emergency_contact_relation: Option<String>,
     legal_status: Option<Value>,
+    clinical_warnings: Option<String>,
     notes: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CreatePatientVitalMeasurementRequest {
+    measured_at: String,
+    bp_systolic: Option<f64>,
+    bp_diastolic: Option<f64>,
+    heart_rate: Option<i32>,
+    weight_kg: Option<f64>,
+    height_cm: Option<f64>,
+    bmi: Option<f64>,
+    notes: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CreatePatientCardEntryRequest {
+    entry_date: String,
+    category: String,
+    source: Option<String>,
+    content: String,
+}
+
+#[derive(Deserialize)]
+struct CreatePatientMedicalOrderRequest {
+    order_date: String,
+    order_type: String,
+    title: String,
+    instructions: String,
+    due_date: Option<String>,
+    source: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct UpdatePatientMedicalOrderRequest {
+    order_date: Option<String>,
+    order_type: Option<String>,
+    title: Option<String>,
+    instructions: Option<String>,
+    status: Option<String>,
+    due_date: Option<String>,
+    source: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CreatePatientRiskScoreRequest {
+    computed_at: String,
+    score_type: String,
+    score_value: f64,
+    scale_max: Option<f64>,
+    interpretation: Option<String>,
+    source: Option<String>,
+    inputs: Option<Value>,
 }
 
 #[derive(Deserialize)]
@@ -201,6 +278,38 @@ pub(crate) struct PatientLabelAgencySettings {
     pub(crate) email: Option<String>,
 }
 
+const PATIENT_CARD_ENTRY_CATEGORIES: &[&str] = &[
+    "medical_update",
+    "patient_report",
+    "provider_report",
+    "treatment_note",
+    "followup_note",
+    "warning",
+    "other",
+];
+
+const PATIENT_MEDICAL_ORDER_TYPES: &[&str] = &[
+    "physiotherapy",
+    "diet",
+    "lab_recheck",
+    "imaging",
+    "medication_followup",
+    "procedure",
+    "other",
+];
+
+const PATIENT_MEDICAL_ORDER_STATUSES: &[&str] = &["active", "completed", "cancelled"];
+
+const PATIENT_RISK_SCORE_TYPES: &[&str] = &[
+    "cha2ds2_vasc",
+    "has_bled",
+    "framingham",
+    "fall_risk",
+    "frailty",
+    "nutrition_risk",
+    "other",
+];
+
 pub(crate) const PATIENT_LABEL_FORMATS: [PatientLabelFormat; 3] = [
     PatientLabelFormat {
         id: "compact-90x48",
@@ -231,14 +340,21 @@ const ALLOWED_PATIENT_FUNCTIONAL_LABELS: [&str; 5] = [
 ];
 
 fn validate_create(req: &CreatePatientRequest) -> Result<(), &'static str> {
-    if req.first_name.is_empty() || req.first_name.len() > 200 {
+    let first_name = req.first_name.trim();
+    let last_name = req.last_name.trim();
+    let birth_date = req.birth_date.trim();
+
+    if first_name.is_empty() || first_name.len() > 200 {
         return Err("First name required (max 200)");
     }
-    if req.last_name.is_empty() || req.last_name.len() > 200 {
+    if last_name.is_empty() || last_name.len() > 200 {
         return Err("Last name required (max 200)");
     }
-    if req.birth_date.is_empty() {
+    if birth_date.is_empty() {
         return Err("Birth date required");
+    }
+    if chrono::NaiveDate::parse_from_str(birth_date, "%Y-%m-%d").is_err() {
+        return Err("Invalid birth_date format (YYYY-MM-DD)");
     }
     match req.gender.as_str() {
         "male" => {}
@@ -297,6 +413,10 @@ fn normalize_setting_text_value(value: &str) -> Option<String> {
     } else {
         Some(normalized.to_string())
     }
+}
+
+fn money_json(value: rust_decimal::Decimal) -> String {
+    value.round_dp(2).normalize().to_string()
 }
 
 pub(crate) fn patient_label_salutation(gender: &str) -> &'static str {
@@ -588,22 +708,28 @@ async fn get_patient(
         Role::Concierge,
     ])?;
 
-    match sqlx::query!(
+    match sqlx::query(
         r#"SELECT id, patient_id, title, first_name, last_name,
                   birth_date, gender, nationality, residence_country,
                   languages, functional_labels, phone_primary, phone_secondary, email,
                   address_street, address_city, address_zip, address_country,
                   insurance_provider, insurance_number, insurance_type,
                   emergency_contact_name, emergency_contact_phone, emergency_contact_relation,
-                  legal_status, notes, is_active, created_at, updated_at
+                  legal_status, clinical_warnings, notes, is_active, created_at, updated_at
            FROM patients WHERE id = $1"#,
-        patient_uuid
     )
+    .bind(patient_uuid)
     .fetch_optional(&state.db)
     .await
     {
         Ok(Some(r)) => {
-            if !has_patient_access(&state, &auth, r.id).await? {
+            let patient_id = r.try_get::<Uuid, _>("id").map_err(|_| {
+                err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to decode patient",
+                )
+            })?;
+            if !has_patient_access(&state, &auth, patient_id).await? {
                 return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
             }
 
@@ -612,35 +738,185 @@ async fn get_patient(
                 &auth,
                 &policies,
                 PatientDetailInput {
-                    id: r.id,
-                    patient_id: r.patient_id,
-                    title: r.title,
-                    first_name: r.first_name,
-                    last_name: r.last_name,
-                    birth_date: r.birth_date,
-                    gender: r.gender,
-                    nationality: r.nationality,
-                    residence_country: r.residence_country,
-                    languages: r.languages,
-                    functional_labels: r.functional_labels,
-                    phone_primary: r.phone_primary,
-                    phone_secondary: r.phone_secondary,
-                    email: r.email,
-                    address_street: r.address_street,
-                    address_city: r.address_city,
-                    address_zip: r.address_zip,
-                    address_country: r.address_country,
-                    insurance_provider: r.insurance_provider,
-                    insurance_number: r.insurance_number,
-                    insurance_type: r.insurance_type,
-                    emergency_contact_name: r.emergency_contact_name,
-                    emergency_contact_phone: r.emergency_contact_phone,
-                    emergency_contact_relation: r.emergency_contact_relation,
-                    legal_status: r.legal_status,
-                    notes: r.notes,
-                    is_active: r.is_active,
-                    created_at: r.created_at,
-                    updated_at: r.updated_at,
+                    id: patient_id,
+                    patient_id: r.try_get("patient_id").map_err(|_| {
+                        err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to decode patient",
+                        )
+                    })?,
+                    title: r.try_get("title").map_err(|_| {
+                        err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to decode patient",
+                        )
+                    })?,
+                    first_name: r.try_get("first_name").map_err(|_| {
+                        err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to decode patient",
+                        )
+                    })?,
+                    last_name: r.try_get("last_name").map_err(|_| {
+                        err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to decode patient",
+                        )
+                    })?,
+                    birth_date: r.try_get("birth_date").map_err(|_| {
+                        err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to decode patient",
+                        )
+                    })?,
+                    gender: r.try_get("gender").map_err(|_| {
+                        err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to decode patient",
+                        )
+                    })?,
+                    nationality: r.try_get("nationality").map_err(|_| {
+                        err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to decode patient",
+                        )
+                    })?,
+                    residence_country: r.try_get("residence_country").map_err(|_| {
+                        err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to decode patient",
+                        )
+                    })?,
+                    languages: r.try_get("languages").map_err(|_| {
+                        err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to decode patient",
+                        )
+                    })?,
+                    functional_labels: r.try_get("functional_labels").map_err(|_| {
+                        err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to decode patient",
+                        )
+                    })?,
+                    phone_primary: r.try_get("phone_primary").map_err(|_| {
+                        err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to decode patient",
+                        )
+                    })?,
+                    phone_secondary: r.try_get("phone_secondary").map_err(|_| {
+                        err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to decode patient",
+                        )
+                    })?,
+                    email: r.try_get("email").map_err(|_| {
+                        err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to decode patient",
+                        )
+                    })?,
+                    address_street: r.try_get("address_street").map_err(|_| {
+                        err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to decode patient",
+                        )
+                    })?,
+                    address_city: r.try_get("address_city").map_err(|_| {
+                        err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to decode patient",
+                        )
+                    })?,
+                    address_zip: r.try_get("address_zip").map_err(|_| {
+                        err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to decode patient",
+                        )
+                    })?,
+                    address_country: r.try_get("address_country").map_err(|_| {
+                        err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to decode patient",
+                        )
+                    })?,
+                    insurance_provider: r.try_get("insurance_provider").map_err(|_| {
+                        err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to decode patient",
+                        )
+                    })?,
+                    insurance_number: r.try_get("insurance_number").map_err(|_| {
+                        err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to decode patient",
+                        )
+                    })?,
+                    insurance_type: r.try_get("insurance_type").map_err(|_| {
+                        err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to decode patient",
+                        )
+                    })?,
+                    emergency_contact_name: r.try_get("emergency_contact_name").map_err(|_| {
+                        err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to decode patient",
+                        )
+                    })?,
+                    emergency_contact_phone: r.try_get("emergency_contact_phone").map_err(
+                        |_| {
+                            err(
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                "Failed to decode patient",
+                            )
+                        },
+                    )?,
+                    emergency_contact_relation: r.try_get("emergency_contact_relation").map_err(
+                        |_| {
+                            err(
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                "Failed to decode patient",
+                            )
+                        },
+                    )?,
+                    legal_status: r.try_get("legal_status").map_err(|_| {
+                        err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to decode patient",
+                        )
+                    })?,
+                    clinical_warnings: r.try_get("clinical_warnings").map_err(|_| {
+                        err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to decode patient",
+                        )
+                    })?,
+                    notes: r.try_get("notes").map_err(|_| {
+                        err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to decode patient",
+                        )
+                    })?,
+                    is_active: r.try_get("is_active").map_err(|_| {
+                        err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to decode patient",
+                        )
+                    })?,
+                    created_at: r.try_get("created_at").map_err(|_| {
+                        err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to decode patient",
+                        )
+                    })?,
+                    updated_at: r.try_get("updated_at").map_err(|_| {
+                        err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to decode patient",
+                        )
+                    })?,
                 },
             );
             state.audit_sender.try_send(audit::domain_event(
@@ -678,8 +954,36 @@ async fn create_patient(
         return Err(err(StatusCode::UNPROCESSABLE_ENTITY, msg));
     }
 
+    let CreatePatientRequest {
+        title,
+        first_name,
+        last_name,
+        birth_date,
+        gender,
+        nationality,
+        residence_country,
+        languages,
+        functional_labels,
+        phone_primary,
+        phone_secondary,
+        email,
+        address_street,
+        address_city,
+        address_zip,
+        address_country,
+        insurance_provider,
+        insurance_number,
+        insurance_type,
+        emergency_contact_name,
+        emergency_contact_phone,
+        emergency_contact_relation,
+        notes,
+    } = body;
+
+    let first_name = first_name.trim().to_string();
+    let last_name = last_name.trim().to_string();
     let birth_date =
-        chrono::NaiveDate::parse_from_str(&body.birth_date, "%Y-%m-%d").map_err(|_| {
+        chrono::NaiveDate::parse_from_str(birth_date.trim(), "%Y-%m-%d").map_err(|_| {
             err(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "Invalid birth_date format (YYYY-MM-DD)",
@@ -698,8 +1002,8 @@ async fn create_patient(
         })?;
 
     let pid = generate_patient_id(seq);
-    let langs = body.languages.unwrap_or_default();
-    let functional_labels = match normalize_functional_labels(body.functional_labels) {
+    let langs = languages.unwrap_or_default();
+    let functional_labels = match normalize_functional_labels(functional_labels) {
         Ok(Some(labels)) => labels,
         Ok(None) => Vec::new(),
         Err(response) => return Err(response),
@@ -720,29 +1024,29 @@ async fn create_patient(
             $17, $18, $19, $20, $21, $22, $23, $24, $25
         ) RETURNING id, patient_id, created_at"#,
         pid,
-        body.title,
-        body.first_name,
-        body.last_name,
+        title,
+        first_name,
+        last_name,
         birth_date,
-        body.gender,
-        body.nationality,
-        body.residence_country,
+        gender,
+        nationality,
+        residence_country,
         &langs,
         &functional_labels,
-        body.phone_primary,
-        body.phone_secondary,
-        body.email,
-        body.address_street,
-        body.address_city,
-        body.address_zip,
-        body.address_country,
-        body.insurance_provider,
-        body.insurance_number,
-        body.insurance_type,
-        body.emergency_contact_name,
-        body.emergency_contact_phone,
-        body.emergency_contact_relation,
-        body.notes,
+        phone_primary,
+        phone_secondary,
+        email,
+        address_street,
+        address_city,
+        address_zip,
+        address_country,
+        insurance_provider,
+        insurance_number,
+        insurance_type,
+        emergency_contact_name,
+        emergency_contact_phone,
+        emergency_contact_relation,
+        notes,
         auth.user_id
     )
     .fetch_one(&state.db)
@@ -830,8 +1134,26 @@ async fn update_patient(
         }
     };
 
-    let first = body.first_name.as_deref().unwrap_or(&current.first_name);
-    let last = body.last_name.as_deref().unwrap_or(&current.last_name);
+    let first = match body.first_name.as_deref() {
+        Some(value) => {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                return err(StatusCode::UNPROCESSABLE_ENTITY, "first name required");
+            }
+            trimmed.to_string()
+        }
+        None => current.first_name,
+    };
+    let last = match body.last_name.as_deref() {
+        Some(value) => {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                return err(StatusCode::UNPROCESSABLE_ENTITY, "last name required");
+            }
+            trimmed.to_string()
+        }
+        None => current.last_name,
+    };
     let legal_status = match body.legal_status {
         Some(value) => match normalize_legal_status(value) {
             Ok(value) => Some(SqlxJson(value)),
@@ -839,11 +1161,26 @@ async fn update_patient(
         },
         None => None,
     };
+    let clinical_warnings_supplied = body.clinical_warnings.is_some();
+    let clinical_warnings = match body.clinical_warnings {
+        Some(value) => {
+            let trimmed = value.trim();
+            if trimmed.len() > 4000 {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "clinical_warnings too long",
+                );
+            }
+            Some((!trimmed.is_empty()).then(|| trimmed.to_string()))
+        }
+        None => None,
+    };
     let functional_labels = match normalize_functional_labels(body.functional_labels) {
         Ok(labels) => labels,
         Err(response) => return response,
     };
     let legal_status_updated = legal_status.is_some();
+    let clinical_warnings_updated = clinical_warnings_supplied;
     let functional_labels_updated = functional_labels.is_some();
     let contract_status = legal_status
         .as_ref()
@@ -878,13 +1215,14 @@ async fn update_patient(
             emergency_contact_relation = COALESCE($21, emergency_contact_relation),
             legal_status = COALESCE($22::jsonb, legal_status),
             notes = COALESCE($23, notes),
+            clinical_warnings = CASE WHEN $24 THEN $25 ELSE clinical_warnings END,
             updated_at = now()
         WHERE id = $1"#,
     )
     .bind(patient_uuid)
     .bind(body.title)
-    .bind(first)
-    .bind(last)
+    .bind(&first)
+    .bind(&last)
     .bind(body.phone_primary)
     .bind(body.phone_secondary)
     .bind(body.email)
@@ -904,11 +1242,14 @@ async fn update_patient(
     .bind(body.emergency_contact_relation)
     .bind(legal_status)
     .bind(body.notes)
+    .bind(clinical_warnings_supplied)
+    .bind(clinical_warnings.flatten())
     .execute(&state.db)
     .await;
 
     let audit_context = serde_json::json!({
         "legal_status_updated": legal_status_updated,
+        "clinical_warnings_updated": clinical_warnings_updated,
         "functional_labels_updated": functional_labels_updated,
         "contract_status": contract_status,
         "compliance_completed": compliance_completed,
@@ -933,6 +1274,1071 @@ async fn update_patient(
             )
         }
     }
+}
+
+async fn list_patient_vitals(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_uuid): Path<Uuid>,
+) -> impl IntoResponse {
+    auth.require_any_role(&[Role::Ceo, Role::PatientManager])?;
+
+    if !has_patient_access(&state, &auth, patient_uuid).await? {
+        return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
+    }
+
+    let rows = sqlx::query(
+        r#"SELECT vm.id,
+                  vm.measured_at,
+                  vm.bp_systolic,
+                  vm.bp_diastolic,
+                  vm.heart_rate,
+                  vm.weight_kg,
+                  vm.height_cm,
+                  vm.bmi,
+                  vm.notes,
+                  vm.recorded_by,
+                  vm.created_at,
+                  u.name AS recorded_by_name
+           FROM patient_vital_measurements vm
+           LEFT JOIN users u ON u.id = vm.recorded_by
+           WHERE vm.patient_id = $1
+           ORDER BY vm.measured_at DESC, vm.created_at DESC"#,
+    )
+    .bind(patient_uuid)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "Failed to load patient vitals");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load patient vitals",
+        )
+    })?;
+
+    let items = rows
+        .into_iter()
+        .map(|row| {
+            json!({
+                "id": row.get::<Uuid, _>("id"),
+                "measured_at": row.get::<chrono::DateTime<chrono::Utc>, _>("measured_at").to_rfc3339(),
+                "bp_systolic": row.get::<Option<f64>, _>("bp_systolic"),
+                "bp_diastolic": row.get::<Option<f64>, _>("bp_diastolic"),
+                "heart_rate": row.get::<Option<i32>, _>("heart_rate"),
+                "weight_kg": row.get::<Option<f64>, _>("weight_kg"),
+                "height_cm": row.get::<Option<f64>, _>("height_cm"),
+                "bmi": row.get::<Option<f64>, _>("bmi"),
+                "notes": row.get::<Option<String>, _>("notes"),
+                "recorded_by": row.get::<Option<Uuid>, _>("recorded_by"),
+                "recorded_by_name": row.get::<Option<String>, _>("recorded_by_name"),
+                "created_at": row.get::<chrono::DateTime<chrono::Utc>, _>("created_at").to_rfc3339(),
+            })
+        })
+        .collect::<Vec<_>>();
+    let count = items.len();
+
+    Ok(Json(json!({
+        "items": items,
+        "count": count,
+    })))
+}
+
+async fn create_patient_vital_measurement(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_uuid): Path<Uuid>,
+    Json(body): Json<CreatePatientVitalMeasurementRequest>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+        return e;
+    }
+
+    match has_patient_access(&state, &auth, patient_uuid).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(_) => {
+            tracing::error!(patient_id = %patient_uuid, "Failed to validate patient access");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to record patient vitals",
+            );
+        }
+    }
+
+    let measured_at = match parse_vital_measurement_timestamp(&body.measured_at) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let bp_systolic = match validate_optional_positive_float("bp_systolic", body.bp_systolic) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let bp_diastolic = match validate_optional_positive_float("bp_diastolic", body.bp_diastolic) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let heart_rate = match validate_optional_positive_int("heart_rate", body.heart_rate) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let weight_kg = match validate_optional_positive_float("weight_kg", body.weight_kg) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let height_cm = match validate_optional_positive_float("height_cm", body.height_cm) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let provided_bmi = match validate_optional_positive_float("bmi", body.bmi) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let notes = match normalize_optional_text(body.notes, "notes", 2000) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+
+    if bp_systolic.is_some() ^ bp_diastolic.is_some() {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Both bp_systolic and bp_diastolic are required together",
+        );
+    }
+
+    let bmi = provided_bmi.or_else(|| match (weight_kg, height_cm) {
+        (Some(weight), Some(height_cm)) => {
+            let height_m = height_cm / 100.0;
+            if height_m > 0.0 {
+                Some(((weight / (height_m * height_m)) * 10.0).round() / 10.0)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    });
+
+    if bp_systolic.is_none()
+        && bp_diastolic.is_none()
+        && heart_rate.is_none()
+        && weight_kg.is_none()
+        && height_cm.is_none()
+        && bmi.is_none()
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "At least one vital measurement is required",
+        );
+    }
+
+    let row = match sqlx::query(
+        r#"INSERT INTO patient_vital_measurements (
+                patient_id, measured_at, bp_systolic, bp_diastolic, heart_rate,
+                weight_kg, height_cm, bmi, notes, recorded_by
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+           RETURNING id, created_at"#,
+    )
+    .bind(patient_uuid)
+    .bind(measured_at)
+    .bind(bp_systolic)
+    .bind(bp_diastolic)
+    .bind(heart_rate)
+    .bind(weight_kg)
+    .bind(height_cm)
+    .bind(bmi)
+    .bind(notes.clone())
+    .bind(auth.user_id)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(row) => row,
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "Failed to record patient vitals");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to record patient vitals",
+            );
+        }
+    };
+
+    state.audit_sender.try_send(audit::domain_event(
+        "record_patient_vitals",
+        Some(auth.user_id),
+        "patient",
+        Some(patient_uuid),
+        json!({
+            "measurement_id": row.get::<Uuid, _>("id"),
+            "measured_at": measured_at.to_rfc3339(),
+            "has_blood_pressure": bp_systolic.is_some(),
+            "has_heart_rate": heart_rate.is_some(),
+            "has_weight": weight_kg.is_some(),
+            "has_height": height_cm.is_some(),
+            "has_notes": notes.is_some(),
+        }),
+    ));
+
+    Json(json!({
+        "id": row.get::<Uuid, _>("id"),
+        "created_at": row.get::<chrono::DateTime<chrono::Utc>, _>("created_at").to_rfc3339(),
+        "ok": true,
+    }))
+    .into_response()
+}
+
+async fn list_patient_card_entries(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_uuid): Path<Uuid>,
+) -> impl IntoResponse {
+    auth.require_any_role(&[Role::Ceo, Role::PatientManager])?;
+
+    if !has_patient_access(&state, &auth, patient_uuid).await? {
+        return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
+    }
+
+    let rows = sqlx::query(
+        r#"SELECT e.id,
+                  e.entry_date,
+                  e.category,
+                  e.source,
+                  e.content,
+                  e.author_id,
+                  e.created_at,
+                  e.updated_at,
+                  u.name AS author_name
+           FROM patient_card_entries e
+           LEFT JOIN users u ON u.id = e.author_id
+           WHERE e.patient_id = $1
+           ORDER BY e.entry_date DESC, e.created_at DESC"#,
+    )
+    .bind(patient_uuid)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "Failed to load patient card entries");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load patient card entries",
+        )
+    })?;
+
+    let items = rows
+        .into_iter()
+        .map(|row| {
+            json!({
+                "id": row.get::<Uuid, _>("id"),
+                "entry_date": row.get::<chrono::DateTime<chrono::Utc>, _>("entry_date").to_rfc3339(),
+                "category": row.get::<String, _>("category"),
+                "source": row.get::<Option<String>, _>("source"),
+                "content": row.get::<String, _>("content"),
+                "author_id": row.get::<Uuid, _>("author_id"),
+                "author_name": row.get::<Option<String>, _>("author_name"),
+                "created_at": row.get::<chrono::DateTime<chrono::Utc>, _>("created_at").to_rfc3339(),
+                "updated_at": row.get::<chrono::DateTime<chrono::Utc>, _>("updated_at").to_rfc3339(),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let count = items.len();
+
+    Ok(Json(json!({
+        "items": items,
+        "count": count,
+    })))
+}
+
+async fn create_patient_card_entry(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_uuid): Path<Uuid>,
+    Json(body): Json<CreatePatientCardEntryRequest>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+        return e;
+    }
+
+    match has_patient_access(&state, &auth, patient_uuid).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(_) => {
+            tracing::error!(patient_id = %patient_uuid, "Failed to validate patient access");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create patient card entry",
+            );
+        }
+    }
+
+    let entry_date = match parse_vital_measurement_timestamp(&body.entry_date) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let category = body.category.trim().to_lowercase();
+    if !PATIENT_CARD_ENTRY_CATEGORIES.contains(&category.as_str()) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid patient card entry category",
+        );
+    }
+    let source = match normalize_optional_text(body.source, "source", 120) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let content = body.content.trim();
+    if content.is_empty() {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "content required");
+    }
+    if content.len() > 4000 {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "content too long");
+    }
+
+    let row = match sqlx::query(
+        r#"INSERT INTO patient_card_entries (
+                patient_id, entry_date, category, source, content, author_id
+           ) VALUES ($1, $2, $3, $4, $5, $6)
+           RETURNING id, created_at"#,
+    )
+    .bind(patient_uuid)
+    .bind(entry_date)
+    .bind(category.as_str())
+    .bind(source.clone())
+    .bind(content)
+    .bind(auth.user_id)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(row) => row,
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "Failed to create patient card entry");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create patient card entry",
+            );
+        }
+    };
+
+    state.audit_sender.try_send(audit::domain_event(
+        "create_patient_card_entry",
+        Some(auth.user_id),
+        "patient",
+        Some(patient_uuid),
+        json!({
+            "entry_id": row.get::<Uuid, _>("id"),
+            "entry_date": entry_date.to_rfc3339(),
+            "category": category,
+            "source": source,
+        }),
+    ));
+
+    Json(json!({
+        "id": row.get::<Uuid, _>("id"),
+        "created_at": row.get::<chrono::DateTime<chrono::Utc>, _>("created_at").to_rfc3339(),
+        "ok": true,
+    }))
+    .into_response()
+}
+
+async fn list_patient_medical_orders(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_uuid): Path<Uuid>,
+) -> impl IntoResponse {
+    auth.require_any_role(&[Role::Ceo, Role::PatientManager])?;
+
+    if !has_patient_access(&state, &auth, patient_uuid).await? {
+        return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
+    }
+
+    let rows = sqlx::query(
+        r#"SELECT mo.id,
+                  mo.order_date,
+                  mo.order_type,
+                  mo.title,
+                  mo.instructions,
+                  mo.status,
+                  mo.due_date,
+                  mo.source,
+                  mo.ordered_by,
+                  mo.created_at,
+                  mo.updated_at,
+                  u.name AS ordered_by_name
+           FROM patient_medical_orders mo
+           LEFT JOIN users u ON u.id = mo.ordered_by
+           WHERE mo.patient_id = $1
+           ORDER BY mo.order_date DESC, mo.created_at DESC"#,
+    )
+    .bind(patient_uuid)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "Failed to load patient medical orders");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load patient medical orders",
+        )
+    })?;
+
+    let items = rows
+        .into_iter()
+        .map(|row| {
+            json!({
+                "id": row.get::<Uuid, _>("id"),
+                "order_date": row.get::<chrono::DateTime<chrono::Utc>, _>("order_date").to_rfc3339(),
+                "order_type": row.get::<String, _>("order_type"),
+                "title": row.get::<String, _>("title"),
+                "instructions": row.get::<String, _>("instructions"),
+                "status": row.get::<String, _>("status"),
+                "due_date": row.get::<Option<chrono::NaiveDate>, _>("due_date").map(|value| value.to_string()),
+                "source": row.get::<Option<String>, _>("source"),
+                "ordered_by": row.get::<Uuid, _>("ordered_by"),
+                "ordered_by_name": row.get::<Option<String>, _>("ordered_by_name"),
+                "created_at": row.get::<chrono::DateTime<chrono::Utc>, _>("created_at").to_rfc3339(),
+                "updated_at": row.get::<chrono::DateTime<chrono::Utc>, _>("updated_at").to_rfc3339(),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let count = items.len();
+
+    Ok(Json(json!({
+        "items": items,
+        "count": count,
+    })))
+}
+
+async fn create_patient_medical_order(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_uuid): Path<Uuid>,
+    Json(body): Json<CreatePatientMedicalOrderRequest>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+        return e;
+    }
+
+    match has_patient_access(&state, &auth, patient_uuid).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(_) => {
+            tracing::error!(patient_id = %patient_uuid, "Failed to validate patient access");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create patient medical order",
+            );
+        }
+    }
+
+    let order_date = match parse_vital_measurement_timestamp(&body.order_date) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let order_type = match validate_patient_medical_order_type(&body.order_type) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let title = match normalize_required_text(&body.title, "title", 160) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let instructions = match normalize_required_text(&body.instructions, "instructions", 4000) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let due_date = match parse_optional_naive_date(body.due_date, "due_date") {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let source = match normalize_optional_text(body.source, "source", 120) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+
+    let row = match sqlx::query(
+        r#"INSERT INTO patient_medical_orders (
+                patient_id, order_date, order_type, title, instructions,
+                status, due_date, source, ordered_by
+           ) VALUES ($1, $2, $3, $4, $5, 'active', $6, $7, $8)
+           RETURNING id, created_at"#,
+    )
+    .bind(patient_uuid)
+    .bind(order_date)
+    .bind(order_type.as_str())
+    .bind(title.as_str())
+    .bind(instructions.as_str())
+    .bind(due_date)
+    .bind(source.clone())
+    .bind(auth.user_id)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(row) => row,
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "Failed to create patient medical order");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create patient medical order",
+            );
+        }
+    };
+
+    state.audit_sender.try_send(audit::domain_event(
+        "create_patient_medical_order",
+        Some(auth.user_id),
+        "patient",
+        Some(patient_uuid),
+        json!({
+            "order_id": row.get::<Uuid, _>("id"),
+            "order_date": order_date.to_rfc3339(),
+            "order_type": order_type,
+            "status": "active",
+            "due_date": due_date.map(|value| value.to_string()),
+            "source": source,
+        }),
+    ));
+
+    Json(json!({
+        "id": row.get::<Uuid, _>("id"),
+        "created_at": row.get::<chrono::DateTime<chrono::Utc>, _>("created_at").to_rfc3339(),
+        "ok": true,
+    }))
+    .into_response()
+}
+
+async fn update_patient_medical_order(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((patient_uuid, medical_order_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<UpdatePatientMedicalOrderRequest>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+        return e;
+    }
+
+    match has_patient_access(&state, &auth, patient_uuid).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(_) => {
+            tracing::error!(patient_id = %patient_uuid, "Failed to validate patient access");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update patient medical order",
+            );
+        }
+    }
+
+    let current = match sqlx::query(
+        r#"SELECT order_date, order_type, title, instructions, status, due_date, source
+           FROM patient_medical_orders
+           WHERE id = $1 AND patient_id = $2"#,
+    )
+    .bind(medical_order_id)
+    .bind(patient_uuid)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Medical order not found"),
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_uuid, order_id = %medical_order_id, "Failed to load patient medical order");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update patient medical order",
+            );
+        }
+    };
+
+    let order_date = match body.order_date {
+        Some(value) => match parse_vital_measurement_timestamp(&value) {
+            Ok(parsed) => parsed,
+            Err(response) => return response,
+        },
+        None => current.get::<chrono::DateTime<chrono::Utc>, _>("order_date"),
+    };
+
+    let order_type = match body.order_type {
+        Some(value) => match validate_patient_medical_order_type(&value) {
+            Ok(parsed) => parsed,
+            Err(response) => return response,
+        },
+        None => current.get::<String, _>("order_type"),
+    };
+
+    let title = match body.title {
+        Some(value) => match normalize_required_text(&value, "title", 160) {
+            Ok(parsed) => parsed,
+            Err(response) => return response,
+        },
+        None => current.get::<String, _>("title"),
+    };
+
+    let instructions = match body.instructions {
+        Some(value) => match normalize_required_text(&value, "instructions", 4000) {
+            Ok(parsed) => parsed,
+            Err(response) => return response,
+        },
+        None => current.get::<String, _>("instructions"),
+    };
+
+    let status = match body.status {
+        Some(value) => match validate_patient_medical_order_status(&value) {
+            Ok(parsed) => parsed,
+            Err(response) => return response,
+        },
+        None => current.get::<String, _>("status"),
+    };
+
+    let due_date = match parse_optional_patch_naive_date(body.due_date, "due_date") {
+        Ok(Some(value)) => value,
+        Ok(None) => current.get::<Option<chrono::NaiveDate>, _>("due_date"),
+        Err(response) => return response,
+    };
+
+    let source = if body.source.is_some() {
+        match normalize_optional_text(body.source, "source", 120) {
+            Ok(value) => value,
+            Err(response) => return response,
+        }
+    } else {
+        current.get::<Option<String>, _>("source")
+    };
+
+    match sqlx::query(
+        r#"UPDATE patient_medical_orders
+           SET order_date = $3,
+               order_type = $4,
+               title = $5,
+               instructions = $6,
+               status = $7,
+               due_date = $8,
+               source = $9
+           WHERE id = $1 AND patient_id = $2"#,
+    )
+    .bind(medical_order_id)
+    .bind(patient_uuid)
+    .bind(order_date)
+    .bind(order_type.as_str())
+    .bind(title.as_str())
+    .bind(instructions.as_str())
+    .bind(status.as_str())
+    .bind(due_date)
+    .bind(source.clone())
+    .execute(&state.db)
+    .await
+    {
+        Ok(_) => {}
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_uuid, order_id = %medical_order_id, "Failed to update patient medical order");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update patient medical order",
+            );
+        }
+    }
+
+    state.audit_sender.try_send(audit::domain_event(
+        "update_patient_medical_order",
+        Some(auth.user_id),
+        "patient",
+        Some(patient_uuid),
+        json!({
+            "order_id": medical_order_id,
+            "order_date": order_date.to_rfc3339(),
+            "order_type": order_type,
+            "status": status,
+            "due_date": due_date.map(|value| value.to_string()),
+            "source": source,
+        }),
+    ));
+
+    Json(json!({ "ok": true })).into_response()
+}
+
+async fn list_patient_risk_scores(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_uuid): Path<Uuid>,
+) -> impl IntoResponse {
+    auth.require_any_role(&[Role::Ceo, Role::PatientManager])?;
+
+    if !has_patient_access(&state, &auth, patient_uuid).await? {
+        return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
+    }
+
+    let rows = sqlx::query(
+        r#"SELECT rs.id,
+                  rs.computed_at,
+                  rs.score_type,
+                  rs.score_value,
+                  rs.scale_max,
+                  rs.interpretation,
+                  rs.source,
+                  rs.inputs,
+                  rs.recorded_by,
+                  rs.created_at,
+                  u.name AS recorded_by_name
+           FROM patient_risk_scores rs
+           LEFT JOIN users u ON u.id = rs.recorded_by
+           WHERE rs.patient_id = $1
+           ORDER BY rs.computed_at DESC, rs.created_at DESC"#,
+    )
+    .bind(patient_uuid)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "Failed to load patient risk scores");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load patient risk scores",
+        )
+    })?;
+
+    let items = rows
+        .into_iter()
+        .map(|row| {
+            json!({
+                "id": row.get::<Uuid, _>("id"),
+                "computed_at": row.get::<chrono::DateTime<chrono::Utc>, _>("computed_at").to_rfc3339(),
+                "score_type": row.get::<String, _>("score_type"),
+                "score_value": row.get::<f64, _>("score_value"),
+                "scale_max": row.get::<Option<f64>, _>("scale_max"),
+                "interpretation": row.get::<Option<String>, _>("interpretation"),
+                "source": row.get::<Option<String>, _>("source"),
+                "inputs": row.get::<Option<SqlxJson<Value>>, _>("inputs").map(|value| value.0),
+                "recorded_by": row.get::<Uuid, _>("recorded_by"),
+                "recorded_by_name": row.get::<Option<String>, _>("recorded_by_name"),
+                "created_at": row.get::<chrono::DateTime<chrono::Utc>, _>("created_at").to_rfc3339(),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let count = items.len();
+
+    Ok(Json(json!({
+        "items": items,
+        "count": count,
+    })))
+}
+
+async fn create_patient_risk_score(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_uuid): Path<Uuid>,
+    Json(body): Json<CreatePatientRiskScoreRequest>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+        return e;
+    }
+
+    match has_patient_access(&state, &auth, patient_uuid).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(_) => {
+            tracing::error!(patient_id = %patient_uuid, "Failed to validate patient access");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create patient risk score",
+            );
+        }
+    }
+
+    let computed_at = match parse_vital_measurement_timestamp(&body.computed_at) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let score_type = match validate_patient_risk_score_type(&body.score_type) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let score_value = match validate_nonnegative_float("score_value", body.score_value) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let scale_max = match validate_optional_positive_float("scale_max", body.scale_max) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    if let Some(max) = scale_max
+        && score_value > max
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "score_value cannot exceed scale_max",
+        );
+    }
+    let interpretation = match normalize_optional_text(body.interpretation, "interpretation", 500) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let source = match normalize_optional_text(body.source, "source", 120) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let inputs = match normalize_optional_json_object(body.inputs, "inputs") {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+
+    let row = match sqlx::query(
+        r#"INSERT INTO patient_risk_scores (
+                patient_id, computed_at, score_type, score_value, scale_max,
+                interpretation, source, inputs, recorded_by
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+           RETURNING id, created_at"#,
+    )
+    .bind(patient_uuid)
+    .bind(computed_at)
+    .bind(score_type.as_str())
+    .bind(score_value)
+    .bind(scale_max)
+    .bind(interpretation.clone())
+    .bind(source.clone())
+    .bind(inputs.as_ref().map(|value| SqlxJson(value.clone())))
+    .bind(auth.user_id)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(row) => row,
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "Failed to create patient risk score");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create patient risk score",
+            );
+        }
+    };
+
+    state.audit_sender.try_send(audit::domain_event(
+        "record_patient_risk_score",
+        Some(auth.user_id),
+        "patient",
+        Some(patient_uuid),
+        json!({
+            "risk_score_id": row.get::<Uuid, _>("id"),
+            "computed_at": computed_at.to_rfc3339(),
+            "score_type": score_type,
+            "score_value": score_value,
+            "scale_max": scale_max,
+            "source": source,
+            "has_inputs": inputs.is_some(),
+        }),
+    ));
+
+    Json(json!({
+        "id": row.get::<Uuid, _>("id"),
+        "created_at": row.get::<chrono::DateTime<chrono::Utc>, _>("created_at").to_rfc3339(),
+        "ok": true,
+    }))
+    .into_response()
+}
+
+#[allow(clippy::result_large_err)]
+fn parse_vital_measurement_timestamp(
+    value: &str,
+) -> Result<chrono::DateTime<chrono::Utc>, axum::response::Response> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "measured_at required",
+        ));
+    }
+
+    chrono::DateTime::parse_from_rfc3339(trimmed)
+        .map(|value| value.with_timezone(&chrono::Utc))
+        .or_else(|_| {
+            chrono::NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%dT%H:%M")
+                .map(|value| value.and_utc())
+        })
+        .map_err(|_| {
+            err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Invalid measured_at format",
+            )
+        })
+}
+
+#[allow(clippy::result_large_err)]
+fn validate_optional_positive_float(
+    field_name: &str,
+    value: Option<f64>,
+) -> Result<Option<f64>, axum::response::Response> {
+    match value {
+        Some(value) if !value.is_finite() || value <= 0.0 => Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            &format!("{field_name} must be a positive number"),
+        )),
+        other => Ok(other),
+    }
+}
+
+#[allow(clippy::result_large_err)]
+fn validate_optional_positive_int(
+    field_name: &str,
+    value: Option<i32>,
+) -> Result<Option<i32>, axum::response::Response> {
+    match value {
+        Some(value) if value <= 0 => Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            &format!("{field_name} must be a positive integer"),
+        )),
+        other => Ok(other),
+    }
+}
+
+#[allow(clippy::result_large_err)]
+fn validate_nonnegative_float(
+    field_name: &str,
+    value: f64,
+) -> Result<f64, axum::response::Response> {
+    if !value.is_finite() || value < 0.0 {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            &format!("{field_name} must be a non-negative number"),
+        ));
+    }
+    Ok(value)
+}
+
+#[allow(clippy::result_large_err)]
+fn normalize_optional_text(
+    value: Option<String>,
+    field_name: &str,
+    max_len: usize,
+) -> Result<Option<String>, axum::response::Response> {
+    match value {
+        Some(value) => {
+            let trimmed = value.trim();
+            if trimmed.len() > max_len {
+                return Err(err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    &format!("{field_name} too long"),
+                ));
+            }
+            Ok((!trimmed.is_empty()).then(|| trimmed.to_string()))
+        }
+        None => Ok(None),
+    }
+}
+
+#[allow(clippy::result_large_err)]
+fn normalize_optional_json_object(
+    value: Option<Value>,
+    field_name: &str,
+) -> Result<Option<Value>, axum::response::Response> {
+    match value {
+        Some(Value::Object(map)) => Ok(Some(Value::Object(map))),
+        Some(Value::Null) => Ok(None),
+        Some(_) => Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            &format!("{field_name} must be a JSON object"),
+        )),
+        None => Ok(None),
+    }
+}
+
+#[allow(clippy::result_large_err)]
+fn normalize_required_text(
+    value: &str,
+    field_name: &str,
+    max_len: usize,
+) -> Result<String, axum::response::Response> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            &format!("{field_name} required"),
+        ));
+    }
+    if trimmed.len() > max_len {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            &format!("{field_name} too long"),
+        ));
+    }
+    Ok(trimmed.to_string())
+}
+
+#[allow(clippy::result_large_err)]
+fn parse_optional_naive_date(
+    value: Option<String>,
+    field_name: &str,
+) -> Result<Option<chrono::NaiveDate>, axum::response::Response> {
+    match value {
+        Some(value) => {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                return Ok(None);
+            }
+            chrono::NaiveDate::parse_from_str(trimmed, "%Y-%m-%d")
+                .map(Some)
+                .map_err(|_| {
+                    err(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        &format!("Invalid {field_name} format"),
+                    )
+                })
+        }
+        None => Ok(None),
+    }
+}
+
+#[allow(clippy::result_large_err)]
+fn parse_optional_patch_naive_date(
+    value: Option<String>,
+    field_name: &str,
+) -> Result<Option<Option<chrono::NaiveDate>>, axum::response::Response> {
+    match value {
+        Some(value) => {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                return Ok(Some(None));
+            }
+            chrono::NaiveDate::parse_from_str(trimmed, "%Y-%m-%d")
+                .map(|parsed| Some(Some(parsed)))
+                .map_err(|_| {
+                    err(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        &format!("Invalid {field_name} format"),
+                    )
+                })
+        }
+        None => Ok(None),
+    }
+}
+
+#[allow(clippy::result_large_err)]
+fn validate_patient_medical_order_type(value: &str) -> Result<String, axum::response::Response> {
+    let normalized = value.trim().to_lowercase();
+    if !PATIENT_MEDICAL_ORDER_TYPES.contains(&normalized.as_str()) {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid patient medical order type",
+        ));
+    }
+    Ok(normalized)
+}
+
+#[allow(clippy::result_large_err)]
+fn validate_patient_medical_order_status(value: &str) -> Result<String, axum::response::Response> {
+    let normalized = value.trim().to_lowercase();
+    if !PATIENT_MEDICAL_ORDER_STATUSES.contains(&normalized.as_str()) {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid patient medical order status",
+        ));
+    }
+    Ok(normalized)
+}
+
+#[allow(clippy::result_large_err)]
+fn validate_patient_risk_score_type(value: &str) -> Result<String, axum::response::Response> {
+    let normalized = value.trim().to_lowercase();
+    if !PATIENT_RISK_SCORE_TYPES.contains(&normalized.as_str()) {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid patient risk score type",
+        ));
+    }
+    Ok(normalized)
 }
 
 #[allow(clippy::result_large_err)]
@@ -1194,7 +2600,7 @@ async fn list_patient_appointments(
     ensure_patient_visible(&state, &auth, patient_uuid).await?;
 
     let rows = sqlx::query(
-        r#"SELECT a.id, a.title, a.date, a.time_start, a.appointment_type, a.status,
+        r#"SELECT a.id, a.title, a.date, a.time_start, a.appointment_type, a.care_path_kind, a.status,
                   p.name AS provider_name, d.name AS doctor_name
            FROM appointments a
            LEFT JOIN providers p ON p.id = a.provider_id
@@ -1222,6 +2628,7 @@ async fn list_patient_appointments(
                 "date": row.try_get::<chrono::NaiveDate, _>("date").map(|value| value.to_string()).unwrap_or_default(),
                 "time_start": row.try_get::<Option<chrono::NaiveTime>, _>("time_start").unwrap_or_default().map(|value| value.format("%H:%M").to_string()),
                 "apt_type": row.try_get::<String, _>("appointment_type").unwrap_or_default(),
+                "care_path_kind": row.try_get::<String, _>("care_path_kind").unwrap_or_else(|_| "regular".to_string()),
                 "status": row.try_get::<String, _>("status").unwrap_or_default(),
                 "provider_name": row.try_get::<Option<String>, _>("provider_name").unwrap_or_default(),
                 "doctor_name": row.try_get::<Option<String>, _>("doctor_name").unwrap_or_default(),
@@ -2193,6 +3600,183 @@ async fn list_patient_invoices(
     Ok(Json(items))
 }
 
+async fn get_patient_service_report(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_uuid): Path<Uuid>,
+) -> Result<Json<Value>, axum::response::Response> {
+    auth.require_any_role(&[
+        Role::Ceo,
+        Role::CeoAssistant,
+        Role::PatientManager,
+        Role::Billing,
+    ])?;
+    ensure_patient_visible(&state, &auth, patient_uuid).await?;
+
+    let summary_row = sqlx::query(
+        r#"SELECT COUNT(*) AS service_count,
+                  COUNT(*) FILTER (
+                      WHERE ol.delivered_at IS NOT NULL
+                         OR ol.status IN ('delivered', 'approved', 'invoiced')
+                  ) AS delivered_count,
+                  COUNT(*) FILTER (
+                      WHERE ol.approved_at IS NOT NULL
+                         OR ol.status IN ('approved', 'invoiced')
+                  ) AS approved_count,
+                  COALESCE(
+                      SUM(ol.quantity * ol.unit_price * (1 + (ol.vat_rate / 100))),
+                      0
+                  ) AS total_gross,
+                  MIN(COALESCE(ol.approved_at, ol.delivered_at, ol.created_at)) AS first_service_at,
+                  MAX(COALESCE(ol.approved_at, ol.delivered_at, ol.created_at)) AS last_service_at
+           FROM order_leistungen ol
+           JOIN orders o ON o.id = ol.order_id
+           WHERE o.patient_id = $1"#,
+    )
+    .bind(patient_uuid)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "Failed to load patient service report summary");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load patient service report",
+        )
+    })?;
+
+    let item_rows = sqlx::query(
+        r#"SELECT ol.id,
+                  o.id AS order_id,
+                  o.order_number,
+                  ol.description,
+                  ol.status,
+                  ol.quantity,
+                  ol.unit_price,
+                  ol.currency,
+                  ol.vat_rate,
+                  (ol.quantity * ol.unit_price) AS line_net,
+                  ((ol.quantity * ol.unit_price) * (ol.vat_rate / 100)) AS line_vat,
+                  (ol.quantity * ol.unit_price * (1 + (ol.vat_rate / 100))) AS line_gross,
+                  ol.provider_id,
+                  p.name AS provider_name,
+                  ol.doctor_id,
+                  d.name AS doctor_name,
+                  ol.is_cost_passthrough,
+                  ol.notes,
+                  ol.delivered_at,
+                  ol.approved_at,
+                  COALESCE(ol.approved_at, ol.delivered_at, ol.created_at) AS effective_at
+           FROM order_leistungen ol
+           JOIN orders o ON o.id = ol.order_id
+           LEFT JOIN providers p ON p.id = ol.provider_id
+           LEFT JOIN provider_doctors d ON d.id = ol.doctor_id
+           WHERE o.patient_id = $1
+           ORDER BY effective_at DESC, ol.created_at DESC"#,
+    )
+    .bind(patient_uuid)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "Failed to load patient service report items");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load patient service report",
+        )
+    })?;
+
+    let service_count = summary_row
+        .try_get::<i64, _>("service_count")
+        .unwrap_or_default();
+    let delivered_count = summary_row
+        .try_get::<i64, _>("delivered_count")
+        .unwrap_or_default();
+    let approved_count = summary_row
+        .try_get::<i64, _>("approved_count")
+        .unwrap_or_default();
+    let total_gross = summary_row
+        .try_get::<rust_decimal::Decimal, _>("total_gross")
+        .unwrap_or(rust_decimal::Decimal::ZERO);
+    let first_service_at = summary_row
+        .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("first_service_at")
+        .unwrap_or_default();
+    let last_service_at = summary_row
+        .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("last_service_at")
+        .unwrap_or_default();
+
+    let items = item_rows
+        .into_iter()
+        .map(|row| {
+            let quantity = row
+                .try_get::<rust_decimal::Decimal, _>("quantity")
+                .unwrap_or(rust_decimal::Decimal::ZERO);
+            let unit_price = row
+                .try_get::<rust_decimal::Decimal, _>("unit_price")
+                .unwrap_or(rust_decimal::Decimal::ZERO);
+            let vat_rate = row
+                .try_get::<rust_decimal::Decimal, _>("vat_rate")
+                .unwrap_or(rust_decimal::Decimal::ZERO);
+            let line_net = row
+                .try_get::<rust_decimal::Decimal, _>("line_net")
+                .unwrap_or(rust_decimal::Decimal::ZERO);
+            let line_vat = row
+                .try_get::<rust_decimal::Decimal, _>("line_vat")
+                .unwrap_or(rust_decimal::Decimal::ZERO);
+            let line_gross = row
+                .try_get::<rust_decimal::Decimal, _>("line_gross")
+                .unwrap_or(rust_decimal::Decimal::ZERO);
+
+            json!({
+                "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
+                "order_id": row.try_get::<Uuid, _>("order_id").unwrap_or_else(|_| Uuid::nil()),
+                "order_number": row.try_get::<String, _>("order_number").unwrap_or_default(),
+                "description": row.try_get::<String, _>("description").unwrap_or_default(),
+                "status": row.try_get::<String, _>("status").unwrap_or_default(),
+                "quantity": quantity.normalize().to_string(),
+                "unit_price": money_json(unit_price),
+                "vat_rate": vat_rate.normalize().to_string(),
+                "line_net": money_json(line_net),
+                "line_vat": money_json(line_vat),
+                "line_gross": money_json(line_gross),
+                "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
+                "provider_id": row.try_get::<Option<Uuid>, _>("provider_id").unwrap_or_default(),
+                "provider_name": row.try_get::<Option<String>, _>("provider_name").unwrap_or_default(),
+                "doctor_id": row.try_get::<Option<Uuid>, _>("doctor_id").unwrap_or_default(),
+                "doctor_name": row.try_get::<Option<String>, _>("doctor_name").unwrap_or_default(),
+                "is_cost_passthrough": row.try_get::<bool, _>("is_cost_passthrough").unwrap_or(false),
+                "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
+                "delivered_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("delivered_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+                "approved_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("approved_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+                "effective_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("effective_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    state.audit_sender.try_send(audit::domain_event(
+        "view_patient_service_report",
+        Some(auth.user_id),
+        "patient",
+        Some(patient_uuid),
+        json!({
+            "service_count": service_count,
+            "approved_count": approved_count,
+            "total_gross": money_json(total_gross),
+        }),
+    ));
+
+    Ok(Json(json!({
+        "patient_id": patient_uuid,
+        "summary": {
+            "service_count": service_count,
+            "delivered_count": delivered_count,
+            "approved_count": approved_count,
+            "total_gross": money_json(total_gross),
+            "first_service_at": first_service_at.map(|value| value.to_rfc3339()),
+            "last_service_at": last_service_at.map(|value| value.to_rfc3339()),
+        },
+        "items": items,
+    })))
+}
+
 async fn list_relations(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -2543,6 +4127,51 @@ async fn get_patient_timeline(
 
             UNION ALL
 
+            SELECT 'card_entry'::text AS entity_type,
+                   e.id AS entity_id,
+                   CASE
+                       WHEN length(e.content) > 120 THEN left(e.content, 117) || '...'
+                       ELSE e.content
+                   END AS title,
+                   e.category AS category,
+                   'logged'::text AS status,
+                   e.entry_date AS happened_at,
+                   concat_ws(' · ', e.source, u.name) AS source_label
+            FROM patient_card_entries e
+            LEFT JOIN users u ON u.id = e.author_id
+            WHERE e.patient_id = $1
+
+            UNION ALL
+
+            SELECT 'medical_order'::text AS entity_type,
+                   mo.id AS entity_id,
+                   mo.title AS title,
+                   mo.order_type AS category,
+                   mo.status AS status,
+                   mo.order_date AS happened_at,
+                   concat_ws(' · ', mo.source, u.name) AS source_label
+            FROM patient_medical_orders mo
+            LEFT JOIN users u ON u.id = mo.ordered_by
+            WHERE mo.patient_id = $1
+
+            UNION ALL
+
+            SELECT 'risk_score'::text AS entity_type,
+                   rs.id AS entity_id,
+                   CASE
+                       WHEN rs.scale_max IS NULL THEN concat(rs.score_type, ' ', trim(to_char(rs.score_value, 'FM999999990.##')))
+                       ELSE concat(rs.score_type, ' ', trim(to_char(rs.score_value, 'FM999999990.##')), '/', trim(to_char(rs.scale_max, 'FM999999990.##')))
+                   END AS title,
+                   rs.score_type AS category,
+                   'recorded'::text AS status,
+                   rs.computed_at AS happened_at,
+                   concat_ws(' · ', rs.source, u.name) AS source_label
+            FROM patient_risk_scores rs
+            LEFT JOIN users u ON u.id = rs.recorded_by
+            WHERE rs.patient_id = $1
+
+            UNION ALL
+
             SELECT 'compliance'::text AS entity_type,
                    COALESCE(al.entity_id, $1) AS entity_id,
                    CASE
@@ -2748,6 +4377,30 @@ async fn assign_patient(
         ));
     }
 
+    let assignment_already_active = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(
+               SELECT 1
+               FROM patient_assignments
+               WHERE patient_id = $1
+                 AND user_id = $2
+                 AND revoked_at IS NULL
+           )"#,
+    )
+    .bind(patient_uuid)
+    .bind(body.user_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, patient_id = %patient_uuid, user_id = %body.user_id, "Failed to inspect existing patient assignment");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate assignment target",
+        )
+    })?;
+
+    let patient_context =
+        load_patient_assignment_notification_context(&state, patient_uuid).await?;
+
     sqlx::query!(
         "INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
          VALUES ($1, $2, $3)
@@ -2760,6 +4413,21 @@ async fn assign_patient(
         tracing::error!(error = %e, "Failed to assign patient");
         err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to assign patient")
     })?;
+
+    if !assignment_already_active {
+        insert_patient_assignment_notification(
+            &state,
+            body.user_id,
+            "patient_assignment",
+            format!("New patient assignment: {}", patient_context.patient_name),
+            format!(
+                "You were assigned to patient {} ({}).",
+                patient_context.patient_name, patient_context.patient_code
+            ),
+            patient_uuid,
+        )
+        .await?;
+    }
 
     state.audit_sender.try_send(audit::domain_event(
         "assign_patient",
@@ -2898,6 +4566,88 @@ fn build_relation_json(row: sqlx::postgres::PgRow) -> Value {
 
 fn err(status: StatusCode, message: &str) -> axum::response::Response {
     (status, Json(serde_json::json!({ "error": status.canonical_reason().unwrap_or("error"), "message": message }))).into_response()
+}
+
+struct PatientAssignmentNotificationContext {
+    patient_code: String,
+    patient_name: String,
+}
+
+async fn load_patient_assignment_notification_context(
+    state: &AppState,
+    patient_id: Uuid,
+) -> Result<PatientAssignmentNotificationContext, axum::response::Response> {
+    let row = sqlx::query(
+        r#"SELECT patient_id, first_name, last_name
+           FROM patients
+           WHERE id = $1"#,
+    )
+    .bind(patient_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, patient_id = %patient_id, "Failed to load patient assignment notification context");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to build patient assignment notification",
+        )
+    })?
+    .ok_or_else(|| err(StatusCode::NOT_FOUND, "Patient not found"))?;
+
+    let patient_code = row.try_get::<String, _>("patient_id").map_err(|_| {
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to build patient assignment notification",
+        )
+    })?;
+    let first_name = row.try_get::<String, _>("first_name").map_err(|_| {
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to build patient assignment notification",
+        )
+    })?;
+    let last_name = row.try_get::<String, _>("last_name").map_err(|_| {
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to build patient assignment notification",
+        )
+    })?;
+    let patient_name = format!("{first_name} {last_name}").trim().to_string();
+
+    Ok(PatientAssignmentNotificationContext {
+        patient_code,
+        patient_name,
+    })
+}
+
+async fn insert_patient_assignment_notification(
+    state: &AppState,
+    user_id: Uuid,
+    kind: &str,
+    title: String,
+    body: String,
+    patient_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    sqlx::query(
+        r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
+           VALUES ($1, $2, $3, $4, 'patient', $5)"#,
+    )
+    .bind(user_id)
+    .bind(kind)
+    .bind(title)
+    .bind(body)
+    .bind(patient_id)
+    .execute(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, user_id = %user_id, patient_id = %patient_id, "Failed to insert patient assignment notification");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to notify assigned user",
+        )
+    })?;
+
+    Ok(())
 }
 
 fn can_manage_assignment(role: Role) -> bool {
@@ -3055,6 +4805,7 @@ struct PatientDetailInput {
     emergency_contact_phone: Option<String>,
     emergency_contact_relation: Option<String>,
     legal_status: serde_json::Value,
+    clinical_warnings: Option<String>,
     notes: Option<String>,
     is_active: bool,
     created_at: chrono::DateTime<chrono::Utc>,
@@ -3181,6 +4932,8 @@ fn build_patient_detail_json(
                 patient.phone_secondary,
             );
         }
+
+        insert_clinical_warnings_field(map, auth, policies, patient.clinical_warnings);
     }
 
     data
@@ -3385,6 +5138,28 @@ fn insert_optional_string(data: &mut Map<String, Value>, key: &str, value: Optio
     }
 }
 
+fn insert_clinical_warnings_field(
+    data: &mut Map<String, Value>,
+    auth: &AuthUser,
+    policies: &HashMap<String, FieldPolicy>,
+    clinical_warnings: Option<String>,
+) {
+    match field_access(policies, "vitals", auth.role == Role::Ceo) {
+        Some(FieldAccess::Visible) => {
+            insert_optional_string(data, "clinical_warnings", clinical_warnings)
+        }
+        Some(FieldAccess::Masked) => {
+            if let Some(value) = clinical_warnings {
+                data.insert(
+                    "clinical_warnings".to_string(),
+                    Value::String(mask_text(&value)),
+                );
+            }
+        }
+        Some(FieldAccess::Hidden) | None => {}
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 enum FieldAccess {
     Visible,
@@ -3466,6 +5241,11 @@ async fn revoke_assignment(
     if let Err(e) = auth.require_any_role(&[Role::PatientManager]) {
         return e;
     }
+    let patient_context =
+        match load_patient_assignment_notification_context(&state, patient_id).await {
+            Ok(context) => context,
+            Err(response) => return response,
+        };
     match sqlx::query!(
         "UPDATE patient_assignments SET revoked_at = now() WHERE patient_id = $1 AND user_id = $2 AND revoked_at IS NULL",
         patient_id, body.user_id
@@ -3474,6 +5254,21 @@ async fn revoke_assignment(
     .await
     {
         Ok(r) if r.rows_affected() > 0 => {
+            if let Err(response) = insert_patient_assignment_notification(
+                &state,
+                body.user_id,
+                "patient_assignment_revoked",
+                format!("Patient assignment revoked: {}", patient_context.patient_name),
+                format!(
+                    "Your access to patient {} ({}) was revoked.",
+                    patient_context.patient_name, patient_context.patient_code
+                ),
+                patient_id,
+            )
+            .await
+            {
+                return response;
+            }
             state.audit_sender.try_send(audit::domain_event(
                 "revoke_assignment",
                 Some(auth.user_id),

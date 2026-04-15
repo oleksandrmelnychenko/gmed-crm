@@ -8,7 +8,7 @@ import {
   type ChangeEvent,
   type FormEvent,
 } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
   LoaderCircle,
@@ -46,6 +46,7 @@ import {
 import { apiFetch, downloadApiFile } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
+import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
 
 import {
@@ -106,7 +107,101 @@ type PatientDetail = {
   emergency_contact_phone?: string | null;
   emergency_contact_relation?: string | null;
   legal_status?: unknown;
+  clinical_warnings?: string | null;
   notes?: string | null;
+};
+
+type PatientVitalMeasurement = {
+  id: string;
+  measured_at: string;
+  bp_systolic?: number | null;
+  bp_diastolic?: number | null;
+  heart_rate?: number | null;
+  weight_kg?: number | null;
+  height_cm?: number | null;
+  bmi?: number | null;
+  notes?: string | null;
+  recorded_by?: string | null;
+  recorded_by_name?: string | null;
+  created_at: string;
+};
+
+type PatientCardEntry = {
+  id: string;
+  entry_date: string;
+  category: string;
+  source?: string | null;
+  content: string;
+  author_id: string;
+  author_name?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type PatientMedicalOrder = {
+  id: string;
+  order_date: string;
+  order_type: string;
+  title: string;
+  instructions: string;
+  status: string;
+  due_date?: string | null;
+  source?: string | null;
+  ordered_by: string;
+  ordered_by_name?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type PatientRiskScore = {
+  id: string;
+  computed_at: string;
+  score_type: string;
+  score_value: number;
+  scale_max?: number | null;
+  interpretation?: string | null;
+  source?: string | null;
+  inputs?: Record<string, unknown> | null;
+  recorded_by: string;
+  recorded_by_name?: string | null;
+  created_at: string;
+};
+
+type PatientVitalFormState = {
+  measuredAt: string;
+  bpSystolic: string;
+  bpDiastolic: string;
+  heartRate: string;
+  weightKg: string;
+  heightCm: string;
+  bmi: string;
+  notes: string;
+};
+
+type PatientCardEntryFormState = {
+  entryDate: string;
+  category: string;
+  source: string;
+  content: string;
+};
+
+type PatientMedicalOrderFormState = {
+  orderDate: string;
+  orderType: string;
+  title: string;
+  instructions: string;
+  dueDate: string;
+  source: string;
+};
+
+type PatientRiskScoreFormState = {
+  computedAt: string;
+  scoreType: string;
+  scoreValue: string;
+  scaleMax: string;
+  interpretation: string;
+  source: string;
+  inputsJson: string;
 };
 
 type PatientAssignment = {
@@ -152,6 +247,7 @@ type AppointmentItem = {
   date: string;
   time_start?: string | null;
   apt_type: string;
+  care_path_kind: string;
   status: string;
   provider_name?: string | null;
   doctor_name?: string | null;
@@ -179,6 +275,36 @@ type TimelineItem = {
   happened_at: string;
   source_label?: string | null;
 };
+
+const PATIENT_CARD_ENTRY_CATEGORY_OPTIONS = [
+  { value: "medical_update", label: "Medical update" },
+  { value: "patient_report", label: "Patient report" },
+  { value: "provider_report", label: "Provider report" },
+  { value: "treatment_note", label: "Treatment note" },
+  { value: "followup_note", label: "Follow-up note" },
+  { value: "warning", label: "Warning" },
+  { value: "other", label: "Other" },
+] as const;
+
+const PATIENT_MEDICAL_ORDER_TYPE_OPTIONS = [
+  { value: "physiotherapy", label: "Physiotherapy" },
+  { value: "diet", label: "Diet" },
+  { value: "lab_recheck", label: "Lab recheck" },
+  { value: "imaging", label: "Imaging" },
+  { value: "medication_followup", label: "Medication follow-up" },
+  { value: "procedure", label: "Procedure" },
+  { value: "other", label: "Other" },
+] as const;
+
+const PATIENT_RISK_SCORE_TYPE_OPTIONS = [
+  { value: "cha2ds2_vasc", label: "CHA2DS2-VASc" },
+  { value: "has_bled", label: "HAS-BLED" },
+  { value: "framingham", label: "Framingham" },
+  { value: "fall_risk", label: "Fall risk" },
+  { value: "frailty", label: "Frailty" },
+  { value: "nutrition_risk", label: "Nutrition risk" },
+  { value: "other", label: "Other" },
+] as const;
 
 type DocumentItem = {
   id: string;
@@ -320,6 +446,7 @@ type PatientEditFormState = {
   emergencyContactPhone: string;
   emergencyContactRelation: string;
   legalStatus: PatientLegalStatus;
+  clinicalWarnings: string;
   notes: string;
 };
 
@@ -386,6 +513,13 @@ function fmtDateTime(v?: string | null, fb = "") {
   } catch { return v; }
 }
 
+function appointmentCarePathKindLabel(value?: string | null) {
+  if (value === "preventive") return "Preventive";
+  if (value === "control") return "Control";
+  if (value === "followup") return "Follow-up";
+  return "Regular";
+}
+
 function fieldVal(v: string | string[] | null | undefined, fb: string) {
   if (Array.isArray(v)) return v.length ? v.join(", ") : fb;
   return v && v.trim() ? v : fb;
@@ -428,6 +562,49 @@ function toDateTimeLocal(value?: string | null) {
   if (Number.isNaN(date.getTime())) return "";
   const shifted = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
   return shifted.toISOString().slice(0, 16);
+}
+
+function formatVitalNumber(
+  value: number | null | undefined,
+  options: Intl.NumberFormatOptions = { maximumFractionDigits: 1 },
+) {
+  if (value == null || Number.isNaN(value)) return null;
+  try {
+    return new Intl.NumberFormat(undefined, options).format(value);
+  } catch {
+    return `${value}`;
+  }
+}
+
+function parseOptionalNumberInput(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const parsed = Number(trimmed.replace(",", "."));
+  if (!Number.isFinite(parsed)) {
+    throw new Error("Enter a valid number");
+  }
+  return parsed;
+}
+
+function parseOptionalIntegerInput(value: string) {
+  const parsed = parseOptionalNumberInput(value);
+  if (parsed == null) return undefined;
+  if (!Number.isInteger(parsed)) {
+    throw new Error("Enter a whole number");
+  }
+  return parsed;
+}
+
+function computeVitalBmi(weightKg: string, heightCm: string) {
+  try {
+    const weight = parseOptionalNumberInput(weightKg);
+    const height = parseOptionalNumberInput(heightCm);
+    if (weight == null || height == null || height <= 0) return null;
+    const heightM = height / 100;
+    return Math.round((weight / (heightM * heightM)) * 10) / 10;
+  } catch {
+    return null;
+  }
 }
 
 function genderLbl(v: string | null | undefined, tr: Record<string, string>) {
@@ -575,6 +752,72 @@ function blankWorkflowChecklistForm(): WorkflowChecklistFormState {
   };
 }
 
+function blankPatientVitalForm(): PatientVitalFormState {
+  return {
+    measuredAt: toDateTimeLocal(new Date().toISOString()),
+    bpSystolic: "",
+    bpDiastolic: "",
+    heartRate: "",
+    weightKg: "",
+    heightCm: "",
+    bmi: "",
+    notes: "",
+  };
+}
+
+function blankPatientCardEntryForm(): PatientCardEntryFormState {
+  return {
+    entryDate: toDateTimeLocal(new Date().toISOString()),
+    category: PATIENT_CARD_ENTRY_CATEGORY_OPTIONS[0].value,
+    source: "",
+    content: "",
+  };
+}
+
+function patientCardEntryCategoryLabel(category: string) {
+  return (
+    PATIENT_CARD_ENTRY_CATEGORY_OPTIONS.find((option) => option.value === category)?.label ??
+    category.replaceAll("_", " ")
+  );
+}
+
+function blankPatientMedicalOrderForm(): PatientMedicalOrderFormState {
+  return {
+    orderDate: toDateTimeLocal(new Date().toISOString()),
+    orderType: PATIENT_MEDICAL_ORDER_TYPE_OPTIONS[0].value,
+    title: "",
+    instructions: "",
+    dueDate: "",
+    source: "",
+  };
+}
+
+function patientMedicalOrderTypeLabel(orderType: string) {
+  return (
+    PATIENT_MEDICAL_ORDER_TYPE_OPTIONS.find((option) => option.value === orderType)?.label ??
+    orderType.replaceAll("_", " ")
+  );
+}
+
+function blankPatientRiskScoreForm(): PatientRiskScoreFormState {
+  return {
+    computedAt: toDateTimeLocal(new Date().toISOString()),
+    scoreType: PATIENT_RISK_SCORE_TYPE_OPTIONS[0].value,
+    scoreValue: "",
+    scaleMax: "",
+    interpretation: "",
+    source: "",
+    inputsJson: "",
+  };
+}
+
+function patientRiskScoreTypeLabel(scoreType: string) {
+  return (
+    PATIENT_RISK_SCORE_TYPE_OPTIONS.find((option) => option.value === scoreType)?.label ??
+    scoreType.replaceAll("_", " ")
+  );
+}
+
 function workflowChecklistLabel(key: string) {
   switch (key) {
     case "patient_intake":
@@ -630,6 +873,7 @@ function patientToEditForm(detail: PatientDetail): PatientEditFormState {
     emergencyContactPhone: detail.emergency_contact_phone ?? "",
     emergencyContactRelation: detail.emergency_contact_relation ?? "",
     legalStatus: normalizePatientLegalStatus(detail.legal_status),
+    clinicalWarnings: detail.clinical_warnings ?? "",
     notes: detail.notes ?? "",
   };
 }
@@ -684,10 +928,16 @@ const ROLE_COLORS: Record<string, string> = {
   patient: "bg-emerald-100 text-emerald-700",
 };
 
+const STATUS_BADGE_CLASSES: Record<string, string> = {
+  active: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  completed: "border-sky-200 bg-sky-50 text-sky-700",
+  cancelled: "border-rose-200 bg-rose-50 text-rose-700",
+};
+
 export function PatientDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
-  const navigate = useNavigate();
+  const { staffGo } = useStaffNavigate();
   const { user } = useAuth();
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
@@ -700,6 +950,10 @@ export function PatientDetailPage() {
   const [staff, setStaff] = useState<StaffOption[]>([]);
   const [selectedAssignee, setSelectedAssignee] = useState("");
   const [assignBusy, setAssignBusy] = useState(false);
+  const [vitalsHistory, setVitalsHistory] = useState<PatientVitalMeasurement[]>([]);
+  const [cardEntries, setCardEntries] = useState<PatientCardEntry[]>([]);
+  const [medicalOrders, setMedicalOrders] = useState<PatientMedicalOrder[]>([]);
+  const [riskScores, setRiskScores] = useState<PatientRiskScore[]>([]);
 
   const [cases, setCases] = useState<CaseItem[]>([]);
   const [orders, setOrders] = useState<OrderItem[]>([]);
@@ -721,6 +975,15 @@ export function PatientDetailPage() {
   const [profileEditorOpen, setProfileEditorOpen] = useState(false);
   const [profileEditorBusy, setProfileEditorBusy] = useState(false);
   const [profileEditForm, setProfileEditForm] = useState<PatientEditFormState | null>(null);
+  const [vitalsBusy, setVitalsBusy] = useState(false);
+  const [vitalsForm, setVitalsForm] = useState<PatientVitalFormState>(blankPatientVitalForm);
+  const [cardEntriesBusy, setCardEntriesBusy] = useState(false);
+  const [cardEntryForm, setCardEntryForm] = useState<PatientCardEntryFormState>(blankPatientCardEntryForm);
+  const [medicalOrdersBusy, setMedicalOrdersBusy] = useState(false);
+  const [medicalOrderActionId, setMedicalOrderActionId] = useState("");
+  const [medicalOrderForm, setMedicalOrderForm] = useState<PatientMedicalOrderFormState>(blankPatientMedicalOrderForm);
+  const [riskScoresBusy, setRiskScoresBusy] = useState(false);
+  const [riskScoreForm, setRiskScoreForm] = useState<PatientRiskScoreFormState>(blankPatientRiskScoreForm);
 
   const [relationEditorOpen, setRelationEditorOpen] = useState(false);
   const [editingRelation, setEditingRelation] = useState<RelationItem | null>(null);
@@ -781,6 +1044,10 @@ export function PatientDetailPage() {
   const canViewInvoices = canViewPatientInvoicesSurface(user?.role);
   const canManageInvoices = user?.role === "ceo" || user?.role === "billing";
   const canEditPatientProfile = user?.role === "ceo" || user?.role === "patient_manager";
+  const canManagePatientVitals = canEditPatientProfile;
+  const canManagePatientCardEntries = canEditPatientProfile;
+  const canManagePatientMedicalOrders = canEditPatientProfile;
+  const canManagePatientRiskScores = canEditPatientProfile;
   const canExportPatientCompliance = user?.role === "patient_manager";
   const canOpenComplianceWorkspace = user?.role === "patient_manager";
   const canPrintPatientLabel = user?.role === "ceo" || user?.role === "patient_manager";
@@ -892,6 +1159,11 @@ export function PatientDetailPage() {
     timelineSourceFilter !== "all" ||
     timelineRangeFilter !== "all" ||
     deferredTimelineSearch.trim().length > 0;
+  const latestVitalMeasurement = vitalsHistory[0] ?? null;
+  const bmiPreview = useMemo(
+    () => computeVitalBmi(vitalsForm.weightKg, vitalsForm.heightCm),
+    [vitalsForm.heightCm, vitalsForm.weightKg]
+  );
 
   useEffect(() => {
     setTimelineOffset(0);
@@ -974,12 +1246,36 @@ export function PatientDetailPage() {
       apiFetch<PatientDetail>(`/patients/${id}`),
       apiFetch<PatientAssignment[]>(`/patients/${id}/assignments`).catch(() => []),
       apiFetch<StaffOption[]>("/users?assignable_only=true&active_only=true").catch(() => []),
-    ]).then(([d, a, s]) => {
+      canManagePatientVitals
+        ? apiFetch<{ items: PatientVitalMeasurement[] }>(`/patients/${id}/vitals`).catch(() => ({
+            items: [],
+          }))
+        : Promise.resolve({ items: [] as PatientVitalMeasurement[] }),
+      canManagePatientCardEntries
+        ? apiFetch<{ items: PatientCardEntry[] }>(`/patients/${id}/card-entries`).catch(() => ({
+            items: [],
+          }))
+        : Promise.resolve({ items: [] as PatientCardEntry[] }),
+      canManagePatientMedicalOrders
+        ? apiFetch<{ items: PatientMedicalOrder[] }>(`/patients/${id}/medical-orders`).catch(() => ({
+            items: [],
+          }))
+        : Promise.resolve({ items: [] as PatientMedicalOrder[] }),
+      canManagePatientRiskScores
+        ? apiFetch<{ items: PatientRiskScore[] }>(`/patients/${id}/risk-scores`).catch(() => ({
+            items: [],
+          }))
+        : Promise.resolve({ items: [] as PatientRiskScore[] }),
+    ]).then(([d, a, s, vitals, entries, medicalOrderItems, riskScoreItems]) => {
       if (cancelled) return;
       startTransition(() => {
         setDetail(d);
         setAssignments(a);
         setStaff(s);
+        setVitalsHistory(vitals.items ?? []);
+        setCardEntries(entries.items ?? []);
+        setMedicalOrders(medicalOrderItems.items ?? []);
+        setRiskScores(riskScoreItems.items ?? []);
       });
     }).catch((e) => {
       if (!cancelled) setError(e instanceof Error ? e.message : String(e));
@@ -988,7 +1284,14 @@ export function PatientDetailPage() {
     });
 
     return () => { cancelled = true; };
-  }, [id, version]);
+  }, [
+    canManagePatientCardEntries,
+    canManagePatientMedicalOrders,
+    canManagePatientRiskScores,
+    canManagePatientVitals,
+    id,
+    version,
+  ]);
 
   useEffect(() => {
     setNotice("");
@@ -1565,6 +1868,7 @@ export function PatientDetailPage() {
           emergency_contact_phone: profileEditForm.emergencyContactPhone,
           emergency_contact_relation: profileEditForm.emergencyContactRelation,
           legal_status: serializePatientLegalStatus(profileEditForm.legalStatus),
+          clinical_warnings: profileEditForm.clinicalWarnings,
           notes: profileEditForm.notes,
         }),
       });
@@ -1575,6 +1879,229 @@ export function PatientDetailPage() {
       setTabActionError(error instanceof Error ? error.message : t.common_failed_update);
     } finally {
       setProfileEditorBusy(false);
+    }
+  }
+
+  async function handleCreateVitalMeasurement(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!id) return;
+
+    let payload: Record<string, unknown>;
+    try {
+      const measuredAt = new Date(vitalsForm.measuredAt);
+      if (Number.isNaN(measuredAt.getTime())) {
+        throw new Error("Select a valid measurement timestamp");
+      }
+      const bmiValue =
+        parseOptionalNumberInput(vitalsForm.bmi) ??
+        computeVitalBmi(vitalsForm.weightKg, vitalsForm.heightCm) ??
+        undefined;
+
+      payload = {
+        measured_at: measuredAt.toISOString(),
+        bp_systolic: parseOptionalNumberInput(vitalsForm.bpSystolic),
+        bp_diastolic: parseOptionalNumberInput(vitalsForm.bpDiastolic),
+        heart_rate: parseOptionalIntegerInput(vitalsForm.heartRate),
+        weight_kg: parseOptionalNumberInput(vitalsForm.weightKg),
+        height_cm: parseOptionalNumberInput(vitalsForm.heightCm),
+        bmi: bmiValue,
+        notes: toOptional(vitalsForm.notes),
+      };
+    } catch (error) {
+      setTabActionError(error instanceof Error ? error.message : t.common_failed_create);
+      return;
+    }
+
+    setVitalsBusy(true);
+    setTabActionError("");
+    try {
+      await apiFetch(`/patients/${id}/vitals`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      const result = await apiFetch<{ items: PatientVitalMeasurement[] }>(`/patients/${id}/vitals`);
+      setVitalsHistory(result.items ?? []);
+      setVitalsForm(blankPatientVitalForm());
+      setNotice("Vital measurement saved.");
+      reload();
+    } catch (error) {
+      setTabActionError(error instanceof Error ? error.message : t.common_failed_create);
+    } finally {
+      setVitalsBusy(false);
+    }
+  }
+
+  async function handleCreatePatientCardEntry(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!id) return;
+
+    let payload: Record<string, unknown>;
+    try {
+      const entryDate = new Date(cardEntryForm.entryDate);
+      if (Number.isNaN(entryDate.getTime())) {
+        throw new Error("Select a valid entry timestamp");
+      }
+      if (!cardEntryForm.content.trim()) {
+        throw new Error("Clinical entry content is required");
+      }
+
+      payload = {
+        entry_date: entryDate.toISOString(),
+        category: cardEntryForm.category,
+        source: toOptional(cardEntryForm.source),
+        content: cardEntryForm.content.trim(),
+      };
+    } catch (error) {
+      setTabActionError(error instanceof Error ? error.message : t.common_failed_create);
+      return;
+    }
+
+    setCardEntriesBusy(true);
+    setTabActionError("");
+    try {
+      await apiFetch(`/patients/${id}/card-entries`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      const result = await apiFetch<{ items: PatientCardEntry[] }>(`/patients/${id}/card-entries`);
+      setCardEntries(result.items ?? []);
+      setCardEntryForm(blankPatientCardEntryForm());
+      setNotice("Clinical card entry saved.");
+      reloadTab();
+    } catch (error) {
+      setTabActionError(error instanceof Error ? error.message : t.common_failed_create);
+    } finally {
+      setCardEntriesBusy(false);
+    }
+  }
+
+  async function handleCreatePatientMedicalOrder(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!id) return;
+
+    let payload: Record<string, unknown>;
+    try {
+      const orderDate = new Date(medicalOrderForm.orderDate);
+      if (Number.isNaN(orderDate.getTime())) {
+        throw new Error("Select a valid medical order timestamp");
+      }
+      if (!medicalOrderForm.title.trim()) {
+        throw new Error("Medical order title is required");
+      }
+      if (!medicalOrderForm.instructions.trim()) {
+        throw new Error("Medical order instructions are required");
+      }
+
+      payload = {
+        order_date: orderDate.toISOString(),
+        order_type: medicalOrderForm.orderType,
+        title: medicalOrderForm.title.trim(),
+        instructions: medicalOrderForm.instructions.trim(),
+        due_date: toOptional(medicalOrderForm.dueDate),
+        source: toOptional(medicalOrderForm.source),
+      };
+    } catch (error) {
+      setTabActionError(error instanceof Error ? error.message : t.common_failed_create);
+      return;
+    }
+
+    setMedicalOrdersBusy(true);
+    setTabActionError("");
+    try {
+      await apiFetch(`/patients/${id}/medical-orders`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      const result = await apiFetch<{ items: PatientMedicalOrder[] }>(`/patients/${id}/medical-orders`);
+      setMedicalOrders(result.items ?? []);
+      setMedicalOrderForm(blankPatientMedicalOrderForm());
+      setNotice("Medical order saved.");
+      reloadTab();
+    } catch (error) {
+      setTabActionError(error instanceof Error ? error.message : t.common_failed_create);
+    } finally {
+      setMedicalOrdersBusy(false);
+    }
+  }
+
+  async function handleUpdatePatientMedicalOrderStatus(
+    medicalOrderId: string,
+    status: "completed" | "cancelled"
+  ) {
+    if (!id) return;
+
+    setMedicalOrderActionId(medicalOrderId);
+    setTabActionError("");
+    try {
+      await apiFetch(`/patients/${id}/medical-orders/${medicalOrderId}/update`, {
+        method: "POST",
+        body: JSON.stringify({ status }),
+      });
+      const result = await apiFetch<{ items: PatientMedicalOrder[] }>(`/patients/${id}/medical-orders`);
+      setMedicalOrders(result.items ?? []);
+      setNotice(status === "completed" ? "Medical order completed." : "Medical order cancelled.");
+      reloadTab();
+    } catch (error) {
+      setTabActionError(error instanceof Error ? error.message : t.common_failed_update);
+    } finally {
+      setMedicalOrderActionId("");
+    }
+  }
+
+  async function handleCreatePatientRiskScore(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!id) return;
+
+    let payload: Record<string, unknown>;
+    try {
+      const computedAt = new Date(riskScoreForm.computedAt);
+      if (Number.isNaN(computedAt.getTime())) {
+        throw new Error("Select a valid risk score timestamp");
+      }
+      const scoreValue = parseOptionalNumberInput(riskScoreForm.scoreValue);
+      if (scoreValue == null) {
+        throw new Error("Risk score value is required");
+      }
+      const scaleMax = parseOptionalNumberInput(riskScoreForm.scaleMax);
+      let inputs: Record<string, unknown> | undefined;
+      if (riskScoreForm.inputsJson.trim()) {
+        const parsed = JSON.parse(riskScoreForm.inputsJson);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          throw new Error("Structured inputs must be a JSON object");
+        }
+        inputs = parsed as Record<string, unknown>;
+      }
+
+      payload = {
+        computed_at: computedAt.toISOString(),
+        score_type: riskScoreForm.scoreType,
+        score_value: scoreValue,
+        scale_max: scaleMax,
+        interpretation: toOptional(riskScoreForm.interpretation),
+        source: toOptional(riskScoreForm.source),
+        inputs,
+      };
+    } catch (error) {
+      setTabActionError(error instanceof Error ? error.message : t.common_failed_create);
+      return;
+    }
+
+    setRiskScoresBusy(true);
+    setTabActionError("");
+    try {
+      await apiFetch(`/patients/${id}/risk-scores`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      const result = await apiFetch<{ items: PatientRiskScore[] }>(`/patients/${id}/risk-scores`);
+      setRiskScores(result.items ?? []);
+      setRiskScoreForm(blankPatientRiskScoreForm());
+      setNotice("Risk score saved.");
+      reloadTab();
+    } catch (error) {
+      setTabActionError(error instanceof Error ? error.message : t.common_failed_create);
+    } finally {
+      setRiskScoresBusy(false);
     }
   }
 
@@ -1589,7 +2116,7 @@ export function PatientDetailPage() {
   if (error || !detail) {
     return (
       <div className="space-y-4">
-        <Button variant="ghost" className="gap-2" onClick={() => navigate("/patients")}>
+        <Button variant="ghost" className="gap-2" onClick={() => staffGo("/patients")}>
           <ArrowLeft className="size-4" /> {t.patients_title}
         </Button>
         <div className="rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">
@@ -1603,7 +2130,7 @@ export function PatientDetailPage() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon" className="rounded-xl" onClick={() => navigate("/patients")}>
+        <Button variant="ghost" size="icon" className="rounded-xl" onClick={() => staffGo("/patients")}>
           <ArrowLeft className="size-5" />
         </Button>
         <div className="flex-1">
@@ -1660,19 +2187,19 @@ export function PatientDetailPage() {
 
       <div className="flex flex-wrap gap-2">
         {canCreateCase ? (
-          <Button type="button" variant="outline" className="rounded-xl" onClick={() => navigate(`/cases?patient=${id}&create=1`)}>
+          <Button type="button" variant="outline" className="rounded-xl" onClick={() => staffGo(`/cases?patient=${id}&create=1`)}>
             <Plus className="mr-2 size-4" />
             New case
           </Button>
         ) : null}
         {canCreateOrder ? (
-          <Button type="button" variant="outline" className="rounded-xl" onClick={() => navigate(`/orders?patient=${id}&create=1`)}>
+          <Button type="button" variant="outline" className="rounded-xl" onClick={() => staffGo(`/orders?patient=${id}&create=1`)}>
             <Plus className="mr-2 size-4" />
             New order
           </Button>
         ) : null}
         {canCreateAppointment ? (
-          <Button type="button" variant="outline" className="rounded-xl" onClick={() => navigate(`/appointments?patient=${id}&create=1`)}>
+          <Button type="button" variant="outline" className="rounded-xl" onClick={() => staffGo(`/appointments?patient=${id}&create=1`)}>
             <Plus className="mr-2 size-4" />
             New appointment
           </Button>
@@ -1888,7 +2415,7 @@ export function PatientDetailPage() {
                       type="button"
                       variant="outline"
                       className="rounded-xl"
-                      onClick={() => navigate(`/admin/compliance?patient=${id}`)}
+                      onClick={() => staffGo(`/admin/compliance?patient=${id}`)}
                     >
                       Open DSGVO workspace
                     </Button>
@@ -1898,7 +2425,7 @@ export function PatientDetailPage() {
                       type="button"
                       variant="outline"
                       className="rounded-xl"
-                      onClick={() => navigate(`/documents?patient=${id}`)}
+                      onClick={() => staffGo(`/documents?patient=${id}`)}
                     >
                       Open documents
                     </Button>
@@ -1908,7 +2435,7 @@ export function PatientDetailPage() {
                       type="button"
                       variant="outline"
                       className="rounded-xl"
-                      onClick={() => navigate(`/contracts?patient=${id}`)}
+                      onClick={() => staffGo(`/contracts?patient=${id}`)}
                     >
                       Open contracts
                     </Button>
@@ -1928,6 +2455,778 @@ export function PatientDetailPage() {
               </div>
             </div>
           </div>
+
+          {(canManagePatientVitals || detail.clinical_warnings || vitalsHistory.length > 0) ? (
+            <div className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
+              <div className={cn(card("p-6"), "border-rose-200 bg-rose-50/60")}>
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-sm font-semibold text-rose-950">Cave notes</h2>
+                    <p className="mt-1 text-sm text-rose-700">
+                      Persistent clinical warnings that should stay visible before coordination or treatment starts.
+                    </p>
+                  </div>
+                  {canEditPatientProfile ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="rounded-xl border-rose-200 bg-white text-rose-700 hover:bg-rose-100"
+                      onClick={openProfileEditor}
+                    >
+                      <Pencil className="mr-2 size-3.5" />
+                      Update
+                    </Button>
+                  ) : null}
+                </div>
+                {detail.clinical_warnings ? (
+                  <p className="whitespace-pre-wrap text-sm text-rose-900">{detail.clinical_warnings}</p>
+                ) : (
+                  <p className="text-sm text-rose-700">No active cave notes documented.</p>
+                )}
+              </div>
+
+              <div className={card("p-6")}>
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-sm font-semibold text-slate-950">Vitals history</h2>
+                    <p className="mt-1 text-sm text-slate-500">
+                      Blood pressure, heart rate and weight snapshots with timestamped clinical context.
+                    </p>
+                  </div>
+                  <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
+                    {vitalsHistory.length} entries
+                  </Badge>
+                </div>
+
+                {latestVitalMeasurement ? (
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                          Latest measurement
+                        </p>
+                        <p className="mt-2 text-sm font-medium text-slate-950">
+                          {fmtDateTime(latestVitalMeasurement.measured_at, t.common_not_set)}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-2 text-xs text-slate-600">
+                        {latestVitalMeasurement.bp_systolic != null && latestVitalMeasurement.bp_diastolic != null ? (
+                          <Badge variant="outline" className="rounded-full">
+                            RR {formatVitalNumber(latestVitalMeasurement.bp_systolic, { maximumFractionDigits: 0 })}/
+                            {formatVitalNumber(latestVitalMeasurement.bp_diastolic, { maximumFractionDigits: 0 })} mmHg
+                          </Badge>
+                        ) : null}
+                        {latestVitalMeasurement.heart_rate != null ? (
+                          <Badge variant="outline" className="rounded-full">
+                            HF {formatVitalNumber(latestVitalMeasurement.heart_rate, { maximumFractionDigits: 0 })} bpm
+                          </Badge>
+                        ) : null}
+                        {latestVitalMeasurement.weight_kg != null ? (
+                          <Badge variant="outline" className="rounded-full">
+                            Weight {formatVitalNumber(latestVitalMeasurement.weight_kg)} kg
+                          </Badge>
+                        ) : null}
+                        {latestVitalMeasurement.bmi != null ? (
+                          <Badge variant="outline" className="rounded-full">
+                            BMI {formatVitalNumber(latestVitalMeasurement.bmi)}
+                          </Badge>
+                        ) : null}
+                      </div>
+                    </div>
+                    {latestVitalMeasurement.notes ? (
+                      <p className="mt-3 whitespace-pre-wrap text-sm text-slate-600">
+                        {latestVitalMeasurement.notes}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
+                    No vital measurements recorded yet.
+                  </div>
+                )}
+
+                {vitalsHistory.length > 0 ? (
+                  <div className="mt-4 space-y-3">
+                    {vitalsHistory.slice(0, 6).map((item) => (
+                      <div key={item.id} className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-medium text-slate-950">
+                              {fmtDateTime(item.measured_at, t.common_not_set)}
+                            </p>
+                            <p className="mt-1 text-xs text-slate-500">
+                              Recorded by {item.recorded_by_name ?? t.common_unknown}
+                            </p>
+                          </div>
+                          <div className="flex flex-wrap gap-2 text-xs text-slate-600">
+                            {item.bp_systolic != null && item.bp_diastolic != null ? (
+                              <span>RR {formatVitalNumber(item.bp_systolic, { maximumFractionDigits: 0 })}/{formatVitalNumber(item.bp_diastolic, { maximumFractionDigits: 0 })}</span>
+                            ) : null}
+                            {item.heart_rate != null ? (
+                              <span>HF {formatVitalNumber(item.heart_rate, { maximumFractionDigits: 0 })}</span>
+                            ) : null}
+                            {item.weight_kg != null ? <span>{formatVitalNumber(item.weight_kg)} kg</span> : null}
+                            {item.height_cm != null ? <span>{formatVitalNumber(item.height_cm)} cm</span> : null}
+                            {item.bmi != null ? <span>BMI {formatVitalNumber(item.bmi)}</span> : null}
+                          </div>
+                        </div>
+                        {item.notes ? (
+                          <p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">{item.notes}</p>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
+          {canManagePatientVitals ? (
+            <form className={card("p-6")} onSubmit={handleCreateVitalMeasurement}>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-sm font-semibold text-slate-950">Add vital measurement</h2>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Capture patient vitals with a concrete measurement timestamp.
+                  </p>
+                </div>
+                {bmiPreview != null ? (
+                  <Badge variant="outline" className="rounded-full border-sky-200 bg-sky-50 text-sky-700">
+                    BMI preview {formatVitalNumber(bmiPreview)}
+                  </Badge>
+                ) : null}
+              </div>
+              <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <div className="space-y-2 xl:col-span-2">
+                  <Label htmlFor="patient-vitals-measured-at">Measured at</Label>
+                  <Input
+                    id="patient-vitals-measured-at"
+                    type="datetime-local"
+                    value={vitalsForm.measuredAt}
+                    onChange={(event) =>
+                      setVitalsForm((current) => ({ ...current, measuredAt: event.target.value }))
+                    }
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="patient-vitals-bp-systolic">BP systolic</Label>
+                  <Input
+                    id="patient-vitals-bp-systolic"
+                    inputMode="decimal"
+                    value={vitalsForm.bpSystolic}
+                    onChange={(event) =>
+                      setVitalsForm((current) => ({ ...current, bpSystolic: event.target.value }))
+                    }
+                    placeholder="120"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="patient-vitals-bp-diastolic">BP diastolic</Label>
+                  <Input
+                    id="patient-vitals-bp-diastolic"
+                    inputMode="decimal"
+                    value={vitalsForm.bpDiastolic}
+                    onChange={(event) =>
+                      setVitalsForm((current) => ({ ...current, bpDiastolic: event.target.value }))
+                    }
+                    placeholder="80"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="patient-vitals-heart-rate">Heart rate</Label>
+                  <Input
+                    id="patient-vitals-heart-rate"
+                    inputMode="numeric"
+                    value={vitalsForm.heartRate}
+                    onChange={(event) =>
+                      setVitalsForm((current) => ({ ...current, heartRate: event.target.value }))
+                    }
+                    placeholder="72"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="patient-vitals-weight">Weight (kg)</Label>
+                  <Input
+                    id="patient-vitals-weight"
+                    inputMode="decimal"
+                    value={vitalsForm.weightKg}
+                    onChange={(event) =>
+                      setVitalsForm((current) => ({ ...current, weightKg: event.target.value }))
+                    }
+                    placeholder="70.5"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="patient-vitals-height">Height (cm)</Label>
+                  <Input
+                    id="patient-vitals-height"
+                    inputMode="decimal"
+                    value={vitalsForm.heightCm}
+                    onChange={(event) =>
+                      setVitalsForm((current) => ({ ...current, heightCm: event.target.value }))
+                    }
+                    placeholder="172"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="patient-vitals-bmi">BMI</Label>
+                  <Input
+                    id="patient-vitals-bmi"
+                    inputMode="decimal"
+                    value={vitalsForm.bmi}
+                    onChange={(event) =>
+                      setVitalsForm((current) => ({ ...current, bmi: event.target.value }))
+                    }
+                    placeholder={bmiPreview != null ? `${bmiPreview}` : "auto"}
+                  />
+                </div>
+              </div>
+              <div className="mt-4 space-y-2">
+                <Label htmlFor="patient-vitals-notes">Measurement notes</Label>
+                <textarea
+                  id="patient-vitals-notes"
+                  className={textareaClassName}
+                  value={vitalsForm.notes}
+                  onChange={(event) =>
+                    setVitalsForm((current) => ({ ...current, notes: event.target.value }))
+                  }
+                  placeholder="Context, symptoms or measurement conditions"
+                />
+              </div>
+              <div className="mt-4 flex justify-end">
+                <Button
+                  type="submit"
+                  className="rounded-xl bg-slate-950 text-white hover:bg-slate-800"
+                  disabled={vitalsBusy}
+                >
+                  {vitalsBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
+                  Save vital measurement
+                </Button>
+              </div>
+            </form>
+          ) : null}
+
+          {(canManagePatientCardEntries || cardEntries.length > 0) ? (
+            <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
+              <div className={card("p-6")}>
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-sm font-semibold text-slate-950">Clinical card log</h2>
+                    <p className="mt-1 text-sm text-slate-500">
+                      Categorized longitudinal entries outside structured anamnesis sections.
+                    </p>
+                  </div>
+                  <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
+                    {cardEntries.length} entries
+                  </Badge>
+                </div>
+
+                {cardEntries.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
+                    No clinical card entries recorded yet.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {cardEntries.slice(0, 6).map((entry) => (
+                      <div key={entry.id} className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-medium text-slate-950">
+                              {fmtDateTime(entry.entry_date, t.common_not_set)}
+                            </p>
+                            <p className="mt-1 text-xs text-slate-500">
+                              {entry.author_name ?? t.common_unknown}
+                              {entry.source ? ` · ${entry.source}` : ""}
+                            </p>
+                          </div>
+                          <Badge variant="outline" className="rounded-full">
+                            {patientCardEntryCategoryLabel(entry.category)}
+                          </Badge>
+                        </div>
+                        <p className="mt-3 whitespace-pre-wrap text-sm text-slate-600">{entry.content}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {canManagePatientCardEntries ? (
+                <form className={card("p-6")} onSubmit={handleCreatePatientCardEntry}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h2 className="text-sm font-semibold text-slate-950">Add card entry</h2>
+                      <p className="mt-1 text-sm text-slate-500">
+                        Log medical updates, patient reports and provider follow-up outside the structured case schema.
+                      </p>
+                    </div>
+                    <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
+                      Longitudinal record
+                    </Badge>
+                  </div>
+
+                  <div className="mt-4 grid gap-4 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="patient-card-entry-date">Entry date</Label>
+                      <Input
+                        id="patient-card-entry-date"
+                        type="datetime-local"
+                        value={cardEntryForm.entryDate}
+                        onChange={(event) =>
+                          setCardEntryForm((current) => ({ ...current, entryDate: event.target.value }))
+                        }
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="patient-card-entry-category">Category</Label>
+                      <ShadSelect
+                        value={cardEntryForm.category}
+                        onValueChange={(value) =>
+                          setCardEntryForm((current) => ({
+                            ...current,
+                            category: value ?? PATIENT_CARD_ENTRY_CATEGORY_OPTIONS[0].value,
+                          }))
+                        }
+                      >
+                        <SelectTrigger id="patient-card-entry-category" className="w-full">
+                          <SelectValue placeholder="Select category" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {PATIENT_CARD_ENTRY_CATEGORY_OPTIONS.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </ShadSelect>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 space-y-2">
+                    <Label htmlFor="patient-card-entry-source">Source</Label>
+                    <Input
+                      id="patient-card-entry-source"
+                      value={cardEntryForm.source}
+                      onChange={(event) =>
+                        setCardEntryForm((current) => ({ ...current, source: event.target.value }))
+                      }
+                      placeholder="Patient, clinic, doctor, phone follow-up"
+                    />
+                  </div>
+
+                  <div className="mt-4 space-y-2">
+                    <Label htmlFor="patient-card-entry-content">Entry content</Label>
+                    <textarea
+                      id="patient-card-entry-content"
+                      className={textareaClassName}
+                      value={cardEntryForm.content}
+                      onChange={(event) =>
+                        setCardEntryForm((current) => ({ ...current, content: event.target.value }))
+                      }
+                      placeholder="Document new medical information, patient-reported changes or provider follow-up"
+                      required
+                    />
+                  </div>
+
+                  <div className="mt-4 flex justify-end">
+                    <Button
+                      type="submit"
+                      className="rounded-xl bg-slate-950 text-white hover:bg-slate-800"
+                      disabled={cardEntriesBusy}
+                    >
+                      {cardEntriesBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
+                      Save card entry
+                    </Button>
+                  </div>
+                </form>
+              ) : null}
+            </div>
+          ) : null}
+
+          {(canManagePatientMedicalOrders || medicalOrders.length > 0) ? (
+            <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
+              <div className={card("p-6")}>
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-sm font-semibold text-slate-950">Medical orders</h2>
+                    <p className="mt-1 text-sm text-slate-500">
+                      Structured physician or therapeutic orders that should stay visible beyond the case form.
+                    </p>
+                  </div>
+                  <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
+                    {medicalOrders.length} orders
+                  </Badge>
+                </div>
+
+                {medicalOrders.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
+                    No medical orders recorded yet.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {medicalOrders.slice(0, 6).map((order) => (
+                      <div key={order.id} className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-medium text-slate-950">{order.title}</p>
+                            <p className="mt-1 text-xs text-slate-500">
+                              {fmtDateTime(order.order_date, t.common_not_set)} · {patientMedicalOrderTypeLabel(order.order_type)}
+                              {order.source ? ` · ${order.source}` : ""}
+                            </p>
+                            <p className="mt-1 text-xs text-slate-500">
+                              Ordered by {order.ordered_by_name ?? t.common_unknown}
+                              {order.due_date ? ` · Due ${order.due_date}` : ""}
+                            </p>
+                          </div>
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "rounded-full",
+                              STATUS_BADGE_CLASSES[order.status] ?? "border-slate-200 bg-slate-50 text-slate-700"
+                            )}
+                          >
+                            {order.status.replaceAll("_", " ")}
+                          </Badge>
+                        </div>
+                        <p className="mt-3 whitespace-pre-wrap text-sm text-slate-600">{order.instructions}</p>
+                        {canManagePatientMedicalOrders && order.status === "active" ? (
+                          <div className="mt-4 flex flex-wrap justify-end gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="rounded-xl"
+                              disabled={medicalOrderActionId === order.id}
+                              onClick={() => void handleUpdatePatientMedicalOrderStatus(order.id, "completed")}
+                            >
+                              {medicalOrderActionId === order.id ? (
+                                <LoaderCircle className="mr-2 size-4 animate-spin" />
+                              ) : null}
+                              Mark completed
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="rounded-xl border-rose-200 text-rose-700 hover:bg-rose-50"
+                              disabled={medicalOrderActionId === order.id}
+                              onClick={() => void handleUpdatePatientMedicalOrderStatus(order.id, "cancelled")}
+                            >
+                              {medicalOrderActionId === order.id ? (
+                                <LoaderCircle className="mr-2 size-4 animate-spin" />
+                              ) : null}
+                              Cancel
+                            </Button>
+                          </div>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {canManagePatientMedicalOrders ? (
+                <form className={card("p-6")} onSubmit={handleCreatePatientMedicalOrder}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h2 className="text-sm font-semibold text-slate-950">Add medical order</h2>
+                      <p className="mt-1 text-sm text-slate-500">
+                        Register therapy plans, rechecks and treatment instructions in a structured way.
+                      </p>
+                    </div>
+                    <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
+                      Structured order
+                    </Badge>
+                  </div>
+
+                  <div className="mt-4 grid gap-4 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="patient-medical-order-date">Order date</Label>
+                      <Input
+                        id="patient-medical-order-date"
+                        type="datetime-local"
+                        value={medicalOrderForm.orderDate}
+                        onChange={(event) =>
+                          setMedicalOrderForm((current) => ({ ...current, orderDate: event.target.value }))
+                        }
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="patient-medical-order-type">Order type</Label>
+                      <ShadSelect
+                        value={medicalOrderForm.orderType}
+                        onValueChange={(value) =>
+                          setMedicalOrderForm((current) => ({
+                            ...current,
+                            orderType: value ?? PATIENT_MEDICAL_ORDER_TYPE_OPTIONS[0].value,
+                          }))
+                        }
+                      >
+                        <SelectTrigger id="patient-medical-order-type" className="w-full">
+                          <SelectValue placeholder="Select order type" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {PATIENT_MEDICAL_ORDER_TYPE_OPTIONS.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </ShadSelect>
+                    </div>
+                    <div className="space-y-2 md:col-span-2">
+                      <Label htmlFor="patient-medical-order-title">Title</Label>
+                      <Input
+                        id="patient-medical-order-title"
+                        value={medicalOrderForm.title}
+                        onChange={(event) =>
+                          setMedicalOrderForm((current) => ({ ...current, title: event.target.value }))
+                        }
+                        placeholder="Physiotherapy 2x per week"
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="patient-medical-order-due-date">Due date</Label>
+                      <Input
+                        id="patient-medical-order-due-date"
+                        type="date"
+                        value={medicalOrderForm.dueDate}
+                        onChange={(event) =>
+                          setMedicalOrderForm((current) => ({ ...current, dueDate: event.target.value }))
+                        }
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="patient-medical-order-source">Source</Label>
+                      <Input
+                        id="patient-medical-order-source"
+                        value={medicalOrderForm.source}
+                        onChange={(event) =>
+                          setMedicalOrderForm((current) => ({ ...current, source: event.target.value }))
+                        }
+                        placeholder="Doctor, clinic, discharge note"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="mt-4 space-y-2">
+                    <Label htmlFor="patient-medical-order-instructions">Instructions</Label>
+                    <textarea
+                      id="patient-medical-order-instructions"
+                      className={textareaClassName}
+                      value={medicalOrderForm.instructions}
+                      onChange={(event) =>
+                        setMedicalOrderForm((current) => ({ ...current, instructions: event.target.value }))
+                      }
+                      placeholder="Explain the therapeutic order, cadence, follow-up or preparation details"
+                      required
+                    />
+                  </div>
+
+                  <div className="mt-4 flex justify-end">
+                    <Button
+                      type="submit"
+                      className="rounded-xl bg-slate-950 text-white hover:bg-slate-800"
+                      disabled={medicalOrdersBusy}
+                    >
+                      {medicalOrdersBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
+                      Save medical order
+                    </Button>
+                  </div>
+                </form>
+              ) : null}
+            </div>
+          ) : null}
+
+          {(canManagePatientRiskScores || riskScores.length > 0) ? (
+            <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
+              <div className={card("p-6")}>
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-sm font-semibold text-slate-950">Risk scores</h2>
+                    <p className="mt-1 text-sm text-slate-500">
+                      Patient-level structured risk score history beyond specialty-specific red flags.
+                    </p>
+                  </div>
+                  <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
+                    {riskScores.length} scores
+                  </Badge>
+                </div>
+
+                {riskScores.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
+                    No risk scores recorded yet.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {riskScores.slice(0, 6).map((score) => (
+                      <div key={score.id} className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-medium text-slate-950">
+                              {patientRiskScoreTypeLabel(score.score_type)}
+                            </p>
+                            <p className="mt-1 text-xs text-slate-500">
+                              {fmtDateTime(score.computed_at, t.common_not_set)}
+                              {score.source ? ` · ${score.source}` : ""}
+                            </p>
+                            <p className="mt-1 text-xs text-slate-500">
+                              Recorded by {score.recorded_by_name ?? t.common_unknown}
+                            </p>
+                          </div>
+                          <Badge variant="outline" className="rounded-full">
+                            {formatVitalNumber(score.score_value)}
+                            {score.scale_max != null ? ` / ${formatVitalNumber(score.scale_max)}` : ""}
+                          </Badge>
+                        </div>
+                        {score.interpretation ? (
+                          <p className="mt-3 whitespace-pre-wrap text-sm text-slate-600">
+                            {score.interpretation}
+                          </p>
+                        ) : null}
+                        {score.inputs ? (
+                          <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-600">
+                            <p className="font-medium text-slate-700">Structured inputs</p>
+                            <pre className="mt-2 overflow-x-auto whitespace-pre-wrap">
+                              {JSON.stringify(score.inputs, null, 2)}
+                            </pre>
+                          </div>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {canManagePatientRiskScores ? (
+                <form className={card("p-6")} onSubmit={handleCreatePatientRiskScore}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h2 className="text-sm font-semibold text-slate-950">Add risk score</h2>
+                      <p className="mt-1 text-sm text-slate-500">
+                        Capture structured patient-level risk scoring with optional JSON inputs.
+                      </p>
+                    </div>
+                    <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
+                      Append-only history
+                    </Badge>
+                  </div>
+
+                  <div className="mt-4 grid gap-4 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="patient-risk-score-computed-at">Computed at</Label>
+                      <Input
+                        id="patient-risk-score-computed-at"
+                        type="datetime-local"
+                        value={riskScoreForm.computedAt}
+                        onChange={(event) =>
+                          setRiskScoreForm((current) => ({ ...current, computedAt: event.target.value }))
+                        }
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="patient-risk-score-type">Score type</Label>
+                      <ShadSelect
+                        value={riskScoreForm.scoreType}
+                        onValueChange={(value) =>
+                          setRiskScoreForm((current) => ({
+                            ...current,
+                            scoreType: value ?? PATIENT_RISK_SCORE_TYPE_OPTIONS[0].value,
+                          }))
+                        }
+                      >
+                        <SelectTrigger id="patient-risk-score-type" className="w-full">
+                          <SelectValue placeholder="Select score type" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {PATIENT_RISK_SCORE_TYPE_OPTIONS.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </ShadSelect>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="patient-risk-score-value">Score value</Label>
+                      <Input
+                        id="patient-risk-score-value"
+                        inputMode="decimal"
+                        value={riskScoreForm.scoreValue}
+                        onChange={(event) =>
+                          setRiskScoreForm((current) => ({ ...current, scoreValue: event.target.value }))
+                        }
+                        placeholder="4"
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="patient-risk-score-scale">Scale max</Label>
+                      <Input
+                        id="patient-risk-score-scale"
+                        inputMode="decimal"
+                        value={riskScoreForm.scaleMax}
+                        onChange={(event) =>
+                          setRiskScoreForm((current) => ({ ...current, scaleMax: event.target.value }))
+                        }
+                        placeholder="9"
+                      />
+                    </div>
+                    <div className="space-y-2 md:col-span-2">
+                      <Label htmlFor="patient-risk-score-source">Source</Label>
+                      <Input
+                        id="patient-risk-score-source"
+                        value={riskScoreForm.source}
+                        onChange={(event) =>
+                          setRiskScoreForm((current) => ({ ...current, source: event.target.value }))
+                        }
+                        placeholder="Doctor assessment, discharge note, intake review"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="mt-4 space-y-2">
+                    <Label htmlFor="patient-risk-score-interpretation">Interpretation</Label>
+                    <textarea
+                      id="patient-risk-score-interpretation"
+                      className={textareaClassName}
+                      value={riskScoreForm.interpretation}
+                      onChange={(event) =>
+                        setRiskScoreForm((current) => ({ ...current, interpretation: event.target.value }))
+                      }
+                      placeholder="Explain clinical meaning, escalation threshold or follow-up implication"
+                    />
+                  </div>
+
+                  <div className="mt-4 space-y-2">
+                    <Label htmlFor="patient-risk-score-inputs">Structured inputs (JSON object)</Label>
+                    <textarea
+                      id="patient-risk-score-inputs"
+                      className={textareaClassName}
+                      value={riskScoreForm.inputsJson}
+                      onChange={(event) =>
+                        setRiskScoreForm((current) => ({ ...current, inputsJson: event.target.value }))
+                      }
+                      placeholder='{"age": 68, "hypertension": true, "prior_stroke": false}'
+                    />
+                  </div>
+
+                  <div className="mt-4 flex justify-end">
+                    <Button
+                      type="submit"
+                      className="rounded-xl bg-slate-950 text-white hover:bg-slate-800"
+                      disabled={riskScoresBusy}
+                    >
+                      {riskScoresBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
+                      Save risk score
+                    </Button>
+                  </div>
+                </form>
+              ) : null}
+            </div>
+          ) : null}
 
           {/* Notes */}
           {detail.notes && (
@@ -2064,7 +3363,7 @@ export function PatientDetailPage() {
                           type="button"
                           variant="outline"
                           className="rounded-xl"
-                          onClick={() => navigate(`/patients/${relation.related_patient_id}`)}
+                          onClick={() => staffGo(`/patients/${relation.related_patient_id}`)}
                         >
                           Open patient
                         </Button>
@@ -2096,7 +3395,7 @@ export function PatientDetailPage() {
           ) : (
             <div className="grid gap-3 md:grid-cols-2">
               {cases.map((c) => (
-                <button key={c.id} type="button" onClick={() => navigate(`/cases?case=${c.id}`)} className={card("p-5 text-left hover:-translate-y-0.5 hover:shadow-lg transition")}>
+                <button key={c.id} type="button" onClick={() => staffGo(`/cases?case=${c.id}`)} className={card("p-5 text-left hover:-translate-y-0.5 hover:shadow-lg transition")}>
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-mono text-slate-400">{c.case_id}</span>
                     <Badge variant="outline" className={cn("rounded-full text-[10px]", STATUS_COLORS[c.status] ?? "")}>{tr[`cases_${c.status}`] ?? c.status}</Badge>
@@ -2118,7 +3417,7 @@ export function PatientDetailPage() {
           ) : (
             <div className="grid gap-3 md:grid-cols-2">
               {orders.map((o) => (
-                <button key={o.id} type="button" onClick={() => navigate(`/orders?order=${o.id}`)} className={card("p-5 text-left hover:-translate-y-0.5 hover:shadow-lg transition")}>
+                <button key={o.id} type="button" onClick={() => staffGo(`/orders?order=${o.id}`)} className={card("p-5 text-left hover:-translate-y-0.5 hover:shadow-lg transition")}>
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-mono text-slate-400">{o.order_number}</span>
                     <Badge variant="outline" className={cn("rounded-full text-[10px]", STATUS_COLORS[o.status] ?? "")}>{o.status}</Badge>
@@ -2143,9 +3442,14 @@ export function PatientDetailPage() {
           ) : (
             <div className="grid gap-3 md:grid-cols-2">
               {appointments.map((a) => (
-                <button key={a.id} type="button" onClick={() => navigate(`/appointments?appointment=${a.id}`)} className={card("p-5 text-left hover:-translate-y-0.5 hover:shadow-lg transition")}>
+                <button key={a.id} type="button" onClick={() => staffGo(`/appointments?appointment=${a.id}`)} className={card("p-5 text-left hover:-translate-y-0.5 hover:shadow-lg transition")}>
                   <div className="flex items-center justify-between">
-                    <span className="text-xs text-slate-400">{a.apt_type}</span>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs text-slate-400">{a.apt_type}</span>
+                      <Badge variant="outline" className="rounded-full text-[10px] border-violet-200 bg-violet-50 text-violet-700">
+                        {appointmentCarePathKindLabel(a.care_path_kind)}
+                      </Badge>
+                    </div>
                     <Badge variant="outline" className={cn("rounded-full text-[10px]", STATUS_COLORS[a.status] ?? "")}>{a.status}</Badge>
                   </div>
                   <p className="mt-2 text-sm font-medium text-slate-900">{a.title}</p>
@@ -2169,7 +3473,7 @@ export function PatientDetailPage() {
             </div>
             <div className="flex flex-wrap gap-2">
               {canOpenDocumentsWorkspace ? (
-                <Button type="button" variant="outline" className="rounded-xl" onClick={() => navigate(`/documents?patient=${id}`)}>
+                <Button type="button" variant="outline" className="rounded-xl" onClick={() => staffGo(`/documents?patient=${id}`)}>
                   Open workspace
                 </Button>
               ) : null}
@@ -2274,7 +3578,7 @@ export function PatientDetailPage() {
               <h3 className="mt-1 text-sm font-semibold text-slate-950">Contracts for this patient</h3>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="outline" className="rounded-xl" onClick={() => navigate(`/contracts?patient=${id}`)}>
+              <Button type="button" variant="outline" className="rounded-xl" onClick={() => staffGo(`/contracts?patient=${id}`)}>
                 Open workspace
               </Button>
               {canManageContracts ? (
@@ -2308,7 +3612,7 @@ export function PatientDetailPage() {
                     <p>Valid to: {fmtDate(contract.valid_to, t.common_not_set)}</p>
                   </div>
                   <div className="mt-4 flex flex-wrap gap-2">
-                    <Button type="button" variant="outline" className="rounded-xl" onClick={() => navigate(`/contracts?contract=${contract.id}`)}>
+                    <Button type="button" variant="outline" className="rounded-xl" onClick={() => staffGo(`/contracts?contract=${contract.id}`)}>
                       Open
                     </Button>
                     {canManageContracts ? (
@@ -2329,7 +3633,7 @@ export function PatientDetailPage() {
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Patient billing</p>
               <h3 className="mt-1 text-sm font-semibold text-slate-950">Invoices and payment follow-up</h3>
             </div>
-            <Button type="button" variant="outline" className="rounded-xl" onClick={() => navigate(`/invoices?patient=${id}`)}>
+            <Button type="button" variant="outline" className="rounded-xl" onClick={() => staffGo(`/invoices?patient=${id}`)}>
               Open workspace
             </Button>
           </div>
@@ -2363,7 +3667,7 @@ export function PatientDetailPage() {
                     <p>Quote: {invoice.quote_number ?? t.common_not_set}</p>
                   </div>
                   <div className="mt-4 flex flex-wrap gap-2">
-                    <Button type="button" variant="outline" className="rounded-xl" onClick={() => navigate(`/invoices?invoice=${invoice.id}`)}>
+                    <Button type="button" variant="outline" className="rounded-xl" onClick={() => staffGo(`/invoices?invoice=${invoice.id}`)}>
                       Open
                     </Button>
                     {canManageInvoices ? (
@@ -2802,7 +4106,7 @@ export function PatientDetailPage() {
                     type="button"
                     onClick={() => {
                       if (route) {
-                        navigate(route);
+                        staffGo(route);
                       }
                     }}
                     className={card(
@@ -3096,10 +4400,26 @@ export function PatientDetailPage() {
                   />
                 </div>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="patient-notes-edit">Notes</Label>
-                <textarea id="patient-notes-edit" className={textareaClassName} value={profileEditForm.notes} onChange={(event) => setProfileEditForm((current) => current ? { ...current, notes: event.target.value } : current)} />
-              </div>
+                <div className="space-y-2">
+                  <Label htmlFor="patient-clinical-warnings-edit">Cave notes</Label>
+                  <textarea
+                    id="patient-clinical-warnings-edit"
+                    className={textareaClassName}
+                    value={profileEditForm.clinicalWarnings}
+                    onChange={(event) =>
+                      setProfileEditForm((current) =>
+                        current
+                          ? { ...current, clinicalWarnings: event.target.value }
+                          : current
+                      )
+                    }
+                    placeholder="Persistent clinical warnings or safety alerts"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="patient-notes-edit">Notes</Label>
+                  <textarea id="patient-notes-edit" className={textareaClassName} value={profileEditForm.notes} onChange={(event) => setProfileEditForm((current) => current ? { ...current, notes: event.target.value } : current)} />
+                </div>
               <DialogFooter>
                 <Button type="button" variant="outline" className="rounded-xl" onClick={() => setProfileEditorOpen(false)}>
                   Cancel
