@@ -1,6 +1,6 @@
 # План: UI + маршрути + ролі на 100% (single source of truth)
 
-> Статус: **route-guard current-state + жорсткий регрес-гейт** (2026-04-15): `App.tsx` staff routes всі сидять під `AppLayout`, `layout.tsx` уже блокує staff deep-link через `canAccessStaffRoute`, `nav-panel` будується з тієї ж shared route metadata, patient portal whitelist теж сидить у тому ж access layer, `check-staff-spa-navigation.mjs` забороняє **будь-який** `navigate(` у `src` поза allowlist і **`<NavLink`** поза `nav-panel`; ESLint ті самі імпорт-обмеження на **`src/components`** (крім shell/ui); Vitest — інтеграційний запуск скрипта + unit на `stripTsCommentsForScan`; live Playwright додатково перевіряє forbidden deep-link normalization для staff і patient shell. Основного незакритого RBAC хвоста тут уже не лишилось.
+> Статус: **route-guard current-state + жорсткий регрес-гейт** (2026-04-15): `App.tsx` staff routes всі сидять під `AppLayout`, `layout.tsx` уже блокує staff deep-link через `canAccessStaffRoute`, `nav-panel` будується з тієї ж shared route metadata, patient portal whitelist теж сидить у тому ж access layer, `check-staff-spa-navigation.mjs` забороняє **будь-який** `navigate(` у `src` поза allowlist і **`<NavLink`** поза `nav-panel`; ESLint ті самі імпорт-обмеження на **`src/components`** (крім shell/ui); Vitest — інтеграційний запуск скрипта + unit на `stripTsCommentsForScan`; live Playwright додатково перевіряє forbidden deep-link normalization для staff і patient shell, включно з high-risk клітинками `sales -> /documents`, `sales -> /contracts`, `concierge -> /invoices`, `billing -> /cases`, `it_admin -> /patients|/cases|/reports|/documents`. Основного незакритого RBAC хвоста тут уже не лишилось.
 > Контекст: **login** — `redirectTo` без staff-таблиці.
 
 ## 1. Визначення «100% готово»
@@ -56,7 +56,7 @@
 ### Фаза E — Тести
 
 1. **Vitest:** набір канонічних шляхів × усі staff-ролі узгоджується з `peekStaffRouteRule` + `canAccessStaffRoute`; окремо `staffHrefIfAllowed`. Опційно: тест «кожен пункт меню ⊆ дозволені маршрути для ролі».
-2. **Playwright (опційно live):** smoke на 1–2 ролях — прямий захід на заборонений URL → очікуваний редірект/denied.
+2. **Playwright (опційно live):** smoke на high-risk ролях — прямий захід на заборонений URL → очікуваний редірект/denied. Current-state baseline уже включає `patient_manager -> /admin/settings`, `ceo_assistant -> /admin/users`, `billing -> /appointments`, `sales -> /documents`, `sales -> /contracts`, `concierge -> /invoices`, `billing -> /cases`, `it_admin -> /patients|/cases|/reports|/documents`, `interpreter -> /reports`, `patient -> /patients`.
 3. У шапці модуля `staff-route-access.ts` — посилання на цей документ і на `02_rbac-matrix_ua.md`.
 4. **Автоматичний регрес-гейт (макс.):** `frontend/scripts/check-staff-spa-navigation.mjs` + `npm run check:staff-nav` (у `npm run lint`): у сканованих файлах **заборонено будь-який** `navigate(` (лише allowlist: login, `use-staff-navigate`, topbar, layout, nav-panel, staff-link, patient-portal); **заборонено** `<NavLink` поза `nav-panel.tsx`; плюс перевірки «голого» `<Link to=/` та `<Navigate to=/`. Vitest: `staff-navigation-guard.integration.test.ts` + `staff-spa-navigation-script.unit.test.ts` (імпорт `stripTsCommentsForScan` з того ж `.mjs`). ESLint `no-restricted-imports` для **`src/pages/**/*.tsx`** і **`src/components/**/*.tsx`** (крім login, patient-portal, `staff-link`, `topbar`, `nav-panel`, `layout`, `components/ui/**`) — заборона `useNavigate` та `Link` з `react-router-dom`.
 
@@ -71,7 +71,7 @@
 - [x] `nav-panel` не містить пунктів, що не виводяться з таблиці доступу (staff nav тепер виводиться з shared route metadata).
 - [x] Vitest покриває репрезентативний набір шляхів × усі staff-ролі (узгоджено з правилами через `peekStaffRouteRule`).
 - [x] CI/лінт: скрипт + ESLint блокують типові регреси (`navigate(\`/…`)`, `<Link to="/…">` у `src` поза allowlist).
-- [x] Ручна перевірка замінена live Playwright denied-route pass: для ключових ролей заборонений URL нормалізується однаково.
+- [x] Ручна перевірка замінена live Playwright denied-route pass: для ключових ролей заборонений URL нормалізується однаково, а high-risk workspace boundaries (`documents / contracts / invoices / cases` + `it_admin` deny на `patients / cases / reports / documents`) уже мають окремий browser proof.
 
 ## 5. Порядок і ризики
 

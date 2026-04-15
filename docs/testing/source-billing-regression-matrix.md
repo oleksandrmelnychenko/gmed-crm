@@ -100,6 +100,29 @@
   Covers:
   billing updates invoice payment state while operational non-financial roles remain blocked from invoice detail.
 
+- `patient manager can inspect invoice detail but cannot mutate billing status or dunning`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:117`
+  `docs/backlog/02_rbac-matrix_ua.md:10`
+  `docs/backlog/02_rbac-matrix_ua.md:14`
+  Covers:
+  browser-level invoice shell keeps the split between commercial visibility and billing mutation rights: `patient_manager` can open patient/order-bound invoice detail and download the PDF, but status-save and dunning controls stay disabled in the same workspace.
+
+- `patient manager can use invoice workspace without accounting ledger access`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:10`
+  `docs/backlog/03_kpi-catalog_ua.md:61`
+  Covers:
+  browser-level invoice shell keeps the accounting split inside the same workspace: `patient_manager` can open the invoices page, see invoice rows and still use invoice-creation flow, but the `Buchhaltungsledger` / EÜR section and its `CSV exportieren` control do not render at all.
+
+- `billing can manage order financial gates and external invoices without operational phase controls`
+  Source:
+  `docs/requirements/01_process-mapping_ua.md:78`
+  `docs/requirements/01_process-mapping_ua.md:103`
+  `docs/requirements/03_product-backlog_ua.md:121`
+  Covers:
+  browser-level order shell keeps the split inside the same order detail: `billing` can open `Prozess-Gates`, save `Billing-Release`, create incoming `external_invoices` and see debt-management context, while planning/lifecycle/workflow mutations stay absent and execution/follow-up controls remain visible only as disabled read-only affordances.
+
 - `patient_can_list_own_invoices_and_payment_proof_status`
   Source:
   `docs/requirements/03_product-backlog_ua.md:131`
@@ -241,6 +264,13 @@
   `docs/backlog/03_kpi-catalog_ua.md:61`
   Covers:
   `ceo_assistant` can read and export the internal accounting ledger / EÜR CSV in read-only mode, while `sales` stays denied from both read and export surfaces.
+
+- `ceo assistant can open accounting ledger and export CSV in read-only mode`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:14`
+  `docs/backlog/03_kpi-catalog_ua.md:61`
+  Covers:
+  browser-level commercial proof for `ceo_assistant`: the invoices workspace exposes the accounting ledger / EÜR section, keeps invoice-creation controls hidden, and still allows a real `accounting-ledger-YYYY.csv` download from the read-only ledger shell.
 
 - `invoice_list_returns_page_metadata_and_slices_results`
   Source:

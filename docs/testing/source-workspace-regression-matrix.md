@@ -66,6 +66,13 @@
   Covers:
   admin security analytics aggregate failed/blocked login signals, token-theft alerts, executive-sensitive access, off-hours sensitive reads, recent suspicious events and top sensitive readers from the append-only `audit_log`.
 
+- `it_admin can open audit analytics in the live browser shell`
+  Source:
+  `docs/requirements/04_non-functional-requirements_ua.md:119`
+  `docs/backlog/02_rbac-matrix_ua.md:21`
+  Covers:
+  canonical live browser proof for the positive admin-security path: `it_admin` can open `/admin/security`, the shell renders `Audit-Analytik`, failed/blocked login KPI cards, token-theft and executive-sensitive access counters, recent suspicious events, and top-reader analytics instead of only being tested through backend route gating.
+
 - `ceo_can_open_risk_analysis_workspace`
   Source:
   `docs/backlog/02_rbac-matrix_ua.md:15`
@@ -180,7 +187,28 @@
   `docs/backlog/02_rbac-matrix_ua.md:9`
   `docs/backlog/01_mvp-backlog_ua.md:112`
   Covers:
-  canonical live browser proof for `ceo_assistant` on the same executive shell: dashboard and reports stay reachable in read mode with forecasting and KPI sections visible, matching the current partial-executive analytics scope.
+  canonical live browser proof for `ceo_assistant` on the same executive shell: dashboard and reports stay reachable in read mode with forecasting and KPI sections visible, matching the current partial-executive analytics scope; `clinic-report.csv` and `doctor-report.csv` also download successfully from the executive read-only reports shell.
+
+- `sales can open sales-safe reports without restricted executive sections`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:14`
+  `docs/backlog/01_mvp-backlog_ua.md:112`
+  Covers:
+  browser-level analytics proof for `sales`: the reports workspace exposes sales-safe sections such as `Sales-KPI-Scorecard`, medical-provider performance and country reporting, `medical-provider-report.csv` and `country-report.csv` download successfully from the visible section-level export controls, while executive-only sections such as billing KPIs, collections forecast, clinic report and doctor drill-down stay hidden.
+
+- `patient manager sees own KPI dashboard and reports without executive finance sections`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:6`
+  `docs/backlog/01_mvp-backlog_ua.md:112`
+  Covers:
+  browser-level analytics proof for `patient_manager`: the dashboard shows the personal KPI card and patient-manager risk layer, while `CEO-Read-Model` and billing risk stay hidden; the reports workspace still exposes operational forecasting (`Forecast-Pipeline`, `Follow-up-Forecast`, `Klinikauslastung nächste 30 Tage`) but keeps billing KPI, sales KPI and collections forecast sections out of the shell.
+
+- `billing sees billing analytics without patient-manager or sales sections`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:12`
+  `docs/backlog/01_mvp-backlog_ua.md:112`
+  Covers:
+  browser-level analytics proof for `billing`: the dashboard exposes only `Abrechnungsrisiken`, not the patient-manager or executive analytics layers, and the reports workspace keeps `Abrechnungs-KPI-Scorecard` plus `Forderungs-Forecast` visible while hiding country and sales sections; `doctor-report.csv` and `provider-cost-report.csv` download successfully from the billing-safe export controls.
 
 - `patient_manager_sop_requires_ceo_approval_and_supports_acknowledgement`
   Source:
@@ -228,6 +256,13 @@
   Covers:
   live browser proof for the end-to-end SOP flow: patient manager authors scoped learning content, CEO approves it in the review queue, acknowledgement is requested from the library surface, and the interpreter sees plus acknowledges the approved revision.
 
+- `teamlead interpreter content waits for patient-manager approval and never appears in the CEO queue`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:135`
+  `docs/backlog/02_rbac-matrix_ua.md:16`
+  Covers:
+  live browser proof for the alternate SOP hierarchy: `teamlead_interpreter` can author interpreter-only learning content and mark it acknowledgement-relevant, the item stays out of the CEO review queue, `patient_manager` receives the review action instead, and the interpreter only sees plus acknowledges the SOP after patient-manager approval and acknowledgement request.
+
 ### Contracts and quotes
 
 - `ceo_can_manage_contracts_and_quotes_without_patient_assignment`
@@ -243,6 +278,13 @@
   `docs/backlog/02_rbac-matrix_ua.md:14`
   Covers:
   `ceo_assistant` can open framework-contract and quote list/detail/version endpoints, including the patient-profile contract tab, but stays read-only and cannot create contracts, update contract status, create quotes or change quote status.
+
+- `ceo assistant can inspect contracts quotes and invoices in read-only mode`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:9`
+  `docs/backlog/02_rbac-matrix_ua.md:14`
+  Covers:
+  browser-level commercial shell lets `ceo_assistant` open patient-bound quote and invoice detail, but keeps create buttons hidden, leaves quote/invoice save actions disabled, blocks dunning mutation controls and still keeps PDF preview/download visible in read-only mode.
 
 - `sales_and_concierge_cannot_access_contracts_or_quotes_workspaces`
   Source:
@@ -314,8 +356,8 @@
   `docs/backlog/02_rbac-matrix_ua.md:8`
   `docs/backlog/02_rbac-matrix_ua.md:9`
   `docs/backlog/02_rbac-matrix_ua.md:14`
-  Covers:
-  browser-level patient profile redirects a forbidden `?tab=documents` deep-link back to profile for `ceo_assistant`, keeps operational/document patient-bound tabs hidden, but still leaves read-only `Contracts` and `Invoices` tabs available inside the shell.
+Covers:
+  browser-level patient profile redirects a forbidden `?tab=documents` deep-link back to profile for `ceo_assistant`, keeps operational/document patient-bound tabs hidden, leaves read-only `Contracts` and `Invoices` tabs available inside the shell, and explicitly proves inside those tabs that patient-bound contract and invoice cards remain visible while mutation controls such as `New contract`, `Update status`, or `Manage billing` do not render.
 
 ### Providers and patients
 
@@ -340,6 +382,13 @@
   `docs/requirements/03_product-backlog_ua.md:24`
   Covers:
   sales role can open provider registry in read-only mode for partner analytics and search, but update routes remain blocked.
+
+- `sales can inspect the provider registry in read-only mode without mutation controls`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:14`
+  `docs/requirements/03_product-backlog_ua.md:24`
+Covers:
+  browser-level provider registry proof for `sales`: `/providers` stays reachable, the shell shows `Nur-Lese-Ansicht`, provider sheet/detail remain visible for partner analytics, and create/save/delete mutation controls stay hidden in read-only mode; the provider-detail `Templates` tab also stays readable but exposes only the read-only notice, with no `New template` or `Save/Create template` actions, and the `Doctors` / `Services` tabs likewise expose no `Edit` or `Delete` controls.
 
 - `provider_and_doctor_detail_expose_linked_patients_and_interactions`
   Source:
@@ -575,7 +624,7 @@
   `docs/backlog/02_rbac-matrix_ua.md:8`
   `docs/architecture/02_field-level-access-control.md:7`
   Covers:
-  CEO Assistant can open patient list/detail in read-only mode, while explicit patient field policies still hide insurance, legal-status, notes and functional labels.
+  CEO Assistant can open patient list/detail in read-only mode, while explicit patient field policies still hide insurance, legal-status, notes and functional labels, and the browser shell exposes no `Neuer Patient`, no `Save patient`, and no assignment section or controls.
 
 - `sales_cannot_open_patient_registry`
   Source:
@@ -675,6 +724,14 @@
   `docs/development-plan.md:129`
   Covers:
   patient privacy erasure requests move through request, approval and execution with audit logging, patient anonymization, chat-message redaction for patient portal identities, and no direct hard-delete path.
+
+- `ceo can approve and execute an erasure request while patient manager gets no execute control`
+  Source:
+  `docs/requirements/04_non-functional-requirements_ua.md:46`
+  `docs/requirements/04_non-functional-requirements_ua.md:87`
+  `docs/development-plan.md:129`
+  Covers:
+  live browser shell now proves the front-end mutation split for privacy execution: `ceo` can approve and execute an erasure request end-to-end, while `patient_manager` can still see the approved item in scope but does not receive the `Ausführen` control for non-`third_party_revoke` request types.
 
 - `restriction_request_updates_legal_status_and_queue_is_assignment_scoped`
   Source:
@@ -928,6 +985,14 @@
   `docs/backlog/03_kpi-catalog_ua.md:129`
   Covers:
   browser-level staff feedback workspace can open a submitted portal feedback row, save a review note through the review sheet and surface the resulting reviewed status plus follow-up note back in the queue card.
+
+- `teamlead and concierge only see their relevant feedback rows in live browser shell`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:400`
+  `docs/backlog/02_rbac-matrix_ua.md:16`
+  `docs/backlog/02_rbac-matrix_ua.md:18`
+  Covers:
+  live browser proof for scoped feedback visibility: once the patient is assigned to both roles, `teamlead_interpreter` sees only the interpreter-related feedback row while `concierge` sees only the service-oriented feedback row, and each role keeps its own review action on the relevant card without inheriting the other queue slice.
 
 - `patient_can_create_appointment_request_and_pm_can_review_queue`
   Source:
@@ -1237,6 +1302,14 @@
   Covers:
   `teamlead_interpreter` can use the same response endpoint when the appointment is explicitly assigned to that teamlead as the interpreter, while unrelated users stay blocked.
 
+- `assigned teamlead interpreter can respond and reassign but cannot manage status checklist or reminder creation`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:214`
+  `docs/backlog/02_rbac-matrix_ua.md:11`
+  `docs/backlog/02_rbac-matrix_ua.md:14`
+  Covers:
+  browser-level appointment shell keeps the split permission model for `teamlead_interpreter`: once explicitly assigned, the teamlead can open the visit, use interpreter-response controls and still access interpreter reassignment, but status transitions, checklist mutation and reminder-creation controls stay unavailable in the same workspace.
+
 ### Operational workflows around visits
 
 - `appointments_report_endpoint_returns_latest_report_state`
@@ -1351,6 +1424,17 @@
   Covers:
   staff roles outside the operational appointment chain stay blocked from the appointments workspace instead of inheriting access through shared navigation or generic staff shell routes.
 
+- `live_rbac_denied_routes_normalize_documents_contracts_invoices_and_cases`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:8`
+  `docs/backlog/02_rbac-matrix_ua.md:11`
+  `docs/backlog/02_rbac-matrix_ua.md:12`
+  `docs/backlog/02_rbac-matrix_ua.md:19`
+  `docs/backlog/02_rbac-matrix_ua.md:20`
+  `docs/backlog/02_rbac-matrix_ua.md:21`
+  Covers:
+  browser-level staff shell normalization now explicitly blocks `sales` from `/documents` and `/contracts`, keeps `concierge` out of `/invoices`, redirects `billing` away from `/cases`, and keeps `it_admin` out of patient-bearing `/patients`, `/cases`, `/reports` and `/documents` routes instead of letting those roles enter a mismatched UI shell before the backend returns `403`.
+
 - `patient_manager_can_log_and_close_appointment_communication`
   Source:
   `docs/requirements/03_product-backlog_ua.md:114`
@@ -1440,6 +1524,13 @@
   Covers:
   browser-level PM lead cards render `Convert` only for qualified leads, keep it disabled with a blocking tooltip when `conversion_ready=false`, and leave it enabled for conversion-ready leads without waiting for a backend `422`.
 
+- `sales can create and qualify a lead but cannot convert it into a patient`
+  Source:
+  `docs/requirements/01_process-mapping_ua.md:48`
+  `docs/backlog/02_rbac-matrix_ua.md:10`
+  Covers:
+  browser-level lead shell for `sales` stays operational but bounded: the role can open `/leads`, create a new intake row and move it into `qualified`, yet the same card never renders `Convert`, so patient creation remains limited to `patient_manager`.
+
 - `list_leads_exposes_conversion_ready_field`
   Source:
   `docs/requirements/01_process-mapping_ua.md:48`
@@ -1505,6 +1596,14 @@
   `docs/backlog/04_implementation-tasks_ua.md:143`
   Covers:
   explicit package coverage can unblock repeat-order execution without separate billing release.
+
+- `billing can manage order financial gates and external invoices without operational phase controls`
+  Source:
+  `docs/requirements/01_process-mapping_ua.md:78`
+  `docs/requirements/01_process-mapping_ua.md:103`
+  `docs/backlog/02_rbac-matrix_ua.md:10`
+  Covers:
+  browser-level order detail preserves the split-permission model for `billing`: financial process gates and the `Externe Rechnungen` intake remain actionable, lifecycle/planning/workflow mutations stay hidden, and execution/follow-up forms degrade into disabled read-only controls instead of actionable writes.
 
 - `existing_customer_recheck_reports_missing_data_and_debt_hold`
   Source:

@@ -68,6 +68,13 @@
   Covers:
   billing role sees invoice-like docs but not medical findings.
 
+- `billing can inspect financial documents but not medical ones and gets no document mutation controls`
+  Source:
+  `docs/requirements/03_product-backlog_ua.md:100`
+  `docs/architecture/02_field-level-access-control.md:46`
+  Covers:
+  browser-level billing shell sees invoice-like financial documents for the patient context, keeps medical documents hidden, and the financial-document detail still exposes no translation, share, portal-release, metadata-save or file-delete mutation controls.
+
 - `sales_and_it_admin_cannot_access_documents_workspace_or_meta_routes`
   Source:
   `docs/backlog/02_rbac-matrix_ua.md:20`
@@ -161,6 +168,27 @@
   `docs/architecture/02_field-level-access-control.md`
   Covers:
   `ceo_assistant` gets read-only access to the provider-share trail for released documents, while create/revoke mutations remain limited to `ceo` and `patient_manager`.
+
+- `ceo assistant can inspect released document share and translation history without mutation controls`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:9`
+  `docs/architecture/02_field-level-access-control.md`
+  Covers:
+  browser-level document detail lets `ceo_assistant` inspect released provider-share trail and completed translation history, while share creation/revoke, translation request creation and translation workspace/status controls stay hidden in the UI shell.
+
+- `interpreter can request document translation but cannot access share portal or translation-status controls`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:11`
+  `docs/architecture/02_field-level-access-control.md`
+  Covers:
+  browser-level interpreter document shell stays request-only: the released patient document detail still exposes translation-request creation, but provider-share UI stays absent, portal release controls stay hidden behind the CEO/PM boundary, and translation status/workspace actions (`Starten`, `Abschließen`, `Abbrechen`, `Workspace speichern`) do not appear.
+
+- `concierge can run translation workflow without provider-share or portal controls`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:13`
+  `docs/architecture/02_field-level-access-control.md`
+  Covers:
+  browser-level concierge document shell keeps the same provider-share and patient-portal boundaries as interpreter-facing roles, but still allows the operational translation workflow: an existing released document translation request can be opened, `Starten` becomes actionable, the status flips to `In Bearbeitung`, and workspace/status controls remain available without exposing provider-share UI or portal-release controls.
 
 - `document_meta_endpoints_return_seeded_categories_and_staff`
   Source:

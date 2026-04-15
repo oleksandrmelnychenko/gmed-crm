@@ -31,18 +31,28 @@
 | `R9 Communication` | internal case comms, clinic/provider comms, tasks, secure patient messaging | `messages_api.rs`, `messages_portal_api.rs`, `feedback_api.rs`, `workflow_checklists_api.rs` | `chat-secure.live.spec.ts`, `staff-workflows.live.spec.ts`, `patient-portal.live.spec.ts` | `Confirmed` | none inside internal scope |
 | `R10 KPI and CEO Dashboard` | CEO dashboard, role KPI, clinic/doctor efficiency reports | `stats_api.rs`, `admin_security_api.rs` | `analytics.live.spec.ts` | `Confirmed` | predictive / AI-style analytics remain outside this MVP epic |
 | `R11 SOP and Learning` | SOP library, acknowledgement, local creation with approval | `sops_api.rs` | `sops.live.spec.ts` | `Confirmed` | none inside current internal scope |
-| `R12 AI Readiness` | medical-data preparation, pseudonymization/anonymization, controlled AI contour | privacy/anonymization backend pieces only; no bounded AI handoff suite | none | `Gap` | `AI / pseudonymization -> AI handoff` remains the main internal product gap |
+| `R12 AI Readiness` | medical-data preparation, pseudonymization/anonymization, controlled AI contour | privacy/anonymization backend pieces only; no bounded AI handoff suite | none | `Gap` | `AI / pseudonymization -> AI handoff` remains the main internal product gap if AI is still in scope |
 
 ## 3. Current Priority Order After This Matrix
 
-Після канонічного `R11` browser proof найближчі реальні missing buckets такі:
+Є два коректні режими читання цієї матриці:
 
-1. `R12 AI Readiness` — це вже не proof gap, а справжній product gap
-2. Зовнішні інтеграції поза current internal scope:
-   - `DATEV`
-   - `E-Rechnung`
-   - real payment checkout / settlement
-   - `eIDAS / QES`
+1. Якщо `AI` лишається в scope, наступний реальний `product gap` — `R12 AI Readiness`.
+2. Якщо `AI` і зовнішні інтеграції свідомо виключені з поточного delivery scope, нових внутрішніх `product gaps` після цієї матриці вже не лишається.
+
+У другому режимі правильний next track такий:
+
+1. `regression / proof hardening`
+2. `exhaustive RBAC matrix density`
+3. `browser mutation coverage`
+4. `commit hygiene / freeze discipline`
+
+Зовнішні інтеграції поза current internal scope:
+
+- `DATEV`
+- `E-Rechnung`
+- real payment checkout / settlement
+- `eIDAS / QES`
 
 ## 4. Як користуватись цією матрицею
 

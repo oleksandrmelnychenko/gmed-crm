@@ -352,7 +352,8 @@ Target-state, але не повністю підтверджено:
 
 ### 8.1 Still real in-scope gaps
 
-- `AI / pseudonymization -> AI handoff` усе ще лишається окремим незакритим workflow: privacy/anonymization mechanics уже є, але bounded pipeline для AI-ready export, role-scoped access і audit trail поверх них не реалізований.
+- Якщо `AI` лишається в scope, `AI / pseudonymization -> AI handoff` усе ще лишається окремим незакритим workflow: privacy/anonymization mechanics уже є, але bounded pipeline для AI-ready export, role-scoped access і audit trail поверх них не реалізований.
+- Якщо `AI` свідомо виключений з поточного scope, цей блок більше не містить активних внутрішніх `product gaps`; далі лишаються лише optional extensions і hardening.
 - У clinical domain ще може знадобитися richer preventive/control program model поверх current `care_path_kind`, якщо source scope вимагатиме окрему preventive orchestration semantics. На поточному current-state це вже не blocker, а potential domain extension.
 
 ### 8.2 Partial / optional tails
@@ -468,4 +469,4 @@ Target-state, але не повністю підтверджено:
 1. `Stabilization / inventory`
 2. `Regression hardening`
 3. optional targeted extensions only if they have real business pressure
-4. `AI / pseudonymization handoff`
+4. `AI / pseudonymization handoff` only if AI is re-included into scope

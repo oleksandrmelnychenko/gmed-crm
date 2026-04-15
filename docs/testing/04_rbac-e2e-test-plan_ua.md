@@ -95,7 +95,7 @@ Current-state:
 
 Current-state:
 - browser smoke/live already покриває patient portal, staff shell, documents release/revoke, template generation, recurring appointments (whole-series cancel + whole-series recurrence reshape), secure chat, lead conversion gate, patient profile role shell.
-- browser live additionally покриває forbidden deep-link normalization для `patient_manager`, `ceo_assistant`, `billing`, `interpreter`, `patient` у [rbac-denied-routes.live.spec.ts](C:/Users/123/Downloads/dev/frontend/tests/e2e-live/rbac-denied-routes.live.spec.ts).
+- browser live additionally покриває forbidden deep-link normalization для `patient_manager`, `ceo_assistant`, `billing`, `sales`, `concierge`, `it_admin`, `interpreter`, `patient` у [rbac-denied-routes.live.spec.ts](C:/Users/123/Downloads/dev/frontend/tests/e2e-live/rbac-denied-routes.live.spec.ts), включно з explicit high-risk cells `sales -> /documents`, `sales -> /contracts`, `concierge -> /invoices`, `billing -> /cases`, `it_admin -> /patients|/cases|/reports|/documents`.
 - На поточному freeze зрізі browser coverage теж повністю зелена: `frontend npm run test:e2e` = `22/22`, `frontend npm run test:e2e:live` = `47/47`.
 
 ### 4.3. Vitest frontend unit
