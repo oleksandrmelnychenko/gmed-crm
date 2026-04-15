@@ -72,6 +72,7 @@ const TREATMENT_PLAN_ARIAL_TTF: &[u8] =
     include_bytes!("../../../../docs/comparison/fonts/arial.ttf");
 const TREATMENT_PLAN_ARIAL_BOLD_TTF: &[u8] =
     include_bytes!("../../../../docs/comparison/fonts/arialbd.ttf");
+const PROVIDER_TEMPLATE_ID_PREFIX: &str = "provider_template:";
 
 #[derive(Clone, Copy)]
 struct DocumentTemplateDefinition {
@@ -88,6 +89,28 @@ struct DocumentTemplateDefinition {
     is_medical: bool,
     languages: &'static [&'static str],
     text_block_keys: &'static [&'static str],
+}
+
+#[derive(Clone)]
+struct ProviderDocumentTemplate {
+    id: Uuid,
+    provider_id: Uuid,
+    provider_name: String,
+    doctor_id: Option<Uuid>,
+    doctor_name: Option<String>,
+    label: String,
+    description: Option<String>,
+    art: String,
+    category: String,
+    default_auto_name: String,
+    default_status: String,
+    default_visibility: String,
+    is_medical: bool,
+    supported_languages: Vec<String>,
+    body_de: Option<String>,
+    body_en: Option<String>,
+    body_uk: Option<String>,
+    body_ru: Option<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -209,6 +232,28 @@ struct GeneratedFrameworkContractContext {
     generated_at: chrono::DateTime<chrono::Utc>,
 }
 
+struct GeneratedVisaInvitationContext {
+    patient_pid: String,
+    patient_name: String,
+    patient_title: Option<String>,
+    birth_date: Option<NaiveDate>,
+    language: String,
+    auto_name: String,
+    title_override: Option<String>,
+    introduction: Option<String>,
+    closing_note: Option<String>,
+    nationality: Option<String>,
+    residence_country: Option<String>,
+    provider_name: Option<String>,
+    doctor_name: Option<String>,
+    appointment_title: Option<String>,
+    appointment_date: Option<NaiveDate>,
+    appointment_time: Option<NaiveTime>,
+    location: Option<String>,
+    order_number: Option<String>,
+    generated_at: chrono::DateTime<chrono::Utc>,
+}
+
 struct GeneratedPatientStickerContext {
     patient_pid: String,
     patient_title: Option<String>,
@@ -222,6 +267,26 @@ struct GeneratedPatientStickerContext {
     format: PatientLabelFormat,
     auto_name: String,
     language: String,
+    generated_at: chrono::DateTime<chrono::Utc>,
+}
+
+struct GeneratedProviderTemplateContext {
+    patient_pid: String,
+    patient_name: String,
+    patient_title: Option<String>,
+    birth_date: Option<NaiveDate>,
+    language: String,
+    auto_name: String,
+    title: String,
+    description: Option<String>,
+    provider_name: String,
+    doctor_name: Option<String>,
+    appointment_title: Option<String>,
+    appointment_date: Option<NaiveDate>,
+    appointment_time: Option<NaiveTime>,
+    location: Option<String>,
+    order_number: Option<String>,
+    body_paragraphs: Vec<String>,
     generated_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -336,6 +401,21 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
             "cost_passthrough_clause",
             "privacy_contract_clause",
         ],
+    },
+    DocumentTemplateDefinition {
+        id: "visa_invitation_letter",
+        label: "Visa Invitation Letter",
+        description: "Formal invitation letter for embassy or consulate visa processing based on patient and appointment context.",
+        art: "visa_invitation",
+        category: "generated",
+        default_auto_name: "Visa invitation",
+        default_status: "draft",
+        default_visibility: "patient_visible",
+        mime_type: "application/pdf",
+        file_extension: "pdf",
+        is_medical: false,
+        languages: &["de", "en", "uk"],
+        text_block_keys: &[],
     },
     DocumentTemplateDefinition {
         id: "patient_sticker_compact",
@@ -552,6 +632,10 @@ struct DocumentListQuery {
     visibility: Option<String>,
     art: Option<String>,
     category: Option<String>,
+    date_from: Option<String>,
+    date_to: Option<String>,
+    klinik: Option<String>,
+    ursprung: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -644,6 +728,34 @@ struct GenerateDocumentRequest {
     text_block_keys: Option<Vec<String>>,
 }
 
+struct GeneratedProviderDocumentResult {
+    id: Uuid,
+    auto_name: String,
+    original_filename: String,
+    mime_type: &'static str,
+    file_size: i64,
+    language: String,
+    preview_html: String,
+}
+
+struct PortalReleaseResult {
+    document_id: Uuid,
+    patient_id: Uuid,
+    visibility: &'static str,
+    recipient_count: usize,
+    created_share_count: usize,
+    requires_confirmation: bool,
+}
+
+#[derive(Default)]
+pub(crate) struct AutoPreparationDocumentSendResult {
+    pub(crate) template_count: usize,
+    pub(crate) generated_document_count: usize,
+    pub(crate) reused_document_count: usize,
+    pub(crate) portal_release_count: usize,
+    pub(crate) marked_sent: bool,
+}
+
 fn err(status: StatusCode, message: &str) -> axum::response::Response {
     (
         status,
@@ -665,6 +777,29 @@ fn sanitize_filename(name: &str) -> String {
             }
         })
         .collect()
+}
+
+fn compact_storage_filename(name: &str, max_len: usize) -> String {
+    let sanitized = sanitize_filename(name);
+    if sanitized.len() <= max_len {
+        return sanitized;
+    }
+
+    let (stem, extension) = match sanitized.rsplit_once('.') {
+        Some((stem, extension)) if !stem.is_empty() && !extension.is_empty() => {
+            (stem, Some(extension))
+        }
+        _ => (sanitized.as_str(), None),
+    };
+
+    let reserved = extension.map(|value| value.len() + 1).unwrap_or(0);
+    let stem_max_len = max_len.saturating_sub(reserved).max(1);
+    let truncated_stem: String = stem.chars().take(stem_max_len).collect();
+
+    match extension {
+        Some(extension) => format!("{truncated_stem}.{extension}"),
+        None => truncated_stem,
+    }
 }
 
 fn escape_html(value: &str) -> String {
@@ -1346,6 +1481,7 @@ fn normalize_document_language(value: Option<&str>) -> Option<&'static str> {
         | Some("de-ch") => Some("de"),
         Some("uk") | Some("uk-ua") | Some("ua") | Some("ukrainian") => Some("uk"),
         Some("en") | Some("en-gb") | Some("en-us") | Some("english") => Some("en"),
+        Some("ru") | Some("ru-ru") | Some("russian") => Some("ru"),
         _ => None,
     }
 }
@@ -1379,11 +1515,247 @@ fn document_template_by_id(template_id: &str) -> Option<DocumentTemplateDefiniti
         .find(|template| template.id == template_id)
 }
 
+fn provider_template_public_id(template_id: Uuid) -> String {
+    format!("{PROVIDER_TEMPLATE_ID_PREFIX}{template_id}")
+}
+
+fn parse_provider_template_public_id(template_id: &str) -> Option<Uuid> {
+    template_id
+        .trim()
+        .strip_prefix(PROVIDER_TEMPLATE_ID_PREFIX)
+        .and_then(|value| Uuid::parse_str(value).ok())
+}
+
+fn resolve_owned_document_language(
+    requested: Option<&str>,
+    patient_languages: &[String],
+    supported_languages: &[String],
+) -> String {
+    if let Some(language) = normalize_document_language(requested)
+        && supported_languages
+            .iter()
+            .any(|supported| supported == language)
+    {
+        return language.to_string();
+    }
+
+    for patient_language in patient_languages {
+        if let Some(language) = normalize_document_language(Some(patient_language.as_str()))
+            && supported_languages
+                .iter()
+                .any(|supported| supported == language)
+        {
+            return language.to_string();
+        }
+    }
+
+    supported_languages
+        .first()
+        .cloned()
+        .unwrap_or_else(|| "de".to_string())
+}
+
 fn document_text_block_by_key(key: &str) -> Option<TextBlockDefinition> {
     DOCUMENT_TEXT_BLOCKS
         .iter()
         .copied()
         .find(|block| block.key == key)
+}
+
+async fn load_active_provider_document_templates(
+    state: &AppState,
+) -> Result<Vec<ProviderDocumentTemplate>, axum::response::Response> {
+    let rows = match sqlx::query(
+        r#"SELECT pt.id, pt.provider_id, provider.name AS provider_name,
+                  pt.doctor_id, doctor.name AS doctor_name,
+                  pt.label, pt.description, pt.art, pt.category,
+                  pt.default_auto_name, pt.default_status, pt.default_visibility,
+                  pt.is_medical, pt.supported_languages,
+                  pt.body_de, pt.body_en, pt.body_uk, pt.body_ru,
+                  pt.auto_send_on_confirmed_appointment
+           FROM provider_templates pt
+           JOIN providers provider ON provider.id = pt.provider_id
+           LEFT JOIN provider_doctors doctor ON doctor.id = pt.doctor_id
+           WHERE pt.is_active = true
+           ORDER BY provider.name, pt.label"#,
+    )
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::error!(error = %error, "load provider document templates");
+            return Err(err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load provider templates",
+            ));
+        }
+    };
+
+    Ok(rows
+        .into_iter()
+        .map(provider_document_template_from_row)
+        .collect())
+}
+
+fn provider_document_template_from_row(row: sqlx::postgres::PgRow) -> ProviderDocumentTemplate {
+    ProviderDocumentTemplate {
+        id: row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
+        provider_id: row
+            .try_get::<Uuid, _>("provider_id")
+            .unwrap_or_else(|_| Uuid::nil()),
+        provider_name: row
+            .try_get::<String, _>("provider_name")
+            .unwrap_or_default(),
+        doctor_id: row
+            .try_get::<Option<Uuid>, _>("doctor_id")
+            .unwrap_or_default(),
+        doctor_name: row
+            .try_get::<Option<String>, _>("doctor_name")
+            .unwrap_or_default(),
+        label: row.try_get::<String, _>("label").unwrap_or_default(),
+        description: row
+            .try_get::<Option<String>, _>("description")
+            .unwrap_or_default(),
+        art: row.try_get::<String, _>("art").unwrap_or_default(),
+        category: row.try_get::<String, _>("category").unwrap_or_default(),
+        default_auto_name: row
+            .try_get::<String, _>("default_auto_name")
+            .unwrap_or_default(),
+        default_status: row
+            .try_get::<String, _>("default_status")
+            .unwrap_or_else(|_| "draft".to_string()),
+        default_visibility: row
+            .try_get::<String, _>("default_visibility")
+            .unwrap_or_else(|_| "patient_visible".to_string()),
+        is_medical: row.try_get::<bool, _>("is_medical").unwrap_or(true),
+        supported_languages: row
+            .try_get::<Vec<String>, _>("supported_languages")
+            .unwrap_or_default(),
+        body_de: row
+            .try_get::<Option<String>, _>("body_de")
+            .unwrap_or_default(),
+        body_en: row
+            .try_get::<Option<String>, _>("body_en")
+            .unwrap_or_default(),
+        body_uk: row
+            .try_get::<Option<String>, _>("body_uk")
+            .unwrap_or_default(),
+        body_ru: row
+            .try_get::<Option<String>, _>("body_ru")
+            .unwrap_or_default(),
+    }
+}
+
+async fn load_provider_document_templates_for_confirmed_appointment(
+    state: &AppState,
+    provider_id: Uuid,
+    doctor_id: Option<Uuid>,
+) -> Result<Vec<ProviderDocumentTemplate>, axum::response::Response> {
+    let rows = match sqlx::query(
+        r#"SELECT pt.id, pt.provider_id, provider.name AS provider_name,
+                  pt.doctor_id, doctor.name AS doctor_name,
+                  pt.label, pt.description, pt.art, pt.category,
+                  pt.default_auto_name, pt.default_status, pt.default_visibility,
+                  pt.is_medical, pt.supported_languages,
+                  pt.body_de, pt.body_en, pt.body_uk, pt.body_ru,
+                  pt.auto_send_on_confirmed_appointment
+           FROM provider_templates pt
+           JOIN providers provider ON provider.id = pt.provider_id
+           LEFT JOIN provider_doctors doctor ON doctor.id = pt.doctor_id
+           WHERE pt.is_active = true
+             AND pt.auto_send_on_confirmed_appointment = true
+             AND pt.provider_id = $1
+             AND (pt.doctor_id IS NULL OR pt.doctor_id = $2)
+           ORDER BY pt.doctor_id NULLS LAST, pt.label, pt.created_at"#,
+    )
+    .bind(provider_id)
+    .bind(doctor_id)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::error!(
+                error = %error,
+                provider_id = %provider_id,
+                doctor_id = ?doctor_id,
+                "load provider auto-send templates"
+            );
+            return Err(err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load provider templates",
+            ));
+        }
+    };
+
+    Ok(rows
+        .into_iter()
+        .map(provider_document_template_from_row)
+        .collect())
+}
+
+async fn load_provider_document_template(
+    state: &AppState,
+    template_id: Uuid,
+) -> Result<Option<ProviderDocumentTemplate>, axum::response::Response> {
+    let templates = load_active_provider_document_templates(state).await?;
+    Ok(templates
+        .into_iter()
+        .find(|template| template.id == template_id))
+}
+
+struct ProviderTemplateDeliveryRecord<'a> {
+    appointment_id: Uuid,
+    template_id: Uuid,
+    document_id: Option<Uuid>,
+    triggered_by: Uuid,
+    delivery_status: &'a str,
+    error_message: Option<&'a str>,
+    delivered_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+async fn record_appointment_provider_template_delivery(
+    state: &AppState,
+    record: ProviderTemplateDeliveryRecord<'_>,
+) -> Result<(), axum::response::Response> {
+    sqlx::query(
+        r#"INSERT INTO appointment_provider_template_deliveries (
+                appointment_id, template_id, document_id, triggered_by,
+                delivery_status, error_message, delivered_at
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+           ON CONFLICT (appointment_id, template_id) DO UPDATE
+           SET document_id = EXCLUDED.document_id,
+               triggered_by = EXCLUDED.triggered_by,
+               delivery_status = EXCLUDED.delivery_status,
+               error_message = EXCLUDED.error_message,
+               delivered_at = EXCLUDED.delivered_at,
+               updated_at = now()"#,
+    )
+    .bind(record.appointment_id)
+    .bind(record.template_id)
+    .bind(record.document_id)
+    .bind(record.triggered_by)
+    .bind(record.delivery_status)
+    .bind(record.error_message)
+    .bind(record.delivered_at)
+    .execute(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(
+            error = %error,
+            appointment_id = %record.appointment_id,
+            template_id = %record.template_id,
+            delivery_status = %record.delivery_status,
+            "record appointment provider template delivery"
+        );
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to record provider template delivery",
+        )
+    })?;
+
+    Ok(())
 }
 
 fn translated_text_block_body(block: TextBlockDefinition, language: &str) -> &'static str {
@@ -1397,6 +1769,7 @@ fn translated_text_block_body(block: TextBlockDefinition, language: &str) -> &'s
 fn translated_label(language: &str, key: &str) -> &'static str {
     match (language, key) {
         ("uk", "framework_contract_title") => "Рамковий договір для",
+        ("uk", "visa_invitation_title") => "Лист-запрошення для візи для",
         ("uk", "contract_data_heading") => "Договірні реквізити",
         ("uk", "contract_terms_heading") => "Стандартні умови",
         ("uk", "contract_conditions_heading") => "Додаткові умови",
@@ -1444,6 +1817,9 @@ fn translated_label(language: &str, key: &str) -> &'static str {
         ("uk", "patient_id") => "ID пацієнта",
         ("uk", "birth_date") => "Дата народження",
         ("uk", "order_number") => "Замовлення",
+        ("uk", "nationality") => "Громадянство",
+        ("uk", "residence_country") => "Країна проживання",
+        ("uk", "appointment") => "Візит",
         ("uk", "intro_heading") => "Короткий вступ",
         ("uk", "program_heading") => "Програма по днях",
         ("uk", "notes_heading") => "Важливі вказівки",
@@ -1457,6 +1833,7 @@ fn translated_label(language: &str, key: &str) -> &'static str {
         ("uk", "no_medications") => "У вибраному контексті ще немає медикаментів.",
         ("uk", "draft_badge") => "Робочий документ",
         ("en", "framework_contract_title") => "Framework contract for",
+        ("en", "visa_invitation_title") => "Visa invitation letter for",
         ("en", "contract_data_heading") => "Contract details",
         ("en", "contract_terms_heading") => "Standard clauses",
         ("en", "contract_conditions_heading") => "Additional conditions",
@@ -1506,6 +1883,9 @@ fn translated_label(language: &str, key: &str) -> &'static str {
         ("en", "patient_id") => "Patient ID",
         ("en", "birth_date") => "Date of birth",
         ("en", "order_number") => "Order",
+        ("en", "nationality") => "Nationality",
+        ("en", "residence_country") => "Country of residence",
+        ("en", "appointment") => "Appointment",
         ("en", "intro_heading") => "Introduction",
         ("en", "program_heading") => "Schedule by day",
         ("en", "notes_heading") => "Important notes",
@@ -1519,6 +1899,7 @@ fn translated_label(language: &str, key: &str) -> &'static str {
         ("en", "no_medications") => "No medication is available for the selected context yet.",
         ("en", "draft_badge") => "Working document",
         (_, "framework_contract_title") => "Rahmenvertrag für",
+        (_, "visa_invitation_title") => "Visa-Einladungsschreiben für",
         (_, "contract_data_heading") => "Vertragsdaten",
         (_, "contract_terms_heading") => "Standardklauseln",
         (_, "contract_conditions_heading") => "Zusätzliche Bedingungen",
@@ -1570,6 +1951,9 @@ fn translated_label(language: &str, key: &str) -> &'static str {
         (_, "patient_id") => "Patienten-ID",
         (_, "birth_date") => "Geburtsdatum",
         (_, "order_number") => "Auftrag",
+        (_, "nationality") => "Nationalität",
+        (_, "residence_country") => "Wohnsitzland",
+        (_, "appointment") => "Termin",
         (_, "intro_heading") => "Einleitung",
         (_, "program_heading") => "Programm nach Tagen",
         (_, "notes_heading") => "Wichtige Hinweise",
@@ -2050,6 +2434,9 @@ fn default_generated_document_name(
         ("framework_contract", "uk") => "Рамковий договір",
         ("framework_contract", "en") => "Framework contract",
         ("framework_contract", _) => "Rahmenvertrag",
+        ("visa_invitation_letter", "uk") => "Візове запрошення",
+        ("visa_invitation_letter", "en") => "Visa invitation letter",
+        ("visa_invitation_letter", _) => "Visa-Einladung",
         (
             "patient_sticker_compact" | "patient_sticker_standard" | "patient_sticker_sheet",
             "uk",
@@ -4039,6 +4426,512 @@ fn build_framework_contract_pdf(
         .save(&PdfSaveOptions::default(), &mut save_warnings))
 }
 
+fn visa_invitation_summary_lines(context: &GeneratedVisaInvitationContext) -> Vec<String> {
+    let mut lines = Vec::new();
+    let patient_line = match context
+        .patient_title
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(title_prefix) => format!("{title_prefix} {}", context.patient_name),
+        None => context.patient_name.clone(),
+    };
+
+    match context.language.as_str() {
+        "uk" => {
+            lines.push(format!(
+                "Цим листом підтверджується, що {patient_line} запрошено до медичної координації та консультації{}.",
+                context
+                    .provider_name
+                    .as_deref()
+                    .filter(|value| !value.is_empty())
+                    .map(|value| format!(" з {}", value))
+                    .unwrap_or_default()
+            ));
+            if let Some(appointment_date) = context.appointment_date {
+                let mut appointment_line = format!(
+                    "Запланований візит: {}",
+                    format_localized_date(appointment_date, &context.language)
+                );
+                if let Some(appointment_time) = context.appointment_time {
+                    appointment_line.push_str(&format!(" о {}", appointment_time.format("%H:%M")));
+                }
+                if let Some(location) = context
+                    .location
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                {
+                    appointment_line.push_str(&format!(" у {location}"));
+                }
+                lines.push(appointment_line);
+            }
+            if let Some(appointment_title) = context
+                .appointment_title
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                lines.push(format!("Мета поїздки: {appointment_title}."));
+            }
+            if let Some(order_number) = context
+                .order_number
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                lines.push(format!("Внутрішній номер координації: {order_number}."));
+            }
+            lines.push(
+                "Лист призначений для подання до посольства або консульства в межах візової заяви."
+                    .to_string(),
+            );
+        }
+        "en" => {
+            lines.push(format!(
+                "This letter confirms that {patient_line} is invited for medical coordination and consultation{}.",
+                context
+                    .provider_name
+                    .as_deref()
+                    .filter(|value| !value.is_empty())
+                    .map(|value| format!(" with {}", value))
+                    .unwrap_or_default()
+            ));
+            if let Some(appointment_date) = context.appointment_date {
+                let mut appointment_line = format!(
+                    "Planned appointment: {}",
+                    format_localized_date(appointment_date, &context.language)
+                );
+                if let Some(appointment_time) = context.appointment_time {
+                    appointment_line.push_str(&format!(" at {}", appointment_time.format("%H:%M")));
+                }
+                if let Some(location) = context
+                    .location
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                {
+                    appointment_line.push_str(&format!(" in {location}"));
+                }
+                lines.push(appointment_line);
+            }
+            if let Some(appointment_title) = context
+                .appointment_title
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                lines.push(format!("Purpose of travel: {appointment_title}."));
+            }
+            if let Some(order_number) = context
+                .order_number
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                lines.push(format!("Internal coordination reference: {order_number}."));
+            }
+            lines.push(
+                "This document is intended for submission to the embassy or consulate as part of the visa application."
+                    .to_string(),
+            );
+        }
+        _ => {
+            lines.push(format!(
+                "Hiermit bestätigen wir, dass {patient_line} zur medizinischen Koordination und Vorstellung{} eingeladen ist.",
+                context
+                    .provider_name
+                    .as_deref()
+                    .filter(|value| !value.is_empty())
+                    .map(|value| format!(" bei {}", value))
+                    .unwrap_or_default()
+            ));
+            if let Some(appointment_date) = context.appointment_date {
+                let mut appointment_line = format!(
+                    "Geplanter Termin: {}",
+                    format_localized_date(appointment_date, &context.language)
+                );
+                if let Some(appointment_time) = context.appointment_time {
+                    appointment_line.push_str(&format!(" um {}", appointment_time.format("%H:%M")));
+                }
+                if let Some(location) = context
+                    .location
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                {
+                    appointment_line.push_str(&format!(" in {location}"));
+                }
+                lines.push(appointment_line);
+            }
+            if let Some(appointment_title) = context
+                .appointment_title
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                lines.push(format!("Zweck der Reise: {appointment_title}."));
+            }
+            if let Some(order_number) = context
+                .order_number
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                lines.push(format!("Interne Koordinationsnummer: {order_number}."));
+            }
+            lines.push(
+                "Dieses Schreiben dient zur Vorlage bei Botschaft oder Konsulat im Rahmen des Visumantrags."
+                    .to_string(),
+            );
+        }
+    }
+
+    lines
+}
+
+fn build_visa_invitation_html(context: &GeneratedVisaInvitationContext) -> String {
+    let title = context.title_override.clone().unwrap_or_else(|| {
+        format!(
+            "{} {}",
+            translated_label(&context.language, "visa_invitation_title"),
+            context.patient_name
+        )
+    });
+    let birth_date = context
+        .birth_date
+        .map(|value| value.format("%d.%m.%Y").to_string())
+        .unwrap_or_else(|| "n/a".to_string());
+    let nationality = context
+        .nationality
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "n/a".to_string());
+    let residence_country = context
+        .residence_country
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "n/a".to_string());
+    let provider_name = context
+        .provider_name
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "n/a".to_string());
+    let doctor_name = context
+        .doctor_name
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "n/a".to_string());
+
+    let intro_section = context
+        .introduction
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            format!(
+                "<section class=\"intro\"><h2>{}</h2><p>{}</p></section>",
+                escape_html(translated_label(&context.language, "intro_heading")),
+                escape_html(value)
+            )
+        })
+        .unwrap_or_default();
+
+    let body_markup = visa_invitation_summary_lines(context)
+        .into_iter()
+        .map(|line| format!("<p>{}</p>", escape_html(&line)))
+        .collect::<Vec<_>>()
+        .join("");
+
+    let closing_markup = context
+        .closing_note
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| format!("<p>{}</p>", escape_html(value)))
+        .unwrap_or_default();
+
+    format!(
+        "<!doctype html><html lang=\"{lang}\"><head><meta charset=\"utf-8\" /><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" /><title>{title}</title><style>
+        :root {{ color-scheme: light; }}
+        * {{ box-sizing: border-box; }}
+        body {{ margin: 0; background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%); color: #0f172a; font-family: Georgia, 'Times New Roman', serif; }}
+        main {{ max-width: 900px; margin: 0 auto; padding: 28px; }}
+        .sheet {{ background: white; border-radius: 26px; padding: 34px; box-shadow: 0 18px 60px rgba(15, 23, 42, 0.1); }}
+        .badge {{ display: inline-block; border-radius: 999px; background: #e0f2fe; color: #075985; padding: 6px 12px; font: 700 12px/1.2 Arial, sans-serif; letter-spacing: 0.08em; text-transform: uppercase; }}
+        h1 {{ margin: 16px 0 10px; font-size: 34px; line-height: 1.15; }}
+        h2 {{ margin: 0 0 10px; font-size: 18px; line-height: 1.25; }}
+        p {{ margin: 0; line-height: 1.65; }}
+        .meta-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-top: 20px; }}
+        .meta-card {{ border: 1px solid #dbe4ef; border-radius: 18px; background: #f8fafc; padding: 14px 16px; }}
+        .meta-card .label {{ display: block; margin-bottom: 6px; color: #475569; font: 700 11px/1.2 Arial, sans-serif; text-transform: uppercase; letter-spacing: 0.08em; }}
+        .intro, .body, .closing {{ margin-top: 24px; padding: 20px 22px; border-radius: 20px; border: 1px solid #dbe4ef; background: #ffffff; }}
+        .body {{ display: grid; gap: 12px; background: #f8fafc; }}
+        .footer {{ margin-top: 28px; color: #64748b; font: 500 12px/1.5 Arial, sans-serif; }}
+        @media print {{
+          body {{ background: #fff; }}
+          main {{ max-width: none; padding: 0; }}
+          .sheet {{ box-shadow: none; border-radius: 0; padding: 0; }}
+        }}
+        </style></head><body><main><div class=\"sheet\"><div class=\"badge\">{draft_badge}</div><h1>{title}</h1>
+        <div class=\"meta-grid\">
+          <div class=\"meta-card\"><span class=\"label\">{created_on}</span><strong>{created_value}</strong></div>
+          <div class=\"meta-card\"><span class=\"label\">{patient_id_label}</span><strong>{patient_pid}</strong></div>
+          <div class=\"meta-card\"><span class=\"label\">{birth_date_label}</span><strong>{birth_date}</strong></div>
+          <div class=\"meta-card\"><span class=\"label\">{nationality_label}</span><strong>{nationality}</strong></div>
+          <div class=\"meta-card\"><span class=\"label\">{residence_country_label}</span><strong>{residence_country}</strong></div>
+          <div class=\"meta-card\"><span class=\"label\">{provider_label}</span><strong>{provider_name}</strong></div>
+          <div class=\"meta-card\"><span class=\"label\">{doctor_label}</span><strong>{doctor_name}</strong></div>
+        </div>
+        {intro_section}
+        <section class=\"body\">{body_markup}</section>
+        {closing_section}
+        <div class=\"footer\">{generated_footer}: {generated_at}</div>
+        </div></main></body></html>",
+        lang = escape_html(&context.language),
+        title = escape_html(&title),
+        draft_badge = escape_html(translated_label(&context.language, "draft_badge")),
+        created_on = escape_html(translated_label(&context.language, "created_on")),
+        created_value = escape_html(&context.generated_at.format("%d.%m.%Y").to_string()),
+        patient_id_label = escape_html(translated_label(&context.language, "patient_id")),
+        patient_pid = escape_html(&context.patient_pid),
+        birth_date_label = escape_html(translated_label(&context.language, "birth_date")),
+        birth_date = escape_html(&birth_date),
+        nationality_label = escape_html(translated_label(&context.language, "nationality")),
+        nationality = escape_html(&nationality),
+        residence_country_label =
+            escape_html(translated_label(&context.language, "residence_country")),
+        residence_country = escape_html(&residence_country),
+        provider_label = escape_html(translated_label(&context.language, "provider")),
+        provider_name = escape_html(&provider_name),
+        doctor_label = escape_html(translated_label(&context.language, "doctor")),
+        doctor_name = escape_html(&doctor_name),
+        intro_section = intro_section,
+        body_markup = body_markup,
+        closing_section = if closing_markup.is_empty() {
+            String::new()
+        } else {
+            format!("<section class=\"closing\">{closing_markup}</section>")
+        },
+        generated_footer = escape_html(translated_label(&context.language, "generated_footer")),
+        generated_at = escape_html(&context.generated_at.to_rfc3339()),
+    )
+}
+
+fn build_visa_invitation_pdf(
+    context: &GeneratedVisaInvitationContext,
+) -> Result<Vec<u8>, &'static str> {
+    let mut font_warnings: Vec<String> = Vec::new();
+    let regular_font = ParsedFont::from_bytes(TREATMENT_PLAN_ARIAL_TTF, 0, &mut font_warnings)
+        .ok_or("Failed to load PDF font")?;
+    let bold_font = ParsedFont::from_bytes(TREATMENT_PLAN_ARIAL_BOLD_TTF, 0, &mut font_warnings)
+        .ok_or("Failed to load PDF font")?;
+
+    let mut document = PdfDocument::new(&context.auto_name);
+    let regular_font_id = document.add_font(&regular_font);
+    let bold_font_id = document.add_font(&bold_font);
+    let regular_handle = PdfFontHandle::External(regular_font_id);
+    let bold_handle = PdfFontHandle::External(bold_font_id);
+
+    let title = context.title_override.clone().unwrap_or_else(|| {
+        format!(
+            "{} {}",
+            translated_label(&context.language, "visa_invitation_title"),
+            context.patient_name
+        )
+    });
+    let birth_date = context
+        .birth_date
+        .map(|value| value.format("%d.%m.%Y").to_string())
+        .unwrap_or_else(|| "n/a".to_string());
+    let footer_text = format!(
+        "{}: {}",
+        translated_label(&context.language, "generated_footer"),
+        context.generated_at.format("%d.%m.%Y %H:%M UTC")
+    );
+    let mut layout = TreatmentPlanPdfLayout::new(footer_text, regular_handle, bold_handle);
+
+    layout.text_block(
+        translated_label(&context.language, "draft_badge"),
+        10.0,
+        true,
+        0.0,
+        TreatmentPlanPdfColor::Primary,
+        0.0,
+        4.0,
+    );
+    layout.text_block(
+        &title,
+        22.0,
+        true,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        6.0,
+    );
+
+    for line in [
+        format!(
+            "{}: {}",
+            translated_label(&context.language, "created_on"),
+            context.generated_at.format("%d.%m.%Y")
+        ),
+        format!(
+            "{}: {}",
+            translated_label(&context.language, "patient_id"),
+            context.patient_pid
+        ),
+        format!(
+            "{}: {}",
+            translated_label(&context.language, "birth_date"),
+            birth_date
+        ),
+        format!(
+            "{}: {}",
+            translated_label(&context.language, "nationality"),
+            context.nationality.as_deref().unwrap_or("n/a")
+        ),
+        format!(
+            "{}: {}",
+            translated_label(&context.language, "residence_country"),
+            context.residence_country.as_deref().unwrap_or("n/a")
+        ),
+    ] {
+        layout.text_block(
+            &line,
+            11.0,
+            false,
+            0.0,
+            TreatmentPlanPdfColor::Muted,
+            0.0,
+            1.0,
+        );
+    }
+
+    if let Some(provider_name) = context
+        .provider_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        layout.text_block(
+            &format!(
+                "{}: {}",
+                translated_label(&context.language, "provider"),
+                provider_name
+            ),
+            11.0,
+            false,
+            0.0,
+            TreatmentPlanPdfColor::Muted,
+            0.0,
+            1.0,
+        );
+    }
+    if let Some(doctor_name) = context
+        .doctor_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        layout.text_block(
+            &format!(
+                "{}: {}",
+                translated_label(&context.language, "doctor"),
+                doctor_name
+            ),
+            11.0,
+            false,
+            0.0,
+            TreatmentPlanPdfColor::Muted,
+            0.0,
+            1.0,
+        );
+    }
+    if let Some(order_number) = context
+        .order_number
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        layout.text_block(
+            &format!(
+                "{}: {}",
+                translated_label(&context.language, "order_number"),
+                order_number
+            ),
+            11.0,
+            false,
+            0.0,
+            TreatmentPlanPdfColor::Muted,
+            0.0,
+            1.0,
+        );
+    }
+
+    if let Some(introduction) = context
+        .introduction
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        layout.text_block(
+            translated_label(&context.language, "intro_heading"),
+            13.0,
+            true,
+            0.0,
+            TreatmentPlanPdfColor::Body,
+            4.0,
+            2.0,
+        );
+        layout.text_block(
+            introduction,
+            11.0,
+            false,
+            0.0,
+            TreatmentPlanPdfColor::Body,
+            0.0,
+            3.0,
+        );
+    }
+
+    for paragraph in visa_invitation_summary_lines(context) {
+        layout.text_block(
+            &paragraph,
+            11.0,
+            false,
+            0.0,
+            TreatmentPlanPdfColor::Body,
+            0.0,
+            3.0,
+        );
+    }
+
+    if let Some(closing) = context
+        .closing_note
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        layout.text_block(
+            closing,
+            11.0,
+            false,
+            0.0,
+            TreatmentPlanPdfColor::Body,
+            3.0,
+            0.0,
+        );
+    }
+
+    let pages = layout.finish();
+    let mut save_warnings: Vec<PdfWarnMsg> = Vec::new();
+    Ok(document
+        .with_pages(pages)
+        .save(&PdfSaveOptions::default(), &mut save_warnings))
+}
+
 fn format_sticker_birth_date(value: NaiveDate) -> String {
     value.format("%d.%m.%Y").to_string()
 }
@@ -4295,6 +5188,427 @@ fn build_patient_sticker_pdf(
     let mut save_warnings: Vec<PdfWarnMsg> = Vec::new();
     Ok(document
         .with_pages(vec![PdfPage::new(Mm(width_mm), Mm(height_mm), ops)])
+        .save(&PdfSaveOptions::default(), &mut save_warnings))
+}
+
+fn provider_template_body_for_language<'a>(
+    template: &'a ProviderDocumentTemplate,
+    language: &str,
+) -> Option<&'a str> {
+    match language {
+        "uk" => template.body_uk.as_deref(),
+        "en" => template.body_en.as_deref(),
+        "ru" => template.body_ru.as_deref(),
+        _ => template.body_de.as_deref(),
+    }
+}
+
+fn translated_provider_template_label(language: &str, key: &str) -> &'static str {
+    match (language, key) {
+        ("uk", "provider_template_title") => "Шаблон партнера",
+        ("uk", "appointment") => "Візит",
+        ("uk", "generated_on") => "Згенеровано",
+        ("uk", "template_body_missing") => "У шаблоні немає тексту для вибраної мови.",
+        ("ru", "provider_template_title") => "Шаблон партнера",
+        ("ru", "appointment") => "Визит",
+        ("ru", "generated_on") => "Сформировано",
+        ("ru", "template_body_missing") => "Для выбранного языка в шаблоне нет текста.",
+        ("en", "provider_template_title") => "Partner template",
+        ("en", "appointment") => "Appointment",
+        ("en", "generated_on") => "Generated on",
+        ("en", "template_body_missing") => {
+            "This template does not contain text for the selected language."
+        }
+        (_, "provider_template_title") => "Partnervorlage",
+        (_, "appointment") => "Termin",
+        (_, "generated_on") => "Erstellt am",
+        (_, "template_body_missing") => {
+            "Für die ausgewählte Sprache ist kein Vorlagentext hinterlegt."
+        }
+        _ => "",
+    }
+}
+
+fn apply_provider_template_placeholders(
+    body: &str,
+    replacements: &BTreeMap<&str, String>,
+) -> String {
+    let mut rendered = body.to_string();
+    for (key, value) in replacements {
+        rendered = rendered.replace(&format!("{{{{{key}}}}}"), value);
+    }
+    rendered
+}
+
+fn provider_template_paragraphs(text: &str) -> Vec<String> {
+    let mut paragraphs = Vec::new();
+    for chunk in text.replace("\r\n", "\n").split("\n\n") {
+        let trimmed = chunk.trim();
+        if !trimmed.is_empty() {
+            paragraphs.push(trimmed.to_string());
+        }
+    }
+    if paragraphs.is_empty() {
+        for line in text.lines() {
+            let trimmed = line.trim();
+            if !trimmed.is_empty() {
+                paragraphs.push(trimmed.to_string());
+            }
+        }
+    }
+    paragraphs
+}
+
+fn build_provider_template_html(context: &GeneratedProviderTemplateContext) -> String {
+    let mut meta_items = vec![
+        format!(
+            "{}: {}",
+            escape_html(translated_label(&context.language, "patient_id")),
+            escape_html(&context.patient_pid)
+        ),
+        format!(
+            "{}: {}",
+            escape_html(translated_label(&context.language, "provider")),
+            escape_html(&context.provider_name)
+        ),
+    ];
+    if let Some(doctor_name) = context
+        .doctor_name
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
+        meta_items.push(format!(
+            "{}: {}",
+            escape_html(translated_label(&context.language, "doctor")),
+            escape_html(doctor_name)
+        ));
+    }
+    if let Some(birth_date) = context.birth_date {
+        meta_items.push(format!(
+            "{}: {}",
+            escape_html(translated_label(&context.language, "birth_date")),
+            escape_html(&birth_date.to_string())
+        ));
+    }
+    if let Some(order_number) = context
+        .order_number
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
+        meta_items.push(format!(
+            "{}: {}",
+            escape_html(translated_label(&context.language, "order_number")),
+            escape_html(order_number)
+        ));
+    }
+    if let Some(appointment_title) = context
+        .appointment_title
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
+        let mut appointment_parts = Vec::new();
+        appointment_parts.push(appointment_title.to_string());
+        if let Some(appointment_date) = context.appointment_date {
+            appointment_parts.push(appointment_date.to_string());
+        }
+        if let Some(appointment_time) = context.appointment_time {
+            appointment_parts.push(appointment_time.format("%H:%M").to_string());
+        }
+        meta_items.push(format!(
+            "{}: {}",
+            escape_html(translated_provider_template_label(
+                &context.language,
+                "appointment"
+            )),
+            escape_html(&appointment_parts.join(" · "))
+        ));
+    }
+    if let Some(location) = context
+        .location
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
+        meta_items.push(format!(
+            "{}: {}",
+            escape_html(translated_label(&context.language, "location")),
+            escape_html(location)
+        ));
+    }
+
+    let body_markup = if context.body_paragraphs.is_empty() {
+        format!(
+            "<p class=\"empty\">{}</p>",
+            escape_html(translated_provider_template_label(
+                &context.language,
+                "template_body_missing"
+            ))
+        )
+    } else {
+        context
+            .body_paragraphs
+            .iter()
+            .map(|paragraph| format!("<p>{}</p>", escape_html(paragraph)))
+            .collect::<Vec<_>>()
+            .join("")
+    };
+
+    format!(
+        "<!doctype html><html lang=\"{lang}\"><head><meta charset=\"utf-8\" /><title>{title}</title><style>
+        :root {{ color-scheme: light; }}
+        * {{ box-sizing: border-box; }}
+        body {{ margin: 0; font-family: Arial, sans-serif; background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%); color: #0f172a; }}
+        main {{ max-width: 820px; margin: 0 auto; padding: 28px; }}
+        article {{ background: white; border: 1px solid #cbd5e1; border-radius: 24px; padding: 28px; box-shadow: 0 20px 60px rgba(15, 23, 42, 0.08); }}
+        .eyebrow {{ font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: #475569; }}
+        h1 {{ margin: 8px 0 0; font-size: 30px; line-height: 1.1; }}
+        .description {{ margin: 10px 0 0; font-size: 14px; color: #475569; }}
+        .meta {{ display: grid; gap: 8px; margin: 20px 0 24px; padding: 16px; border-radius: 18px; background: #f8fafc; border: 1px solid #e2e8f0; font-size: 13px; color: #334155; }}
+        .body {{ display: grid; gap: 14px; font-size: 15px; line-height: 1.68; color: #0f172a; }}
+        .body p {{ margin: 0; white-space: pre-wrap; }}
+        .empty {{ color: #64748b; font-style: italic; }}
+        .footer {{ margin-top: 24px; font-size: 12px; color: #64748b; }}
+        </style></head><body><main><article><div class=\"eyebrow\">{eyebrow}</div><h1>{title}</h1>{description}<div class=\"meta\">{meta}</div><div class=\"body\">{body}</div><div class=\"footer\">{footer}</div></article></main></body></html>",
+        lang = escape_html(&context.language),
+        title = escape_html(&context.title),
+        eyebrow = escape_html(translated_provider_template_label(
+            &context.language,
+            "provider_template_title"
+        )),
+        description = context.description.as_deref().filter(|value| !value.is_empty()).map(|value| {
+            format!("<p class=\"description\">{}</p>", escape_html(value))
+        }).unwrap_or_default(),
+        meta = meta_items
+            .into_iter()
+            .map(|value| format!("<div>{value}</div>"))
+            .collect::<Vec<_>>()
+            .join(""),
+        body = body_markup,
+        footer = escape_html(&format!(
+            "{} {}",
+            translated_provider_template_label(&context.language, "generated_on"),
+            context.generated_at.format("%d.%m.%Y %H:%M")
+        )),
+    )
+}
+
+fn build_provider_template_pdf(
+    context: &GeneratedProviderTemplateContext,
+) -> Result<Vec<u8>, &'static str> {
+    let mut font_warnings: Vec<String> = Vec::new();
+    let regular_font = ParsedFont::from_bytes(TREATMENT_PLAN_ARIAL_TTF, 0, &mut font_warnings)
+        .ok_or("Failed to load PDF font")?;
+    let bold_font = ParsedFont::from_bytes(TREATMENT_PLAN_ARIAL_BOLD_TTF, 0, &mut font_warnings)
+        .ok_or("Failed to load PDF font")?;
+
+    let mut document = PdfDocument::new(&context.auto_name);
+    let regular_font_id = document.add_font(&regular_font);
+    let bold_font_id = document.add_font(&bold_font);
+    let regular_handle = PdfFontHandle::External(regular_font_id);
+    let bold_handle = PdfFontHandle::External(bold_font_id);
+
+    let footer_text = format!(
+        "{} · {}",
+        context.provider_name,
+        context.generated_at.format("%Y-%m-%d")
+    );
+    let mut layout = TreatmentPlanPdfLayout::new(footer_text, regular_handle, bold_handle);
+
+    layout.text_block(
+        &context.title,
+        21.0,
+        true,
+        0.0,
+        TreatmentPlanPdfColor::Primary,
+        0.0,
+        3.0,
+    );
+    if let Some(description) = context
+        .description
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
+        layout.text_block(
+            description,
+            10.5,
+            false,
+            0.0,
+            TreatmentPlanPdfColor::Muted,
+            0.0,
+            5.0,
+        );
+    }
+
+    let patient_line = match context
+        .patient_title
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
+        Some(title) => format!("{title} {}", context.patient_name),
+        None => context.patient_name.clone(),
+    };
+    layout.text_block(
+        &patient_line,
+        12.0,
+        true,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        1.5,
+    );
+    layout.text_block(
+        &format!(
+            "{}: {}",
+            translated_label(&context.language, "patient_id"),
+            context.patient_pid
+        ),
+        10.0,
+        false,
+        0.0,
+        TreatmentPlanPdfColor::Muted,
+        0.0,
+        1.0,
+    );
+    if let Some(birth_date) = context.birth_date {
+        layout.text_block(
+            &format!(
+                "{}: {}",
+                translated_label(&context.language, "birth_date"),
+                birth_date
+            ),
+            10.0,
+            false,
+            0.0,
+            TreatmentPlanPdfColor::Muted,
+            0.0,
+            1.0,
+        );
+    }
+    layout.text_block(
+        &format!(
+            "{}: {}",
+            translated_label(&context.language, "provider"),
+            context.provider_name
+        ),
+        10.0,
+        false,
+        0.0,
+        TreatmentPlanPdfColor::Muted,
+        0.0,
+        1.0,
+    );
+    if let Some(doctor_name) = context
+        .doctor_name
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
+        layout.text_block(
+            &format!(
+                "{}: {}",
+                translated_label(&context.language, "doctor"),
+                doctor_name
+            ),
+            10.0,
+            false,
+            0.0,
+            TreatmentPlanPdfColor::Muted,
+            0.0,
+            1.0,
+        );
+    }
+    if let Some(order_number) = context
+        .order_number
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
+        layout.text_block(
+            &format!(
+                "{}: {}",
+                translated_label(&context.language, "order_number"),
+                order_number
+            ),
+            10.0,
+            false,
+            0.0,
+            TreatmentPlanPdfColor::Muted,
+            0.0,
+            1.0,
+        );
+    }
+    if let Some(appointment_title) = context
+        .appointment_title
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
+        let mut parts = vec![appointment_title.to_string()];
+        if let Some(appointment_date) = context.appointment_date {
+            parts.push(appointment_date.to_string());
+        }
+        if let Some(appointment_time) = context.appointment_time {
+            parts.push(appointment_time.format("%H:%M").to_string());
+        }
+        layout.text_block(
+            &format!(
+                "{}: {}",
+                translated_provider_template_label(&context.language, "appointment"),
+                parts.join(" · ")
+            ),
+            10.0,
+            false,
+            0.0,
+            TreatmentPlanPdfColor::Muted,
+            0.0,
+            1.0,
+        );
+    }
+    if let Some(location) = context
+        .location
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
+        layout.text_block(
+            &format!(
+                "{}: {}",
+                translated_label(&context.language, "location"),
+                location
+            ),
+            10.0,
+            false,
+            0.0,
+            TreatmentPlanPdfColor::Muted,
+            0.0,
+            4.0,
+        );
+    } else {
+        layout.spacer(3.0);
+    }
+
+    if context.body_paragraphs.is_empty() {
+        layout.text_block(
+            translated_provider_template_label(&context.language, "template_body_missing"),
+            11.0,
+            false,
+            0.0,
+            TreatmentPlanPdfColor::Muted,
+            0.0,
+            0.0,
+        );
+    } else {
+        for paragraph in &context.body_paragraphs {
+            layout.text_block(
+                paragraph,
+                11.0,
+                false,
+                0.0,
+                TreatmentPlanPdfColor::Body,
+                0.0,
+                3.2,
+            );
+        }
+    }
+
+    let mut save_warnings: Vec<PdfWarnMsg> = Vec::new();
+    Ok(document
+        .with_pages(layout.finish())
         .save(&PdfSaveOptions::default(), &mut save_warnings))
 }
 
@@ -5343,6 +6657,32 @@ fn can_review_document_intake_row(
     row: &sqlx::postgres::PgRow,
     assignment_set: &HashSet<Uuid>,
 ) -> bool {
+    if auth.role == Role::TeamleadInterpreter {
+        let uploaded_by_role = row
+            .try_get::<Option<String>, _>("uploaded_by_role")
+            .unwrap_or_default();
+        let ursprung = row
+            .try_get::<Option<String>, _>("ursprung")
+            .unwrap_or_default();
+        let status = row
+            .try_get::<Option<String>, _>("status")
+            .unwrap_or_default();
+        let patient_id: Option<Uuid> = row.try_get("patient_id").unwrap_or_default();
+        let is_assigned = patient_id
+            .map(|id| assignment_set.contains(&id))
+            .unwrap_or(false);
+
+        if is_assigned
+            && is_interpreter_review_document(
+                uploaded_by_role.as_deref(),
+                ursprung.as_deref(),
+                status.as_deref(),
+            )
+        {
+            return true;
+        }
+    }
+
     if !can_view_document_row(auth, row, assignment_set) {
         return false;
     }
@@ -5614,11 +6954,8 @@ async fn persist_document_file(
     } else {
         input.original_filename.trim().to_string()
     };
-    let storage_key = format!(
-        "{}_{}",
-        Uuid::new_v4(),
-        sanitize_filename(&original_filename)
-    );
+    let compact_filename = compact_storage_filename(&original_filename, 96);
+    let storage_key = format!("{}_{}", Uuid::new_v4(), compact_filename);
     let file_size = data.len() as i64;
 
     if let Err(e) = tokio::fs::create_dir_all(FsPath::new(UPLOAD_DIR)).await {
@@ -5750,16 +7087,26 @@ async fn finalize_staged_document_delete(staged: &StagedDocumentDelete) {
     }
 }
 
-async fn list_document_templates(Extension(auth): Extension<AuthUser>) -> axum::response::Response {
+async fn list_document_templates(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+) -> axum::response::Response {
     if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::CeoAssistant, Role::PatientManager])
     {
         return resp;
     }
 
-    Json(json!({
-        "templates": DOCUMENT_TEMPLATES.iter().map(|template| {
+    let provider_templates = match load_active_provider_document_templates(&state).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+
+    let mut templates = DOCUMENT_TEMPLATES
+        .iter()
+        .map(|template| {
             json!({
                 "id": template.id,
+                "template_kind": "builtin",
                 "label": template.label,
                 "description": template.description,
                 "art": template.art,
@@ -5771,7 +7118,31 @@ async fn list_document_templates(Extension(auth): Extension<AuthUser>) -> axum::
                 "supported_languages": template.languages,
                 "text_block_keys": template.text_block_keys,
             })
-        }).collect::<Vec<_>>(),
+        })
+        .collect::<Vec<_>>();
+    templates.extend(provider_templates.into_iter().map(|template| {
+        json!({
+            "id": provider_template_public_id(template.id),
+            "template_kind": "provider",
+            "provider_id": template.provider_id,
+            "provider_name": template.provider_name,
+            "doctor_id": template.doctor_id,
+            "doctor_name": template.doctor_name,
+            "label": template.label,
+            "description": template.description,
+            "art": template.art,
+            "category": template.category,
+            "default_auto_name": template.default_auto_name,
+            "default_status": template.default_status,
+            "default_visibility": template.default_visibility,
+            "is_medical": template.is_medical,
+            "supported_languages": template.supported_languages,
+            "text_block_keys": Vec::<String>::new(),
+        })
+    }));
+
+    Json(json!({
+        "templates": templates,
         "text_blocks": DOCUMENT_TEXT_BLOCKS.iter().map(|block| {
             json!({
                 "key": block.key,
@@ -5783,6 +7154,411 @@ async fn list_document_templates(Extension(auth): Extension<AuthUser>) -> axum::
     .into_response()
 }
 
+async fn generate_provider_document_from_template_internal(
+    state: &AppState,
+    actor_user_id: Uuid,
+    body: &GenerateDocumentRequest,
+    template: ProviderDocumentTemplate,
+) -> Result<GeneratedProviderDocumentResult, axum::response::Response> {
+    if body.replace_document_id.is_some() {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Provider templates do not support replacement versioning yet",
+        ));
+    }
+
+    let status = body
+        .status
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(template.default_status.as_str());
+    let visibility = body
+        .visibility
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(template.default_visibility.as_str());
+    if !matches!(status, "draft" | "active" | "archived") {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid document status",
+        ));
+    }
+    if parse_share_status(visibility).is_none() {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid document visibility",
+        ));
+    }
+    if body.language.as_deref().is_some()
+        && normalize_document_language(body.language.as_deref()).is_none()
+    {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Unknown document language",
+        ));
+    }
+
+    let (patient_id, order_id, appointment_id) =
+        match validate_document_context(state, body.patient_id, body.order_id, body.appointment_id)
+            .await
+        {
+            Ok(value) => value,
+            Err(resp) => return Err(resp),
+        };
+    let Some(patient_uuid) = patient_id else {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Generated documents must be linked to a patient",
+        ));
+    };
+
+    let patient_row = match sqlx::query(
+        r#"SELECT patient_id, title, first_name, last_name, birth_date, languages
+           FROM patients
+           WHERE id = $1"#,
+    )
+    .bind(patient_uuid)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return Err(err(StatusCode::NOT_FOUND, "Patient not found")),
+        Err(error) => {
+            tracing::error!(error = %error, patient_id = %patient_uuid, "load provider template patient context");
+            return Err(err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load patient context",
+            ));
+        }
+    };
+
+    let patient_pid = patient_row
+        .try_get::<String, _>("patient_id")
+        .unwrap_or_else(|_| "PID".to_string());
+    let patient_first_name = patient_row
+        .try_get::<String, _>("first_name")
+        .unwrap_or_default();
+    let patient_last_name = patient_row
+        .try_get::<String, _>("last_name")
+        .unwrap_or_default();
+    let patient_name = format!("{patient_first_name} {patient_last_name}")
+        .trim()
+        .to_string();
+    let patient_title = patient_row
+        .try_get::<Option<String>, _>("title")
+        .unwrap_or_default();
+    let patient_languages = patient_row
+        .try_get::<Vec<String>, _>("languages")
+        .unwrap_or_default();
+    let birth_date = patient_row
+        .try_get::<Option<NaiveDate>, _>("birth_date")
+        .unwrap_or_default();
+
+    let language = resolve_owned_document_language(
+        body.language.as_deref(),
+        &patient_languages,
+        &template.supported_languages,
+    );
+    let Some(template_body) = provider_template_body_for_language(&template, &language) else {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Language is not supported by the selected template",
+        ));
+    };
+
+    let order_number = if let Some(order_uuid) = order_id {
+        match sqlx::query_scalar::<_, String>("SELECT order_number FROM orders WHERE id = $1")
+            .bind(order_uuid)
+            .fetch_optional(&state.db)
+            .await
+        {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::error!(error = %error, order_id = %order_uuid, "load provider template order context");
+                return Err(err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to load order context",
+                ));
+            }
+        }
+    } else {
+        None
+    };
+
+    let appointment_context = if let Some(appointment_uuid) = appointment_id {
+        match sqlx::query(
+            r#"SELECT a.provider_id, a.doctor_id, a.title, a.date, a.time_start, a.location
+               FROM appointments a
+               WHERE a.id = $1"#,
+        )
+        .bind(appointment_uuid)
+        .fetch_optional(&state.db)
+        .await
+        {
+            Ok(Some(row)) => Some(row),
+            Ok(None) => return Err(err(StatusCode::NOT_FOUND, "Appointment not found")),
+            Err(error) => {
+                tracing::error!(error = %error, appointment_id = %appointment_uuid, "load provider template appointment context");
+                return Err(err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to load appointment context",
+                ));
+            }
+        }
+    } else {
+        None
+    };
+
+    if let Some(appointment_row) = appointment_context.as_ref() {
+        let appointment_provider_id = appointment_row
+            .try_get::<Option<Uuid>, _>("provider_id")
+            .unwrap_or_default();
+        if appointment_provider_id != Some(template.provider_id) {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Provider template must match the appointment provider context",
+            ));
+        }
+        if let Some(template_doctor_id) = template.doctor_id {
+            let appointment_doctor_id = appointment_row
+                .try_get::<Option<Uuid>, _>("doctor_id")
+                .unwrap_or_default();
+            if appointment_doctor_id.is_some() && appointment_doctor_id != Some(template_doctor_id)
+            {
+                return Err(err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Provider template doctor must match the appointment doctor context",
+                ));
+            }
+        }
+    }
+
+    let appointment_title = appointment_context
+        .as_ref()
+        .and_then(|row| row.try_get::<Option<String>, _>("title").ok().flatten());
+    let appointment_date = appointment_context
+        .as_ref()
+        .and_then(|row| row.try_get::<Option<NaiveDate>, _>("date").ok().flatten());
+    let appointment_time = appointment_context.as_ref().and_then(|row| {
+        row.try_get::<Option<NaiveTime>, _>("time_start")
+            .ok()
+            .flatten()
+    });
+    let appointment_location = appointment_context
+        .as_ref()
+        .and_then(|row| row.try_get::<Option<String>, _>("location").ok().flatten());
+
+    let mut replacements = BTreeMap::new();
+    replacements.insert("patient_id", patient_pid.clone());
+    replacements.insert("patient_name", patient_name.clone());
+    replacements.insert("patient_first_name", patient_first_name.clone());
+    replacements.insert("patient_last_name", patient_last_name.clone());
+    replacements.insert("patient_title", patient_title.clone().unwrap_or_default());
+    replacements.insert(
+        "birth_date",
+        birth_date
+            .map(|value| value.to_string())
+            .unwrap_or_default(),
+    );
+    replacements.insert("provider_name", template.provider_name.clone());
+    replacements.insert("clinic_name", template.provider_name.clone());
+    replacements.insert(
+        "doctor_name",
+        template.doctor_name.clone().unwrap_or_default(),
+    );
+    replacements.insert(
+        "appointment_title",
+        appointment_title.clone().unwrap_or_default(),
+    );
+    replacements.insert(
+        "appointment_date",
+        appointment_date
+            .map(|value| value.to_string())
+            .unwrap_or_default(),
+    );
+    replacements.insert(
+        "appointment_time",
+        appointment_time
+            .map(|value| value.format("%H:%M").to_string())
+            .unwrap_or_default(),
+    );
+    replacements.insert("location", appointment_location.clone().unwrap_or_default());
+    replacements.insert("order_number", order_number.clone().unwrap_or_default());
+    replacements.insert("today", chrono::Utc::now().date_naive().to_string());
+
+    let rendered_body = apply_provider_template_placeholders(template_body, &replacements);
+    let generated_at = chrono::Utc::now();
+    let auto_name = body
+        .auto_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| {
+            format!(
+                "{} · {} · {}",
+                template.default_auto_name,
+                patient_name,
+                generated_at.format("%Y-%m-%d")
+            )
+        });
+
+    let mut body_paragraphs = Vec::new();
+    if let Some(introduction) = body
+        .introduction
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        body_paragraphs.push(introduction.to_string());
+    }
+    body_paragraphs.extend(provider_template_paragraphs(&rendered_body));
+    if let Some(closing_note) = body
+        .closing_note
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        body_paragraphs.push(closing_note.to_string());
+    }
+
+    let context = GeneratedProviderTemplateContext {
+        patient_pid: patient_pid.clone(),
+        patient_name: patient_name.clone(),
+        patient_title: patient_title.clone(),
+        birth_date,
+        language: language.clone(),
+        auto_name: auto_name.clone(),
+        title: body
+            .title_override
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| template.label.clone()),
+        description: template.description.clone(),
+        provider_name: template.provider_name.clone(),
+        doctor_name: template.doctor_name.clone(),
+        appointment_title,
+        appointment_date,
+        appointment_time,
+        location: appointment_location,
+        order_number: order_number.clone(),
+        body_paragraphs,
+        generated_at,
+    };
+
+    let preview_html = build_provider_template_html(&context);
+    let pdf_bytes = match build_provider_template_pdf(&context) {
+        Ok(bytes) => bytes,
+        Err(message) => return Err(err(StatusCode::INTERNAL_SERVER_ERROR, message)),
+    };
+
+    let original_filename = format!(
+        "{}.pdf",
+        sanitize_filename(&auto_name.replace([' ', '/', '\\'], "_"))
+    );
+    let ursprung = body
+        .ursprung
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| format!("template:{}", provider_template_public_id(template.id)));
+    let klinik = body
+        .klinik
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| template.provider_name.clone());
+
+    let persist_input = NewStoredDocument {
+        patient_id,
+        order_id,
+        appointment_id,
+        auto_name: &auto_name,
+        original_filename: &original_filename,
+        art: &template.art,
+        category: Some(template.category.as_str()),
+        status,
+        visibility,
+        is_medical: template.is_medical,
+        mime_type: "application/pdf",
+        klinik: Some(klinik.as_str()),
+        ursprung: Some(ursprung.as_str()),
+        notes: body
+            .notes
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty()),
+        version_root_document_id: None,
+        replaces_document_id: None,
+        version_number: 1,
+        uploaded_by: actor_user_id,
+    };
+
+    let (document_id, file_size, original_filename, _storage_key) =
+        match persist_document_file(state, &pdf_bytes, &persist_input).await {
+            Ok(value) => value,
+            Err(resp) => return Err(resp),
+        };
+
+    state.audit_sender.try_send(audit::domain_event(
+        "generate_document_from_template",
+        Some(actor_user_id),
+        "document",
+        Some(document_id),
+        json!({
+            "template_id": provider_template_public_id(template.id),
+            "patient_id": patient_uuid,
+            "order_id": order_id,
+            "appointment_id": appointment_id,
+            "language": language,
+            "version_number": 1,
+        }),
+    ));
+
+    Ok(GeneratedProviderDocumentResult {
+        id: document_id,
+        auto_name,
+        original_filename,
+        mime_type: "application/pdf",
+        file_size,
+        language: context.language,
+        preview_html,
+    })
+}
+
+async fn generate_provider_document_from_template(
+    state: &AppState,
+    auth: &AuthUser,
+    body: &GenerateDocumentRequest,
+    template: ProviderDocumentTemplate,
+) -> axum::response::Response {
+    match generate_provider_document_from_template_internal(state, auth.user_id, body, template)
+        .await
+    {
+        Ok(result) => Json(json!({
+            "ok": true,
+            "id": result.id,
+            "auto_name": result.auto_name,
+            "original_filename": result.original_filename,
+            "mime_type": result.mime_type,
+            "file_size": result.file_size,
+            "language": result.language,
+            "version_number": 1,
+            "version_root_document_id": result.id,
+            "replaces_document_id": Value::Null,
+            "preview_html": result.preview_html,
+        }))
+        .into_response(),
+        Err(resp) => resp,
+    }
+}
+
 async fn generate_document(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -5790,6 +7566,20 @@ async fn generate_document(
 ) -> axum::response::Response {
     if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
         return resp;
+    }
+
+    if let Some(provider_template_id) = parse_provider_template_public_id(body.template_id.trim()) {
+        let template = match load_provider_document_template(&state, provider_template_id).await {
+            Ok(Some(value)) => value,
+            Ok(None) => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Unknown document template",
+                );
+            }
+            Err(resp) => return resp,
+        };
+        return generate_provider_document_from_template(&state, &auth, &body, template).await;
     }
 
     let Some(template) = document_template_by_id(body.template_id.trim()) else {
@@ -6470,6 +8260,84 @@ async fn generate_document(
             };
             (preview_html, pdf_bytes)
         }
+        "visa_invitation_letter" => {
+            let appointment_context = if let Some(appointment_uuid) = appointment_id {
+                match sqlx::query(
+                    r#"SELECT a.title, a.date, a.time_start, a.location,
+                              provider.name AS provider_name,
+                              doctor.name AS doctor_name
+                       FROM appointments a
+                       LEFT JOIN providers provider ON provider.id = a.provider_id
+                       LEFT JOIN provider_doctors doctor ON doctor.id = a.doctor_id
+                       WHERE a.id = $1"#,
+                )
+                .bind(appointment_uuid)
+                .fetch_optional(&state.db)
+                .await
+                {
+                    Ok(row) => row,
+                    Err(e) => {
+                        tracing::error!(error = %e, appointment_id = %appointment_uuid, "load visa invitation appointment context");
+                        return err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to load visa invitation context",
+                        );
+                    }
+                }
+            } else {
+                None
+            };
+
+            let context = GeneratedVisaInvitationContext {
+                patient_pid: patient_pid.clone(),
+                patient_name: patient_name.clone(),
+                patient_title: patient_title.clone(),
+                birth_date,
+                language: language.to_string(),
+                auto_name: auto_name.clone(),
+                title_override,
+                introduction,
+                closing_note,
+                nationality,
+                residence_country,
+                provider_name: appointment_context.as_ref().and_then(|row| {
+                    row.try_get::<Option<String>, _>("provider_name")
+                        .ok()
+                        .flatten()
+                }),
+                doctor_name: appointment_context.as_ref().and_then(|row| {
+                    row.try_get::<Option<String>, _>("doctor_name")
+                        .ok()
+                        .flatten()
+                }),
+                appointment_title: appointment_context
+                    .as_ref()
+                    .and_then(|row| row.try_get::<Option<String>, _>("title").ok().flatten()),
+                appointment_date: appointment_context
+                    .as_ref()
+                    .and_then(|row| row.try_get::<Option<NaiveDate>, _>("date").ok().flatten()),
+                appointment_time: appointment_context.as_ref().and_then(|row| {
+                    row.try_get::<Option<NaiveTime>, _>("time_start")
+                        .ok()
+                        .flatten()
+                }),
+                location: appointment_context
+                    .as_ref()
+                    .and_then(|row| row.try_get::<Option<String>, _>("location").ok().flatten()),
+                order_number,
+                generated_at,
+            };
+
+            let preview_html = build_visa_invitation_html(&context);
+            let pdf_bytes = match build_visa_invitation_pdf(&context) {
+                Ok(bytes) => bytes,
+                Err(message) => {
+                    tracing::error!(template_id = template.id, patient_id = %patient_uuid, "build generated visa invitation PDF");
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, message);
+                }
+            };
+            (preview_html, pdf_bytes)
+        }
         "patient_sticker_compact" | "patient_sticker_standard" | "patient_sticker_sheet" => {
             let Some(format) = patient_sticker_format_for_template(template.id) else {
                 return err(
@@ -6671,6 +8539,40 @@ async fn list_documents(
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty());
+    let date_from = match query
+        .date_from
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(value) => match NaiveDate::parse_from_str(value, "%Y-%m-%d") {
+            Ok(value) => Some(value),
+            Err(_) => return err(StatusCode::BAD_REQUEST, "Invalid date_from filter"),
+        },
+        None => None,
+    };
+    let date_to = match query
+        .date_to
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(value) => match NaiveDate::parse_from_str(value, "%Y-%m-%d") {
+            Ok(value) => Some(value),
+            Err(_) => return err(StatusCode::BAD_REQUEST, "Invalid date_to filter"),
+        },
+        None => None,
+    };
+    let klinik = query
+        .klinik
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let ursprung = query
+        .ursprung
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
 
     let rows = match sqlx::query(
         r#"SELECT d.id, d.patient_id, d.order_id, d.appointment_id,
@@ -6694,7 +8596,7 @@ async fn list_documents(
                   EXISTS(
                     SELECT 1 FROM document_shares ds
                     WHERE ds.document_id = d.id
-                      AND ds.shared_with_user_id = $9
+                      AND ds.shared_with_user_id = $13
                       AND ds.revoked_at IS NULL
                   ) AS shared_to_current
            FROM documents d
@@ -6716,6 +8618,10 @@ async fn list_documents(
              AND ($6::text IS NULL OR d.visibility = $6)
              AND ($7::text IS NULL OR d.art = $7)
              AND ($8::text IS NULL OR d.category = $8)
+             AND ($9::date IS NULL OR d.created_at::date >= $9)
+             AND ($10::date IS NULL OR d.created_at::date <= $10)
+             AND ($11::text IS NULL OR COALESCE(d.klinik, '') ILIKE '%' || $11 || '%')
+             AND ($12::text IS NULL OR COALESCE(d.ursprung, '') ILIKE '%' || $12 || '%')
            ORDER BY d.created_at DESC
            LIMIT 300"#,
     )
@@ -6727,6 +8633,10 @@ async fn list_documents(
     .bind(query.visibility.as_deref())
     .bind(query.art.as_deref())
     .bind(query.category.as_deref())
+    .bind(date_from)
+    .bind(date_to)
+    .bind(klinik)
+    .bind(ursprung)
     .bind(auth.user_id)
     .fetch_all(&state.db)
     .await
@@ -8610,53 +10520,53 @@ async fn delete_document_file(
     .into_response()
 }
 
-async fn release_document_to_patient_portal(
-    State(state): State<AppState>,
-    Extension(auth): Extension<AuthUser>,
-    Path(id): Path<Uuid>,
-    Json(body): Json<PortalReleaseRequest>,
-) -> axum::response::Response {
-    if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
-        return resp;
-    }
-
-    let row = match fetch_document_row(&state, id, auth.user_id).await {
+async fn release_document_to_patient_portal_internal(
+    state: &AppState,
+    actor_user_id: Uuid,
+    id: Uuid,
+    requires_confirmation: bool,
+) -> Result<PortalReleaseResult, axum::response::Response> {
+    let row = match sqlx::query(
+        r#"SELECT id, patient_id, visibility, status, auto_name
+           FROM documents
+           WHERE id = $1"#,
+    )
+    .bind(id)
+    .fetch_optional(&state.db)
+    .await
+    {
         Ok(Some(row)) => row,
-        Ok(None) => return err(StatusCode::NOT_FOUND, "Document not found"),
-        Err(resp) => return resp,
+        Ok(None) => return Err(err(StatusCode::NOT_FOUND, "Document not found")),
+        Err(e) => {
+            tracing::error!(error = %e, document_id = %id, "load document for portal release");
+            return Err(err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to release document to the portal",
+            ));
+        }
     };
 
     let Some(patient_id) = row
         .try_get::<Option<Uuid>, _>("patient_id")
         .unwrap_or_default()
     else {
-        return err(
+        return Err(err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Only patient-linked documents can be released to the portal",
-        );
+        ));
     };
 
     let current_visibility = row
         .try_get::<String, _>("visibility")
         .unwrap_or_else(|_| "internal".to_string());
     if row.try_get::<String, _>("status").unwrap_or_default() == "archived" {
-        return err(
+        return Err(err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Archived document versions cannot be released to the portal",
-        );
+        ));
     }
     let auto_name = row.try_get::<String, _>("auto_name").unwrap_or_default();
-    let channel =
-        match normalize_share_channel(Some(body.channel.as_deref().unwrap_or("patient_portal"))) {
-            Ok(value) => value,
-            Err(resp) => return resp,
-        };
-    if channel != "patient_portal" {
-        return err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "Patient portal release channel must be patient_portal",
-        );
-    }
+    let channel = "patient_portal".to_string();
     let recipients = match sqlx::query(
         r#"SELECT DISTINCT u.id
            FROM users u
@@ -8677,21 +10587,19 @@ async fn release_document_to_patient_portal(
             .collect::<Vec<_>>(),
         Err(e) => {
             tracing::error!(error = %e, patient_id = %patient_id, document_id = %id, "load patient portal recipients");
-            return err(
+            return Err(err(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to load patient portal recipients",
-            );
+            ));
         }
     };
 
     if recipients.is_empty() {
-        return err(
+        return Err(err(
             StatusCode::CONFLICT,
             "No active patient portal user is linked to this patient",
-        );
+        ));
     }
-
-    let requires_confirmation = body.requires_confirmation.unwrap_or(true);
 
     if current_visibility != "patient_visible"
         && let Err(e) =
@@ -8701,10 +10609,10 @@ async fn release_document_to_patient_portal(
                 .await
     {
         tracing::error!(error = %e, document_id = %id, "set patient portal visibility");
-        return err(
+        return Err(err(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Failed to release document to the portal",
-        );
+        ));
     }
 
     let existing_rows = match sqlx::query(
@@ -8727,10 +10635,10 @@ async fn release_document_to_patient_portal(
         Ok(rows) => rows,
         Err(e) => {
             tracing::error!(error = %e, document_id = %id, patient_id = %patient_id, "load existing patient portal shares");
-            return err(
+            return Err(err(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to load existing portal releases",
-            );
+            ));
         }
     };
 
@@ -8753,7 +10661,7 @@ async fn release_document_to_patient_portal(
         )
         .bind(id)
         .bind(recipient_id)
-        .bind(auth.user_id)
+        .bind(actor_user_id)
         .bind(channel.as_str())
         .bind(requires_confirmation)
         .fetch_one(&state.db)
@@ -8762,10 +10670,10 @@ async fn release_document_to_patient_portal(
             Ok(row) => row,
             Err(e) => {
                 tracing::error!(error = %e, document_id = %id, recipient_id = %recipient_id, "create patient portal share");
-                return err(
+                return Err(err(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Failed to create patient portal release",
-                );
+                ));
             }
         };
 
@@ -8788,7 +10696,7 @@ async fn release_document_to_patient_portal(
 
     state.audit_sender.try_send(audit::domain_event(
         "release_document_to_patient_portal",
-        Some(auth.user_id),
+        Some(actor_user_id),
         "document",
         Some(id),
         json!({
@@ -8802,16 +10710,305 @@ async fn release_document_to_patient_portal(
         }),
     ));
 
-    Json(json!({
-        "ok": true,
-        "document_id": id,
-        "patient_id": patient_id,
-        "visibility": "patient_visible",
-        "recipient_count": recipients.len(),
-        "created_share_count": created_share_ids.len(),
-        "requires_confirmation": requires_confirmation,
-    }))
-    .into_response()
+    Ok(PortalReleaseResult {
+        document_id: id,
+        patient_id,
+        visibility: "patient_visible",
+        recipient_count: recipients.len(),
+        created_share_count: created_share_ids.len(),
+        requires_confirmation,
+    })
+}
+
+pub(crate) async fn auto_send_provider_preparation_documents_for_confirmed_appointment(
+    state: &AppState,
+    actor_user_id: Uuid,
+    appointment_id: Uuid,
+) -> Result<AutoPreparationDocumentSendResult, axum::response::Response> {
+    let appointment = match sqlx::query(
+        r#"SELECT patient_id, order_id, provider_id, doctor_id, appointment_type, status
+           FROM appointments
+           WHERE id = $1"#,
+    )
+    .bind(appointment_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return Ok(AutoPreparationDocumentSendResult::default()),
+        Err(error) => {
+            tracing::error!(error = %error, appointment_id = %appointment_id, "load appointment for auto preparation documents");
+            return Err(err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to auto-send preparation documents",
+            ));
+        }
+    };
+
+    if appointment
+        .try_get::<String, _>("appointment_type")
+        .unwrap_or_default()
+        != "medical"
+        || appointment
+            .try_get::<String, _>("status")
+            .unwrap_or_default()
+            != "confirmed"
+    {
+        return Ok(AutoPreparationDocumentSendResult::default());
+    }
+
+    let Some(patient_id) = appointment
+        .try_get::<Option<Uuid>, _>("patient_id")
+        .unwrap_or_default()
+    else {
+        return Ok(AutoPreparationDocumentSendResult::default());
+    };
+    let Some(order_id) = appointment
+        .try_get::<Option<Uuid>, _>("order_id")
+        .unwrap_or_default()
+    else {
+        return Ok(AutoPreparationDocumentSendResult::default());
+    };
+    let Some(provider_id) = appointment
+        .try_get::<Option<Uuid>, _>("provider_id")
+        .unwrap_or_default()
+    else {
+        return Ok(AutoPreparationDocumentSendResult::default());
+    };
+    let doctor_id = appointment
+        .try_get::<Option<Uuid>, _>("doctor_id")
+        .unwrap_or_default();
+
+    let templates =
+        load_provider_document_templates_for_confirmed_appointment(state, provider_id, doctor_id)
+            .await?;
+    if templates.is_empty() {
+        return Ok(AutoPreparationDocumentSendResult::default());
+    }
+
+    let mut result = AutoPreparationDocumentSendResult {
+        template_count: templates.len(),
+        ..Default::default()
+    };
+
+    for template in templates {
+        let template_id = template.id;
+        record_appointment_provider_template_delivery(
+            state,
+            ProviderTemplateDeliveryRecord {
+                appointment_id,
+                template_id,
+                document_id: None,
+                triggered_by: actor_user_id,
+                delivery_status: "processing",
+                error_message: None,
+                delivered_at: None,
+            },
+        )
+        .await?;
+
+        let ursprung = format!(
+            "auto_preparation:{}:{}",
+            appointment_id,
+            provider_template_public_id(template.id)
+        );
+        let existing_document_id = match sqlx::query_scalar::<_, Uuid>(
+            r#"SELECT id
+               FROM documents
+               WHERE appointment_id = $1
+                 AND ursprung = $2
+                 AND status <> 'archived'
+               ORDER BY created_at DESC
+               LIMIT 1"#,
+        )
+        .bind(appointment_id)
+        .bind(&ursprung)
+        .fetch_optional(&state.db)
+        .await
+        {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::error!(error = %error, appointment_id = %appointment_id, template_id = %template.id, "load existing auto preparation document");
+                return Err(err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to auto-send preparation documents",
+                ));
+            }
+        };
+
+        let document_id = if let Some(value) = existing_document_id {
+            result.reused_document_count += 1;
+            value
+        } else {
+            let generated = match generate_provider_document_from_template_internal(
+                state,
+                actor_user_id,
+                &GenerateDocumentRequest {
+                    template_id: provider_template_public_id(template.id),
+                    patient_id: Some(patient_id),
+                    order_id: Some(order_id),
+                    appointment_id: Some(appointment_id),
+                    auto_name: None,
+                    status: Some("active".to_string()),
+                    visibility: Some("released_internal".to_string()),
+                    ursprung: Some(ursprung),
+                    ..GenerateDocumentRequest::default()
+                },
+                template,
+            )
+            .await
+            {
+                Ok(value) => value,
+                Err(resp) => {
+                    let _ = record_appointment_provider_template_delivery(
+                        state,
+                        ProviderTemplateDeliveryRecord {
+                            appointment_id,
+                            template_id,
+                            document_id: None,
+                            triggered_by: actor_user_id,
+                            delivery_status: "failed",
+                            error_message: Some("document_generation_failed"),
+                            delivered_at: None,
+                        },
+                    )
+                    .await;
+                    return Err(resp);
+                }
+            };
+            result.generated_document_count += 1;
+            generated.id
+        };
+
+        let release = match release_document_to_patient_portal_internal(
+            state,
+            actor_user_id,
+            document_id,
+            true,
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(resp) => {
+                let _ = record_appointment_provider_template_delivery(
+                    state,
+                    ProviderTemplateDeliveryRecord {
+                        appointment_id,
+                        template_id,
+                        document_id: Some(document_id),
+                        triggered_by: actor_user_id,
+                        delivery_status: "failed",
+                        error_message: Some("patient_portal_release_failed"),
+                        delivered_at: None,
+                    },
+                )
+                .await;
+                return Err(resp);
+            }
+        };
+        result.portal_release_count += release.created_share_count;
+
+        record_appointment_provider_template_delivery(
+            state,
+            ProviderTemplateDeliveryRecord {
+                appointment_id,
+                template_id,
+                document_id: Some(document_id),
+                triggered_by: actor_user_id,
+                delivery_status: "delivered",
+                error_message: None,
+                delivered_at: Some(chrono::Utc::now()),
+            },
+        )
+        .await?;
+    }
+
+    if result.generated_document_count > 0
+        || result.reused_document_count > 0
+        || result.portal_release_count > 0
+    {
+        if let Err(error) = sqlx::query(
+            r#"INSERT INTO order_planning_preparation (
+                    order_id, preparation_documents_status, preparation_documents_sent_at, preparation_documents_sent_by
+               ) VALUES ($1, 'sent', now(), $2)
+               ON CONFLICT (order_id) DO UPDATE
+               SET preparation_documents_status = 'sent',
+                   preparation_documents_sent_at = COALESCE(order_planning_preparation.preparation_documents_sent_at, now()),
+                   preparation_documents_sent_by = COALESCE(order_planning_preparation.preparation_documents_sent_by, $2)"#,
+        )
+        .bind(order_id)
+        .bind(actor_user_id)
+        .execute(&state.db)
+        .await
+        {
+            tracing::error!(error = %error, order_id = %order_id, appointment_id = %appointment_id, "mark preparation documents sent after auto portal release");
+            return Err(err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update preparation document status",
+            ));
+        }
+
+        state.audit_sender.try_send(audit::domain_event(
+            "auto_send_partner_preparation_documents",
+            Some(actor_user_id),
+            "appointment",
+            Some(appointment_id),
+            json!({
+                "order_id": order_id,
+                "patient_id": patient_id,
+                "template_count": result.template_count,
+                "generated_document_count": result.generated_document_count,
+                "reused_document_count": result.reused_document_count,
+                "portal_release_count": result.portal_release_count,
+            }),
+        ));
+        result.marked_sent = true;
+    }
+
+    Ok(result)
+}
+
+async fn release_document_to_patient_portal(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<PortalReleaseRequest>,
+) -> axum::response::Response {
+    if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+        return resp;
+    }
+    let channel =
+        match normalize_share_channel(Some(body.channel.as_deref().unwrap_or("patient_portal"))) {
+            Ok(value) => value,
+            Err(resp) => return resp,
+        };
+    if channel != "patient_portal" {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Patient portal release channel must be patient_portal",
+        );
+    }
+
+    match release_document_to_patient_portal_internal(
+        &state,
+        auth.user_id,
+        id,
+        body.requires_confirmation.unwrap_or(true),
+    )
+    .await
+    {
+        Ok(result) => Json(json!({
+            "ok": true,
+            "document_id": result.document_id,
+            "patient_id": result.patient_id,
+            "visibility": result.visibility,
+            "recipient_count": result.recipient_count,
+            "created_share_count": result.created_share_count,
+            "requires_confirmation": result.requires_confirmation,
+        }))
+        .into_response(),
+        Err(resp) => resp,
+    }
 }
 
 async fn revoke_document_from_patient_portal(

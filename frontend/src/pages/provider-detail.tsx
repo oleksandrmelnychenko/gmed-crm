@@ -4,7 +4,7 @@ import {
   useEffect,
   useState,
 } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import {
   ArrowLeft,
   Building2,
@@ -17,6 +17,8 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Tabs,
   TabsContent,
@@ -26,6 +28,7 @@ import {
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
+import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
@@ -54,6 +57,7 @@ type ProviderDetail = {
   services: ServiceItem[];
   linked_patients: LinkedPatient[];
   interactions: InteractionItem[];
+  templates: ProviderTemplateItem[];
 };
 
 type DoctorItem = {
@@ -112,6 +116,54 @@ type AppointmentItem = {
   doctor_name?: string | null;
 };
 
+type ProviderTemplateItem = {
+  id: string;
+  provider_id: string;
+  doctor_id?: string | null;
+  doctor_name?: string | null;
+  label: string;
+  description?: string | null;
+  art: string;
+  category: string;
+  default_auto_name: string;
+  default_status: string;
+  default_visibility: string;
+  is_medical: boolean;
+  supported_languages: string[];
+  body_de?: string | null;
+  body_en?: string | null;
+  body_uk?: string | null;
+  body_ru?: string | null;
+  notes?: string | null;
+  is_active: boolean;
+  auto_send_on_confirmed_appointment: boolean;
+  updated_at: string;
+};
+
+type ProviderTemplateFormState = {
+  label: string;
+  description: string;
+  doctorId: string;
+  art: string;
+  category: string;
+  defaultAutoName: string;
+  defaultStatus: "draft" | "active" | "archived";
+  defaultVisibility:
+    | "internal"
+    | "released_internal"
+    | "released_external"
+    | "patient_visible";
+  isMedical: boolean;
+  isActive: boolean;
+  supportedLanguages: string[];
+  bodyDe: string;
+  bodyEn: string;
+  bodyUk: string;
+  bodyRu: string;
+  notes: string;
+  autoSendOnConfirmedAppointment: boolean;
+};
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -129,6 +181,61 @@ function fieldVal(v: string | null | undefined, fb: string) {
 
 function card(extra?: string) {
   return cn("rounded-[1.75rem] border border-border/70 bg-card shadow-[0_20px_60px_rgba(15,23,42,0.05)]", extra);
+}
+
+const inputClassName =
+  "h-10 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-300 focus:bg-white";
+
+const textareaClassName =
+  "min-h-[104px] w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-300 focus:bg-white";
+
+function emptyTemplateForm(): ProviderTemplateFormState {
+  return {
+    label: "",
+    description: "",
+    doctorId: "",
+    art: "provider_template_instruction",
+    category: "provider_template",
+    defaultAutoName: "",
+    defaultStatus: "draft",
+    defaultVisibility: "patient_visible",
+    isMedical: true,
+    isActive: true,
+    supportedLanguages: ["de"],
+    bodyDe: "",
+    bodyEn: "",
+    bodyUk: "",
+    bodyRu: "",
+    notes: "",
+    autoSendOnConfirmedAppointment: false,
+  };
+}
+
+function templateToFormState(template: ProviderTemplateItem): ProviderTemplateFormState {
+  return {
+    label: template.label,
+    description: template.description ?? "",
+    doctorId: template.doctor_id ?? "",
+    art: template.art,
+    category: template.category,
+    defaultAutoName: template.default_auto_name,
+    defaultStatus:
+      (template.default_status as ProviderTemplateFormState["defaultStatus"]) ??
+      "draft",
+    defaultVisibility:
+      (template.default_visibility as ProviderTemplateFormState["defaultVisibility"]) ??
+      "patient_visible",
+    isMedical: template.is_medical,
+    isActive: template.is_active,
+    supportedLanguages: template.supported_languages,
+    bodyDe: template.body_de ?? "",
+    bodyEn: template.body_en ?? "",
+    bodyUk: template.body_uk ?? "",
+    bodyRu: template.body_ru ?? "",
+    notes: template.notes ?? "",
+    autoSendOnConfirmedAppointment:
+      template.auto_send_on_confirmed_appointment ?? false,
+  };
 }
 
 function Lbl({ children }: { children: React.ReactNode }) {
@@ -160,7 +267,7 @@ const STATUS_COLORS: Record<string, string> = {
 
 export function ProviderDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
+  const { staffGo } = useStaffNavigate();
   const { user } = useAuth();
   const { t } = useLang();
 
@@ -172,6 +279,15 @@ export function ProviderDetailPage() {
 
   const [appointments, setAppointments] = useState<AppointmentItem[]>([]);
   const [tabLoading, setTabLoading] = useState(false);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(
+    null,
+  );
+  const [creatingTemplate, setCreatingTemplate] = useState(false);
+  const [templateForm, setTemplateForm] = useState<ProviderTemplateFormState>(
+    () => emptyTemplateForm(),
+  );
+  const [templateBusy, setTemplateBusy] = useState(false);
+  const [templateError, setTemplateError] = useState("");
 
   const canManage = user?.role === "ceo" || user?.role === "patient_manager";
   const reload = useCallback(() => setVersion((v) => v + 1), []);
@@ -200,6 +316,97 @@ export function ProviderDetailPage() {
     return () => { cancelled = true; };
   }, [id, activeTab]);
 
+  useEffect(() => {
+    if (!detail) {
+      return;
+    }
+    const selectedTemplate = selectedTemplateId
+      ? detail.templates.find((item) => item.id === selectedTemplateId) ?? null
+      : null;
+    if (selectedTemplate) {
+      setCreatingTemplate(false);
+      setTemplateForm(templateToFormState(selectedTemplate));
+      return;
+    }
+    if (detail.templates.length > 0 && !creatingTemplate) {
+      setSelectedTemplateId(detail.templates[0].id);
+      return;
+    }
+    setSelectedTemplateId(null);
+    setTemplateForm(emptyTemplateForm());
+  }, [creatingTemplate, detail, selectedTemplateId]);
+
+  async function saveTemplate() {
+    if (!id) return;
+    setTemplateBusy(true);
+    setTemplateError("");
+    try {
+      const payload = {
+        label: templateForm.label,
+        description: templateForm.description || null,
+        doctor_id: templateForm.doctorId || null,
+        art: templateForm.art,
+        category: templateForm.category,
+        default_auto_name: templateForm.defaultAutoName,
+        default_status: templateForm.defaultStatus,
+        default_visibility: templateForm.defaultVisibility,
+        is_medical: templateForm.isMedical,
+        is_active: templateForm.isActive,
+        supported_languages: templateForm.supportedLanguages,
+        body_de: templateForm.bodyDe || null,
+        body_en: templateForm.bodyEn || null,
+        body_uk: templateForm.bodyUk || null,
+        body_ru: templateForm.bodyRu || null,
+        notes: templateForm.notes || null,
+        auto_send_on_confirmed_appointment:
+          templateForm.autoSendOnConfirmedAppointment,
+      };
+      if (selectedTemplateId) {
+        await apiFetch(`/providers/${id}/templates/${selectedTemplateId}/update`, {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+      } else {
+        const created = await apiFetch<{ id: string }>(`/providers/${id}/templates`, {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+        setCreatingTemplate(false);
+        setSelectedTemplateId(created.id);
+      }
+      reload();
+    } catch (error) {
+      setTemplateError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setTemplateBusy(false);
+    }
+  }
+
+  function startNewTemplate() {
+    setCreatingTemplate(true);
+    setSelectedTemplateId(null);
+    setTemplateError("");
+    setTemplateForm(emptyTemplateForm());
+  }
+
+  function openTemplateEditor(template: ProviderTemplateItem) {
+    setCreatingTemplate(false);
+    setSelectedTemplateId(template.id);
+    setTemplateError("");
+    setTemplateForm(templateToFormState(template));
+  }
+
+  function toggleLanguage(language: string, checked: boolean) {
+    setTemplateForm((current) => ({
+      ...current,
+      supportedLanguages: checked
+        ? current.supportedLanguages.includes(language)
+          ? current.supportedLanguages
+          : [...current.supportedLanguages, language]
+        : current.supportedLanguages.filter((item) => item !== language),
+    }));
+  }
+
   if (loading) {
     return <div className="flex items-center justify-center py-20"><LoaderCircle className="size-6 animate-spin text-slate-400" /></div>;
   }
@@ -207,7 +414,7 @@ export function ProviderDetailPage() {
   if (error || !detail) {
     return (
       <div className="space-y-4">
-        <Button variant="ghost" className="gap-2" onClick={() => navigate("/providers")}><ArrowLeft className="size-4" /> {t.providers_title}</Button>
+        <Button variant="ghost" className="gap-2" onClick={() => staffGo("/providers")}><ArrowLeft className="size-4" /> {t.providers_title}</Button>
         <div className="rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error || t.common_failed_load}</div>
       </div>
     );
@@ -217,7 +424,7 @@ export function ProviderDetailPage() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon" className="rounded-xl" onClick={() => navigate("/providers")}>
+        <Button variant="ghost" size="icon" className="rounded-xl" onClick={() => staffGo("/providers")}>
           <ArrowLeft className="size-5" />
         </Button>
         <div className="flex-1">
@@ -287,6 +494,7 @@ export function ProviderDetailPage() {
             <TabsTrigger value="overview" className="px-4 py-2">{t.providers_detail}</TabsTrigger>
             <TabsTrigger value="doctors" className="px-4 py-2">{t.providers_doctors}</TabsTrigger>
             <TabsTrigger value="services" className="px-4 py-2">{t.providers_services}</TabsTrigger>
+            <TabsTrigger value="templates" className="px-4 py-2">Templates</TabsTrigger>
             <TabsTrigger value="patients" className="px-4 py-2">{t.providers_linked_patients}</TabsTrigger>
             <TabsTrigger value="appointments" className="px-4 py-2">{t.appointments_title}</TabsTrigger>
           </TabsList>
@@ -388,6 +596,387 @@ export function ProviderDetailPage() {
           )}
         </TabsContent>
 
+        {/* Templates */}
+        <TabsContent value="templates" className="mt-4 min-h-[400px]">
+          <div className="grid gap-4 xl:grid-cols-[1.1fr_1.4fr]">
+            <div className={card("p-5")}>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-sm font-semibold text-slate-950">
+                    Clinic templates
+                  </h2>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Store provider-specific document templates for generation.
+                  </p>
+                </div>
+                {canManage ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="rounded-xl"
+                    onClick={startNewTemplate}
+                  >
+                    New template
+                  </Button>
+                ) : null}
+              </div>
+              <div className="mt-4 space-y-3">
+                {detail.templates.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
+                    No provider templates yet.
+                  </div>
+                ) : (
+                  detail.templates.map((template) => (
+                    <button
+                      key={template.id}
+                      type="button"
+                      className={cn(
+                        "w-full rounded-2xl border px-4 py-4 text-left transition",
+                        selectedTemplateId === template.id
+                          ? "border-sky-300 bg-sky-50/80 shadow-sm"
+                          : "border-slate-200 bg-white hover:border-slate-300",
+                      )}
+                      onClick={() => openTemplateEditor(template)}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-slate-900">
+                            {template.label}
+                          </p>
+                          <p className="mt-1 text-xs text-slate-500">
+                            {template.description || template.default_auto_name}
+                          </p>
+                        </div>
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            "rounded-full",
+                            template.is_active
+                              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                              : "border-slate-200 bg-slate-100 text-slate-600",
+                          )}
+                        >
+                          {template.is_active ? t.common_active : t.common_inactive}
+                        </Badge>
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-500">
+                        <span>{template.art}</span>
+                        {template.auto_send_on_confirmed_appointment ? (
+                          <span>Auto-send on confirmation</span>
+                        ) : null}
+                        <span>· {template.category}</span>
+                        {template.doctor_name ? (
+                          <span>· {template.doctor_name}</span>
+                        ) : null}
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {template.supported_languages.map((language) => (
+                          <Badge
+                            key={`${template.id}-${language}`}
+                            variant="outline"
+                            className="rounded-full border-slate-200 bg-white text-slate-700"
+                          >
+                            {language.toUpperCase()}
+                          </Badge>
+                        ))}
+                      </div>
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div className={card("p-5")}>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-sm font-semibold text-slate-950">
+                    {selectedTemplateId ? "Edit template" : "Create template"}
+                  </h2>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Generated documents will use the selected provider template
+                    in the documents workspace.
+                  </p>
+                </div>
+                {selectedTemplateId ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="rounded-xl"
+                    onClick={startNewTemplate}
+                  >
+                    Reset
+                  </Button>
+                ) : null}
+              </div>
+
+              {templateError ? (
+                <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                  {templateError}
+                </div>
+              ) : null}
+
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Label</Label>
+                  <Input
+                    value={templateForm.label}
+                    onChange={(event) =>
+                      setTemplateForm((current) => ({
+                        ...current,
+                        label: event.target.value,
+                      }))
+                    }
+                    className={inputClassName}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Default file name</Label>
+                  <Input
+                    value={templateForm.defaultAutoName}
+                    onChange={(event) =>
+                      setTemplateForm((current) => ({
+                        ...current,
+                        defaultAutoName: event.target.value,
+                      }))
+                    }
+                    className={inputClassName}
+                  />
+                </div>
+                <div className="space-y-2 md:col-span-2">
+                  <Label>Description</Label>
+                  <textarea
+                    value={templateForm.description}
+                    onChange={(event) =>
+                      setTemplateForm((current) => ({
+                        ...current,
+                        description: event.target.value,
+                      }))
+                    }
+                    className={textareaClassName}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Doctor binding</Label>
+                  <select
+                    value={templateForm.doctorId}
+                    onChange={(event) =>
+                      setTemplateForm((current) => ({
+                        ...current,
+                        doctorId: event.target.value,
+                      }))
+                    }
+                    className={inputClassName}
+                  >
+                    <option value="">Any doctor in this clinic</option>
+                    {detail.doctors.map((doctor) => (
+                      <option key={doctor.id} value={doctor.id}>
+                        {doctor.title ? `${doctor.title} ` : ""}
+                        {doctor.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Status</Label>
+                  <select
+                    value={templateForm.defaultStatus}
+                    onChange={(event) =>
+                      setTemplateForm((current) => ({
+                        ...current,
+                        defaultStatus:
+                          event.target
+                            .value as ProviderTemplateFormState["defaultStatus"],
+                      }))
+                    }
+                    className={inputClassName}
+                  >
+                    <option value="draft">draft</option>
+                    <option value="active">active</option>
+                    <option value="archived">archived</option>
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Document art</Label>
+                  <Input
+                    value={templateForm.art}
+                    onChange={(event) =>
+                      setTemplateForm((current) => ({
+                        ...current,
+                        art: event.target.value,
+                      }))
+                    }
+                    className={inputClassName}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Category</Label>
+                  <Input
+                    value={templateForm.category}
+                    onChange={(event) =>
+                      setTemplateForm((current) => ({
+                        ...current,
+                        category: event.target.value,
+                      }))
+                    }
+                    className={inputClassName}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Visibility</Label>
+                  <select
+                    value={templateForm.defaultVisibility}
+                    onChange={(event) =>
+                      setTemplateForm((current) => ({
+                        ...current,
+                        defaultVisibility:
+                          event.target
+                            .value as ProviderTemplateFormState["defaultVisibility"],
+                      }))
+                    }
+                    className={inputClassName}
+                  >
+                    <option value="patient_visible">patient_visible</option>
+                    <option value="internal">internal</option>
+                    <option value="released_internal">released_internal</option>
+                    <option value="released_external">released_external</option>
+                  </select>
+                </div>
+                <div className="flex flex-wrap items-center gap-5 md:col-span-2">
+                  <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={templateForm.isMedical}
+                      onChange={(event) =>
+                        setTemplateForm((current) => ({
+                          ...current,
+                          isMedical: event.target.checked,
+                        }))
+                      }
+                    />
+                    Medical data
+                  </label>
+                  <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={templateForm.isActive}
+                      onChange={(event) =>
+                        setTemplateForm((current) => ({
+                          ...current,
+                          isActive: event.target.checked,
+                        }))
+                      }
+                    />
+                    Active
+                  </label>
+                  <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={templateForm.autoSendOnConfirmedAppointment}
+                      onChange={(event) =>
+                        setTemplateForm((current) => ({
+                          ...current,
+                          autoSendOnConfirmedAppointment: event.target.checked,
+                        }))
+                      }
+                    />
+                    Auto-send when appointment is confirmed
+                  </label>
+                </div>
+              </div>
+
+              <div className="mt-6">
+                <Lbl>Localized bodies</Lbl>
+                <div className="mt-3 grid gap-4 md:grid-cols-2">
+                  {[
+                    ["de", "German", "bodyDe"],
+                    ["en", "English", "bodyEn"],
+                    ["uk", "Ukrainian", "bodyUk"],
+                    ["ru", "Russian", "bodyRu"],
+                  ].map(([language, label, field]) => {
+                    const checked =
+                      templateForm.supportedLanguages.includes(language);
+                    return (
+                      <div
+                        key={language}
+                        className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                      >
+                        <label className="inline-flex items-center gap-2 text-sm font-medium text-slate-800">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(event) =>
+                              toggleLanguage(language, event.target.checked)
+                            }
+                          />
+                          {label}
+                        </label>
+                        <textarea
+                          value={
+                            field === "bodyDe"
+                              ? templateForm.bodyDe
+                              : field === "bodyEn"
+                                ? templateForm.bodyEn
+                                : field === "bodyUk"
+                                  ? templateForm.bodyUk
+                                  : templateForm.bodyRu
+                          }
+                          onChange={(event) =>
+                            setTemplateForm((current) => ({
+                              ...current,
+                              [field]: event.target.value,
+                            }))
+                          }
+                          disabled={!checked}
+                          placeholder="Use placeholders like {{patient_name}}, {{provider_name}}, {{appointment_date}}."
+                          className={cn(
+                            textareaClassName,
+                            "mt-3 min-h-[140px]",
+                            !checked && "opacity-60",
+                          )}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="mt-6 space-y-2">
+                <Label>Internal notes</Label>
+                <textarea
+                  value={templateForm.notes}
+                  onChange={(event) =>
+                    setTemplateForm((current) => ({
+                      ...current,
+                      notes: event.target.value,
+                    }))
+                  }
+                  className={textareaClassName}
+                />
+              </div>
+
+              {canManage ? (
+                <div className="mt-6 flex justify-end">
+                  <Button
+                    className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+                    onClick={() => void saveTemplate()}
+                    disabled={templateBusy}
+                  >
+                    {templateBusy ? (
+                      <LoaderCircle className="mr-2 size-4 animate-spin" />
+                    ) : null}
+                    {selectedTemplateId ? "Save template" : "Create template"}
+                  </Button>
+                </div>
+              ) : (
+                <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
+                  Read-only access. CEO or patient manager can edit clinic
+                  templates.
+                </div>
+              )}
+            </div>
+          </div>
+        </TabsContent>
+
         {/* Linked Patients */}
         <TabsContent value="patients" className="mt-4 min-h-[400px]">
           {detail.linked_patients.length === 0 ? (
@@ -395,7 +984,7 @@ export function ProviderDetailPage() {
           ) : (
             <div className="grid gap-3 md:grid-cols-2">
               {detail.linked_patients.map((p) => (
-                <button key={p.patient_id} type="button" onClick={() => navigate(`/patients/${p.patient_id}`)} className={card("p-5 text-left hover:-translate-y-0.5 hover:shadow-lg transition")}>
+                <button key={p.patient_id} type="button" onClick={() => staffGo(`/patients/${p.patient_id}`)} className={card("p-5 text-left hover:-translate-y-0.5 hover:shadow-lg transition")}>
                   <div className="flex items-center gap-3">
                     <div className="flex items-center justify-center size-10 rounded-full bg-slate-100 text-[11px] font-semibold text-slate-600">
                       {p.first_name?.[0]?.toUpperCase()}{p.last_name?.[0]?.toUpperCase()}
@@ -424,7 +1013,7 @@ export function ProviderDetailPage() {
           ) : (
             <div className="grid gap-3 md:grid-cols-2">
               {appointments.map((a) => (
-                <button key={a.id} type="button" onClick={() => navigate(`/appointments?appointment=${a.id}`)} className={card("p-5 text-left hover:-translate-y-0.5 hover:shadow-lg transition")}>
+                <button key={a.id} type="button" onClick={() => staffGo(`/appointments?appointment=${a.id}`)} className={card("p-5 text-left hover:-translate-y-0.5 hover:shadow-lg transition")}>
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-slate-400">{a.apt_type}</span>
                     <Badge variant="outline" className={cn("rounded-full text-[10px]", STATUS_COLORS[a.status] ?? "")}>{a.status}</Badge>

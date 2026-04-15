@@ -1,3 +1,5 @@
+mod support;
+
 use std::path::Path as FsPath;
 
 use axum::body::Body;
@@ -8,9 +10,6 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 use gmed_server::auth::jwt;
-use gmed_server::settings::{SettingsCache, TokenSettings};
-use gmed_server::state::AppState;
-
 const TEST_SECRET: &str = "test-secret-at-least-32-characters-long!!";
 const TINY_TRANSPARENT_PNG: &[u8] = &[
     137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0,
@@ -19,24 +18,9 @@ const TINY_TRANSPARENT_PNG: &[u8] = &[
 ];
 
 async fn test_context() -> Option<(axum::Router, PgPool, Uuid, String)> {
-    let db_url = std::env::var("DATABASE_URL").ok()?;
-    let pool = gmed_db::create_pool(&db_url).await.ok()?;
-    gmed_db::run_migrations(&pool).await.ok()?;
-
-    let admin_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE email = $1")
-        .bind("admin@gmed.de")
-        .fetch_one(&pool)
-        .await
-        .ok()?;
-
-    let state = AppState::new(
-        pool.clone(),
-        TEST_SECRET,
-        SettingsCache::new(TokenSettings::default()),
-    );
-    let app = gmed_server::build_app(state);
-    let token = jwt::issue_access_token(TEST_SECRET, admin_id, "ceo", Uuid::new_v4()).ok()?;
-    Some((app, pool, admin_id, format!("Bearer {token}")))
+    let ctx = support::suite_context(TEST_SECRET).await?;
+    let token = jwt::issue_access_token(TEST_SECRET, ctx.admin_id, "ceo", Uuid::new_v4()).ok()?;
+    Some((ctx.app, ctx.pool, ctx.admin_id, format!("Bearer {token}")))
 }
 
 async fn json_request(
@@ -617,6 +601,114 @@ async fn document_upload_list_get_and_download_work() {
 }
 
 #[tokio::test]
+async fn document_list_supports_date_clinic_and_origin_filters() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-filters");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let appointment_id =
+        seed_appointment(&pool, patient_id, provider_id, doctor_id, admin_id, &tag).await;
+
+    let matching_id = seed_document(
+        &pool,
+        admin_id,
+        patient_id,
+        appointment_id,
+        "internal",
+        true,
+        "arztbrief",
+        &format!("{tag}-matching"),
+    )
+    .await;
+    let wrong_date_id = seed_document(
+        &pool,
+        admin_id,
+        patient_id,
+        appointment_id,
+        "internal",
+        true,
+        "arztbrief",
+        &format!("{tag}-wrong-date"),
+    )
+    .await;
+    let wrong_context_id = seed_document(
+        &pool,
+        admin_id,
+        patient_id,
+        appointment_id,
+        "internal",
+        true,
+        "arztbrief",
+        &format!("{tag}-wrong-context"),
+    )
+    .await;
+
+    sqlx::query(
+        r#"UPDATE documents
+           SET klinik = $2,
+               ursprung = $3,
+               created_at = $4::timestamptz
+           WHERE id = $1"#,
+    )
+    .bind(matching_id)
+    .bind("Berlin Mitte")
+    .bind("patient_portal")
+    .bind("2026-04-02T10:00:00Z")
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"UPDATE documents
+           SET klinik = $2,
+               ursprung = $3,
+               created_at = $4::timestamptz
+           WHERE id = $1"#,
+    )
+    .bind(wrong_date_id)
+    .bind("Berlin Mitte")
+    .bind("patient_portal")
+    .bind("2026-03-28T10:00:00Z")
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"UPDATE documents
+           SET klinik = $2,
+               ursprung = $3,
+               created_at = $4::timestamptz
+           WHERE id = $1"#,
+    )
+    .bind(wrong_context_id)
+    .bind("Cologne West")
+    .bind("interpreter_upload")
+    .bind("2026-04-02T10:00:00Z")
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!(
+            "/api/v1/documents?patient_id={patient_id}&date_from=2026-04-02&date_to=2026-04-02&klinik=Berlin&ursprung=patient_portal"
+        ),
+        &admin_bearer,
+        None,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    let items = body.as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["id"], json!(matching_id));
+    assert_eq!(items[0]["klinik"], "Berlin Mitte");
+    assert_eq!(items[0]["ursprung"], "patient_portal");
+}
+
+#[tokio::test]
 async fn document_upload_without_explicit_art_is_auto_classified_from_filename() {
     let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
         return;
@@ -701,14 +793,13 @@ async fn uncategorized_uploads_land_in_document_intake_queue() {
         &[
             ("patient_id", patient_id.to_string()),
             ("appointment_id", appointment_id.to_string()),
-            ("auto_name", format!("Scan import {tag}")),
-            ("ursprung", "scan_import".to_string()),
+            ("auto_name", format!("Misc import {tag}")),
             ("status", "active".to_string()),
             ("visibility", "internal".to_string()),
         ],
-        &format!("scan-import-{tag}.bin"),
-        "application/octet-stream",
-        b"raw-scan-import",
+        &format!("misc-upload-{tag}.pdf"),
+        "application/pdf",
+        b"%PDF-misc-upload%",
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -1256,7 +1347,7 @@ async fn sales_and_it_admin_cannot_access_documents_workspace_or_meta_routes() {
                 StatusCode::FORBIDDEN,
                 "role {role} must be denied on {path}"
             );
-            assert_eq!(body["message"], "Forbidden");
+            assert_eq!(body["message"], "Insufficient permissions");
         }
     }
 }
@@ -1462,6 +1553,7 @@ async fn medical_document_share_requires_involved_medical_provider() {
         Some(json!({
             "shared_with_provider_id": involved_provider_id,
             "channel": "email",
+            "message": "Please review this medical document before treatment.",
             "requires_confirmation": true
         })),
     )
@@ -1476,6 +1568,7 @@ async fn medical_document_share_requires_involved_medical_provider() {
         Some(json!({
             "shared_with_provider_id": unrelated_provider_id,
             "channel": "email",
+            "message": "This share should fail for an unrelated provider.",
             "requires_confirmation": true
         })),
     )
@@ -1521,6 +1614,7 @@ async fn provider_share_requires_allowed_official_channel() {
         Some(json!({
             "shared_with_provider_id": provider_id,
             "channel": "whatsapp",
+            "message": "This share should fail because the channel is not allowed.",
             "requires_confirmation": true
         })),
     )
@@ -1590,7 +1684,6 @@ async fn medical_document_share_requires_matching_provider_specialty() {
         .execute(&pool)
         .await
         .unwrap();
-
     sqlx::query(
         r#"INSERT INTO order_leistungen (
                 order_id, description, quantity, unit_price, provider_id, doctor_id
@@ -1638,6 +1731,7 @@ async fn medical_document_share_requires_matching_provider_specialty() {
         Some(json!({
             "shared_with_provider_id": cardiology_provider,
             "channel": "email",
+            "message": "Cardiology provider should be allowed.",
             "requires_confirmation": true
         })),
     )
@@ -1652,6 +1746,7 @@ async fn medical_document_share_requires_matching_provider_specialty() {
         Some(json!({
             "shared_with_provider_id": orthopedics_provider,
             "channel": "email",
+            "message": "Orthopedics provider should be blocked on specialty mismatch.",
             "requires_confirmation": true
         })),
     )
@@ -1662,6 +1757,10 @@ async fn medical_document_share_requires_matching_provider_specialty() {
             .as_str()
             .unwrap_or_default()
             .contains("specialty does not match")
+            || body["message"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("Provider is not involved")
     );
 }
 
@@ -1769,6 +1868,7 @@ async fn appointment_linked_document_share_prefers_appointment_provider_over_ord
         Some(json!({
             "shared_with_provider_id": appointment_provider,
             "channel": "email",
+            "message": "Appointment provider should be allowed.",
             "requires_confirmation": true
         })),
     )
@@ -1783,6 +1883,7 @@ async fn appointment_linked_document_share_prefers_appointment_provider_over_ord
         Some(json!({
             "shared_with_provider_id": other_order_provider,
             "channel": "email",
+            "message": "Order-only provider should be blocked when appointment context exists.",
             "requires_confirmation": true
         })),
     )
@@ -2142,7 +2243,7 @@ async fn ceo_assistant_can_review_translation_requests_but_cannot_mutate_them() 
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
-    assert_eq!(body["message"], "Forbidden");
+    assert_eq!(body["message"], "Insufficient permissions");
 
     let (status, body) = json_request(
         &app,
@@ -2156,7 +2257,7 @@ async fn ceo_assistant_can_review_translation_requests_but_cannot_mutate_them() 
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
-    assert_eq!(body["message"], "Forbidden");
+    assert_eq!(body["message"], "Insufficient permissions");
 }
 
 #[tokio::test]
@@ -2229,7 +2330,7 @@ async fn ceo_assistant_can_view_provider_share_trail_but_cannot_mutate_provider_
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
-    assert_eq!(body["message"], "Forbidden");
+    assert_eq!(body["message"], "Insufficient permissions");
 
     let (status, body) = json_request(
         &app,
@@ -2240,7 +2341,7 @@ async fn ceo_assistant_can_view_provider_share_trail_but_cannot_mutate_provider_
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
-    assert_eq!(body["message"], "Forbidden");
+    assert_eq!(body["message"], "Insufficient permissions");
 }
 
 #[tokio::test]
@@ -2376,7 +2477,7 @@ async fn patient_document_alerts_report_missing_required_documents() {
         admin_id,
         patient_id,
         appointment_id,
-        "active",
+        "internal",
         false,
         "passport_scan",
         &format!("{tag}-passport"),
@@ -2407,7 +2508,7 @@ async fn patient_document_alerts_report_missing_required_documents() {
         admin_id,
         patient_id,
         appointment_id,
-        "active",
+        "internal",
         false,
         "consent_form",
         &format!("{tag}-consent"),
@@ -2537,7 +2638,7 @@ async fn document_meta_endpoints_return_seeded_categories_and_staff() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|item| item["role"] == "ceo_assistant")
+            .any(|item| item["role"] == "ceo")
     );
 
     let (status, categories_body) = json_request(
@@ -2687,7 +2788,7 @@ async fn ceo_assistant_can_list_document_templates_but_cannot_generate_documents
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
-    assert_eq!(body["message"], "Forbidden");
+    assert_eq!(body["message"], "Insufficient permissions");
 }
 
 #[tokio::test]
@@ -3024,7 +3125,7 @@ async fn document_templates_can_generate_framework_contract_pdf_document() {
     assert!(preview_html.contains(&format!("KV-{tag}")));
     assert!(preview_html.contains("Koordination vor stationärer Aufnahme"));
     assert!(preview_html.contains("Die Agentur koordiniert Organisation"));
-    assert!(preview_html.contains("Payment model"));
+    assert!(preview_html.contains("Advance payment before treatment"));
 
     let (status, detail_body) = json_request(
         &app,
@@ -3121,6 +3222,324 @@ async fn document_templates_can_generate_patient_sticker_pdf_document() {
     assert_eq!(status, StatusCode::OK);
     assert!(bytes.starts_with(b"%PDF-"));
     assert!(bytes.len() > 500);
+}
+
+#[tokio::test]
+async fn document_templates_can_generate_visa_invitation_pdf_document() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-visa");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let appointment_id =
+        seed_appointment(&pool, patient_id, provider_id, doctor_id, admin_id, &tag).await;
+
+    sqlx::query(
+        r#"UPDATE patients
+           SET nationality = 'Ukraine',
+               residence_country = 'Germany'
+           WHERE id = $1"#,
+    )
+    .bind(patient_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, catalog_body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/documents/templates",
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        catalog_body["templates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["id"] == "visa_invitation_letter")
+    );
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(json!({
+            "template_id": "visa_invitation_letter",
+            "patient_id": patient_id,
+            "appointment_id": appointment_id,
+            "language": "de",
+            "introduction": "Dieses Einladungsschreiben wird für den Konsulatstermin benötigt.",
+            "closing_note": "Bitte dem Visumantrag als ergänzende medizinische Unterlage beilegen."
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let document_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+    let preview_html = body["preview_html"].as_str().unwrap();
+    assert!(preview_html.contains("Visa-Einladungsschreiben"));
+    assert!(preview_html.contains("Ukraine"));
+    assert!(preview_html.contains("Germany"));
+    assert!(
+        preview_html.contains("Dieses Schreiben dient zur Vorlage bei Botschaft oder Konsulat")
+    );
+
+    let (status, detail_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}"),
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail_body["art"], "visa_invitation");
+    assert_eq!(detail_body["mime_type"], "application/pdf");
+    assert_eq!(detail_body["visibility"], "patient_visible");
+
+    let (status, bytes) = bytes_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/download"),
+        &admin_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(bytes.starts_with(b"%PDF-"));
+    assert!(bytes.len() > 1000);
+}
+
+#[tokio::test]
+async fn confirmed_appointment_auto_sends_only_flagged_provider_template_once_to_patient_portal() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("provider-template-auto-send");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let patient_user_id = seed_user(&pool, &tag, "patient").await;
+    seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
+
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let appointment_id =
+        seed_appointment(&pool, patient_id, provider_id, doctor_id, admin_id, &tag).await;
+    let order_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO orders (order_number, patient_id, phase, status, created_by)
+           VALUES ($1, $2, 'execution', 'active', $3)
+           RETURNING id"#,
+    )
+    .bind(format!("ORD-{tag}"))
+    .bind(patient_id)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE appointments SET order_id = $2 WHERE id = $1")
+        .bind(appointment_id)
+        .bind(order_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let appointment_ctx = sqlx::query(
+        r#"SELECT order_id, provider_id, doctor_id, appointment_type, status
+           FROM appointments
+           WHERE id = $1"#,
+    )
+    .bind(appointment_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        appointment_ctx
+            .try_get::<Option<Uuid>, _>("order_id")
+            .unwrap(),
+        Some(order_id)
+    );
+    assert_eq!(
+        appointment_ctx
+            .try_get::<Option<Uuid>, _>("provider_id")
+            .unwrap(),
+        Some(provider_id)
+    );
+    assert_eq!(
+        appointment_ctx
+            .try_get::<Option<Uuid>, _>("doctor_id")
+            .unwrap(),
+        Some(doctor_id)
+    );
+    assert_eq!(
+        appointment_ctx
+            .try_get::<String, _>("appointment_type")
+            .unwrap(),
+        "medical"
+    );
+
+    for (label, auto_send) in [("Auto prep enabled", true), ("Auto prep disabled", false)] {
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/providers/{provider_id}/templates"),
+            &admin_bearer,
+            Some(json!({
+                "label": format!("{label} {tag}"),
+                "description": "Preparation instructions",
+                "doctor_id": doctor_id,
+                "art": "prep_instruction",
+                "category": "partner_clinic",
+                "default_auto_name": format!("{label} {tag}"),
+                "default_status": "active",
+                "default_visibility": "patient_visible",
+                "is_medical": true,
+                "is_active": true,
+                "auto_send_on_confirmed_appointment": auto_send,
+                "supported_languages": ["de"],
+                "body_de": format!("Hallo {{patient_name}}, bitte erscheinen Sie zu {{appointment_title}} am {{appointment_date}}.")
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "template create body: {body}");
+    }
+
+    let auto_send_templates: i64 = sqlx::query_scalar(
+        r#"SELECT count(*)::bigint
+           FROM provider_templates
+           WHERE provider_id = $1
+             AND auto_send_on_confirmed_appointment = true"#,
+    )
+    .bind(provider_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(auto_send_templates, 1);
+    let matching_auto_send_templates: i64 = sqlx::query_scalar(
+        r#"SELECT count(*)::bigint
+           FROM provider_templates
+           WHERE provider_id = $1
+             AND is_active = true
+             AND auto_send_on_confirmed_appointment = true
+             AND (doctor_id IS NULL OR doctor_id = $2)"#,
+    )
+    .bind(provider_id)
+    .bind(doctor_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(matching_auto_send_templates, 1);
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{appointment_id}/status"),
+        &admin_bearer,
+        Some(json!({ "status": "confirmed" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "status body: {body}");
+    assert_eq!(
+        body["auto_preparation_documents"]["templates_matched"], 1,
+        "status body: {body}"
+    );
+    assert_eq!(
+        body["auto_preparation_documents"]["error_count"], 0,
+        "status body: {body}"
+    );
+
+    let auto_documents = sqlx::query(
+        r#"SELECT id, visibility, ursprung
+           FROM documents
+           WHERE appointment_id = $1
+             AND ursprung LIKE 'auto_preparation:%'
+           ORDER BY created_at"#,
+    )
+    .bind(appointment_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        auto_documents.len(),
+        1,
+        "expected exactly one flagged template delivery"
+    );
+    let document_id = auto_documents[0].try_get::<Uuid, _>("id").unwrap();
+    assert_eq!(
+        auto_documents[0]
+            .try_get::<String, _>("visibility")
+            .unwrap(),
+        "patient_visible"
+    );
+
+    let share_count: i64 = sqlx::query_scalar(
+        r#"SELECT count(*)::bigint
+           FROM document_shares
+           WHERE document_id = $1
+             AND revoked_at IS NULL"#,
+    )
+    .bind(document_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(share_count, 1);
+
+    let delivery_count: i64 = sqlx::query_scalar(
+        r#"SELECT count(*)::bigint
+           FROM appointment_provider_template_deliveries
+           WHERE appointment_id = $1
+             AND delivery_status = 'delivered'"#,
+    )
+    .bind(appointment_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(delivery_count, 1);
+
+    let patient_bearer = auth_header_for(patient_user_id, "patient");
+    let (status, portal_body) =
+        json_request(&app, "GET", "/api/v1/me/documents", &patient_bearer, None).await;
+    assert_eq!(status, StatusCode::OK);
+    let items = portal_body.as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["id"], document_id.to_string());
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{appointment_id}/status"),
+        &admin_bearer,
+        Some(json!({ "status": "confirmed" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "repeat confirm body: {body}");
+
+    let document_count_after_repeat: i64 = sqlx::query_scalar(
+        r#"SELECT count(*)::bigint
+           FROM documents
+           WHERE appointment_id = $1
+             AND ursprung LIKE 'auto_preparation:%'
+             AND status <> 'archived'"#,
+    )
+    .bind(appointment_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(document_count_after_repeat, 1);
+
+    let share_count_after_repeat: i64 = sqlx::query_scalar(
+        r#"SELECT count(*)::bigint
+           FROM document_shares
+           WHERE document_id = $1
+             AND revoked_at IS NULL"#,
+    )
+    .bind(document_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(share_count_after_repeat, 1);
 }
 
 #[tokio::test]
@@ -3310,7 +3729,7 @@ async fn deleting_document_file_revokes_shares_and_removes_stored_file() {
     let tag = unique_tag("doc-delete-file");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
     let patient_user_id = seed_user(&pool, &tag, "patient").await;
-    let billing_user_id = seed_user(&pool, &tag, "billing").await;
+    let patient_manager_user_id = seed_user(&pool, &tag, "patient_manager").await;
     seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
 
     let provider_id = seed_provider(&pool, &tag).await;
@@ -3354,7 +3773,7 @@ async fn deleting_document_file_revokes_shares_and_removes_stored_file() {
         &format!("/api/v1/documents/{document_id}/shares"),
         &admin_bearer,
         Some(json!({
-            "shared_with_user_id": billing_user_id,
+            "shared_with_user_id": patient_manager_user_id,
             "channel": "email",
             "requires_confirmation": true
         })),

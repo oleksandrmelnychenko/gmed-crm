@@ -6,13 +6,14 @@ import {
   useEffect,
   useId,
   useMemo,
+  useRef,
   useState,
   type ChangeEvent,
   type FormEvent,
   type ReactElement,
   type ReactNode,
 } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import {
   Download,
   FileText,
@@ -24,6 +25,7 @@ import {
   Trash2,
 } from "lucide-react";
 
+import { StaffLink } from "@/components/staff-link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -189,6 +191,10 @@ type FiltersState = {
   visibility: string;
   art: string;
   category: string;
+  dateFrom: string;
+  dateTo: string;
+  klinik: string;
+  ursprung: string;
 };
 
 type UploadFormState = {
@@ -233,6 +239,11 @@ type ShareFormState = {
 
 type DocumentTemplate = {
   id: string;
+  template_kind?: "builtin" | "provider";
+  provider_id?: string | null;
+  provider_name?: string | null;
+  doctor_id?: string | null;
+  doctor_name?: string | null;
   label: string;
   description: string;
   art: string;
@@ -372,6 +383,11 @@ function buildDocumentsPath(filters: FiltersState) {
   if (filters.visibility) params.set("visibility", filters.visibility);
   if (filters.art.trim()) params.set("art", filters.art.trim());
   if (filters.category) params.set("category", filters.category);
+  if (filters.dateFrom) params.set("date_from", filters.dateFrom);
+  if (filters.dateTo) params.set("date_to", filters.dateTo);
+  if (filters.klinik.trim()) params.set("klinik", filters.klinik.trim());
+  if (filters.ursprung.trim())
+    params.set("ursprung", filters.ursprung.trim());
   return params.size ? `/documents?${params.toString()}` : "/documents";
 }
 
@@ -546,6 +562,7 @@ function normalizeTemplateLanguage(value?: string | null) {
   }
   if (["uk", "uk-ua", "ua", "ukrainian"].includes(normalized)) return "uk";
   if (["en", "en-gb", "en-us", "english"].includes(normalized)) return "en";
+  if (["ru", "ru-ru", "russian"].includes(normalized)) return "ru";
   return null;
 }
 
@@ -573,6 +590,7 @@ function templateForDocument(
   return (
     templates.find(
       (template) =>
+        (template.template_kind ?? "builtin") === "builtin" &&
         template.art === detail.art && template.category === detail.category,
     ) ?? null
   );
@@ -727,13 +745,21 @@ function StaffDocumentsPage() {
 
   const [filters, setFilters] = useState<FiltersState>(() => ({
     search: searchParams.get("search") ?? "",
-    patientId: searchParams.get("patient") ?? "",
-    orderId: searchParams.get("order") ?? "",
-    appointmentId: searchParams.get("appointment") ?? "",
+    patientId:
+      searchParams.get("patient_id") ?? searchParams.get("patient") ?? "",
+    orderId: searchParams.get("order_id") ?? searchParams.get("order") ?? "",
+    appointmentId:
+      searchParams.get("appointment_id") ??
+      searchParams.get("appointment") ??
+      "",
     status: searchParams.get("status") ?? "",
     visibility: searchParams.get("visibility") ?? "",
     art: searchParams.get("art") ?? "",
     category: searchParams.get("category") ?? "",
+    dateFrom: searchParams.get("date_from") ?? "",
+    dateTo: searchParams.get("date_to") ?? "",
+    klinik: searchParams.get("klinik") ?? "",
+    ursprung: searchParams.get("ursprung") ?? "",
   }));
   const deferredSearch = useDeferredValue(filters.search);
 
@@ -791,6 +817,9 @@ function StaffDocumentsPage() {
   const [translationDrafts, setTranslationDrafts] = useState<
     Record<string, TranslationWorkspaceDraft>
   >({});
+  const translationDraftsRef = useRef<Record<string, TranslationWorkspaceDraft>>(
+    {},
+  );
   const [textExtraction, setTextExtraction] =
     useState<DocumentTextExtraction | null>(null);
   const [detailBusy, setDetailBusy] = useState(false);
@@ -1091,6 +1120,7 @@ function StaffDocumentsPage() {
         translatedText: request.translated_text ?? "",
       };
     }
+    translationDraftsRef.current = next;
     setTranslationDrafts(next);
   }, [translationRequests]);
 
@@ -1523,15 +1553,20 @@ function StaffDocumentsPage() {
     requestId: string,
     patch: Partial<TranslationWorkspaceDraft>,
   ) {
+    const nextDraft: TranslationWorkspaceDraft = {
+      note: translationDraftsRef.current[requestId]?.note ?? "",
+      sourceLanguage: translationDraftsRef.current[requestId]?.sourceLanguage ?? "",
+      sourceText: translationDraftsRef.current[requestId]?.sourceText ?? "",
+      translatedText: translationDraftsRef.current[requestId]?.translatedText ?? "",
+      ...patch,
+    };
+    translationDraftsRef.current = {
+      ...translationDraftsRef.current,
+      [requestId]: nextDraft,
+    };
     setTranslationDrafts((current) => ({
       ...current,
-      [requestId]: {
-        note: current[requestId]?.note ?? "",
-        sourceLanguage: current[requestId]?.sourceLanguage ?? "",
-        sourceText: current[requestId]?.sourceText ?? "",
-        translatedText: current[requestId]?.translatedText ?? "",
-        ...patch,
-      },
+      [requestId]: nextDraft,
     }));
   }
 
@@ -1600,7 +1635,7 @@ function StaffDocumentsPage() {
     setTranslationBusy(true);
     setTranslationError("");
     try {
-      const existingDraft = translationDrafts[requestId];
+      const existingDraft = translationDraftsRef.current[requestId];
       const draft: TranslationWorkspaceDraft = {
         note: patch?.note ?? existingDraft?.note ?? "",
         sourceLanguage:
@@ -2224,6 +2259,30 @@ function StaffDocumentsPage() {
             className="h-10 rounded-xl border-slate-200 bg-slate-50"
             placeholder={t.appointments_title}
           />
+          <Input
+            type="date"
+            value={filters.dateFrom}
+            onChange={(event) =>
+              setFilters((current) => ({
+                ...current,
+                dateFrom: event.target.value,
+              }))
+            }
+            aria-label={t.documents_date_from}
+            className="h-10 rounded-xl border-slate-200 bg-slate-50"
+          />
+          <Input
+            type="date"
+            value={filters.dateTo}
+            onChange={(event) =>
+              setFilters((current) => ({
+                ...current,
+                dateTo: event.target.value,
+              }))
+            }
+            aria-label={t.documents_date_to}
+            className="h-10 rounded-xl border-slate-200 bg-slate-50"
+          />
         </div>
         <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <select
@@ -2235,14 +2294,36 @@ function StaffDocumentsPage() {
               }))
             }
             className={selectClassName}
-          >
-            <option value="">All categories</option>
-            {categories.map((category) => (
-              <option key={category.key} value={category.key}>
-                {category.label}
-              </option>
-            ))}
-          </select>
+            >
+              <option value="">All categories</option>
+              {categories.map((category) => (
+                <option key={category.key} value={category.key}>
+                  {category.label}
+                </option>
+              ))}
+            </select>
+          <Input
+            value={filters.klinik}
+            onChange={(event) =>
+              setFilters((current) => ({
+                ...current,
+                klinik: event.target.value,
+              }))
+            }
+            className="h-10 rounded-xl border-slate-200 bg-slate-50"
+            placeholder={t.documents_clinic}
+          />
+          <Input
+            value={filters.ursprung}
+            onChange={(event) =>
+              setFilters((current) => ({
+                ...current,
+                ursprung: event.target.value,
+              }))
+            }
+            className="h-10 rounded-xl border-slate-200 bg-slate-50"
+            placeholder={t.documents_source}
+          />
           <Button
             variant="outline"
             className="rounded-xl"
@@ -2256,6 +2337,10 @@ function StaffDocumentsPage() {
                 visibility: "",
                 art: "",
                 category: "",
+                dateFrom: "",
+                dateTo: "",
+                klinik: "",
+                ursprung: "",
               })
             }
           >
@@ -2473,7 +2558,9 @@ function StaffDocumentsPage() {
                   <option value="">{t.documents_select_template}</option>
                   {templates.map((template) => (
                     <option key={template.id} value={template.id}>
-                      {template.label}
+                      {template.provider_name
+                        ? `${template.label} · ${template.provider_name}`
+                        : template.label}
                     </option>
                   ))}
                 </select>
@@ -3218,28 +3305,28 @@ function StaffDocumentsPage() {
                         </Button>
                       ) : null}
                       {detail.patient_id ? (
-                        <Link
+                        <StaffLink
                           to={`/patients?patient=${detail.patient_id}`}
                           className="inline-flex h-10 items-center rounded-2xl border border-input bg-background px-4 text-sm font-medium text-slate-900 transition-colors hover:bg-accent hover:text-accent-foreground"
                         >
                           {t.orders_patient}
-                        </Link>
+                        </StaffLink>
                       ) : null}
                       {detail.order_id ? (
-                        <Link
+                        <StaffLink
                           to={`/orders?order=${detail.order_id}`}
                           className="inline-flex h-10 items-center rounded-2xl border border-input bg-background px-4 text-sm font-medium text-slate-900 transition-colors hover:bg-accent hover:text-accent-foreground"
                         >
                           {t.orders_title}
-                        </Link>
+                        </StaffLink>
                       ) : null}
                       {detail.appointment_id ? (
-                        <Link
+                        <StaffLink
                           to={`/appointments?appointment=${detail.appointment_id}`}
                           className="inline-flex h-10 items-center rounded-2xl border border-input bg-background px-4 text-sm font-medium text-slate-900 transition-colors hover:bg-accent hover:text-accent-foreground"
                         >
                           {t.appointments_title}
-                        </Link>
+                        </StaffLink>
                       ) : null}
                     </div>
                   </div>
