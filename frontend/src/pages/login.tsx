@@ -43,6 +43,7 @@ export function LoginPage() {
   const toggleLang = () => {
     switchLang(lang === "de" ? "ru" : "de");
   };
+  const nextLangNative = lang === "de" ? "Русский" : "Deutsch";
 
   const validate = (): boolean => {
     const errors: { email?: string; password?: string } = {};
@@ -193,10 +194,11 @@ export function LoginPage() {
             <div className="mt-5 flex justify-center">
               <button
                 onClick={toggleLang}
+                aria-label={nextLangNative}
                 className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
               >
                 <Globe className="size-3.5" />
-                {tr.common_lang_native}
+                {nextLangNative}
               </button>
             </div>
 

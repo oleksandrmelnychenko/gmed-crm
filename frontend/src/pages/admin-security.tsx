@@ -210,7 +210,7 @@ export function AdminSecurityPage() {
             </div>
             {maintEnabled && (
               <Badge variant="destructive">
-                {t.security_maintenance} ON
+                {t.security_maintenance} {t.security_maintenance_on}
               </Badge>
             )}
           </div>
