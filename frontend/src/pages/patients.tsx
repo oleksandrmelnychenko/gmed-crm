@@ -7,7 +7,7 @@ import {
   type FormEvent,
   type ReactNode,
 } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import {
   CalendarClock,
   ChevronLeft,
@@ -43,6 +43,7 @@ import {
 } from "@/components/ui/select";
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -439,7 +440,7 @@ export function PatientsPage() {
   const { user } = useAuth();
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
-  const navigate = useNavigate();
+  const { staffGo } = useStaffNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const permissions = useMemo(() => patientPermissions(user?.role), [user?.role]);
   const [filters, setFilters] = useState<PatientFilters>(DEFAULT_FILTERS);
@@ -691,7 +692,7 @@ export function PatientsPage() {
   }
 
   function openPatient(patientId: string) {
-    navigate(`/patients/${patientId}`);
+    staffGo(`/patients/${patientId}`);
   }
 
   async function handleCreatePatient(event: FormEvent<HTMLFormElement>) {
@@ -730,7 +731,7 @@ export function PatientsPage() {
       });
       setCreateOpen(false);
       setCreateForm(blankPatientForm());
-      navigate(`/patients/${created.id}`);
+      staffGo(`/patients/${created.id}`);
     } catch (error) {
       setCreateError(error instanceof Error ? error.message : t.common_failed_create);
     } finally {
@@ -1172,11 +1173,11 @@ export function PatientsPage() {
               <div className="space-y-6 pt-5">
                 <PatientOverviewSection
                   detail={detail}
-                  onOpenCases={() => navigate(`/cases?patient=${detail.id}`)}
-                  onOpenOrders={() => navigate(`/orders?patient=${detail.id}`)}
-                  onOpenAppointments={() => navigate(`/appointments?patient=${detail.id}`)}
-                  onOpenContracts={() => navigate(`/contracts?patient=${detail.id}`)}
-                  onOpenDocuments={() => navigate(`/documents?patient=${detail.id}`)}
+                  onOpenCases={() => staffGo(`/cases?patient=${detail.id}`)}
+                  onOpenOrders={() => staffGo(`/orders?patient=${detail.id}`)}
+                  onOpenAppointments={() => staffGo(`/appointments?patient=${detail.id}`)}
+                  onOpenContracts={() => staffGo(`/contracts?patient=${detail.id}`)}
+                  onOpenDocuments={() => staffGo(`/documents?patient=${detail.id}`)}
                 />
                 <PatientProfileSection
                   detail={detail}
