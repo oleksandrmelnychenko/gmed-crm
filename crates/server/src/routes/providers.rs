@@ -31,6 +31,14 @@ pub fn router() -> Router<AppState> {
             get(list_provider_patients),
         )
         .route(
+            "/providers/{provider_id}/templates",
+            get(list_provider_templates).post(create_provider_template),
+        )
+        .route(
+            "/providers/{provider_id}/templates/{template_id}/update",
+            post(update_provider_template),
+        )
+        .route(
             "/providers/{provider_id}/doctors",
             get(list_doctors).post(create_doctor),
         )
@@ -80,6 +88,7 @@ struct ListProvidersQuery {
     doctor_fachbereich: Option<String>,
     service_name: Option<String>,
     has_contract: Option<bool>,
+    rating_gte: Option<f64>,
 }
 
 #[derive(Deserialize)]
@@ -124,6 +133,27 @@ struct UpsertServiceRequest {
     valid_to: Option<String>,
 }
 
+#[derive(Deserialize, Default, Clone)]
+struct UpsertProviderTemplateRequest {
+    label: String,
+    description: Option<String>,
+    doctor_id: Option<Uuid>,
+    art: Option<String>,
+    category: Option<String>,
+    default_auto_name: Option<String>,
+    default_status: Option<String>,
+    default_visibility: Option<String>,
+    is_medical: Option<bool>,
+    supported_languages: Option<Vec<String>>,
+    body_de: Option<String>,
+    body_en: Option<String>,
+    body_uk: Option<String>,
+    body_ru: Option<String>,
+    notes: Option<String>,
+    is_active: Option<bool>,
+    auto_send_on_confirmed_appointment: Option<bool>,
+}
+
 async fn list_providers(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -149,6 +179,7 @@ async fn list_providers(
     let doctor_fachbereich_pattern = format!("%{}%", query.doctor_fachbereich.unwrap_or_default());
     let service_name_pattern = format!("%{}%", query.service_name.unwrap_or_default());
     let has_contract = query.has_contract;
+    let rating_gte = query.rating_gte;
 
     if let Some(ref provider_type) = provider_type
         && !is_valid_provider_type(provider_type)
@@ -191,7 +222,17 @@ async fn list_providers(
                     FROM concierge_services cs
                     WHERE cs.provider_id = p.id
                       AND cs.status IN ('planned', 'booked', 'confirmed', 'in_service')
-                  ) AS open_concierge_service_count,
+                   ) AS open_concierge_service_count,
+                  (
+                    SELECT COUNT(*)
+                    FROM patient_feedback_forms f
+                    WHERE f.provider_id = p.id
+                  ) AS rating_count,
+                  (
+                    SELECT AVG(f.overall_score)::double precision
+                    FROM patient_feedback_forms f
+                    WHERE f.provider_id = p.id
+                  ) AS avg_rating,
                   NULLIF(
                     GREATEST(
                         COALESCE((
@@ -286,13 +327,21 @@ async fn list_providers(
                        )
                  )
               )
-             AND (
-                $10::bool IS NULL
-                OR ($10 = true AND p.kooperationsvertrag IS NOT NULL)
-                OR ($10 = false AND p.kooperationsvertrag IS NULL)
-             )
-           ORDER BY p.name
-           LIMIT 200"#,
+              AND (
+                 $10::bool IS NULL
+                 OR ($10 = true AND p.kooperationsvertrag IS NOT NULL)
+                 OR ($10 = false AND p.kooperationsvertrag IS NULL)
+              )
+              AND (
+                 $11::double precision IS NULL
+                 OR COALESCE((
+                     SELECT AVG(f.overall_score)::double precision
+                     FROM patient_feedback_forms f
+                     WHERE f.provider_id = p.id
+                 ), 0) >= $11
+              )
+            ORDER BY p.name
+            LIMIT 200"#,
     )
     .bind(active_only)
     .bind(provider_type)
@@ -304,6 +353,7 @@ async fn list_providers(
     .bind(doctor_fachbereich_pattern)
     .bind(service_name_pattern)
     .bind(has_contract)
+    .bind(rating_gte)
     .fetch_all(&state.db)
     .await
     {
@@ -376,6 +426,8 @@ async fn list_providers(
             "service_count": row.try_get::<i64, _>("service_count").unwrap_or_default(),
             "concierge_service_count": row.try_get::<i64, _>("concierge_service_count").unwrap_or_default(),
             "open_concierge_service_count": row.try_get::<i64, _>("open_concierge_service_count").unwrap_or_default(),
+            "rating_count": row.try_get::<i64, _>("rating_count").unwrap_or_default(),
+            "avg_rating": row.try_get::<Option<f64>, _>("avg_rating").unwrap_or_default(),
             "last_interaction_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("last_interaction_at").unwrap_or_default().map(|v| v.to_rfc3339()),
         }));
     }
@@ -520,6 +572,10 @@ async fn get_provider(
         Ok(items) => items,
         Err(resp) => return resp,
     };
+    let templates = match load_provider_templates_json(&state, provider_id).await {
+        Ok(items) => items,
+        Err(resp) => return resp,
+    };
 
     Json(json!({
         "id": provider.try_get::<Uuid, _>("id").unwrap_or(provider_id),
@@ -544,6 +600,7 @@ async fn get_provider(
         "services": services,
         "linked_patients": linked_patients,
         "interactions": interactions,
+        "templates": templates,
     }))
     .into_response()
 }
@@ -718,6 +775,220 @@ async fn list_provider_patients(
         Ok(items) => Json(items).into_response(),
         Err(resp) => resp,
     }
+}
+
+async fn list_provider_templates(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(provider_id): Path<Uuid>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::PatientManager,
+        Role::Concierge,
+        Role::Billing,
+        Role::Sales,
+    ]) {
+        return e;
+    }
+
+    if let Err(resp) = ensure_provider_exists(&state, provider_id).await {
+        return resp;
+    }
+
+    match load_provider_templates_json(&state, provider_id).await {
+        Ok(items) => Json(items).into_response(),
+        Err(resp) => resp,
+    }
+}
+
+async fn create_provider_template(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(provider_id): Path<Uuid>,
+    Json(body): Json<UpsertProviderTemplateRequest>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+        return e;
+    }
+
+    if let Err(resp) = ensure_provider_exists(&state, provider_id).await {
+        return resp;
+    }
+
+    let payload = match normalize_provider_template_payload(body) {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+
+    if let Some(doctor_id) = payload.doctor_id
+        && let Err(resp) = ensure_doctor_belongs_to_provider(&state, provider_id, doctor_id).await
+    {
+        return resp;
+    }
+
+    let template_id = Uuid::new_v4();
+    let row = match sqlx::query(
+        r#"INSERT INTO provider_templates (
+                id, provider_id, doctor_id, label, description, art, category,
+                default_auto_name, default_status, default_visibility, is_medical,
+                supported_languages, body_de, body_en, body_uk, body_ru,
+                notes, is_active, auto_send_on_confirmed_appointment, created_by, updated_by
+           ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7,
+                $8, $9, $10, $11,
+                $12, $13, $14, $15, $16,
+                $17, $18, $19, $20, $21
+           )
+           RETURNING created_at"#,
+    )
+    .bind(template_id)
+    .bind(provider_id)
+    .bind(payload.doctor_id)
+    .bind(&payload.label)
+    .bind(&payload.description)
+    .bind(&payload.art)
+    .bind(&payload.category)
+    .bind(&payload.default_auto_name)
+    .bind(&payload.default_status)
+    .bind(&payload.default_visibility)
+    .bind(payload.is_medical)
+    .bind(&payload.supported_languages)
+    .bind(&payload.body_de)
+    .bind(&payload.body_en)
+    .bind(&payload.body_uk)
+    .bind(&payload.body_ru)
+    .bind(&payload.notes)
+    .bind(payload.is_active)
+    .bind(payload.auto_send_on_confirmed_appointment)
+    .bind(auth.user_id)
+    .bind(auth.user_id)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(row) => row,
+        Err(e) => {
+            tracing::error!(error = %e, provider_id = %provider_id, "Failed to create provider template");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create provider template",
+            );
+        }
+    };
+
+    let _ = audit(
+        &state,
+        auth.user_id,
+        "create_provider_template",
+        "provider_template",
+        Some(template_id),
+        Some(json!({ "provider_id": provider_id, "template_id": template_id })),
+    )
+    .await;
+
+    (
+        StatusCode::CREATED,
+        Json(json!({
+            "id": template_id,
+            "created_at": row
+                .try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
+                .map(|value| value.to_rfc3339())
+                .unwrap_or_default(),
+        })),
+    )
+        .into_response()
+}
+
+async fn update_provider_template(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((provider_id, template_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<UpsertProviderTemplateRequest>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+        return e;
+    }
+
+    let payload = match normalize_provider_template_payload(body) {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+
+    if let Some(doctor_id) = payload.doctor_id
+        && let Err(resp) = ensure_doctor_belongs_to_provider(&state, provider_id, doctor_id).await
+    {
+        return resp;
+    }
+
+    match sqlx::query(
+        r#"UPDATE provider_templates
+           SET doctor_id = $3,
+               label = $4,
+               description = $5,
+               art = $6,
+               category = $7,
+               default_auto_name = $8,
+               default_status = $9,
+               default_visibility = $10,
+               is_medical = $11,
+               supported_languages = $12,
+               body_de = $13,
+               body_en = $14,
+               body_uk = $15,
+               body_ru = $16,
+               notes = $17,
+               is_active = $18,
+               auto_send_on_confirmed_appointment = $19,
+               updated_by = $20,
+               updated_at = now()
+           WHERE provider_id = $1
+             AND id = $2"#,
+    )
+    .bind(provider_id)
+    .bind(template_id)
+    .bind(payload.doctor_id)
+    .bind(&payload.label)
+    .bind(&payload.description)
+    .bind(&payload.art)
+    .bind(&payload.category)
+    .bind(&payload.default_auto_name)
+    .bind(&payload.default_status)
+    .bind(&payload.default_visibility)
+    .bind(payload.is_medical)
+    .bind(&payload.supported_languages)
+    .bind(&payload.body_de)
+    .bind(&payload.body_en)
+    .bind(&payload.body_uk)
+    .bind(&payload.body_ru)
+    .bind(&payload.notes)
+    .bind(payload.is_active)
+    .bind(payload.auto_send_on_confirmed_appointment)
+    .bind(auth.user_id)
+    .execute(&state.db)
+    .await
+    {
+        Ok(result) if result.rows_affected() > 0 => {}
+        Ok(_) => return err(StatusCode::NOT_FOUND, "Provider template not found"),
+        Err(e) => {
+            tracing::error!(error = %e, provider_id = %provider_id, template_id = %template_id, "Failed to update provider template");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update provider template",
+            );
+        }
+    }
+
+    let _ = audit(
+        &state,
+        auth.user_id,
+        "update_provider_template",
+        "provider_template",
+        Some(template_id),
+        Some(json!({ "provider_id": provider_id, "template_id": template_id })),
+    )
+    .await;
+
+    Json(json!({ "ok": true })).into_response()
 }
 
 async fn list_doctor_patients(
@@ -1316,6 +1587,26 @@ struct ServicePayload {
     valid_to: Option<chrono::NaiveDate>,
 }
 
+struct ProviderTemplatePayload {
+    label: String,
+    description: Option<String>,
+    doctor_id: Option<Uuid>,
+    art: String,
+    category: String,
+    default_auto_name: String,
+    default_status: String,
+    default_visibility: String,
+    is_medical: bool,
+    supported_languages: Vec<String>,
+    body_de: Option<String>,
+    body_en: Option<String>,
+    body_uk: Option<String>,
+    body_ru: Option<String>,
+    notes: Option<String>,
+    is_active: bool,
+    auto_send_on_confirmed_appointment: bool,
+}
+
 fn normalize_provider_payload(
     body: UpsertProviderRequest,
 ) -> Result<ProviderPayload, &'static str> {
@@ -1410,6 +1701,84 @@ fn normalize_service_payload(body: UpsertServiceRequest) -> Result<ServicePayloa
     })
 }
 
+fn normalize_provider_template_payload(
+    body: UpsertProviderTemplateRequest,
+) -> Result<ProviderTemplatePayload, &'static str> {
+    let label = body.label.trim().to_string();
+    if label.is_empty() || label.len() > 255 {
+        return Err("Template label is required (max 255)");
+    }
+
+    let art =
+        normalize_optional(body.art).unwrap_or_else(|| "provider_template_instruction".to_string());
+    let category =
+        normalize_optional(body.category).unwrap_or_else(|| "provider_template".to_string());
+    let default_auto_name =
+        normalize_optional(body.default_auto_name).unwrap_or_else(|| label.clone());
+    if default_auto_name.len() > 255 {
+        return Err("Default document name is too long");
+    }
+
+    let default_status =
+        normalize_optional(body.default_status).unwrap_or_else(|| "draft".to_string());
+    if !matches!(default_status.as_str(), "draft" | "active" | "archived") {
+        return Err("Template default status must be draft, active or archived");
+    }
+
+    let default_visibility = normalize_optional(body.default_visibility)
+        .unwrap_or_else(|| "patient_visible".to_string());
+    if !matches!(
+        default_visibility.as_str(),
+        "internal" | "released_internal" | "released_external" | "patient_visible"
+    ) {
+        return Err("Template default visibility is invalid");
+    }
+
+    let supported_languages = normalize_provider_template_languages(body.supported_languages)?;
+    if supported_languages.is_empty() {
+        return Err("Template must support at least one language");
+    }
+
+    let body_de = normalize_optional(body.body_de);
+    let body_en = normalize_optional(body.body_en);
+    let body_uk = normalize_optional(body.body_uk);
+    let body_ru = normalize_optional(body.body_ru);
+    for language in &supported_languages {
+        let has_body = match language.as_str() {
+            "de" => body_de.is_some(),
+            "en" => body_en.is_some(),
+            "uk" => body_uk.is_some(),
+            "ru" => body_ru.is_some(),
+            _ => false,
+        };
+        if !has_body {
+            return Err("Every supported language must have a template body");
+        }
+    }
+
+    Ok(ProviderTemplatePayload {
+        label,
+        description: normalize_optional(body.description),
+        doctor_id: body.doctor_id,
+        art,
+        category,
+        default_auto_name,
+        default_status,
+        default_visibility,
+        is_medical: body.is_medical.unwrap_or(true),
+        supported_languages,
+        body_de,
+        body_en,
+        body_uk,
+        body_ru,
+        notes: normalize_optional(body.notes),
+        is_active: body.is_active.unwrap_or(true),
+        auto_send_on_confirmed_appointment: body
+            .auto_send_on_confirmed_appointment
+            .unwrap_or(false),
+    })
+}
+
 fn normalize_optional(value: Option<String>) -> Option<String> {
     value.and_then(|raw| {
         let trimmed = raw.trim().to_string();
@@ -1454,6 +1823,31 @@ fn normalize_string_list(value: Option<Vec<String>>) -> Vec<String> {
             }
         })
         .collect()
+}
+
+fn normalize_provider_template_languages(
+    value: Option<Vec<String>>,
+) -> Result<Vec<String>, &'static str> {
+    let mut normalized = Vec::new();
+    for item in value.unwrap_or_default() {
+        let Some(language) = normalize_provider_template_language(&item) else {
+            return Err("Template languages must be one of de, en, uk or ru");
+        };
+        if !normalized.iter().any(|existing| existing == language) {
+            normalized.push(language.to_string());
+        }
+    }
+    Ok(normalized)
+}
+
+fn normalize_provider_template_language(value: &str) -> Option<&'static str> {
+    match value.trim().to_lowercase().as_str() {
+        "de" | "de-de" | "de_at" | "de-at" | "de_ch" | "de-ch" => Some("de"),
+        "en" | "en-gb" | "en-us" | "english" => Some("en"),
+        "uk" | "uk-ua" | "ua" | "ukrainian" => Some("uk"),
+        "ru" | "ru-ru" | "russian" => Some("ru"),
+        _ => None,
+    }
 }
 
 fn is_valid_provider_type(value: &str) -> bool {
@@ -1644,6 +2038,65 @@ async fn load_services_json(
     }
 
     Ok(services)
+}
+
+async fn load_provider_templates_json(
+    state: &AppState,
+    provider_id: Uuid,
+) -> Result<Vec<serde_json::Value>, axum::response::Response> {
+    let rows = sqlx::query(
+        r#"SELECT pt.id, pt.provider_id, pt.doctor_id, pt.label, pt.description, pt.art,
+                  pt.category, pt.default_auto_name, pt.default_status,
+                  pt.default_visibility, pt.is_medical, pt.supported_languages,
+                  pt.body_de, pt.body_en, pt.body_uk, pt.body_ru,
+                  pt.notes, pt.is_active, pt.auto_send_on_confirmed_appointment,
+                  pt.created_at, pt.updated_at,
+                  doctor.name AS doctor_name
+           FROM provider_templates pt
+           LEFT JOIN provider_doctors doctor ON doctor.id = pt.doctor_id
+           WHERE pt.provider_id = $1
+           ORDER BY pt.is_active DESC, pt.label, pt.created_at DESC"#,
+    )
+    .bind(provider_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, provider_id = %provider_id, "Failed to load provider templates");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load provider templates",
+        )
+    })?;
+
+    let mut templates = Vec::with_capacity(rows.len());
+    for row in rows {
+        templates.push(json!({
+            "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+            "provider_id": row.try_get::<Uuid, _>("provider_id").unwrap_or(provider_id),
+            "doctor_id": row.try_get::<Option<Uuid>, _>("doctor_id").unwrap_or_default(),
+            "doctor_name": row.try_get::<Option<String>, _>("doctor_name").unwrap_or_default(),
+            "label": row.try_get::<String, _>("label").unwrap_or_default(),
+            "description": row.try_get::<Option<String>, _>("description").unwrap_or_default(),
+            "art": row.try_get::<String, _>("art").unwrap_or_default(),
+            "category": row.try_get::<String, _>("category").unwrap_or_default(),
+            "default_auto_name": row.try_get::<String, _>("default_auto_name").unwrap_or_default(),
+            "default_status": row.try_get::<String, _>("default_status").unwrap_or_else(|_| "draft".to_string()),
+            "default_visibility": row.try_get::<String, _>("default_visibility").unwrap_or_else(|_| "patient_visible".to_string()),
+            "is_medical": row.try_get::<bool, _>("is_medical").unwrap_or(true),
+            "supported_languages": row.try_get::<Vec<String>, _>("supported_languages").unwrap_or_default(),
+            "body_de": row.try_get::<Option<String>, _>("body_de").unwrap_or_default(),
+            "body_en": row.try_get::<Option<String>, _>("body_en").unwrap_or_default(),
+            "body_uk": row.try_get::<Option<String>, _>("body_uk").unwrap_or_default(),
+            "body_ru": row.try_get::<Option<String>, _>("body_ru").unwrap_or_default(),
+            "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
+            "is_active": row.try_get::<bool, _>("is_active").unwrap_or(true),
+            "auto_send_on_confirmed_appointment": row.try_get::<bool, _>("auto_send_on_confirmed_appointment").unwrap_or(false),
+            "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+            "updated_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+        }));
+    }
+
+    Ok(templates)
 }
 
 async fn load_provider_patients_json(

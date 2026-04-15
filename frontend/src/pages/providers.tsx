@@ -7,7 +7,7 @@ import {
   type FormEvent,
   type ReactNode,
 } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import {
   Building2,
   CalendarClock,
@@ -19,6 +19,7 @@ import {
   Phone,
   Plus,
   RefreshCw,
+  Star,
   Stethoscope,
   Trash2,
   UsersRound,
@@ -44,6 +45,7 @@ import {
 import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
+import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
 
 type ProviderType = "medical" | "non_medical";
@@ -67,6 +69,8 @@ type ProviderSummary = {
   service_count: number;
   concierge_service_count: number;
   open_concierge_service_count: number;
+  rating_count: number;
+  avg_rating: number | null;
   last_interaction_at: string | null;
   created_at: string;
 };
@@ -173,6 +177,7 @@ type ProviderFilters = {
   doctorFachbereich: string;
   serviceName: string;
   hasContract: string;
+  ratingGte: string;
 };
 
 type ProviderFormState = {
@@ -233,6 +238,7 @@ const DEFAULT_FILTERS: ProviderFilters = {
   doctorFachbereich: "",
   serviceName: "",
   hasContract: "",
+  ratingGte: "",
 };
 
 const textareaClassName =
@@ -360,6 +366,11 @@ function compactDate(value?: string | null, fallback = "Not set") {
   }
 }
 
+function formatRating(value?: number | null) {
+  if (value === null || value === undefined) return null;
+  return value.toFixed(1);
+}
+
 function stringifyContract(value: unknown) {
   if (value === null || value === undefined || value === "") return "";
   if (typeof value === "string") return value;
@@ -398,6 +409,7 @@ function buildProvidersQuery(filters: ProviderFilters, forceNonMedical: boolean)
   }
   if (filters.serviceName.trim()) params.set("service_name", filters.serviceName.trim());
   if (filters.hasContract) params.set("has_contract", filters.hasContract);
+  if (filters.ratingGte) params.set("rating_gte", filters.ratingGte);
   const query = params.toString();
   return query ? `/providers?${query}` : "/providers";
 }
@@ -623,7 +635,7 @@ function ProvidersPage() {
   const { user } = useAuth();
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
-  const navigate = useNavigate();
+  const { staffGo } = useStaffNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const permissions = useMemo(() => providerPermissions(user?.role), [user?.role]);
   const [filters, setFilters] = useState<ProviderFilters>(DEFAULT_FILTERS);
@@ -806,7 +818,7 @@ function ProvidersPage() {
   }
 
   function openProvider(id: string) {
-    navigate(`/providers/${id}`);
+    staffGo(`/providers/${id}`);
     syncQuery({ provider: id });
   }
 
@@ -836,7 +848,7 @@ function ProvidersPage() {
         body: JSON.stringify(payload),
       });
       setCreateOpen(false);
-      navigate(`/providers/${created.id}`);
+      staffGo(`/providers/${created.id}`);
     } catch (error) {
       setCreateError(error instanceof Error ? error.message : t.common_failed_create);
     } finally {
@@ -1229,6 +1241,25 @@ function ProvidersPage() {
                 />
               </Field>
 
+              <Field label={t.providers_min_rating}>
+                <ShadSelect
+                  value={filters.ratingGte}
+                  onValueChange={(value) =>
+                    setFilters((current) => ({ ...current, ratingGte: value ?? "" }))
+                  }
+                >
+                  <SelectTrigger className="w-full h-10 rounded-xl bg-slate-50">
+                    <SelectValue placeholder={t.providers_all} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">{t.providers_all}</SelectItem>
+                    <SelectItem value="3.5">3.5+</SelectItem>
+                    <SelectItem value="4">4.0+</SelectItem>
+                    <SelectItem value="4.5">4.5+</SelectItem>
+                  </SelectContent>
+                </ShadSelect>
+              </Field>
+
               <Field label={t.providers_contract}>
                 <ShadSelect value={filters.hasContract} onValueChange={(v) => setFilters((current) => ({ ...current, hasContract: v ?? "" }))}>
                   <SelectTrigger className="w-full h-10 rounded-xl bg-slate-50">
@@ -1348,6 +1379,11 @@ function ProvidersPage() {
                       </InlineInfo>
                       <InlineInfo icon={Phone}>{provider.phone || t.common_not_set}</InlineInfo>
                       <InlineInfo icon={Mail}>{provider.email || t.common_not_set}</InlineInfo>
+                      {provider.rating_count > 0 ? (
+                        <InlineInfo icon={Star}>
+                          {formatRating(provider.avg_rating)} / 5 · {provider.rating_count} ratings
+                        </InlineInfo>
+                      ) : null}
                     </div>
 
                     <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -1522,8 +1558,8 @@ function ProvidersPage() {
                   onActivate={() => handleToggleProvider(true)}
                   onDeactivate={() => handleToggleProvider(false)}
                   onDelete={handleDeleteProvider}
-                  onOpenPatients={() => navigate(`/patients?provider=${detail.id}`)}
-                  onOpenAppointments={() => navigate(`/appointments?provider=${detail.id}`)}
+                  onOpenPatients={() => staffGo(`/patients?provider=${detail.id}`)}
+                  onOpenAppointments={() => staffGo(`/appointments?provider=${detail.id}`)}
                 />
 
                 <DoctorSection
@@ -1564,21 +1600,21 @@ function ProvidersPage() {
 
                 <LinkedPatientsSection
                   detail={detail}
-                  onOpenPatient={(patientId) => navigate(`/patients?patient=${patientId}`)}
+                  onOpenPatient={(patientId) => staffGo(`/patients?patient=${patientId}`)}
                   onOpenAppointments={(patientId) =>
-                    navigate(`/appointments?patient=${patientId}&provider=${detail.id}`)
+                    staffGo(`/appointments?patient=${patientId}&provider=${detail.id}`)
                   }
                 />
                 <InteractionHistorySection
                   detail={detail}
-                  onOpenPatient={(patientId) => navigate(`/patients?patient=${patientId}`)}
+                  onOpenPatient={(patientId) => staffGo(`/patients?patient=${patientId}`)}
                   onOpenAppointments={(patientId) =>
-                    navigate(`/appointments?patient=${patientId}&provider=${detail.id}`)
+                    staffGo(`/appointments?patient=${patientId}&provider=${detail.id}`)
                   }
                   onOpenAppointment={(appointmentId) =>
-                    navigate(`/appointments?appointment=${appointmentId}`)
+                    staffGo(`/appointments?appointment=${appointmentId}`)
                   }
-                  onOpenOrder={(orderId) => navigate(`/orders?order=${orderId}`)}
+                  onOpenOrder={(orderId) => staffGo(`/orders?order=${orderId}`)}
                 />
               </div>
             ) : (
