@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { apiFetch } from "@/lib/api";
+import { staffHrefIfAllowed } from "@/lib/staff-route-access";
 import { useLang } from "@/lib/i18n";
 
 interface Notification {
@@ -191,6 +192,7 @@ export function Topbar() {
         <NotificationPanel
           onClose={() => setNotifOpen(false)}
           onUnreadChange={setUnread}
+          staffRole={user?.role ?? ""}
         />
       )}
 
@@ -247,9 +249,11 @@ function OnlineAvatars({
 function NotificationPanel({
   onClose,
   onUnreadChange,
+  staffRole,
 }: {
   onClose: () => void;
   onUnreadChange: (n: number) => void;
+  staffRole: string;
 }) {
   const navigate = useNavigate();
   const [notifs, setNotifs] = useState<Notification[]>([]);
@@ -284,7 +288,7 @@ function NotificationPanel({
     }
     const href = notificationHref(item);
     if (href) {
-      navigate(href);
+      navigate(staffHrefIfAllowed(staffRole, href));
       onClose();
     }
   };

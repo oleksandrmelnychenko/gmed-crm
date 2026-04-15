@@ -425,4 +425,317 @@ mod tests {
         );
         assert!(d.allowed);
     }
+
+    const ALL_SENSITIVITIES: [DataSensitivity; 6] = [
+        DataSensitivity::General,
+        DataSensitivity::PatientIdentity,
+        DataSensitivity::Medical,
+        DataSensitivity::Financial,
+        DataSensitivity::Internal,
+        DataSensitivity::Service,
+    ];
+
+    const ALL_SHARES: [Option<ShareStatus>; 5] = [
+        None,
+        Some(ShareStatus::InternalOnly),
+        Some(ShareStatus::ReleasedInternal),
+        Some(ShareStatus::ReleasedExternal),
+        Some(ShareStatus::PatientVisible),
+    ];
+
+    fn requires_assignment(role: Role) -> bool {
+        matches!(
+            role,
+            Role::PatientManager
+                | Role::TeamleadInterpreter
+                | Role::Interpreter
+                | Role::Concierge
+                | Role::Patient
+        )
+    }
+
+    fn interpreter_assigned_expected(sens: DataSensitivity, share: Option<ShareStatus>) -> bool {
+        match sens {
+            DataSensitivity::Financial | DataSensitivity::Internal | DataSensitivity::Service => {
+                false
+            }
+            DataSensitivity::Medical => matches!(
+                share,
+                Some(
+                    ShareStatus::ReleasedInternal
+                        | ShareStatus::ReleasedExternal
+                        | ShareStatus::PatientVisible
+                )
+            ),
+            DataSensitivity::General | DataSensitivity::PatientIdentity => true,
+        }
+    }
+
+    fn ceo_assistant_expected(sens: DataSensitivity, share: Option<ShareStatus>) -> bool {
+        let needs_release = matches!(
+            sens,
+            DataSensitivity::PatientIdentity
+                | DataSensitivity::Medical
+                | DataSensitivity::Financial
+                | DataSensitivity::Service
+        );
+        if !needs_release {
+            return true;
+        }
+        matches!(
+            share,
+            Some(
+                ShareStatus::ReleasedInternal
+                    | ShareStatus::ReleasedExternal
+                    | ShareStatus::PatientVisible
+            )
+        )
+    }
+
+    #[test]
+    fn rbac_matrix_ceo_always_allows() {
+        for assigned in [false, true] {
+            for sens in ALL_SENSITIVITIES {
+                for share in ALL_SHARES {
+                    let got = check_access(&ctx(Role::Ceo, assigned, sens, share)).allowed;
+                    assert!(
+                        got,
+                        "CEO must allow role=ceo assigned={assigned} sens={sens:?} share={share:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn rbac_matrix_assignment_required_roles_deny_when_unassigned() {
+        for role in [
+            Role::PatientManager,
+            Role::TeamleadInterpreter,
+            Role::Interpreter,
+            Role::Concierge,
+            Role::Patient,
+        ] {
+            assert!(requires_assignment(role));
+            for sens in ALL_SENSITIVITIES {
+                for share in ALL_SHARES {
+                    let got = check_access(&ctx(role, false, sens, share)).allowed;
+                    assert!(
+                        !got,
+                        "unassigned must deny role={role:?} sens={sens:?} share={share:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn rbac_matrix_patient_manager_assigned_allows_all_cells() {
+        for sens in ALL_SENSITIVITIES {
+            for share in ALL_SHARES {
+                let got = check_access(&ctx(Role::PatientManager, true, sens, share)).allowed;
+                assert!(got, "PM assigned must allow sens={sens:?} share={share:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn rbac_matrix_teamlead_interpreter_assigned_matches_sensitivity_rules() {
+        for sens in ALL_SENSITIVITIES {
+            for share in ALL_SHARES {
+                let got = check_access(&ctx(Role::TeamleadInterpreter, true, sens, share)).allowed;
+                let exp = matches!(
+                    sens,
+                    DataSensitivity::General
+                        | DataSensitivity::PatientIdentity
+                        | DataSensitivity::Internal
+                );
+                assert_eq!(got, exp, "teamlead assigned sens={sens:?} share={share:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn rbac_matrix_interpreter_assigned_matches_sensitivity_and_medical_release() {
+        for sens in ALL_SENSITIVITIES {
+            for share in ALL_SHARES {
+                let got = check_access(&ctx(Role::Interpreter, true, sens, share)).allowed;
+                let exp = interpreter_assigned_expected(sens, share);
+                assert_eq!(
+                    got, exp,
+                    "interpreter assigned sens={sens:?} share={share:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn rbac_matrix_concierge_assigned_matches_sensitivity_rules() {
+        for sens in ALL_SENSITIVITIES {
+            for share in ALL_SHARES {
+                let got = check_access(&ctx(Role::Concierge, true, sens, share)).allowed;
+                let exp = !matches!(
+                    sens,
+                    DataSensitivity::Medical
+                        | DataSensitivity::Financial
+                        | DataSensitivity::Internal
+                );
+                assert_eq!(got, exp, "concierge assigned sens={sens:?} share={share:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn rbac_matrix_billing_assigned_matches_sensitivity_rules() {
+        for sens in ALL_SENSITIVITIES {
+            for share in ALL_SHARES {
+                let got = check_access(&ctx(Role::Billing, true, sens, share)).allowed;
+                let exp = !matches!(
+                    sens,
+                    DataSensitivity::Medical | DataSensitivity::Internal | DataSensitivity::Service
+                );
+                assert_eq!(got, exp, "billing assigned sens={sens:?} share={share:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn rbac_matrix_sales_only_general_when_assigned_or_not() {
+        for assigned in [false, true] {
+            for sens in ALL_SENSITIVITIES {
+                for share in ALL_SHARES {
+                    let got = check_access(&ctx(Role::Sales, assigned, sens, share)).allowed;
+                    let exp = sens == DataSensitivity::General;
+                    assert_eq!(
+                        got, exp,
+                        "sales assigned={assigned} sens={sens:?} share={share:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn rbac_matrix_it_admin_only_general() {
+        for assigned in [false, true] {
+            for sens in ALL_SENSITIVITIES {
+                for share in ALL_SHARES {
+                    let got = check_access(&ctx(Role::ItAdmin, assigned, sens, share)).allowed;
+                    let exp = sens == DataSensitivity::General;
+                    assert_eq!(
+                        got, exp,
+                        "it_admin assigned={assigned} sens={sens:?} share={share:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn rbac_matrix_ceo_assistant_release_gating_independent_of_assignment() {
+        for assigned in [false, true] {
+            for sens in ALL_SENSITIVITIES {
+                for share in ALL_SHARES {
+                    let got = check_access(&ctx(Role::CeoAssistant, assigned, sens, share)).allowed;
+                    let exp = ceo_assistant_expected(sens, share);
+                    assert_eq!(
+                        got, exp,
+                        "ceo_assistant assigned={assigned} sens={sens:?} share={share:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn rbac_matrix_patient_only_patient_visible_share() {
+        for sens in ALL_SENSITIVITIES {
+            for share in ALL_SHARES {
+                let got = check_access(&ctx(Role::Patient, true, sens, share)).allowed;
+                let exp = matches!(share, Some(ShareStatus::PatientVisible));
+                assert_eq!(got, exp, "patient sens={sens:?} share={share:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn rbac_matrix_roles_without_assignment_requirement_allow_unassigned_when_sensitivity_ok() {
+        for role in [
+            Role::CeoAssistant,
+            Role::Billing,
+            Role::Sales,
+            Role::ItAdmin,
+        ] {
+            assert!(!requires_assignment(role));
+        }
+        let c = ctx(Role::Billing, false, DataSensitivity::Financial, None);
+        assert!(check_access(&c).allowed);
+        let c = ctx(Role::Sales, false, DataSensitivity::General, None);
+        assert!(check_access(&c).allowed);
+    }
+
+    const ALL_SHARE_STATUSES: [ShareStatus; 4] = [
+        ShareStatus::InternalOnly,
+        ShareStatus::ReleasedInternal,
+        ShareStatus::ReleasedExternal,
+        ShareStatus::PatientVisible,
+    ];
+
+    #[test]
+    fn rbac_matrix_provider_share_internal_only_always_denies() {
+        for sens in ALL_SENSITIVITIES {
+            for med in [false, true] {
+                for in_order in [false, true] {
+                    let d = can_share_with_provider(ShareStatus::InternalOnly, sens, med, in_order);
+                    assert!(
+                        !d.allowed,
+                        "internal_only sens={sens:?} med={med} in_order={in_order}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn rbac_matrix_provider_share_requires_involved_provider() {
+        for status in [
+            ShareStatus::ReleasedInternal,
+            ShareStatus::ReleasedExternal,
+            ShareStatus::PatientVisible,
+        ] {
+            for sens in ALL_SENSITIVITIES {
+                for med in [false, true] {
+                    let d = can_share_with_provider(status, sens, med, false);
+                    assert!(
+                        !d.allowed,
+                        "not in order status={status:?} sens={sens:?} med={med}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn rbac_matrix_provider_share_medical_requires_medical_flag() {
+        for status in ALL_SHARE_STATUSES {
+            if !status.can_share_externally() {
+                continue;
+            }
+            let d = can_share_with_provider(status, DataSensitivity::Medical, false, true);
+            assert!(!d.allowed, "non-medical provider status={status:?}");
+            let d = can_share_with_provider(status, DataSensitivity::Medical, true, true);
+            assert!(d.allowed, "medical provider status={status:?}");
+        }
+    }
+
+    #[test]
+    fn rbac_matrix_provider_share_non_medical_allowed_when_released_external() {
+        let d = can_share_with_provider(
+            ShareStatus::ReleasedExternal,
+            DataSensitivity::General,
+            false,
+            true,
+        );
+        assert!(d.allowed);
+    }
 }

@@ -1,22 +1,10 @@
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
+import { canAccessPatientPortalRoute, canAccessStaffRoute } from "@/lib/staff-route-access";
 import { NavStateProvider, useNavState } from "@/lib/nav-state";
 import { NavPanel } from "./nav-panel";
 import { Topbar } from "./topbar";
 import { cn } from "@/lib/utils";
-
-function isPatientPortalPath(pathname: string) {
-  return (
-    pathname === "/" ||
-    pathname === "/chat" ||
-    pathname === "/documents" ||
-    pathname === "/privacy" ||
-    pathname === "/invoices" ||
-    pathname === "/appointments" ||
-    pathname === "/services" ||
-    pathname === "/feedback"
-  );
-}
 
 export function AppLayout() {
   const { user, loading } = useAuth();
@@ -40,7 +28,7 @@ export function AppLayout() {
     );
   }
 
-  if (user.role === "patient" && !isPatientPortalPath(location.pathname)) {
+  if (user.role === "patient" && !canAccessPatientPortalRoute(location.pathname)) {
     return <Navigate to="/" replace />;
   }
 
@@ -52,7 +40,17 @@ export function AppLayout() {
 }
 
 function AppLayoutInner() {
+  const { user } = useAuth();
+  const location = useLocation();
   const { collapsed } = useNavState();
+
+  if (
+    user &&
+    user.role !== "patient" &&
+    !canAccessStaffRoute(user.role, location.pathname)
+  ) {
+    return <Navigate to="/" replace />;
+  }
 
   return (
     <div className="min-h-screen bg-white">

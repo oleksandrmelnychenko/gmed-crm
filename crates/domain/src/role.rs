@@ -192,4 +192,52 @@ mod tests {
             assert_eq!(serde_json::to_string(&role).unwrap(), expected);
         }
     }
+
+    #[test]
+    fn rbac_capability_matrix_matches_product_matrix() {
+        let all = [
+            Role::Ceo,
+            Role::CeoAssistant,
+            Role::PatientManager,
+            Role::TeamleadInterpreter,
+            Role::Interpreter,
+            Role::Concierge,
+            Role::Billing,
+            Role::Sales,
+            Role::ItAdmin,
+            Role::Patient,
+        ];
+
+        for role in all {
+            let medical = role.can_see_medical_data();
+            let financial = role.can_see_financial_data();
+            let full = role.has_full_access();
+            let assign = role.can_assign_patients();
+
+            assert_eq!(full, role == Role::Ceo);
+            assert_eq!(assign, role == Role::Ceo);
+
+            match role {
+                Role::Concierge | Role::Billing | Role::Sales | Role::ItAdmin => {
+                    assert!(!medical, "{role:?} must not see medical per matrix");
+                }
+                Role::Patient => assert!(!medical),
+                Role::Ceo
+                | Role::CeoAssistant
+                | Role::PatientManager
+                | Role::TeamleadInterpreter
+                | Role::Interpreter => assert!(medical),
+            }
+
+            match role {
+                Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing => {
+                    assert!(financial, "{role:?} expects financial visibility");
+                }
+                _ => assert!(
+                    !financial,
+                    "{role:?} must not have financial visibility flag"
+                ),
+            }
+        }
+    }
 }
