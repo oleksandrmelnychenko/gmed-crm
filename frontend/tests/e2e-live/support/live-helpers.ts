@@ -22,6 +22,9 @@ import {
   waitForTcp,
 } from "./runtime";
 
+const LIVE_FRONTEND_BASE_URL =
+  process.env.PLAYWRIGHT_LIVE_BASE_URL ?? "http://127.0.0.1:4174";
+
 export type BootstrapScenario = {
   scenario: string;
   tag: string;
@@ -43,6 +46,21 @@ export type BootstrapScenario = {
       user_id: string;
     };
     billing: {
+      email: string;
+      name: string;
+      user_id: string;
+    };
+    sales: {
+      email: string;
+      name: string;
+      user_id: string;
+    };
+    concierge: {
+      email: string;
+      name: string;
+      user_id: string;
+    };
+    it_admin: {
       email: string;
       name: string;
       user_id: string;
@@ -234,6 +252,10 @@ export async function ensureLiveBackendHealthy(forceRestart = false) {
   return ensureBackendHealthy(forceRestart);
 }
 
+async function ensureFrontendHealthy() {
+  await waitForHttp(`${LIVE_FRONTEND_BASE_URL}/login`, 60_000);
+}
+
 export type LiveApiClient = {
   backendUrl: string;
   headers: Record<string, string>;
@@ -298,8 +320,9 @@ export async function bootstrapFullSmokeScenario(
 export async function loginViaUi(page: Page, email: string, password: string) {
   let lastError: unknown;
 
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
     await ensureBackendHealthy();
+    await ensureFrontendHealthy();
     await page.goto("/login");
     await page.locator("#email").fill(email);
     await page.locator("#password").fill(password);
@@ -376,7 +399,15 @@ export async function loginViaApi(
 export async function bootstrapAndLogin(
   page: Page,
   request: APIRequestContext,
-  role: "pm" | "assistant" | "billing" | "interpreter" | "patient",
+  role:
+    | "pm"
+    | "assistant"
+    | "billing"
+    | "sales"
+    | "concierge"
+    | "it_admin"
+    | "interpreter"
+    | "patient",
 ) {
   const scenario = await bootstrapFullSmokeScenario(request);
   const credentials =
@@ -386,9 +417,15 @@ export async function bootstrapAndLogin(
         ? scenario.credentials.assistant
         : role === "billing"
           ? scenario.credentials.billing
-        : role === "interpreter"
-          ? scenario.credentials.interpreter
-          : scenario.credentials.patient;
+          : role === "sales"
+            ? scenario.credentials.sales
+            : role === "concierge"
+              ? scenario.credentials.concierge
+              : role === "it_admin"
+                ? scenario.credentials.it_admin
+              : role === "interpreter"
+                ? scenario.credentials.interpreter
+                : scenario.credentials.patient;
 
   await loginViaApi(page, request, credentials.email, scenario.credentials.password);
   return scenario;

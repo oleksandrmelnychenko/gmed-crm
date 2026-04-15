@@ -115,4 +115,95 @@ test.describe("provider registry live workflows", () => {
     await page.getByRole("tab", { name: /^(Linked patients|Verknüpfte Patienten)$/i }).click();
     await expect(page.getByText(scenario.patient.name).first()).toBeVisible();
   });
+
+  test("sales can inspect the provider registry in read-only mode without mutation controls", async ({
+    page,
+    request,
+  }) => {
+    await setGermanLanguage(page);
+    const scenario = await bootstrapFullSmokeScenario(request);
+    await loginViaApi(
+      page,
+      request,
+      scenario.credentials.sales.email,
+      scenario.credentials.password,
+    );
+
+    const salesApi = await authenticateApiClient(
+      request,
+      scenario.credentials.sales.email,
+      scenario.credentials.password,
+    );
+    const providerResponse = await request.get(
+      `${salesApi.backendUrl}/api/v1/providers/${SEEDED_MEDICAL_PROVIDER_ID}`,
+      { headers: salesApi.headers },
+    );
+    expect(providerResponse.ok()).toBe(true);
+    const provider = (await providerResponse.json()) as ProviderDetail;
+
+    await page.goto(
+      `/providers?search=${encodeURIComponent(provider.name)}`,
+    );
+    await expect(page).toHaveURL(/\/providers/);
+    await expect(page.getByText(/Nur-Lese-Ansicht/i)).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /Neuer Provider|Новый провайдер/i }),
+    ).toHaveCount(0);
+
+    const providerHeading = page.getByRole("heading", { name: provider.name }).first();
+    await expect(providerHeading).toBeVisible();
+    await providerHeading.locator("xpath=ancestor::button[1]").click();
+
+    const sheet = page.getByRole("dialog");
+    await expect(sheet.getByRole("heading", { name: provider.name })).toBeVisible();
+    await expect(
+      sheet.getByText(/Registry edits are restricted for your role\./i),
+    ).toBeVisible();
+    await expect(
+      sheet.getByRole("button", { name: /Save|Speichern/i }),
+    ).toHaveCount(0);
+    await expect(
+      sheet.getByRole("button", { name: /Delete/i }),
+    ).toHaveCount(0);
+
+    await page.goto(`/providers/${SEEDED_MEDICAL_PROVIDER_ID}`);
+    await expect(
+      page.getByRole("heading", { name: provider.name }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /Save|Speichern/i }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: /Delete/i }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("tab", { name: /^Templates$/i }),
+    ).toBeVisible();
+    await page.getByRole("tab", { name: /^Templates$/i }).click();
+    await expect(
+      page.getByText(/Read-only access\. CEO or patient manager can edit clinic templates\./i),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /New template/i }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: /Save template|Create template/i }),
+    ).toHaveCount(0);
+
+    await page.getByRole("tab", { name: /^(Doctors|Ärzte)$/i }).click();
+    await expect(
+      page.getByRole("button", { name: /^Edit$/i }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: /^Delete$/i }),
+    ).toHaveCount(0);
+
+    await page.getByRole("tab", { name: /^(Services|Leistungen)$/i }).click();
+    await expect(
+      page.getByRole("button", { name: /^Edit$/i }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: /^Delete$/i }),
+    ).toHaveCount(0);
+  });
 });

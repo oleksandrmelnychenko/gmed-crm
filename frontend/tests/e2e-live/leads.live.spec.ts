@@ -65,9 +65,13 @@ test.describe("lead live workflows", () => {
 
     const convertDialog = page.getByRole("dialog");
     await expect(
-      convertDialog.getByRole("heading", { name: /Convert lead to patient\?/i }),
+      convertDialog.getByRole("heading", {
+        name: /Lead in Patienten umwandeln\?|Convert lead to patient\?/i,
+      }),
     ).toBeVisible();
-    await convertDialog.getByRole("button", { name: "Create patient" }).click();
+    await convertDialog
+      .getByRole("button", { name: /Patient anlegen|Create patient/i })
+      .click();
 
     await page.waitForURL(/\/patients\/[^/]+$/);
     await expect(
@@ -210,9 +214,13 @@ test.describe("lead live workflows", () => {
 
     const convertDialog = page.getByRole("dialog");
     await expect(
-      convertDialog.getByRole("heading", { name: /Convert lead to patient\?/i }),
+      convertDialog.getByRole("heading", {
+        name: /Lead in Patienten umwandeln\?|Convert lead to patient\?/i,
+      }),
     ).toBeVisible();
-    await convertDialog.getByRole("button", { name: "Create patient" }).click();
+    await convertDialog
+      .getByRole("button", { name: /Patient anlegen|Create patient/i })
+      .click();
 
     await page.waitForURL(/\/patients\/[^/]+$/);
     const patientId = new URL(page.url()).pathname.split("/").pop()!;
@@ -247,6 +255,117 @@ test.describe("lead live workflows", () => {
       converted_patient_id: string | null;
     };
     expect(leadRecord.converted_patient_id).toBe(patientId);
+  });
+
+  test("sales can create and qualify a lead but cannot convert it into a patient", async ({
+    page,
+    request,
+  }) => {
+    await setGermanLanguage(page);
+    const scenario = await bootstrapAndLogin(page, request, "sales");
+    const salesApi = await authenticateApiClient(
+      request,
+      scenario.credentials.sales.email,
+      scenario.credentials.password,
+    );
+    const leadName = `Sales Boundary ${scenario.tag}`;
+
+    await page.goto("/leads");
+    await expect(
+      page.getByRole("button", { name: /Neuer Lead|New lead/i }),
+    ).toBeVisible();
+
+    const createLeadResponse = page.waitForResponse(
+      (nextResponse) =>
+        nextResponse.url().includes("/api/v1/leads") &&
+        nextResponse.request().method() === "POST",
+    );
+    await page.getByRole("button", { name: /Neuer Lead|New lead/i }).click();
+    const createDialog = page.getByRole("dialog");
+    await expect(
+      createDialog.getByRole("heading", { name: /Create lead/i }),
+    ).toBeVisible();
+    const createInputs = createDialog.locator("input");
+    await createInputs.nth(0).fill("Sales");
+    await createInputs.nth(1).fill(`Boundary ${scenario.tag}`);
+    await createInputs.nth(2).fill("+49 30 555 010");
+    await createInputs
+      .nth(3)
+      .fill(`sales-boundary-${scenario.tag}@example.com`);
+    await createDialog.getByRole("button", { name: /Save|Speichern|Сохранить/i }).click();
+
+    const createdLeadResponse = await createLeadResponse;
+    expect(createdLeadResponse.ok()).toBe(true);
+    const createdLead = (await createdLeadResponse.json()) as { id: string };
+
+    const createdLeadCard = leadCard(page, leadName);
+    await expect(createdLeadCard).toBeVisible();
+
+    await createdLeadCard.click();
+    const detailSheet = page.getByRole("dialog");
+    await expect(detailSheet).toBeVisible();
+    await expect(detailSheet.getByText(/Conversion blocked/i)).toBeVisible();
+
+    await detailSheet.getByLabel("Date of birth").fill("1992-02-02");
+    await detailSheet.getByLabel("Legal sex").selectOption("female");
+    await detailSheet.getByLabel("Compliance status").selectOption("signed");
+    await detailSheet
+      .locator("label")
+      .filter({ hasText: "Healthcare consent available" })
+      .locator("input")
+      .check();
+    await detailSheet
+      .locator("label")
+      .filter({ hasText: "Privacy practices accepted" })
+      .locator("input")
+      .check();
+    await detailSheet.getByRole("button", { name: "Save gate data" }).click();
+    await expect(detailSheet.getByText(/Qualification ready/i)).toBeVisible();
+    await expect(detailSheet.getByText(/Conversion blocked/i)).toBeVisible();
+
+    await page.goto("/leads");
+    const refreshedLeadCard = leadCard(page, leadName);
+    await expect(
+      refreshedLeadCard.getByRole("button", { name: "Qualify", exact: true }),
+    ).toBeVisible();
+
+    const qualifyResponse = page.waitForResponse(
+      (nextResponse) =>
+        nextResponse.url().includes(`/api/v1/leads/${createdLead.id}/qualify`) &&
+        nextResponse.request().method() === "POST",
+    );
+    await refreshedLeadCard.getByRole("button", { name: "Qualify", exact: true }).click();
+    const qualifiedLeadResponse = await qualifyResponse;
+    expect(qualifiedLeadResponse.ok()).toBe(true);
+
+    await expect(
+      refreshedLeadCard.getByText("qualified", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      refreshedLeadCard.getByRole("button", { name: "Convert", exact: true }),
+    ).toHaveCount(0);
+
+    const leadResponse = await request.get(
+      `${salesApi.backendUrl}/api/v1/leads/${createdLead.id}`,
+      { headers: salesApi.headers },
+    );
+    expect(leadResponse.ok()).toBe(true);
+    const leadRecord = (await leadResponse.json()) as {
+      qualification_status: string;
+      converted_patient_id: string | null;
+      compliance_status: string;
+      consent_healthcare: boolean;
+      consent_privacy_practices: boolean;
+      date_of_birth: string;
+      legal_sex: string;
+    };
+    expect(leadRecord.qualification_status).toBe("qualified");
+    expect(leadRecord.converted_patient_id).toBeNull();
+    expect(leadRecord.compliance_status).toBe("signed");
+    expect(leadRecord.consent_healthcare).toBe(true);
+    expect(leadRecord.consent_privacy_practices).toBe(true);
+    expect(leadRecord.date_of_birth).toBe("1992-02-02");
+    expect(leadRecord.legal_sex).toBe("female");
   });
 
   test("interpreter deep-linking /leads is redirected by the staff route guard and cannot convert a ready lead via the API", async ({

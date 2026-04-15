@@ -76,6 +76,28 @@ describe("canAccessStaffRoute", () => {
     expect(canAccessStaffRoute("sales", "/reports")).toBe(true);
   });
 
+  it("blocks high-risk workspace boundaries across sales concierge and billing", () => {
+    expect(canAccessStaffRoute("sales", "/documents")).toBe(false);
+    expect(canAccessStaffRoute("sales", "/contracts")).toBe(false);
+    expect(canAccessStaffRoute("sales", "/invoices")).toBe(false);
+    expect(canAccessStaffRoute("concierge", "/contracts")).toBe(false);
+    expect(canAccessStaffRoute("concierge", "/invoices")).toBe(false);
+    expect(canAccessStaffRoute("billing", "/cases")).toBe(false);
+    expect(canAccessStaffRoute("billing", "/documents")).toBe(true);
+    expect(canAccessStaffRoute("billing", "/invoices")).toBe(true);
+    expect(canAccessStaffRoute("patient_manager", "/cases")).toBe(true);
+  });
+
+  it("keeps it_admin inside admin-only shell and out of patient-bearing workspaces", () => {
+    expect(canAccessStaffRoute("it_admin", "/admin/settings")).toBe(true);
+    expect(canAccessStaffRoute("it_admin", "/patients")).toBe(false);
+    expect(canAccessStaffRoute("it_admin", "/cases")).toBe(false);
+    expect(canAccessStaffRoute("it_admin", "/reports")).toBe(false);
+    expect(canAccessStaffRoute("it_admin", "/documents")).toBe(false);
+    expect(canAccessStaffRoute("it_admin", "/contracts")).toBe(false);
+    expect(canAccessStaffRoute("it_admin", "/invoices")).toBe(false);
+  });
+
   it("blocks billing and ceo_assistant from appointments", () => {
     expect(canAccessStaffRoute("billing", "/appointments")).toBe(false);
     expect(canAccessStaffRoute("ceo_assistant", "/appointments")).toBe(false);

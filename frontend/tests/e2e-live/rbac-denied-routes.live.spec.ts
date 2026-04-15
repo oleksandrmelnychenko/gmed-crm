@@ -39,6 +39,78 @@ test.describe("live RBAC denied route normalization", () => {
     await expectForbiddenRouteRedirect(page, "/appointments");
   });
 
+  test("sales is redirected away from documents workspace", async ({
+    page,
+    request,
+  }) => {
+    await setGermanLanguage(page);
+    await bootstrapAndLogin(page, request, "sales");
+    await expectForbiddenRouteRedirect(page, "/documents");
+  });
+
+  test("sales is redirected away from contracts workspace", async ({
+    page,
+    request,
+  }) => {
+    await setGermanLanguage(page);
+    await bootstrapAndLogin(page, request, "sales");
+    await expectForbiddenRouteRedirect(page, "/contracts");
+  });
+
+  test("concierge is redirected away from invoices workspace", async ({
+    page,
+    request,
+  }) => {
+    await setGermanLanguage(page);
+    await bootstrapAndLogin(page, request, "concierge");
+    await expectForbiddenRouteRedirect(page, "/invoices");
+  });
+
+  test("billing is redirected away from cases workspace", async ({
+    page,
+    request,
+  }) => {
+    await setGermanLanguage(page);
+    await bootstrapAndLogin(page, request, "billing");
+    await expectForbiddenRouteRedirect(page, "/cases");
+  });
+
+  test("it_admin is redirected away from patients workspace", async ({
+    page,
+    request,
+  }) => {
+    await setGermanLanguage(page);
+    await bootstrapAndLogin(page, request, "it_admin");
+    await expectForbiddenRouteRedirect(page, "/patients");
+  });
+
+  test("it_admin is redirected away from cases workspace", async ({
+    page,
+    request,
+  }) => {
+    await setGermanLanguage(page);
+    await bootstrapAndLogin(page, request, "it_admin");
+    await expectForbiddenRouteRedirect(page, "/cases");
+  });
+
+  test("it_admin is redirected away from reports workspace", async ({
+    page,
+    request,
+  }) => {
+    await setGermanLanguage(page);
+    await bootstrapAndLogin(page, request, "it_admin");
+    await expectForbiddenRouteRedirect(page, "/reports");
+  });
+
+  test("it_admin is redirected away from documents workspace", async ({
+    page,
+    request,
+  }) => {
+    await setGermanLanguage(page);
+    await bootstrapAndLogin(page, request, "it_admin");
+    await expectForbiddenRouteRedirect(page, "/documents");
+  });
+
   test("interpreter is redirected away from reports workspace", async ({
     page,
     request,

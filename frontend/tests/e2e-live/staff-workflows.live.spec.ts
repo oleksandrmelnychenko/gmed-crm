@@ -70,9 +70,420 @@ test.describe("staff live workflows", () => {
 
     await page.getByRole("tab", { name: "Contracts" }).click();
     await expect(page.getByText(scenario.contract.contract_number)).toBeVisible();
+    await expect(page.getByRole("button", { name: "Open workspace" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "New contract" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Update status" })).toHaveCount(0);
 
     await page.getByRole("tab", { name: "Invoices" }).click();
     await expect(page.getByText(scenario.invoice.invoice_number)).toBeVisible();
+    await expect(page.getByRole("button", { name: "Open workspace" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Manage billing" })).toHaveCount(0);
+  });
+
+  test("ceo assistant can inspect released document share and translation history without mutation controls", async ({
+    page,
+    request,
+  }) => {
+    await setGermanLanguage(page);
+    const scenario = await bootstrapAndLogin(page, request, "assistant");
+
+    const pmApi = await authenticateApiClient(
+      request,
+      scenario.credentials.pm.email,
+      scenario.credentials.password,
+    );
+
+    const shareResponse = await request.post(
+      `${pmApi.backendUrl}/api/v1/documents/${scenario.documents.provider_ready.id}/shares`,
+      {
+        headers: pmApi.headers,
+        data: {
+          shared_with_provider_id: SEEDED_MEDICAL_PROVIDER_ID,
+          channel: "email",
+          message: "Read-only provider share trail for executive review.",
+          requires_confirmation: false,
+        },
+      },
+    );
+    expect(shareResponse.ok()).toBe(true);
+
+    const translationCreateResponse = await request.post(
+      `${pmApi.backendUrl}/api/v1/documents/${scenario.documents.released.id}/translation-requests`,
+      {
+        headers: pmApi.headers,
+        data: {
+          requested_language: "en",
+          note: "Read-only translation history note for executive review.",
+        },
+      },
+    );
+    expect(translationCreateResponse.ok()).toBe(true);
+    const translationRequest = (await translationCreateResponse.json()) as {
+      id: string;
+    };
+
+    const translationUpdateResponse = await request.post(
+      `${pmApi.backendUrl}/api/v1/documents/translation-requests/${translationRequest.id}/update`,
+      {
+        headers: pmApi.headers,
+        data: {
+          status: "completed",
+          note: "Completed translation for executive read-only inspection.",
+          translated_text: "Patient-safe English summary for executive review.",
+        },
+      },
+    );
+    expect(translationUpdateResponse.ok()).toBe(true);
+
+    await openDocumentSheet(page, scenario.documents.provider_ready.title);
+
+    const shareSheet = page.getByRole("dialog");
+    await expect(
+      shareSheet.getByText("Provider · Charite Universitaetsmedizin Berlin"),
+    ).toBeVisible();
+    await expect(
+      shareSheet.getByText("Read-only provider share trail for executive review."),
+    ).toBeVisible();
+    await expect(
+      shareSheet.getByRole("button", { name: /^Widerrufen$|^Revoke$/i }),
+    ).toHaveCount(0);
+    await expect(
+      shareSheet.getByRole("button", {
+        name: /Freigabe erstellen|Create share/i,
+      }),
+    ).toHaveCount(0);
+
+    await page.keyboard.press("Escape");
+    await expect(shareSheet).toHaveCount(0);
+
+    await openDocumentSheet(page, scenario.documents.released.title);
+
+    const translationSheet = page.getByRole("dialog");
+    await expect(
+      translationSheet.getByText(
+        "Completed translation for executive read-only inspection.",
+      ),
+    ).toBeVisible();
+    await expect(
+      translationSheet.getByText(
+        "Patient-safe English summary for executive review.",
+      ),
+    ).toBeVisible();
+    await expect(
+      translationSheet.getByRole("button", {
+        name: /Übersetzung anfordern|Request translation/i,
+      }),
+    ).toHaveCount(0);
+    await expect(
+      translationSheet.getByRole("button", { name: /^Starten$|^Start$/i }),
+    ).toHaveCount(0);
+    await expect(
+      translationSheet.getByRole("button", {
+        name: /Abschließen|Complete/i,
+      }),
+    ).toHaveCount(0);
+    await expect(
+      translationSheet.getByRole("button", {
+        name: /Abbrechen|Cancel/i,
+      }),
+    ).toHaveCount(0);
+    await expect(
+      translationSheet.getByRole("button", {
+        name: /Workspace speichern|Save workspace/i,
+      }),
+    ).toHaveCount(0);
+  });
+
+  test("interpreter can request document translation but cannot access share portal or translation-status controls", async ({
+    page,
+    request,
+  }) => {
+    await setGermanLanguage(page);
+    const scenario = await bootstrapAndLogin(page, request, "interpreter");
+
+    const pmApi = await authenticateApiClient(
+      request,
+      scenario.credentials.pm.email,
+      scenario.credentials.password,
+    );
+
+    const translationCreateResponse = await request.post(
+      `${pmApi.backendUrl}/api/v1/documents/${scenario.documents.released.id}/translation-requests`,
+      {
+        headers: pmApi.headers,
+        data: {
+          requested_language: "en",
+          note: "Interpreter shell should stay request-only for translation handling.",
+        },
+      },
+    );
+    expect(translationCreateResponse.ok()).toBe(true);
+
+    await openDocumentSheet(page, scenario.documents.released.title);
+
+    const sheet = page.getByRole("dialog");
+    await expect(
+      sheet.getByText(
+        "Nur CEO und Patientenmanager dürfen Dokumente ins Patientenportal veröffentlichen.",
+        { exact: true },
+      ),
+    ).toBeVisible();
+    await expect(
+      sheet.getByRole("button", {
+        name: /Ins Patientenportal freigeben|Release to portal/i,
+      }),
+    ).toHaveCount(0);
+    await expect(
+      sheet.getByRole("button", {
+        name: /Portalfreigabe widerrufen|Revoke portal release/i,
+      }),
+    ).toHaveCount(0);
+    await expect(
+      sheet.getByText("Teilen", { exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      sheet.getByRole("button", {
+        name: /Übersetzung anfordern|Request translation/i,
+      }),
+    ).toBeVisible();
+    await expect(
+      sheet.getByText(
+        "Interpreter shell should stay request-only for translation handling.",
+      ),
+    ).toBeVisible();
+    await expect(
+      sheet.getByRole("button", { name: /^Starten$|^Start$/i }),
+    ).toHaveCount(0);
+    await expect(
+      sheet.getByRole("button", { name: /Abschließen|Complete/i }),
+    ).toHaveCount(0);
+    await expect(
+      sheet.getByRole("button", { name: /Abbrechen|Cancel/i }),
+    ).toHaveCount(0);
+    await expect(
+      sheet.getByRole("button", {
+        name: /Workspace speichern|Save workspace/i,
+      }),
+    ).toHaveCount(0);
+  });
+
+  test("concierge can run translation workflow without provider-share or portal controls", async ({
+    page,
+    request,
+  }) => {
+    await setGermanLanguage(page);
+    const scenario = await bootstrapAndLogin(page, request, "concierge");
+
+    const pmApi = await authenticateApiClient(
+      request,
+      scenario.credentials.pm.email,
+      scenario.credentials.password,
+    );
+
+    const conciergeDocumentTitle = `Concierge translation packet ${scenario.tag}`;
+    const uploadResponse = await request.post(
+      `${pmApi.backendUrl}/api/v1/documents/upload`,
+      {
+        headers: pmApi.headers,
+        multipart: {
+          patient_id: scenario.patient.id,
+          auto_name: conciergeDocumentTitle,
+          art: "concierge_service_note",
+          category: "service",
+          status: "active",
+          visibility: "released_internal",
+          is_medical: "false",
+          file: {
+            name: `concierge-translation-${scenario.tag}.txt`,
+            mimeType: "text/plain",
+            buffer: Buffer.from("Concierge-accessible released document for translation workflow."),
+          },
+        },
+      },
+    );
+    expect(uploadResponse.ok()).toBe(true);
+    const conciergeDocument = (await uploadResponse.json()) as { id: string };
+
+    const assignConciergeResponse = await request.post(
+      `${pmApi.backendUrl}/api/v1/patients/${scenario.patient.id}/assign`,
+      {
+        headers: pmApi.headers,
+        data: {
+          user_id: scenario.credentials.concierge.user_id,
+        },
+      },
+    );
+    expect(assignConciergeResponse.ok()).toBe(true);
+
+    const translationCreateResponse = await request.post(
+      `${pmApi.backendUrl}/api/v1/documents/${conciergeDocument.id}/translation-requests`,
+      {
+        headers: pmApi.headers,
+        data: {
+          requested_language: "en",
+          note: "Concierge can process translation workflow but must not access provider-share or portal controls.",
+        },
+      },
+    );
+    expect(translationCreateResponse.ok()).toBe(true);
+
+    await page.goto(`/documents?document=${conciergeDocument.id}`);
+    const sheet = page.getByRole("dialog");
+    await expect(sheet).toBeVisible();
+    await expect(
+      sheet.getByRole("heading", { name: conciergeDocumentTitle }).first(),
+    ).toBeVisible();
+    await expect(
+      sheet.getByText(
+        "Nur CEO und Patientenmanager dürfen Dokumente ins Patientenportal veröffentlichen.",
+        { exact: true },
+      ),
+    ).toBeVisible();
+    await expect(
+      sheet.getByRole("button", {
+        name: /Ins Patientenportal freigeben|Release to portal/i,
+      }),
+    ).toHaveCount(0);
+    await expect(
+      sheet.getByRole("button", {
+        name: /Portalfreigabe widerrufen|Revoke portal release/i,
+      }),
+    ).toHaveCount(0);
+    await expect(
+      sheet.getByText("Teilen", { exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      sheet.getByRole("button", {
+        name: /Übersetzung anfordern|Request translation/i,
+      }),
+    ).toBeVisible();
+    await expect(
+      sheet.getByRole("button", { name: /^Starten$|^Start$/i }),
+    ).toBeVisible();
+    await expect(
+      sheet.getByRole("button", { name: /Abschließen|Complete/i }),
+    ).toBeVisible();
+    await expect(
+      sheet.getByRole("button", { name: /Abbrechen|Cancel/i }),
+    ).toBeVisible();
+    await expect(
+      sheet.getByRole("button", {
+        name: /Workspace speichern|Save workspace/i,
+      }),
+    ).toBeVisible();
+
+    await sheet.getByRole("button", { name: /^Starten$|^Start$/i }).click();
+    await expect(
+      page.locator('[role="status"]').filter({
+        hasText: /als In Bearbeitung markiert|marked as In Progress/i,
+      }),
+    ).toBeVisible();
+    await expect(sheet.getByText("In Bearbeitung", { exact: true })).toBeVisible();
+  });
+
+  test("billing can inspect financial documents but not medical ones and gets no document mutation controls", async ({
+    page,
+    request,
+  }) => {
+    await setGermanLanguage(page);
+    const scenario = await bootstrapAndLogin(page, request, "billing");
+
+    const pmApi = await authenticateApiClient(
+      request,
+      scenario.credentials.pm.email,
+      scenario.credentials.password,
+    );
+
+    const financialTitle = `Billing invoice packet ${scenario.tag}`;
+    const medicalTitle = `Billing hidden medical packet ${scenario.tag}`;
+
+    const financialUploadResponse = await request.post(
+      `${pmApi.backendUrl}/api/v1/documents/upload`,
+      {
+        headers: pmApi.headers,
+        multipart: {
+          patient_id: scenario.patient.id,
+          appointment_id: scenario.appointment.id,
+          auto_name: financialTitle,
+          art: "invoice",
+          category: "billing",
+          status: "active",
+          visibility: "internal",
+          is_medical: "false",
+          file: {
+            name: `billing-invoice-${scenario.tag}.txt`,
+            mimeType: "text/plain",
+            buffer: Buffer.from("Invoice-like financial document for billing shell proof."),
+          },
+        },
+      },
+    );
+    expect(financialUploadResponse.ok()).toBe(true);
+
+    const medicalUploadResponse = await request.post(
+      `${pmApi.backendUrl}/api/v1/documents/upload`,
+      {
+        headers: pmApi.headers,
+        multipart: {
+          patient_id: scenario.patient.id,
+          appointment_id: scenario.appointment.id,
+          auto_name: medicalTitle,
+          art: "medical_report",
+          category: "medical",
+          status: "active",
+          visibility: "released_internal",
+          is_medical: "true",
+          file: {
+            name: `billing-medical-${scenario.tag}.txt`,
+            mimeType: "text/plain",
+            buffer: Buffer.from("Medical document that billing must not see."),
+          },
+        },
+      },
+    );
+    expect(medicalUploadResponse.ok()).toBe(true);
+
+    await page.goto(`/documents?patient=${scenario.patient.id}`);
+    await expect(page.getByText(financialTitle).first()).toBeVisible();
+    await expect(page.getByText(medicalTitle)).toHaveCount(0);
+
+    await page.getByText(financialTitle).first().click();
+    const sheet = page.getByRole("dialog");
+    await expect(sheet).toBeVisible();
+    await expect(
+      sheet.getByRole("heading", { name: financialTitle }).first(),
+    ).toBeVisible();
+    await expect(
+      sheet.getByRole("button", { name: /Übersetzung anfordern|Request translation/i }),
+    ).toHaveCount(0);
+    await expect(
+      sheet.getByText("Teilen", { exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      sheet.getByRole("button", {
+        name: /Ins Patientenportal freigeben|Release to portal/i,
+      }),
+    ).toHaveCount(0);
+    await expect(
+      sheet.getByRole("button", {
+        name: /Portalfreigabe widerrufen|Revoke portal release/i,
+      }),
+    ).toHaveCount(0);
+    await expect(
+      sheet.getByRole("button", { name: /Metadaten speichern|Save metadata/i }),
+    ).toHaveCount(0);
+    await expect(
+      sheet.getByRole("button", { name: /Datei löschen|Delete file/i }),
+    ).toHaveCount(0);
+    await expect(
+      sheet.getByText(
+        "Nur CEO und Patientenmanager dürfen Dokumente ins Patientenportal veröffentlichen.",
+        { exact: true },
+      ),
+    ).toBeVisible();
+    await expect(
+      sheet.getByRole("button", { name: /Herunterladen|Download/i }),
+    ).toBeVisible();
   });
 
   test("patient manager can release and revoke a document from patient portal scope", async ({

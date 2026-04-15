@@ -71,6 +71,9 @@ async fn seed_full_smoke(state: &AppState) -> Result<serde_json::Value, String> 
     let ceo = create_user(state, &tag, "ceo", "CEO", "ceo").await?;
     let assistant = create_user(state, &tag, "ceo_assistant", "CEO Assistant", "assistant").await?;
     let billing = create_user(state, &tag, "billing", "Billing", "billing").await?;
+    let sales = create_user(state, &tag, "sales", "Sales", "sales").await?;
+    let concierge = create_user(state, &tag, "concierge", "Concierge", "concierge").await?;
+    let it_admin = create_user(state, &tag, "it_admin", "IT Admin", "itadmin").await?;
     let teamlead =
         create_user(state, &tag, "teamlead_interpreter", "Teamlead Interpreter", "teamlead")
             .await?;
@@ -207,6 +210,21 @@ async fn seed_full_smoke(state: &AppState) -> Result<serde_json::Value, String> 
                 "email": billing.email,
                 "name": billing.name,
                 "user_id": billing.id,
+            },
+            "sales": {
+                "email": sales.email,
+                "name": sales.name,
+                "user_id": sales.id,
+            },
+            "concierge": {
+                "email": concierge.email,
+                "name": concierge.name,
+                "user_id": concierge.id,
+            },
+            "it_admin": {
+                "email": it_admin.email,
+                "name": it_admin.name,
+                "user_id": it_admin.id,
             },
             "teamlead_interpreter": {
                 "email": teamlead.email,

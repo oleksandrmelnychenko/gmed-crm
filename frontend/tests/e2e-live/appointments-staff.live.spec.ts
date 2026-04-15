@@ -617,4 +617,72 @@ test.describe("staff appointments live workflows", () => {
       await interpreterContext.close();
     }
   });
+
+  test("assigned teamlead interpreter can respond and reassign but cannot manage status checklist or reminder creation", async ({
+    page,
+    request,
+    browser,
+  }) => {
+    await setGermanLanguage(page);
+    const scenario = await bootstrapAndLogin(page, request, "pm");
+    const pmApi = await authenticateApiClient(
+      request,
+      scenario.credentials.pm.email,
+      scenario.credentials.password,
+    );
+
+    const assignResponse = await request.post(
+      `${pmApi.backendUrl}/api/v1/appointments/${scenario.appointment.id}/assign-interpreter`,
+      {
+        headers: pmApi.headers,
+        data: {
+          interpreter_id: scenario.credentials.teamlead_interpreter.user_id,
+        },
+      },
+    );
+    expect(assignResponse.ok()).toBe(true);
+
+    const teamleadContext = await browser.newContext();
+    const teamleadPage = await teamleadContext.newPage();
+
+    try {
+      await setGermanLanguage(teamleadPage);
+      await loginViaApi(
+        teamleadPage,
+        request,
+        scenario.credentials.teamlead_interpreter.email,
+        scenario.credentials.password,
+      );
+      await openAppointmentDetail(
+        teamleadPage,
+        scenario.appointment.id,
+        scenario.appointment.title,
+      );
+
+      await expect(
+        teamleadPage.getByRole("button", {
+          name: "accepted",
+          exact: true,
+        }),
+      ).toBeVisible();
+      await expect(
+        teamleadPage.getByRole("button", { name: "Assign interpreter" }),
+      ).toBeVisible();
+
+      await expect(
+        teamleadPage.getByRole("button", { name: "in progress", exact: true }),
+      ).toHaveCount(0);
+      await expect(
+        teamleadPage.getByRole("button", { name: "completed", exact: true }),
+      ).toHaveCount(0);
+      await expect(
+        teamleadPage.getByRole("button", { name: "Add checklist item" }),
+      ).toHaveCount(0);
+      await expect(
+        teamleadPage.getByRole("button", { name: "Erinnerung hinzufügen" }),
+      ).toHaveCount(0);
+    } finally {
+      await teamleadContext.close();
+    }
+  });
 });
