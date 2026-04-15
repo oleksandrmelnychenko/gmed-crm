@@ -122,6 +122,7 @@ Frontend live/browser baseline:
 
 - [playwright.live.config.ts](C:/Users/123/Downloads/dev/frontend/playwright.live.config.ts)
 - [tests/e2e-live/](C:/Users/123/Downloads/dev/frontend/tests/e2e-live/)
+- для rerun/debug є explicit hook `PLAYWRIGHT_LIVE_SKIP_SETUP=1`, якщо state вже materialize-ений вручну і треба прогнати окремий spec без повторного managed setup/teardown
 
 Database provisioning semantics:
 

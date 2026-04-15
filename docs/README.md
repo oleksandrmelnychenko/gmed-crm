@@ -45,6 +45,7 @@
 
 - `testing/user-stories-excel-backlog-audit_ua.md` - аудит 1:1 між Excel `User Stories` і `requirements/03_product-backlog_ua.md`
 - `testing/full-docs-backlog-reconciliation_ua.md` - повна звірка `requirements/`, `backlog/`, `architecture/`, planning docs і current-state коду
+- `testing/backlog-proof-matrix_ua.md` - канонічна матриця `MVP backlog -> Rust proof -> live browser proof`
 - `testing/04_rbac-e2e-test-plan_ua.md` - current-state RBAC / browser verification plan і правила coverage
 - `testing/source-workspace-regression-matrix.md` - regression coverage по workspace slices
 - `testing/source-billing-regression-matrix.md` - regression coverage по billing slice
@@ -84,6 +85,8 @@
 Якщо треба побачити **повну current-state звірку** між `docs/` і реальним кодом:
 
 - почни з `testing/full-docs-backlog-reconciliation_ua.md`
+- якщо треба побачити саме `backlog -> proof` по MVP epic-ах:
+  `testing/backlog-proof-matrix_ua.md`
 
 Якщо треба зрозуміти узгоджені вимоги до продукту:
 

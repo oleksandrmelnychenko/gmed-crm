@@ -68,8 +68,12 @@ async fn seed_full_smoke(state: &AppState) -> Result<serde_json::Value, String> 
     let tag = format!("e2e-{}", Uuid::new_v4().simple());
 
     let pm = create_user(state, &tag, "patient_manager", "Patient Manager", "pm").await?;
+    let ceo = create_user(state, &tag, "ceo", "CEO", "ceo").await?;
     let assistant = create_user(state, &tag, "ceo_assistant", "CEO Assistant", "assistant").await?;
     let billing = create_user(state, &tag, "billing", "Billing", "billing").await?;
+    let teamlead =
+        create_user(state, &tag, "teamlead_interpreter", "Teamlead Interpreter", "teamlead")
+            .await?;
     let interpreter = create_user(state, &tag, "interpreter", "Interpreter", "interpreter").await?;
     let patient_user = create_user(state, &tag, "patient", "Portal Patient", "patient").await?;
     let mfa_staff =
@@ -189,6 +193,11 @@ async fn seed_full_smoke(state: &AppState) -> Result<serde_json::Value, String> 
                 "name": pm.name,
                 "user_id": pm.id,
             },
+            "ceo": {
+                "email": ceo.email,
+                "name": ceo.name,
+                "user_id": ceo.id,
+            },
             "assistant": {
                 "email": assistant.email,
                 "name": assistant.name,
@@ -198,6 +207,11 @@ async fn seed_full_smoke(state: &AppState) -> Result<serde_json::Value, String> 
                 "email": billing.email,
                 "name": billing.name,
                 "user_id": billing.id,
+            },
+            "teamlead_interpreter": {
+                "email": teamlead.email,
+                "name": teamlead.name,
+                "user_id": teamlead.id,
             },
             "interpreter": {
                 "email": interpreter.email,

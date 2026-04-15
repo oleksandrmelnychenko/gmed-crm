@@ -32,12 +32,22 @@ export type BootstrapScenario = {
       name: string;
       user_id: string;
     };
+    ceo: {
+      email: string;
+      name: string;
+      user_id: string;
+    };
     assistant: {
       email: string;
       name: string;
       user_id: string;
     };
     billing: {
+      email: string;
+      name: string;
+      user_id: string;
+    };
+    teamlead_interpreter: {
       email: string;
       name: string;
       user_id: string;

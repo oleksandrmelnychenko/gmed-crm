@@ -167,6 +167,21 @@
   Covers:
   `patient_manager`, `teamlead_interpreter` / `interpreter` and `concierge` can fetch their own KPI scorecard from a dedicated operational dashboard route with role-scoped payloads, while unrelated roles such as `billing` stay blocked from that endpoint.
 
+- `CEO can open dashboard and reports with executive analytics sections`
+  Source:
+  `docs/backlog/01_mvp-backlog_ua.md:112`
+  `docs/backlog/01_mvp-backlog_ua.md:113`
+  `docs/backlog/01_mvp-backlog_ua.md:114`
+  Covers:
+  canonical live browser proof for the executive analytics shell: `ceo` opens dashboard and reports, sees the `CEO read model`, both risk-analysis layers and the reports workspace sections for billing KPIs, sales KPIs, forecasting and clinic/doctor reporting.
+
+- `CEO assistant can open dashboard and reports in executive read mode`
+  Source:
+  `docs/backlog/02_rbac-matrix_ua.md:9`
+  `docs/backlog/01_mvp-backlog_ua.md:112`
+  Covers:
+  canonical live browser proof for `ceo_assistant` on the same executive shell: dashboard and reports stay reachable in read mode with forecasting and KPI sections visible, matching the current partial-executive analytics scope.
+
 - `patient_manager_sop_requires_ceo_approval_and_supports_acknowledgement`
   Source:
   `docs/requirements/03_product-backlog_ua.md:130`
@@ -196,6 +211,22 @@
   `docs/backlog/02_rbac-matrix_ua.md:16`
   Covers:
   teamlead-authored SOP scope remains limited to interpreter-team distribution instead of spilling into concierge, billing or other unrelated staff roles.
+
+- `patient manager can open the provider registry and inspect the canonical clinic detail surfaces`
+  Source:
+  `docs/backlog/01_mvp-backlog_ua.md:19`
+  `docs/backlog/01_mvp-backlog_ua.md:20`
+  `docs/backlog/01_mvp-backlog_ua.md:22`
+  Covers:
+  canonical live browser proof for the generic provider registry/reference-data path: `patient_manager` opens `/providers`, sees the seeded clinic card in the registry, provider sheet exposes `Provider profile / Service catalog / Linked patients / Interaction history`, and the full `/providers/:id` route keeps `Doctors / Services / Templates / Linked patients` detail tabs reachable for the same partner.
+
+- `patient manager creates an interpreter SOP, CEO approves it and the interpreter acknowledges it`
+  Source:
+  `docs/backlog/01_mvp-backlog_ua.md:123`
+  `docs/backlog/01_mvp-backlog_ua.md:124`
+  `docs/backlog/01_mvp-backlog_ua.md:125`
+  Covers:
+  live browser proof for the end-to-end SOP flow: patient manager authors scoped learning content, CEO approves it in the review queue, acknowledgement is requested from the library surface, and the interpreter sees plus acknowledges the approved revision.
 
 ### Contracts and quotes
 

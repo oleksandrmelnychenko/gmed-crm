@@ -1,5 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
+const skipManagedSetup = process.env.PLAYWRIGHT_LIVE_SKIP_SETUP === "1";
+
 export default defineConfig({
   testDir: "./tests/e2e-live",
   timeout: 120_000,
@@ -11,8 +13,12 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   reporter: "list",
-  globalSetup: "./tests/e2e-live/support/global-setup.ts",
-  globalTeardown: "./tests/e2e-live/support/global-teardown.ts",
+  globalSetup: skipManagedSetup
+    ? undefined
+    : "./tests/e2e-live/support/global-setup.ts",
+  globalTeardown: skipManagedSetup
+    ? undefined
+    : "./tests/e2e-live/support/global-teardown.ts",
   use: {
     baseURL: "http://127.0.0.1:4174",
     trace: "off",
