@@ -19,6 +19,14 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/cases", get(list_cases).post(create_case))
         .route("/cases/meta/doctors", get(list_case_doctors))
+        .route(
+            "/cases/text-snippets",
+            get(list_case_text_snippets).post(create_case_text_snippet),
+        )
+        .route(
+            "/cases/text-snippets/{snippet_id}/update",
+            post(update_case_text_snippet),
+        )
         .route("/cases/{case_id}", get(get_case_full))
         .route("/cases/{case_id}/history", get(get_case_history))
         .route("/cases/{case_id}/anamnesis", post(update_anamnesis))
@@ -29,6 +37,10 @@ pub fn router() -> Router<AppState> {
         .route("/cases/{case_id}/allergien", post(save_allergien))
         .route("/cases/{case_id}/operationen", post(save_operationen))
         .route("/cases/{case_id}/medikamente", post(save_medikamente))
+        .route(
+            "/cases/{case_id}/medikamente/{medication_id}/expiry-confirm",
+            post(confirm_medication_expiry),
+        )
         .route("/cases/{case_id}/pain", post(save_pain_records))
         .route("/cases/{case_id}/symptome", post(save_symptome))
         .route("/cases/{case_id}/cardiology", post(save_cardiology))
@@ -61,6 +73,14 @@ struct UpdateAnamnesisRequest {
     zuweiser: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct CaseTextSnippetRequest {
+    label: String,
+    category: Option<String>,
+    body: String,
+    is_active: Option<bool>,
+}
+
 #[derive(Deserialize, Serialize, Clone)]
 struct VorerkrankungItem {
     erkrankung: String,
@@ -85,6 +105,7 @@ struct OperationItem {
 
 #[derive(Deserialize, Serialize, Clone)]
 struct MedikamentItem {
+    id: Option<Uuid>,
     handelsname: String,
     wirkstoff: Option<String>,
     dosis: Option<String>,
@@ -98,6 +119,7 @@ struct MedikamentItem {
     verordnender_arzt_id: Option<Uuid>,
     verordnender_arzt: Option<String>,
     med_typ: Option<String>,
+    expiry_date: Option<String>,
 }
 
 #[derive(Deserialize, Serialize, Clone)]
@@ -134,6 +156,24 @@ struct VegetativeRequest {
 #[derive(Deserialize)]
 struct ImpfstatusRequest {
     status_text: Option<String>,
+}
+
+const MEDICATION_EXPIRY_CHECK_INTERVAL_SECS: u64 = 60 * 60 * 6;
+
+#[derive(Default, Clone, Copy, Debug)]
+pub struct MedicationExpiryRunSummary {
+    pub events_created: u64,
+    pub notifications_created: u64,
+}
+
+struct MedicationExpiryCandidate {
+    medication_id: Uuid,
+    case_id: Uuid,
+    patient_id: Uuid,
+    patient_code: String,
+    patient_name: String,
+    medication_name: String,
+    expiry_date: chrono::NaiveDate,
 }
 
 #[derive(Deserialize, Serialize, Clone)]
@@ -255,6 +295,24 @@ fn gen_case_id(seq: i64) -> String {
     format!("C-{}-{:04}", now.format("%Y%m%d"), seq)
 }
 
+fn normalize_case_text_snippet_label(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+fn normalize_case_text_snippet_body(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+fn normalize_case_text_snippet_category(value: Option<&str>) -> String {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| "general".to_string())
+}
+
 fn symptom_matches_specialty(item: &serde_json::Value, aliases: &[&str]) -> bool {
     item["fachrichtung"]
         .as_str()
@@ -346,6 +404,204 @@ async fn list_cases(
 
 fn is_valid_case_status(value: &str) -> bool {
     matches!(value, "open" | "in_progress" | "closed")
+}
+
+async fn list_case_text_snippets(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
+        return e;
+    }
+
+    match sqlx::query(
+        r#"SELECT s.id, s.label, s.category, s.body, s.is_active,
+                  s.created_at, s.updated_at,
+                  created_user.name AS created_by_name,
+                  updated_user.name AS updated_by_name
+           FROM case_text_snippets s
+           LEFT JOIN users created_user ON created_user.id = s.created_by
+           LEFT JOIN users updated_user ON updated_user.id = s.updated_by
+           ORDER BY s.is_active DESC, s.category, s.label, s.created_at DESC"#,
+    )
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => Json(
+            rows.into_iter()
+                .map(|row| {
+                    serde_json::json!({
+                        "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                        "label": row.try_get::<String, _>("label").unwrap_or_default(),
+                        "category": row.try_get::<String, _>("category").unwrap_or_else(|_| "general".to_string()),
+                        "body": row.try_get::<String, _>("body").unwrap_or_default(),
+                        "is_active": row.try_get::<bool, _>("is_active").unwrap_or(true),
+                        "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+                        "updated_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+                        "created_by_name": row.try_get::<Option<String>, _>("created_by_name").unwrap_or_default(),
+                        "updated_by_name": row.try_get::<Option<String>, _>("updated_by_name").unwrap_or_default(),
+                    })
+                })
+                .collect::<Vec<_>>(),
+        )
+        .into_response(),
+        Err(error) => {
+            tracing::error!(error = %error, "list case text snippets");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load case text snippets",
+            )
+        }
+    }
+}
+
+async fn create_case_text_snippet(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Json(body): Json<CaseTextSnippetRequest>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
+        return e;
+    }
+
+    let Some(label) = normalize_case_text_snippet_label(&body.label) else {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Snippet label is required",
+        );
+    };
+    let Some(snippet_body) = normalize_case_text_snippet_body(&body.body) else {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Snippet body is required");
+    };
+    let category = normalize_case_text_snippet_category(body.category.as_deref());
+    let is_active = body.is_active.unwrap_or(true);
+
+    match sqlx::query(
+        r#"INSERT INTO case_text_snippets (
+                label, category, body, is_active, created_by, updated_by
+           ) VALUES ($1, $2, $3, $4, $5, $5)
+           RETURNING id, created_at, updated_at"#,
+    )
+    .bind(label.clone())
+    .bind(category.clone())
+    .bind(snippet_body.clone())
+    .bind(is_active)
+    .bind(auth.user_id)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(row) => {
+            let snippet_id = row.try_get::<Uuid, _>("id").unwrap_or_default();
+            state.audit_sender.try_send(audit::domain_event(
+                "create_case_text_snippet",
+                Some(auth.user_id),
+                "case_text_snippet",
+                Some(snippet_id),
+                serde_json::json!({
+                    "label": label,
+                    "category": category,
+                    "is_active": is_active,
+                }),
+            ));
+
+            (
+                StatusCode::CREATED,
+                Json(serde_json::json!({
+                    "id": snippet_id,
+                    "label": label,
+                    "category": category,
+                    "body": snippet_body,
+                    "is_active": is_active,
+                    "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+                    "updated_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+                })),
+            )
+                .into_response()
+        }
+        Err(error) => {
+            tracing::error!(error = %error, user_id = %auth.user_id, "create case text snippet");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create case text snippet",
+            )
+        }
+    }
+}
+
+async fn update_case_text_snippet(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(snippet_id): Path<Uuid>,
+    Json(body): Json<CaseTextSnippetRequest>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
+        return e;
+    }
+
+    let Some(label) = normalize_case_text_snippet_label(&body.label) else {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Snippet label is required",
+        );
+    };
+    let Some(snippet_body) = normalize_case_text_snippet_body(&body.body) else {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Snippet body is required");
+    };
+    let category = normalize_case_text_snippet_category(body.category.as_deref());
+    let is_active = body.is_active.unwrap_or(true);
+
+    match sqlx::query(
+        r#"UPDATE case_text_snippets
+           SET label = $2,
+               category = $3,
+               body = $4,
+               is_active = $5,
+               updated_by = $6,
+               updated_at = now()
+           WHERE id = $1
+           RETURNING updated_at"#,
+    )
+    .bind(snippet_id)
+    .bind(label.clone())
+    .bind(category.clone())
+    .bind(snippet_body.clone())
+    .bind(is_active)
+    .bind(auth.user_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => {
+            state.audit_sender.try_send(audit::domain_event(
+                "update_case_text_snippet",
+                Some(auth.user_id),
+                "case_text_snippet",
+                Some(snippet_id),
+                serde_json::json!({
+                    "label": label,
+                    "category": category,
+                    "is_active": is_active,
+                }),
+            ));
+
+            Json(serde_json::json!({
+                "id": snippet_id,
+                "label": label,
+                "category": category,
+                "body": snippet_body,
+                "is_active": is_active,
+                "updated_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+            }))
+            .into_response()
+        }
+        Ok(None) => err(StatusCode::NOT_FOUND, "Case text snippet not found"),
+        Err(error) => {
+            tracing::error!(error = %error, snippet_id = %snippet_id, "update case text snippet");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update case text snippet",
+            )
+        }
+    }
 }
 
 async fn create_case(
@@ -530,9 +786,15 @@ async fn get_case_full(
         r#"SELECT m.handelsname, m.wirkstoff, m.dosis, m.dosis_einheit,
                   m.einnahmeschema, m.darreichungsform, m.einheit, m.anmerkung,
                   m.grund, m.seit, m.verordnender_arzt_id, m.verordnender_arzt, m.med_typ,
+                  m.id, m.expiry_date,
+                  mee.id AS pending_expiry_event_id,
+                  mee.notification_sent_at AS pending_expiry_notification_sent_at,
                   d.name AS doctor_name,
                   p.name AS provider_name
            FROM medikamente m
+           LEFT JOIN medication_expiry_events mee
+                  ON mee.medication_id = m.id
+                 AND mee.status = 'pending_confirmation'
            LEFT JOIN provider_doctors d ON d.id = m.verordnender_arzt_id
            LEFT JOIN providers p ON p.id = d.provider_id
            WHERE m.case_id = $1
@@ -671,7 +933,16 @@ async fn get_case_full(
             "verordnender_arzt": m.try_get::<Option<String>, _>("verordnender_arzt").unwrap_or_default(),
             "verordnender_arzt_registry_name": m.try_get::<Option<String>, _>("doctor_name").unwrap_or_default(),
             "verordnender_arzt_provider_name": m.try_get::<Option<String>, _>("provider_name").unwrap_or_default(),
-            "med_typ": m.try_get::<String, _>("med_typ").unwrap_or_default()
+            "med_typ": m.try_get::<String, _>("med_typ").unwrap_or_default(),
+            "id": m.try_get::<Uuid, _>("id").unwrap_or_default(),
+            "expiry_date": m.try_get::<Option<chrono::NaiveDate>, _>("expiry_date").unwrap_or_default().map(|value| value.to_string()),
+            "is_expired": m
+                .try_get::<Option<chrono::NaiveDate>, _>("expiry_date")
+                .unwrap_or_default()
+                .map(|value| value < chrono::Utc::now().date_naive())
+                .unwrap_or(false),
+            "pending_expiry_confirmation": m.try_get::<Option<Uuid>, _>("pending_expiry_event_id").unwrap_or_default().is_some(),
+            "pending_expiry_notification_sent_at": m.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("pending_expiry_notification_sent_at").unwrap_or_default().map(|value| value.to_rfc3339())
         }));
     }
     let mut pains_json = Vec::new();
@@ -1233,8 +1504,12 @@ async fn save_medikamente(
             Err(resp) => return resp,
         };
         let mt = item.med_typ.as_deref().unwrap_or("permanent");
+        let expiry_date = match parse_optional_case_date(item.expiry_date.as_deref()) {
+            Ok(value) => value,
+            Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+        };
         if let Err(e) = sqlx::query(
-            "INSERT INTO medikamente (case_id, handelsname, wirkstoff, dosis, dosis_einheit, einnahmeschema, darreichungsform, einheit, anmerkung, grund, seit, verordnender_arzt_id, verordnender_arzt, med_typ, sort_order) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)",
+            "INSERT INTO medikamente (case_id, handelsname, wirkstoff, dosis, dosis_einheit, einnahmeschema, darreichungsform, einheit, anmerkung, grund, seit, verordnender_arzt_id, verordnender_arzt, med_typ, expiry_date, sort_order) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)",
         )
         .bind(case_uuid)
         .bind(&item.handelsname)
@@ -1250,6 +1525,7 @@ async fn save_medikamente(
         .bind(item.verordnender_arzt_id)
         .bind(doctor_label)
         .bind(mt)
+        .bind(expiry_date)
         .bind(i as i32)
         .execute(&mut *tx)
         .await
@@ -2313,7 +2589,8 @@ async fn load_case_section_snapshot(
                                 'seit', seit,
                                 'verordnender_arzt_id', verordnender_arzt_id,
                                 'verordnender_arzt', verordnender_arzt,
-                                'med_typ', med_typ
+                                'med_typ', med_typ,
+                                'expiry_date', expiry_date
                             )
                             ORDER BY sort_order
                         ),
@@ -2549,6 +2826,278 @@ async fn load_case_section_snapshot(
             .ok()
             .flatten()
     }))
+}
+
+fn parse_optional_case_date(
+    value: Option<&str>,
+) -> Result<Option<chrono::NaiveDate>, &'static str> {
+    match value.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(raw) => chrono::NaiveDate::parse_from_str(raw, "%Y-%m-%d")
+            .map(Some)
+            .map_err(|_| "Invalid date (YYYY-MM-DD)"),
+        None => Ok(None),
+    }
+}
+
+async fn confirm_medication_expiry(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((case_id, medication_id)): Path<(Uuid, Uuid)>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
+        return e;
+    }
+    match can_access_case(&state, &auth, case_id, None).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(resp) => return resp,
+    }
+
+    let confirmed = match sqlx::query(
+        r#"UPDATE medication_expiry_events
+           SET status = 'confirmed',
+               confirmed_at = now(),
+               confirmed_by = $3
+           WHERE case_id = $1
+             AND medication_id = $2
+             AND status = 'pending_confirmation'
+           RETURNING id, patient_id, expiry_date"#,
+    )
+    .bind(case_id)
+    .bind(medication_id)
+    .bind(auth.user_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => {
+            return err(
+                StatusCode::NOT_FOUND,
+                "No pending medication expiry confirmation found",
+            );
+        }
+        Err(error) => {
+            tracing::error!(
+                error = %error,
+                case_id = %case_id,
+                medication_id = %medication_id,
+                "confirm medication expiry",
+            );
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to confirm medication expiry",
+            );
+        }
+    };
+
+    let patient_id: Uuid = confirmed.try_get("patient_id").unwrap_or_default();
+    let expiry_date = confirmed
+        .try_get::<chrono::NaiveDate, _>("expiry_date")
+        .map(|value| value.to_string())
+        .unwrap_or_default();
+
+    state.audit_sender.try_send(audit::domain_event(
+        "confirm_medication_expiry".to_string(),
+        Some(auth.user_id),
+        "case",
+        Some(case_id),
+        serde_json::json!({
+            "patient_id": patient_id,
+            "medication_id": medication_id,
+            "expiry_date": expiry_date,
+        }),
+    ));
+
+    Json(serde_json::json!({ "ok": true })).into_response()
+}
+
+async fn resolve_medication_expiry_notification_recipients(
+    state: &AppState,
+    patient_id: Uuid,
+) -> Result<Vec<Uuid>, sqlx::Error> {
+    let assigned = sqlx::query_scalar(
+        r#"SELECT pa.user_id
+           FROM patient_assignments pa
+           JOIN users u ON u.id = pa.user_id
+           WHERE pa.patient_id = $1
+             AND pa.revoked_at IS NULL
+             AND u.is_active = true
+             AND u.role = 'patient_manager'
+           ORDER BY pa.assigned_at"#,
+    )
+    .bind(patient_id)
+    .fetch_all(&state.db)
+    .await?;
+
+    if !assigned.is_empty() {
+        return Ok(assigned);
+    }
+
+    let fallback = sqlx::query_scalar(
+        r#"SELECT id
+           FROM users
+           WHERE is_active = true
+             AND role IN ('ceo', 'ceo_assistant')
+           ORDER BY CASE role
+               WHEN 'ceo' THEN 0
+               ELSE 1
+           END,
+           created_at
+           LIMIT 1"#,
+    )
+    .fetch_optional(&state.db)
+    .await?;
+
+    Ok(fallback.into_iter().collect())
+}
+
+async fn load_medication_expiry_candidates(
+    state: &AppState,
+    today: chrono::NaiveDate,
+) -> Result<Vec<MedicationExpiryCandidate>, sqlx::Error> {
+    let rows = sqlx::query(
+        r#"SELECT m.id AS medication_id,
+                  m.case_id,
+                  c.patient_id,
+                  p.patient_id AS patient_code,
+                  p.first_name,
+                  p.last_name,
+                  m.handelsname,
+                  m.expiry_date
+           FROM medikamente m
+           JOIN cases c ON c.id = m.case_id
+           JOIN patients p ON p.id = c.patient_id
+           LEFT JOIN medication_expiry_events mee
+                  ON mee.medication_id = m.id
+                 AND mee.status = 'pending_confirmation'
+           WHERE m.med_typ = 'permanent'
+             AND m.expiry_date IS NOT NULL
+             AND m.expiry_date < $1
+             AND mee.id IS NULL
+           ORDER BY m.expiry_date, m.created_at"#,
+    )
+    .bind(today)
+    .fetch_all(&state.db)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| MedicationExpiryCandidate {
+            medication_id: row.try_get::<Uuid, _>("medication_id").unwrap_or_default(),
+            case_id: row.try_get::<Uuid, _>("case_id").unwrap_or_default(),
+            patient_id: row.try_get::<Uuid, _>("patient_id").unwrap_or_default(),
+            patient_code: row.try_get::<String, _>("patient_code").unwrap_or_default(),
+            patient_name: format!(
+                "{} {}",
+                row.try_get::<String, _>("first_name").unwrap_or_default(),
+                row.try_get::<String, _>("last_name").unwrap_or_default()
+            )
+            .trim()
+            .to_string(),
+            medication_name: row.try_get::<String, _>("handelsname").unwrap_or_default(),
+            expiry_date: row
+                .try_get::<chrono::NaiveDate, _>("expiry_date")
+                .unwrap_or(today),
+        })
+        .collect())
+}
+
+pub async fn run_medication_expiry_scheduler_once(
+    state: &AppState,
+) -> Result<MedicationExpiryRunSummary, sqlx::Error> {
+    let today = chrono::Utc::now().date_naive();
+    let mut summary = MedicationExpiryRunSummary::default();
+
+    for candidate in load_medication_expiry_candidates(state, today).await? {
+        let inserted = sqlx::query(
+            r#"INSERT INTO medication_expiry_events (
+                    medication_id, case_id, patient_id, expiry_date
+               ) VALUES ($1, $2, $3, $4)
+               ON CONFLICT DO NOTHING
+               RETURNING id"#,
+        )
+        .bind(candidate.medication_id)
+        .bind(candidate.case_id)
+        .bind(candidate.patient_id)
+        .bind(candidate.expiry_date)
+        .fetch_optional(&state.db)
+        .await?;
+
+        if inserted.is_none() {
+            continue;
+        }
+
+        summary.events_created += 1;
+        let recipients =
+            resolve_medication_expiry_notification_recipients(state, candidate.patient_id).await?;
+
+        for recipient_id in recipients {
+            sqlx::query(
+                r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
+                   VALUES ($1, $2, $3, $4, 'case', $5)"#,
+            )
+            .bind(recipient_id)
+            .bind("medication_expiry_confirmation")
+            .bind(format!(
+                "Medication review required for {}",
+                candidate.patient_code
+            ))
+            .bind(format!(
+                "{} ({}) expired on {} and now requires confirmation. Patient: {}.",
+                candidate.medication_name,
+                candidate.patient_code,
+                candidate.expiry_date,
+                candidate.patient_name
+            ))
+            .bind(candidate.case_id)
+            .execute(&state.db)
+            .await?;
+            summary.notifications_created += 1;
+        }
+
+        state.audit_sender.try_send(audit::domain_event(
+            "auto_flag_medication_expiry".to_string(),
+            None,
+            "case",
+            Some(candidate.case_id),
+            serde_json::json!({
+                "patient_id": candidate.patient_id,
+                "medication_id": candidate.medication_id,
+                "medication_name": candidate.medication_name,
+                "expiry_date": candidate.expiry_date.to_string(),
+            }),
+        ));
+    }
+
+    Ok(summary)
+}
+
+pub fn spawn_medication_expiry_scheduler(state: AppState) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(
+            MEDICATION_EXPIRY_CHECK_INTERVAL_SECS,
+        ));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        interval.tick().await;
+
+        loop {
+            interval.tick().await;
+            match run_medication_expiry_scheduler_once(&state).await {
+                Ok(summary) => {
+                    if summary.events_created > 0 || summary.notifications_created > 0 {
+                        tracing::info!(
+                            events_created = summary.events_created,
+                            notifications_created = summary.notifications_created,
+                            "Medication expiry scheduler created confirmation work"
+                        );
+                    }
+                }
+                Err(error) => {
+                    tracing::error!(error = %error, "Medication expiry scheduler failed");
+                }
+            }
+        }
+    });
 }
 
 fn err(status: StatusCode, message: &str) -> axum::response::Response {

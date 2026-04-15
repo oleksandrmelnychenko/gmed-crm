@@ -75,6 +75,7 @@ export interface Translations {
   common_loading: string;
   common_error: string;
   common_save: string;
+  common_edit: string;
   common_cancel: string;
   common_confirm: string;
   common_search: string;
@@ -106,6 +107,7 @@ export interface Translations {
   providers_street: string;
   providers_zip: string;
   providers_fachbereich: string;
+  providers_min_rating: string;
   providers_contract: string;
   providers_contract_with: string;
   providers_contract_without: string;
@@ -179,6 +181,18 @@ export interface Translations {
   cases_anamnesis: string;
   cases_core_anamnesis: string;
   cases_narrative: string;
+  cases_snippets_title: string;
+  cases_snippets_description: string;
+  cases_snippets_empty: string;
+  cases_snippets_insert: string;
+  cases_snippets_manage: string;
+  cases_snippets_new: string;
+  cases_snippets_label: string;
+  cases_snippets_category: string;
+  cases_snippets_body: string;
+  cases_snippets_active: string;
+  cases_snippets_preview: string;
+  cases_snippets_save: string;
   cases_preconditions: string;
   cases_allergies: string;
   cases_operations: string;
@@ -338,6 +352,14 @@ export interface Translations {
   security_maintenance_msg: string;
   security_maintenance_on: string;
   security_maintenance_off: string;
+  security_audit_analytics: string;
+  security_audit_recent: string;
+  security_audit_top_readers: string;
+  security_audit_failed_logins: string;
+  security_audit_blocked_logins: string;
+  security_audit_token_theft: string;
+  security_audit_executive_access: string;
+  security_audit_off_hours: string;
 
   health_title: string;
   health_subtitle: string;
@@ -585,6 +607,9 @@ export interface Translations {
   documents_file_deleted_by: string;
   documents_failed_delete_file: string;
   documents_no_files: string;
+  documents_clinic: string;
+  documents_date_from: string;
+  documents_date_to: string;
   documents_source: string;
   documents_size: string;
   documents_generate_title: string;

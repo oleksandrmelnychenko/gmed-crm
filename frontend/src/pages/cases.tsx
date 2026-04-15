@@ -17,7 +17,7 @@ import {
   Stethoscope,
   UserRound,
 } from "lucide-react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -47,7 +47,13 @@ import {
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
+import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
+import {
+  CASE_TEXT_SNIPPET_PLACEHOLDERS,
+  appendSnippetToNarrative,
+  renderCaseTextSnippet,
+} from "./cases.snippets";
 
 type CaseStatus = "open" | "in_progress" | "closed";
 
@@ -95,7 +101,28 @@ type CaseHistoryEntry = {
   changed_by_role: string;
 };
 
+type CaseTextSnippet = {
+  id: string;
+  label: string;
+  category: string;
+  body: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  created_by_name?: string | null;
+  updated_by_name?: string | null;
+};
+
+type CaseTextSnippetFormState = {
+  id: string;
+  label: string;
+  category: string;
+  body: string;
+  is_active: boolean;
+};
+
 type MedikamentItem = {
+  id?: string | null;
   handelsname: string;
   wirkstoff?: string | null;
   dosis?: string | null;
@@ -111,6 +138,10 @@ type MedikamentItem = {
   verordnender_arzt_registry_name?: string | null;
   verordnender_arzt_provider_name?: string | null;
   med_typ?: string | null;
+  expiry_date?: string | null;
+  is_expired?: boolean;
+  pending_expiry_confirmation?: boolean;
+  pending_expiry_notification_sent_at?: string | null;
 };
 
 type PainItem = {
@@ -401,6 +432,13 @@ const DEFAULT_OVERVIEW_FORM: CaseOverviewFormState = {
   zuweiser_doctor_id: "",
   zuweiser: "",
 };
+const DEFAULT_CASE_TEXT_SNIPPET_FORM: CaseTextSnippetFormState = {
+  id: "",
+  label: "",
+  category: "general",
+  body: "",
+  is_active: true,
+};
 
 const textareaClassName =
   "min-h-[104px] w-full rounded-xl border border-input bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100";
@@ -478,6 +516,7 @@ function blankMedikament(): MedikamentItem {
     verordnender_arzt_id: "",
     verordnender_arzt: "",
     med_typ: "permanent",
+    expiry_date: "",
   };
 }
 
@@ -797,6 +836,7 @@ function sanitizeMedikamente(items: MedikamentItem[]) {
       verordnender_arzt_id: toOptionalText(item.verordnender_arzt_id ?? ""),
       verordnender_arzt: toOptionalText(item.verordnender_arzt ?? ""),
       med_typ: toOptionalText(item.med_typ ?? "") ?? "permanent",
+      expiry_date: toOptionalText(item.expiry_date ?? ""),
     }));
 }
 
@@ -934,7 +974,7 @@ function urologyToPayload(urology: UrologyAssessment) {
 export function CasesPage() {
   const { t } = useLang();
   const { user } = useAuth();
-  const navigate = useNavigate();
+  const { staffGo } = useStaffNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const permissions = useMemo(() => casePermissions(user?.role), [user?.role]);
 
@@ -983,6 +1023,16 @@ export function CasesPage() {
   const [impfstatus, setImpfstatus] = useState("");
   const [sectionBusy, setSectionBusy] = useState<SectionStatusKey | "">("");
   const [sectionErrors, setSectionErrors] = useState<Record<string, string>>({});
+  const [snippets, setSnippets] = useState<CaseTextSnippet[]>([]);
+  const [snippetsBusy, setSnippetsBusy] = useState(false);
+  const [snippetsError, setSnippetsError] = useState("");
+  const [snippetVersion, setSnippetVersion] = useState(0);
+  const [snippetDialogOpen, setSnippetDialogOpen] = useState(false);
+  const [snippetSaveBusy, setSnippetSaveBusy] = useState(false);
+  const [snippetSaveError, setSnippetSaveError] = useState("");
+  const [snippetForm, setSnippetForm] = useState<CaseTextSnippetFormState>(
+    DEFAULT_CASE_TEXT_SNIPPET_FORM,
+  );
 
   const effectiveFilters = useMemo(
     () => ({ ...filters, search: deferredSearch || filters.search }),
@@ -996,6 +1046,27 @@ export function CasesPage() {
   const selectedPatient = useMemo(
     () => patients.find((patient) => patient.id === (detail?.patient_id ?? selectedSummary?.patient_id)),
     [detail?.patient_id, patients, selectedSummary?.patient_id],
+  );
+  const snippetContext = useMemo(
+    () => ({
+      patientName:
+        selectedSummary?.patient_name ??
+        [selectedPatient?.first_name, selectedPatient?.last_name]
+          .filter(Boolean)
+          .join(" ")
+          .trim(),
+      patientPid: selectedSummary?.patient_pid ?? selectedPatient?.patient_id ?? "",
+      caseId: detail?.case_id ?? selectedSummary?.case_id ?? "",
+      caseUuid: detail?.case_uuid ?? detail?.id ?? "",
+      hauptanfragegrund: overviewForm.hauptanfragegrund.trim(),
+      zuweiser: overviewForm.zuweiser.trim(),
+      today: new Date().toISOString().slice(0, 10),
+    }),
+    [detail?.case_id, detail?.case_uuid, detail?.id, overviewForm.hauptanfragegrund, overviewForm.zuweiser, selectedPatient?.first_name, selectedPatient?.last_name, selectedPatient?.patient_id, selectedSummary?.case_id, selectedSummary?.patient_name, selectedSummary?.patient_pid],
+  );
+  const activeSnippets = useMemo(
+    () => snippets.filter((snippet) => snippet.is_active),
+    [snippets],
   );
   const metrics = useMemo(() => {
     return cases.reduce(
@@ -1118,6 +1189,34 @@ export function CasesPage() {
       cancelled = true;
     };
   }, [permissions.canViewPage]);
+
+  useEffect(() => {
+    if (!permissions.canViewPage) return;
+    let cancelled = false;
+    setSnippetsBusy(true);
+    setSnippetsError("");
+
+    void apiFetch<CaseTextSnippet[]>("/cases/text-snippets")
+      .then((items) => {
+        if (!cancelled) {
+          startTransition(() => setSnippets(items));
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setSnippetsError(bannerText(error, "Failed to load text snippets"));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setSnippetsBusy(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [permissions.canViewPage, snippetVersion]);
 
   useEffect(() => {
     const patientParam = searchParams.get("patient") ?? "";
@@ -1401,17 +1500,78 @@ export function CasesPage() {
 
   function openPatientWorkspace() {
     if (!detail) return;
-    navigate(`/patients?patient=${detail.patient_id}`);
+    staffGo(`/patients?patient=${detail.patient_id}`);
   }
 
   function openOrdersWorkspace() {
     if (!detail) return;
-    navigate(`/orders?patient=${detail.patient_id}`);
+    staffGo(`/orders?patient=${detail.patient_id}`);
   }
 
   function openAppointmentsWorkspace() {
     if (!detail) return;
-    navigate(`/appointments?patient=${detail.patient_id}`);
+    staffGo(`/appointments?patient=${detail.patient_id}`);
+  }
+
+  function refreshSnippetLibrary() {
+    setSnippetVersion((current) => current + 1);
+  }
+
+  function openNewSnippetDialog() {
+    setSnippetSaveError("");
+    setSnippetForm(DEFAULT_CASE_TEXT_SNIPPET_FORM);
+    setSnippetDialogOpen(true);
+  }
+
+  function openEditSnippetDialog(snippet: CaseTextSnippet) {
+    setSnippetSaveError("");
+    setSnippetForm({
+      id: snippet.id,
+      label: snippet.label,
+      category: snippet.category,
+      body: snippet.body,
+      is_active: snippet.is_active,
+    });
+    setSnippetDialogOpen(true);
+  }
+
+  function insertSnippetIntoNarrative(snippet: CaseTextSnippet) {
+    const rendered = renderCaseTextSnippet(snippet.body, snippetContext);
+    setOverviewForm((current) => ({
+      ...current,
+      aktuelle_anamnese: appendSnippetToNarrative(
+        current.aktuelle_anamnese,
+        rendered,
+      ),
+    }));
+  }
+
+  async function handleSaveSnippet(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSnippetSaveBusy(true);
+    setSnippetSaveError("");
+
+    try {
+      const path = snippetForm.id
+        ? `/cases/text-snippets/${snippetForm.id}/update`
+        : "/cases/text-snippets";
+      await apiFetch(path, {
+        method: "POST",
+        body: JSON.stringify({
+          label: snippetForm.label,
+          category: toOptionalText(snippetForm.category) ?? "general",
+          body: snippetForm.body,
+          is_active: snippetForm.is_active,
+        }),
+      });
+      setSnippetDialogOpen(false);
+      setSnippetForm(DEFAULT_CASE_TEXT_SNIPPET_FORM);
+      refreshSnippetLibrary();
+    } catch (error) {
+      setSnippetSaveError(bannerText(error, "Failed to save text snippet"));
+    } finally {
+      setSnippetSaveBusy(false);
+    }
   }
 
   async function handleSaveOverview(event: FormEvent<HTMLFormElement>) {
@@ -1486,6 +1646,18 @@ export function CasesPage() {
           body: JSON.stringify({ items: sanitizeMedikamente(medikamente) }),
         }),
       t.common_failed_update,
+    );
+  }
+
+  async function handleConfirmMedicationExpiry(medicationId: string) {
+    if (!detail) return;
+    await runSectionSave(
+      "medikamente",
+      () =>
+        apiFetch(`/cases/${detail.id}/medikamente/${medicationId}/expiry-confirm`, {
+          method: "POST",
+        }),
+      "Failed to confirm medication expiry review",
     );
   }
 
@@ -2118,6 +2290,18 @@ export function CasesPage() {
                 <Panel
                   title={t.cases_core_anamnesis}
                   description={t.cases_subtitle}
+                  action={
+                    permissions.canEdit ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="rounded-2xl"
+                        onClick={openNewSnippetDialog}
+                      >
+                        {t.cases_snippets_manage}
+                      </Button>
+                    ) : null
+                  }
                 >
                   <form onSubmit={handleSaveOverview} className="space-y-4">
                     {sectionErrors.overview ? <Banner tone="error">{sectionErrors.overview}</Banner> : null}
@@ -2182,6 +2366,85 @@ export function CasesPage() {
                         rows={5}
                       />
                     </Field>
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-900">
+                            {t.cases_snippets_title}
+                          </p>
+                          <p className="mt-1 text-xs text-slate-500">
+                            {t.cases_snippets_description}
+                          </p>
+                        </div>
+                        <code className="rounded-xl bg-white px-3 py-1 text-[11px] text-slate-500">
+                          {CASE_TEXT_SNIPPET_PLACEHOLDERS.join(" · ")}
+                        </code>
+                      </div>
+                      {snippetsError ? (
+                        <Banner tone="error">{snippetsError}</Banner>
+                      ) : null}
+                      {snippetsBusy ? (
+                        <div className="mt-3 flex items-center gap-2 text-sm text-slate-500">
+                          <LoaderCircle className="size-4 animate-spin" />
+                          {t.common_loading}
+                        </div>
+                      ) : activeSnippets.length === 0 ? (
+                        <p className="mt-3 text-sm text-slate-500">
+                          {t.cases_snippets_empty}
+                        </p>
+                      ) : (
+                        <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                          {activeSnippets.map((snippet) => {
+                            const rendered = renderCaseTextSnippet(
+                              snippet.body,
+                              snippetContext,
+                            );
+                            return (
+                              <div
+                                key={snippet.id}
+                                className="rounded-2xl border border-slate-200 bg-white p-4"
+                              >
+                                <div className="flex items-start justify-between gap-3">
+                                  <div>
+                                    <p className="text-sm font-semibold text-slate-900">
+                                      {snippet.label}
+                                    </p>
+                                    <p className="text-xs text-slate-500">
+                                      {snippet.category}
+                                    </p>
+                                  </div>
+                                  {permissions.canEdit ? (
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      className="rounded-2xl"
+                                      onClick={() => openEditSnippetDialog(snippet)}
+                                    >
+                                      {t.common_edit}
+                                    </Button>
+                                  ) : null}
+                                </div>
+                                <p className="mt-3 whitespace-pre-wrap text-sm text-slate-700">
+                                  {rendered}
+                                </p>
+                                <div className="mt-3 flex justify-end">
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="rounded-2xl"
+                                    onClick={() => insertSnippetIntoNarrative(snippet)}
+                                  >
+                                    {t.cases_snippets_insert}
+                                  </Button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
                     <div className="flex justify-end border-t border-border/70 pt-4">
                       <Button type="submit" className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800" disabled={sectionBusy === "overview" || !permissions.canEdit}>
                         {sectionBusy === "overview" ? <LoaderCircle className="size-4 animate-spin" /> : null}
@@ -2190,6 +2453,160 @@ export function CasesPage() {
                     </div>
                   </form>
                 </Panel>
+
+                <Dialog open={snippetDialogOpen} onOpenChange={setSnippetDialogOpen}>
+                  <DialogContent className="max-w-4xl">
+                    <DialogHeader>
+                      <DialogTitle>{t.cases_snippets_title}</DialogTitle>
+                      <DialogDescription>
+                        {t.cases_snippets_description}
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="grid gap-6 lg:grid-cols-[1.15fr,0.85fr]">
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="text-sm font-semibold text-slate-900">
+                            {t.cases_snippets_title}
+                          </p>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="rounded-2xl"
+                            onClick={openNewSnippetDialog}
+                          >
+                            {t.cases_snippets_new}
+                          </Button>
+                        </div>
+                        <div className="max-h-[26rem] space-y-3 overflow-y-auto pr-1">
+                          {snippets.map((snippet) => (
+                            <button
+                              key={snippet.id}
+                              type="button"
+                              className={cn(
+                                "w-full rounded-2xl border p-4 text-left transition",
+                                snippetForm.id === snippet.id
+                                  ? "border-sky-300 bg-sky-50"
+                                  : "border-slate-200 bg-white hover:border-slate-300",
+                              )}
+                              onClick={() => openEditSnippetDialog(snippet)}
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div>
+                                  <p className="text-sm font-semibold text-slate-900">
+                                    {snippet.label}
+                                  </p>
+                                  <p className="text-xs text-slate-500">
+                                    {snippet.category}
+                                  </p>
+                                </div>
+                                <Badge
+                                  variant="secondary"
+                                  className={snippet.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"}
+                                >
+                                  {snippet.is_active ? t.common_active : t.common_inactive}
+                                </Badge>
+                              </div>
+                              <p className="mt-2 line-clamp-3 whitespace-pre-wrap text-xs text-slate-600">
+                                {snippet.body}
+                              </p>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <form onSubmit={handleSaveSnippet} className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                        {snippetSaveError ? (
+                          <Banner tone="error">{snippetSaveError}</Banner>
+                        ) : null}
+                        <Field label={t.cases_snippets_label}>
+                          <Input
+                            value={snippetForm.label}
+                            onChange={(event) =>
+                              setSnippetForm((current) => ({
+                                ...current,
+                                label: event.target.value,
+                              }))
+                            }
+                            className="h-10 rounded-xl bg-white"
+                          />
+                        </Field>
+                        <Field label={t.cases_snippets_category}>
+                          <Input
+                            value={snippetForm.category}
+                            onChange={(event) =>
+                              setSnippetForm((current) => ({
+                                ...current,
+                                category: event.target.value,
+                              }))
+                            }
+                            className="h-10 rounded-xl bg-white"
+                          />
+                        </Field>
+                        <Field label={t.cases_snippets_body}>
+                          <textarea
+                            value={snippetForm.body}
+                            onChange={(event) =>
+                              setSnippetForm((current) => ({
+                                ...current,
+                                body: event.target.value,
+                              }))
+                            }
+                            className={textareaClassName}
+                            rows={8}
+                          />
+                        </Field>
+                        <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+                          <input
+                            type="checkbox"
+                            checked={snippetForm.is_active}
+                            onChange={(event) =>
+                              setSnippetForm((current) => ({
+                                ...current,
+                                is_active: event.target.checked,
+                              }))
+                            }
+                          />
+                          {t.cases_snippets_active}
+                        </label>
+                        <div className="rounded-xl border border-dashed border-slate-300 bg-white px-3 py-3">
+                          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                            {t.cases_snippets_preview}
+                          </p>
+                          <p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">
+                            {renderCaseTextSnippet(snippetForm.body, snippetContext) || t.cases_snippets_empty}
+                          </p>
+                        </div>
+                        <code className="block rounded-xl bg-white px-3 py-2 text-[11px] text-slate-500">
+                          {CASE_TEXT_SNIPPET_PLACEHOLDERS.join(" · ")}
+                        </code>
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="rounded-2xl"
+                            onClick={() => {
+                              setSnippetDialogOpen(false);
+                              setSnippetForm(DEFAULT_CASE_TEXT_SNIPPET_FORM);
+                              setSnippetSaveError("");
+                            }}
+                          >
+                            {t.common_cancel}
+                          </Button>
+                          <Button
+                            type="submit"
+                            className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+                            disabled={snippetSaveBusy}
+                          >
+                            {snippetSaveBusy ? (
+                              <LoaderCircle className="size-4 animate-spin" />
+                            ) : null}
+                            {t.cases_snippets_save}
+                          </Button>
+                        </div>
+                      </form>
+                    </div>
+                  </DialogContent>
+                </Dialog>
 
                 <ItemEditorSection title={t.cases_preconditions} description={t.cases_subtitle} count={countFilled(vorerkrankungen, "erkrankung")} addLabel={t.providers_add_service} emptyTitle={t.common_not_set} emptyText={t.cases_subtitle} busy={sectionBusy === "vorerkrankungen"} error={sectionErrors.vorerkrankungen ?? ""} canEdit={permissions.canEdit} onAdd={() => setVorerkrankungen((current) => [...current, blankVorerkrankung()])} onSave={handleSaveVorerkrankungen}>
                   {vorerkrankungen.map((item, index) => (
@@ -2264,6 +2681,20 @@ export function CasesPage() {
                         <Field label={t.cases_medications}><Input value={item.handelsname} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { handelsname: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_medications}><Input value={item.wirkstoff ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { wirkstoff: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.documents_category}><Input value={item.med_typ ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { med_typ: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label="Valid until">
+                          <Input
+                            type="date"
+                            value={item.expiry_date ?? ""}
+                            onChange={(event) =>
+                              setMedikamente((current) =>
+                                updateItemAtIndex(current, index, {
+                                  expiry_date: event.target.value,
+                                }),
+                              )
+                            }
+                            className="h-10 rounded-xl bg-white"
+                          />
+                        </Field>
                         <Field label={t.cases_medications}><Input value={item.dosis ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { dosis: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_medications}><Input value={item.dosis_einheit ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { dosis_einheit: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_medications}><Input value={item.einnahmeschema ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { einnahmeschema: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
@@ -2299,7 +2730,51 @@ export function CasesPage() {
                         <Field label={`${t.common_doctor} label`}><Input value={item.verordnender_arzt ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { verordnender_arzt: event.target.value }))} className="h-10 rounded-xl bg-white" placeholder="Legacy / manual fallback" /></Field>
                         <Field label={t.patients_notes}><Input value={item.anmerkung ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { anmerkung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                       </div>
-                      <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-2xl" onClick={() => setMedikamente((current) => removeItemAtIndex(current, index))}>Remove</Button></div>
+                      {item.is_expired ? (
+                        <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant="outline" className="rounded-full border-amber-300 bg-white text-amber-700">
+                              Expired
+                            </Badge>
+                            {item.pending_expiry_confirmation ? (
+                              <Badge variant="outline" className="rounded-full border-rose-300 bg-white text-rose-700">
+                                Confirmation required
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="rounded-full border-emerald-300 bg-white text-emerald-700">
+                                Review confirmed
+                              </Badge>
+                            )}
+                            <span>
+                              Medication validity ended on {formatDate(item.expiry_date)}.
+                            </span>
+                          </div>
+                          {item.pending_expiry_notification_sent_at ? (
+                            <p className="mt-2 text-xs text-amber-700">
+                              Notification sent {formatDateTime(item.pending_expiry_notification_sent_at)}.
+                            </p>
+                          ) : null}
+                        </div>
+                      ) : null}
+                      <div className="mt-3 flex flex-wrap justify-end gap-2">
+                        {item.pending_expiry_confirmation && item.id ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="rounded-2xl"
+                            onClick={() => {
+                              if (item.id) {
+                                void handleConfirmMedicationExpiry(item.id);
+                              }
+                            }}
+                            disabled={sectionBusy === "medikamente"}
+                          >
+                            Confirm expiry review
+                          </Button>
+                        ) : null}
+                        <Button type="button" variant="outline" size="sm" className="rounded-2xl" onClick={() => setMedikamente((current) => removeItemAtIndex(current, index))}>Remove</Button>
+                      </div>
                     </div>
                   ))}
                 </ItemEditorSection>
