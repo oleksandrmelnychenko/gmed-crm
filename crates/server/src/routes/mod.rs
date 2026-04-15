@@ -11,6 +11,7 @@ pub mod contracts;
 pub mod custom_fields;
 pub(crate) mod debt_management;
 pub mod documents;
+pub mod e2e_support;
 pub mod feedback;
 pub mod health;
 pub mod invoices;

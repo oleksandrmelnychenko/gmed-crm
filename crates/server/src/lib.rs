@@ -37,7 +37,8 @@ pub fn build_app(app_state: state::AppState) -> Router {
     let misc_public = rate_limit::apply_general(
         Router::new()
             .merge(routes::leads::public_router())
-            .merge(routes::messages::public_router()),
+            .merge(routes::messages::public_router())
+            .merge(routes::e2e_support::public_router()),
     );
 
     // Protected routes get three concentric middlewares, applied in
