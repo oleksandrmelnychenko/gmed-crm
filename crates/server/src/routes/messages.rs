@@ -456,6 +456,18 @@ async fn upsert_my_e2e_key(
         }
     };
 
+    if let Err(e) = sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))")
+        .bind(auth.user_id)
+        .execute(&mut *tx)
+        .await
+    {
+        tracing::error!(error = %e, user_id = %auth.user_id, "lock message key upsert");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to save message key",
+        );
+    }
+
     if let Err(e) = sqlx::query(
         "UPDATE user_message_keys
          SET is_active = false
@@ -1488,7 +1500,7 @@ async fn upload_file(
            )
            VALUES (
                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-               $11, $12, $13, $14, $15, $16, $17, $18
+               $11, $12, $13, $14, $15, $16, $17, $18, $19
            ) RETURNING id, created_at"#,
     )
     .bind(auth.user_id)
@@ -2013,7 +2025,9 @@ async fn load_allowed_peer_rows(
 ) -> Result<Vec<sqlx::postgres::PgRow>, axum::response::Response> {
     if auth.role == Role::Patient {
         return sqlx::query(
-            r#"SELECT DISTINCT u.id, u.name, u.email, u.role
+            r#"SELECT DISTINCT
+                    u.id, u.name, u.email, u.role,
+                    CASE WHEN u.role IN ('ceo', 'ceo_assistant') THEN 0 ELSE 1 END AS role_sort
                FROM users u
                LEFT JOIN patient_assignments pa
                  ON pa.user_id = u.id
@@ -2032,9 +2046,7 @@ async fn load_allowed_peer_rows(
                  )
                  AND pa.id IS NOT NULL
                  AND ($3::text = '%%' OR u.name ILIKE $3 OR u.email ILIKE $3)
-               ORDER BY
-                 CASE WHEN u.role IN ('ceo', 'ceo_assistant') THEN 0 ELSE 1 END,
-                 u.name"#,
+               ORDER BY role_sort, u.name"#,
         )
         .bind(resolve_self_patient_id(state, auth.user_id).await?)
         .bind(auth.user_id)

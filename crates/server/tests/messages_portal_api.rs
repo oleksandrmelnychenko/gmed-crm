@@ -1,3 +1,5 @@
+mod support;
+
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
@@ -7,33 +9,11 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 use gmed_server::auth::jwt;
-use gmed_server::settings::{SettingsCache, TokenSettings};
-use gmed_server::state::AppState;
-
 const TEST_SECRET: &str = "test-secret-at-least-32-characters-long!!";
 
 async fn test_context() -> Option<(axum::Router, PgPool, Uuid)> {
-    let db_url = match std::env::var("DATABASE_URL") {
-        Ok(url) => url,
-        Err(_) => return None,
-    };
-
-    let pool = gmed_db::create_pool(&db_url).await.ok()?;
-    gmed_db::run_migrations(&pool).await.ok()?;
-
-    let admin_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE email = $1")
-        .bind("admin@gmed.de")
-        .fetch_one(&pool)
-        .await
-        .ok()?;
-
-    let state = AppState::new(
-        pool.clone(),
-        TEST_SECRET,
-        SettingsCache::new(TokenSettings::default()),
-    );
-
-    Some((gmed_server::build_app(state), pool, admin_id))
+    let ctx = support::suite_context(TEST_SECRET).await?;
+    Some((ctx.app, ctx.pool, ctx.admin_id))
 }
 
 fn unique_tag(prefix: &str) -> String {
@@ -104,16 +84,19 @@ async fn seed_document(
     tag: &str,
     visibility: &str,
 ) -> Uuid {
+    let document_id = Uuid::new_v4();
     sqlx::query_scalar(
         r#"INSERT INTO documents (
-                patient_id, auto_name, original_filename, art, category, status, visibility,
-                is_medical, mime_type, file_size, uploaded_by, notes
+                id, patient_id, auto_name, original_filename, art, category, status, visibility,
+                is_medical, mime_type, file_size, version_root_document_id, version_number,
+                uploaded_by, notes
            ) VALUES (
-                $1, $2, $3, 'medical_report', 'report', 'active', $4,
-                true, 'application/pdf', 1024, $5, $6
+                $1, $2, $3, $4, 'medical_report', 'report', 'active', $5,
+                true, 'application/pdf', 1024, $1, 1, $6, $7
            )
            RETURNING id"#,
     )
+    .bind(document_id)
     .bind(patient_id)
     .bind(format!("Portal document {tag}"))
     .bind(format!("{tag}.pdf"))
@@ -293,6 +276,29 @@ async fn multipart_request_with_extra_fields(
 }
 
 async fn audit_contexts(pool: &PgPool, user_id: Uuid, peer_id: Uuid, action: &str) -> Vec<Value> {
+    support::wait_until(
+        &format!("message audit contexts for action '{action}' between {user_id} and {peer_id}"),
+        || async move {
+            let rows: Vec<Value> = sqlx::query_scalar(
+                r#"SELECT context
+                   FROM audit_log
+                   WHERE user_id = $1
+                     AND entity_type = 'message_peer'
+                     AND entity_id = $2
+                     AND action = $3
+                   ORDER BY created_at"#,
+            )
+            .bind(user_id)
+            .bind(peer_id)
+            .bind(action)
+            .fetch_all(pool)
+            .await
+            .unwrap();
+            !rows.is_empty()
+        },
+    )
+    .await;
+
     sqlx::query_scalar::<_, Value>(
         r#"SELECT context
            FROM audit_log
@@ -378,7 +384,7 @@ async fn patient_can_message_assigned_staff_and_exchange_file() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["ok"], true);
 
-    let file_bytes = b"portal-uploaded-chat-attachment";
+    let file_bytes = b"%PDF-1.4\nportal-uploaded-chat-attachment";
     let (status, upload_body) = multipart_request(
         &app,
         &format!("/api/v1/messages/{patient_manager_id}/upload"),
@@ -389,7 +395,7 @@ async fn patient_can_message_assigned_staff_and_exchange_file() {
         Some("Attached file"),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::OK, "upload response: {upload_body:?}");
     let attachment_key = upload_body["attachment_key"].as_str().unwrap();
 
     let (status, conversation) = json_request(
@@ -706,7 +712,7 @@ async fn patient_message_creates_staff_notifications_and_mark_read_clears_them()
         &app,
         &format!("/api/v1/messages/{patient_manager_id}/upload"),
         &patient_auth,
-        b"portal-chat-notification-attachment",
+        b"%PDF-1.4\nportal-chat-notification-attachment",
         "portal-note.pdf",
         "application/pdf",
         Some("Attachment for review"),
@@ -989,7 +995,7 @@ async fn patient_message_operations_write_audit_trail() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["ok"], true);
 
-    let file_bytes = b"portal-audit-attachment";
+    let file_bytes = b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n";
     let (status, upload_body) = multipart_request(
         &app,
         &format!("/api/v1/messages/{patient_manager_id}/upload"),
@@ -1000,7 +1006,7 @@ async fn patient_message_operations_write_audit_trail() {
         Some("Attachment for audit"),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::OK, "upload response: {upload_body:?}");
     let attachment_key = upload_body["attachment_key"].as_str().unwrap();
 
     let (status, _) = json_request(

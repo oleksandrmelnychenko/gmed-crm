@@ -155,11 +155,11 @@ async fn list_my_feedback(
                   f.concierge_score, f.treatment_score, f.doctor_score, f.organization_score,
                   f.service_score, f.infrastructure_score, f.price_value_score,
                   f.treatment_success, f.complication_reported, f.nps_score,
-                  f.comments, f.improvement_notes, f.submitted_at, f.reviewed_at,
+                  f.comments, f.improvement_notes, f.review_note, f.submitted_at, f.reviewed_at,
                   a.title AS appointment_title, a.date AS appointment_date,
                   p.name AS provider_name, d.name AS doctor_name,
                   pm.name AS patient_manager_name, i.name AS interpreter_name,
-                  c.name AS concierge_name
+                  c.name AS concierge_name, reviewed_by_user.name AS reviewed_by_name
            FROM patient_feedback_forms f
            LEFT JOIN appointments a ON a.id = f.appointment_id
            LEFT JOIN providers p ON p.id = f.provider_id
@@ -167,6 +167,7 @@ async fn list_my_feedback(
            LEFT JOIN users pm ON pm.id = f.patient_manager_id
            LEFT JOIN users i ON i.id = f.interpreter_id
            LEFT JOIN users c ON c.id = f.concierge_id
+           LEFT JOIN users reviewed_by_user ON reviewed_by_user.id = f.reviewed_by
            WHERE f.patient_id = $1
            ORDER BY f.submitted_at DESC, f.created_at DESC"#,
     )
@@ -691,6 +692,7 @@ async fn review_feedback(
     Json(json!({
         "ok": true,
         "status": status,
+        "review_note": review_note,
         "reviewed_at": reviewed_at.to_rfc3339(),
     }))
     .into_response()
@@ -766,7 +768,7 @@ async fn create_feedback_record(
                 $10, $11, $12,
                 $13, $14, $15, $16,
                 $17, $18, $19, $20, $21,
-                $22, $23, $24, $25
+                $22, $23, $24, $25, $26
            )
            RETURNING id"#,
     )

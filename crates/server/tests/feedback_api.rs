@@ -1,3 +1,5 @@
+mod support;
+
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use serde_json::{Value, json};
@@ -6,29 +8,38 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 use gmed_server::auth::jwt;
-use gmed_server::settings::{SettingsCache, TokenSettings};
-use gmed_server::state::AppState;
-
 const TEST_SECRET: &str = "test-secret-at-least-32-characters-long!!";
 
-async fn test_context() -> Option<(axum::Router, PgPool, Uuid)> {
-    let db_url = std::env::var("DATABASE_URL").ok()?;
-    let pool = gmed_db::create_pool(&db_url).await.ok()?;
-    gmed_db::run_migrations(&pool).await.ok()?;
+struct TestContext {
+    suite: support::TestSuiteContext,
+}
 
-    let admin_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE email = $1")
-        .bind("admin@gmed.de")
-        .fetch_one(&pool)
-        .await
-        .ok()?;
+impl std::ops::Deref for TestContext {
+    type Target = axum::Router;
 
-    let state = AppState::new(
-        pool.clone(),
-        TEST_SECRET,
-        SettingsCache::new(TokenSettings::default()),
-    );
+    fn deref(&self) -> &Self::Target {
+        &self.suite.app
+    }
+}
 
-    Some((gmed_server::build_app(state), pool, admin_id))
+impl TestContext {
+    fn router(&self) -> axum::Router {
+        self.suite.app.clone()
+    }
+
+    fn pool(&self) -> &PgPool {
+        &self.suite.pool
+    }
+
+    fn admin_id(&self) -> Uuid {
+        self.suite.admin_id
+    }
+}
+
+async fn test_context() -> Option<TestContext> {
+    Some(TestContext {
+        suite: support::suite_context(TEST_SECRET).await?,
+    })
 }
 
 async fn json_request(
@@ -175,21 +186,24 @@ async fn seed_appointment(
 
 #[tokio::test]
 async fn patient_can_submit_feedback_and_pm_gets_summary() {
-    let Some((app, pool, admin_id)) = test_context().await else {
+    let Some(ctx) = test_context().await else {
         return;
     };
+    let app = ctx.router();
+    let pool = ctx.pool();
+    let admin_id = ctx.admin_id();
 
     let tag = unique_tag("feedback-portal");
-    let patient_user_id = seed_user(&pool, &tag, "patient").await;
-    let patient_manager_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
-    let teamlead_id = seed_user(&pool, &format!("{tag}-tl"), "teamlead_interpreter").await;
-    let concierge_id = seed_user(&pool, &format!("{tag}-concierge"), "concierge").await;
-    let interpreter_id = seed_user(&pool, &format!("{tag}-interp"), "interpreter").await;
-    let patient_id = seed_patient(&pool, admin_id, &tag).await;
-    let provider_id = seed_provider(&pool, &tag).await;
-    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let patient_user_id = seed_user(pool, &tag, "patient").await;
+    let patient_manager_id = seed_user(pool, &format!("{tag}-pm"), "patient_manager").await;
+    let teamlead_id = seed_user(pool, &format!("{tag}-tl"), "teamlead_interpreter").await;
+    let concierge_id = seed_user(pool, &format!("{tag}-concierge"), "concierge").await;
+    let interpreter_id = seed_user(pool, &format!("{tag}-interp"), "interpreter").await;
+    let patient_id = seed_patient(pool, admin_id, &tag).await;
+    let provider_id = seed_provider(pool, &tag).await;
+    let doctor_id = seed_doctor(pool, provider_id, &tag).await;
     let appointment_id = seed_appointment(
-        &pool,
+        pool,
         patient_id,
         provider_id,
         doctor_id,
@@ -199,11 +213,11 @@ async fn patient_can_submit_feedback_and_pm_gets_summary() {
     )
     .await;
 
-    seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
-    seed_patient_assignment(&pool, patient_id, patient_manager_id, admin_id).await;
-    seed_patient_assignment(&pool, patient_id, teamlead_id, admin_id).await;
-    seed_patient_assignment(&pool, patient_id, concierge_id, admin_id).await;
-    seed_patient_assignment(&pool, patient_id, interpreter_id, admin_id).await;
+    seed_patient_assignment(pool, patient_id, patient_user_id, admin_id).await;
+    seed_patient_assignment(pool, patient_id, patient_manager_id, admin_id).await;
+    seed_patient_assignment(pool, patient_id, teamlead_id, admin_id).await;
+    seed_patient_assignment(pool, patient_id, concierge_id, admin_id).await;
+    seed_patient_assignment(pool, patient_id, interpreter_id, admin_id).await;
 
     let patient_auth = auth_header_for(patient_user_id, "patient");
     let pm_auth = auth_header_for(patient_manager_id, "patient_manager");
@@ -270,7 +284,7 @@ async fn patient_can_submit_feedback_and_pm_gets_summary() {
     )
     .bind(patient_manager_id)
     .bind(patient_id)
-    .fetch_one(&pool)
+    .fetch_one(pool)
     .await
     .unwrap();
     assert_eq!(notification_count, 1);
@@ -278,41 +292,46 @@ async fn patient_can_submit_feedback_and_pm_gets_summary() {
 
 #[tokio::test]
 async fn billing_sales_interpreter_and_it_admin_cannot_open_feedback_workspace() {
-    let Some((app, pool, _admin_id)) = test_context().await else {
+    let Some(ctx) = test_context().await else {
         return;
     };
+    let app = ctx.router();
+    let pool = ctx.pool();
 
     for role in ["billing", "sales", "interpreter", "it_admin"] {
-        let user_id = seed_user(&pool, &unique_tag(&format!("feedback-{role}")), role).await;
+        let user_id = seed_user(pool, &unique_tag(&format!("feedback-{role}")), role).await;
         let bearer = auth_header_for(user_id, role);
 
         let (status, body) = json_request(&app, "GET", "/api/v1/feedback", &bearer, None).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "role {role} must be denied");
-        assert_eq!(body["message"], "Forbidden");
+        assert_eq!(body["message"], "Insufficient permissions");
 
         let (status, body) =
             json_request(&app, "GET", "/api/v1/feedback/summary", &bearer, None).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "role {role} must be denied");
-        assert_eq!(body["message"], "Forbidden");
+        assert_eq!(body["message"], "Insufficient permissions");
     }
 }
 
 #[tokio::test]
 async fn teamlead_and_concierge_only_see_relevant_feedback_rows() {
-    let Some((app, pool, admin_id)) = test_context().await else {
+    let Some(ctx) = test_context().await else {
         return;
     };
+    let app = ctx.router();
+    let pool = ctx.pool();
+    let admin_id = ctx.admin_id();
 
     let tag = unique_tag("feedback-scope");
-    let patient_manager_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
-    let teamlead_id = seed_user(&pool, &format!("{tag}-tl"), "teamlead_interpreter").await;
-    let concierge_id = seed_user(&pool, &format!("{tag}-concierge"), "concierge").await;
-    let interpreter_id = seed_user(&pool, &format!("{tag}-interp"), "interpreter").await;
-    let patient_id = seed_patient(&pool, admin_id, &tag).await;
-    let provider_id = seed_provider(&pool, &tag).await;
-    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let patient_manager_id = seed_user(pool, &format!("{tag}-pm"), "patient_manager").await;
+    let teamlead_id = seed_user(pool, &format!("{tag}-tl"), "teamlead_interpreter").await;
+    let concierge_id = seed_user(pool, &format!("{tag}-concierge"), "concierge").await;
+    let interpreter_id = seed_user(pool, &format!("{tag}-interp"), "interpreter").await;
+    let patient_id = seed_patient(pool, admin_id, &tag).await;
+    let provider_id = seed_provider(pool, &tag).await;
+    let doctor_id = seed_doctor(pool, provider_id, &tag).await;
     let appointment_id = seed_appointment(
-        &pool,
+        pool,
         patient_id,
         provider_id,
         doctor_id,
@@ -322,9 +341,9 @@ async fn teamlead_and_concierge_only_see_relevant_feedback_rows() {
     )
     .await;
 
-    seed_patient_assignment(&pool, patient_id, patient_manager_id, admin_id).await;
-    seed_patient_assignment(&pool, patient_id, teamlead_id, admin_id).await;
-    seed_patient_assignment(&pool, patient_id, concierge_id, admin_id).await;
+    seed_patient_assignment(pool, patient_id, patient_manager_id, admin_id).await;
+    seed_patient_assignment(pool, patient_id, teamlead_id, admin_id).await;
+    seed_patient_assignment(pool, patient_id, concierge_id, admin_id).await;
 
     let pm_auth = auth_header_for(patient_manager_id, "patient_manager");
     let teamlead_auth = auth_header_for(teamlead_id, "teamlead_interpreter");
@@ -398,18 +417,21 @@ async fn teamlead_and_concierge_only_see_relevant_feedback_rows() {
 
 #[tokio::test]
 async fn review_writes_timeline_feedback_events() {
-    let Some((app, pool, admin_id)) = test_context().await else {
+    let Some(ctx) = test_context().await else {
         return;
     };
+    let app = ctx.router();
+    let pool = ctx.pool();
+    let admin_id = ctx.admin_id();
 
     let tag = unique_tag("feedback-timeline");
-    let patient_manager_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
-    let interpreter_id = seed_user(&pool, &format!("{tag}-interp"), "interpreter").await;
-    let patient_id = seed_patient(&pool, admin_id, &tag).await;
-    let provider_id = seed_provider(&pool, &tag).await;
-    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let patient_manager_id = seed_user(pool, &format!("{tag}-pm"), "patient_manager").await;
+    let interpreter_id = seed_user(pool, &format!("{tag}-interp"), "interpreter").await;
+    let patient_id = seed_patient(pool, admin_id, &tag).await;
+    let provider_id = seed_provider(pool, &tag).await;
+    let doctor_id = seed_doctor(pool, provider_id, &tag).await;
     let appointment_id = seed_appointment(
-        &pool,
+        pool,
         patient_id,
         provider_id,
         doctor_id,
@@ -419,7 +441,7 @@ async fn review_writes_timeline_feedback_events() {
     )
     .await;
 
-    seed_patient_assignment(&pool, patient_id, patient_manager_id, admin_id).await;
+    seed_patient_assignment(pool, patient_id, patient_manager_id, admin_id).await;
 
     let pm_auth = auth_header_for(patient_manager_id, "patient_manager");
     let (status, created) = json_request(
@@ -462,45 +484,50 @@ async fn review_writes_timeline_feedback_events() {
     .await;
     assert_eq!(status, StatusCode::OK);
 
-    let (status, timeline) = json_request(
-        &app,
-        "GET",
-        &format!("/api/v1/patients/{patient_id}/timeline"),
-        &pm_auth,
-        None,
-    )
+    let timeline_path = format!("/api/v1/patients/{patient_id}/timeline");
+    support::wait_until("feedback review timeline events", || {
+        let app = app.clone();
+        let pm_auth = pm_auth.clone();
+        let timeline_path = timeline_path.clone();
+        async move {
+            let (status, timeline) =
+                json_request(&app, "GET", &timeline_path, &pm_auth, None).await;
+            if status != StatusCode::OK {
+                return false;
+            }
+            let Some(items) = timeline["items"].as_array() else {
+                return false;
+            };
+            let has_submitted = items
+                .iter()
+                .any(|item| item["title"] == "Patient feedback submitted");
+            let has_reviewed = items
+                .iter()
+                .any(|item| item["title"] == "Patient feedback reviewed");
+            has_submitted && has_reviewed
+        }
+    })
     .await;
-    assert_eq!(status, StatusCode::OK);
-    let items = timeline["items"].as_array().unwrap();
-    assert!(
-        items
-            .iter()
-            .any(|item| item["title"] == "Patient feedback submitted"),
-        "feedback submission should appear in patient timeline"
-    );
-    assert!(
-        items
-            .iter()
-            .any(|item| item["title"] == "Patient feedback reviewed"),
-        "feedback review should appear in patient timeline"
-    );
 }
 
 #[tokio::test]
 async fn reviewed_portal_feedback_flows_back_into_patient_history() {
-    let Some((app, pool, admin_id)) = test_context().await else {
+    let Some(ctx) = test_context().await else {
         return;
     };
+    let app = ctx.router();
+    let pool = ctx.pool();
+    let admin_id = ctx.admin_id();
 
     let tag = unique_tag("feedback-portal-review");
-    let patient_user_id = seed_user(&pool, &tag, "patient").await;
-    let patient_manager_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
-    let interpreter_id = seed_user(&pool, &format!("{tag}-interp"), "interpreter").await;
-    let patient_id = seed_patient(&pool, admin_id, &tag).await;
-    let provider_id = seed_provider(&pool, &tag).await;
-    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let patient_user_id = seed_user(pool, &tag, "patient").await;
+    let patient_manager_id = seed_user(pool, &format!("{tag}-pm"), "patient_manager").await;
+    let interpreter_id = seed_user(pool, &format!("{tag}-interp"), "interpreter").await;
+    let patient_id = seed_patient(pool, admin_id, &tag).await;
+    let provider_id = seed_provider(pool, &tag).await;
+    let doctor_id = seed_doctor(pool, provider_id, &tag).await;
     let appointment_id = seed_appointment(
-        &pool,
+        pool,
         patient_id,
         provider_id,
         doctor_id,
@@ -510,8 +537,8 @@ async fn reviewed_portal_feedback_flows_back_into_patient_history() {
     )
     .await;
 
-    seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
-    seed_patient_assignment(&pool, patient_id, patient_manager_id, admin_id).await;
+    seed_patient_assignment(pool, patient_id, patient_user_id, admin_id).await;
+    seed_patient_assignment(pool, patient_id, patient_manager_id, admin_id).await;
 
     let patient_auth = auth_header_for(patient_user_id, "patient");
     let pm_auth = auth_header_for(patient_manager_id, "patient_manager");
@@ -592,24 +619,27 @@ async fn reviewed_portal_feedback_flows_back_into_patient_history() {
 
 #[tokio::test]
 async fn portal_feedback_notifications_are_scoped_to_assigned_patient_roles() {
-    let Some((app, pool, admin_id)) = test_context().await else {
+    let Some(ctx) = test_context().await else {
         return;
     };
+    let app = ctx.router();
+    let pool = ctx.pool();
+    let admin_id = ctx.admin_id();
 
     let tag = unique_tag("feedback-notify-scope");
-    let patient_user_id = seed_user(&pool, &tag, "patient").await;
-    let patient_manager_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
-    let teamlead_id = seed_user(&pool, &format!("{tag}-tl"), "teamlead_interpreter").await;
-    let concierge_id = seed_user(&pool, &format!("{tag}-concierge"), "concierge").await;
-    let unrelated_pm_id = seed_user(&pool, &format!("{tag}-other-pm"), "patient_manager").await;
+    let patient_user_id = seed_user(pool, &tag, "patient").await;
+    let patient_manager_id = seed_user(pool, &format!("{tag}-pm"), "patient_manager").await;
+    let teamlead_id = seed_user(pool, &format!("{tag}-tl"), "teamlead_interpreter").await;
+    let concierge_id = seed_user(pool, &format!("{tag}-concierge"), "concierge").await;
+    let unrelated_pm_id = seed_user(pool, &format!("{tag}-other-pm"), "patient_manager").await;
     let unrelated_concierge_id =
-        seed_user(&pool, &format!("{tag}-other-concierge"), "concierge").await;
-    let interpreter_id = seed_user(&pool, &format!("{tag}-interp"), "interpreter").await;
-    let patient_id = seed_patient(&pool, admin_id, &tag).await;
-    let provider_id = seed_provider(&pool, &tag).await;
-    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+        seed_user(pool, &format!("{tag}-other-concierge"), "concierge").await;
+    let interpreter_id = seed_user(pool, &format!("{tag}-interp"), "interpreter").await;
+    let patient_id = seed_patient(pool, admin_id, &tag).await;
+    let provider_id = seed_provider(pool, &tag).await;
+    let doctor_id = seed_doctor(pool, provider_id, &tag).await;
     let appointment_id = seed_appointment(
-        &pool,
+        pool,
         patient_id,
         provider_id,
         doctor_id,
@@ -619,10 +649,10 @@ async fn portal_feedback_notifications_are_scoped_to_assigned_patient_roles() {
     )
     .await;
 
-    seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
-    seed_patient_assignment(&pool, patient_id, patient_manager_id, admin_id).await;
-    seed_patient_assignment(&pool, patient_id, teamlead_id, admin_id).await;
-    seed_patient_assignment(&pool, patient_id, concierge_id, admin_id).await;
+    seed_patient_assignment(pool, patient_id, patient_user_id, admin_id).await;
+    seed_patient_assignment(pool, patient_id, patient_manager_id, admin_id).await;
+    seed_patient_assignment(pool, patient_id, teamlead_id, admin_id).await;
+    seed_patient_assignment(pool, patient_id, concierge_id, admin_id).await;
 
     let patient_auth = auth_header_for(patient_user_id, "patient");
     let teamlead_auth = auth_header_for(teamlead_id, "teamlead_interpreter");
@@ -673,7 +703,7 @@ async fn portal_feedback_notifications_are_scoped_to_assigned_patient_roles() {
         )
         .bind(user_id)
         .bind(patient_id)
-        .fetch_one(&pool)
+        .fetch_one(pool)
         .await
         .unwrap();
         assert_eq!(

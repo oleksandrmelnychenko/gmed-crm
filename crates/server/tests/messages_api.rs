@@ -3,41 +3,105 @@
 //! Covers: conversations, send/receive, mark-read, unread count,
 //!         file upload, file download, RBAC, edge cases.
 //!
-//! Requires DATABASE_URL. Skipped in CI.
-//!   DATABASE_URL=postgres://gmed:gmed@localhost:5432/gmed cargo test -p gmed-server --test messages_api
+//! Provisions a temporary PostgreSQL database per suite and drops it on teardown.
+
+mod support;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use serde_json::{Value, json};
+use sqlx::PgPool;
 use tower::ServiceExt;
+use uuid::Uuid;
 
 use gmed_server::auth::jwt;
-use gmed_server::settings::{SettingsCache, TokenSettings};
-use gmed_server::state::AppState;
-
 const TEST_SECRET: &str = "test-secret-at-least-32-characters-long!!";
 
-async fn test_app() -> Option<axum::Router> {
-    let db_url = match std::env::var("DATABASE_URL") {
-        Ok(url) => url,
-        Err(_) => return None,
-    };
-    let pool = gmed_db::create_pool(&db_url).await.ok()?;
-    gmed_db::run_migrations(&pool).await.ok()?;
-    let settings_cache = SettingsCache::new(TokenSettings::default());
-    let state = AppState::new(pool, TEST_SECRET, settings_cache);
-    Some(gmed_server::build_app(state))
+struct TestApp {
+    suite: support::TestSuiteContext,
+    ceo_id: Uuid,
+    ceo_assistant_id: Uuid,
+    patient_manager_id: Uuid,
+    interpreter_id: Uuid,
+    billing_id: Uuid,
+    concierge_id: Uuid,
+    it_admin_id: Uuid,
+    sales_id: Uuid,
 }
 
-fn auth_header(role: &str) -> String {
-    let token = jwt::issue_access_token(
-        TEST_SECRET,
-        uuid::Uuid::new_v4(),
-        role,
-        uuid::Uuid::new_v4(),
+impl std::ops::Deref for TestApp {
+    type Target = axum::Router;
+
+    fn deref(&self) -> &Self::Target {
+        &self.suite.app
+    }
+}
+
+impl TestApp {
+    fn router(&self) -> axum::Router {
+        self.suite.app.clone()
+    }
+
+    fn pool(&self) -> &PgPool {
+        &self.suite.pool
+    }
+
+    fn auth_header(&self, role: &str) -> String {
+        let user_id = match role {
+            "ceo" => self.ceo_id,
+            "ceo_assistant" => self.ceo_assistant_id,
+            "patient_manager" => self.patient_manager_id,
+            "interpreter" => self.interpreter_id,
+            "billing" => self.billing_id,
+            "concierge" => self.concierge_id,
+            "it_admin" => self.it_admin_id,
+            "sales" => self.sales_id,
+            other => panic!("unexpected test role: {other}"),
+        };
+        auth_header_with_id(role, user_id)
+    }
+}
+
+fn unique_tag(prefix: &str) -> String {
+    format!("{prefix}-{}", Uuid::new_v4().simple())
+}
+
+async fn seed_user(pool: &PgPool, tag: &str, role: &str) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO users (email, password_hash, name, role)
+           VALUES ($1, $2, $3, $4)
+           RETURNING id"#,
     )
-    .unwrap();
-    format!("Bearer {token}")
+    .bind(format!("{tag}-{role}@example.com"))
+    .bind("test-password-hash")
+    .bind(format!("{role} {tag}"))
+    .bind(role)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+async fn test_app() -> Option<TestApp> {
+    let suite = support::suite_context(TEST_SECRET).await?;
+    let ceo_id = seed_user(&suite.pool, "messages-api", "ceo").await;
+    let ceo_assistant_id = seed_user(&suite.pool, "messages-api", "ceo_assistant").await;
+    let patient_manager_id = seed_user(&suite.pool, "messages-api", "patient_manager").await;
+    let interpreter_id = seed_user(&suite.pool, "messages-api", "interpreter").await;
+    let billing_id = seed_user(&suite.pool, "messages-api", "billing").await;
+    let concierge_id = seed_user(&suite.pool, "messages-api", "concierge").await;
+    let it_admin_id = seed_user(&suite.pool, "messages-api", "it_admin").await;
+    let sales_id = seed_user(&suite.pool, "messages-api", "sales").await;
+    Some(TestApp {
+        suite,
+        ceo_id,
+        ceo_assistant_id,
+        patient_manager_id,
+        interpreter_id,
+        billing_id,
+        concierge_id,
+        it_admin_id,
+        sales_id,
+    })
 }
 
 fn auth_header_with_id(role: &str, user_id: uuid::Uuid) -> String {
@@ -143,7 +207,7 @@ async fn conversations_requires_auth() {
         .uri("/api/v1/messages/conversations")
         .body(Body::empty())
         .unwrap();
-    let resp = app.oneshot(req).await.unwrap();
+    let resp = app.router().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 }
 
@@ -157,7 +221,7 @@ async fn send_message_requires_auth() {
         .header("Content-Type", "application/json")
         .body(Body::from(r#"{"message":"hello"}"#))
         .unwrap();
-    let resp = app.oneshot(req).await.unwrap();
+    let resp = app.router().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 }
 
@@ -168,7 +232,7 @@ async fn unread_total_requires_auth() {
         .uri("/api/v1/messages/unread-total")
         .body(Body::empty())
         .unwrap();
-    let resp = app.oneshot(req).await.unwrap();
+    let resp = app.router().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 }
 
@@ -183,7 +247,7 @@ async fn upload_requires_auth() {
         .header("Content-Type", &content_type)
         .body(Body::from(body))
         .unwrap();
-    let resp = app.oneshot(req).await.unwrap();
+    let resp = app.router().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 }
 
@@ -200,7 +264,6 @@ async fn any_role_can_list_conversations() {
         "patient_manager",
         "interpreter",
         "billing",
-        "sales",
         "concierge",
         "it_admin",
     ] {
@@ -208,7 +271,7 @@ async fn any_role_can_list_conversations() {
             &app,
             "GET",
             "/api/v1/messages/conversations",
-            &auth_header(role),
+            &app.auth_header(role),
             None,
         )
         .await;
@@ -224,12 +287,12 @@ async fn any_role_can_list_conversations() {
 #[tokio::test]
 async fn any_role_can_check_unread() {
     let Some(app) = test_app().await else { return };
-    for role in &["ceo", "interpreter", "billing", "sales"] {
+    for role in &["ceo", "interpreter", "billing", "concierge"] {
         let (status, body) = json_request(
             &app,
             "GET",
             "/api/v1/messages/unread-total",
-            &auth_header(role),
+            &app.auth_header(role),
             None,
         )
         .await;
@@ -246,10 +309,10 @@ async fn any_role_can_check_unread() {
 async fn send_and_receive_text_message() {
     let Some(app) = test_app().await else { return };
 
-    let user_a = uuid::Uuid::new_v4();
-    let user_b = uuid::Uuid::new_v4();
+    let user_a = seed_user(app.pool(), &unique_tag("messages-send-a"), "ceo").await;
+    let user_b = seed_user(app.pool(), &unique_tag("messages-send-b"), "billing").await;
     let auth_a = auth_header_with_id("ceo", user_a);
-    let auth_b = auth_header_with_id("sales", user_b);
+    let auth_b = auth_header_with_id("billing", user_b);
 
     // A sends message to B
     let (status, body) = json_request(
@@ -286,12 +349,12 @@ async fn send_and_receive_text_message() {
 #[tokio::test]
 async fn send_empty_message_rejected() {
     let Some(app) = test_app().await else { return };
-    let peer = uuid::Uuid::new_v4();
+    let peer = seed_user(app.pool(), &unique_tag("messages-empty-peer"), "billing").await;
     let (status, _) = json_request(
         &app,
         "POST",
         &format!("/api/v1/messages/{peer}"),
-        &auth_header("ceo"),
+        &app.auth_header("ceo"),
         Some(json!({"message": ""})),
     )
     .await;
@@ -301,12 +364,12 @@ async fn send_empty_message_rejected() {
 #[tokio::test]
 async fn send_whitespace_only_message_rejected() {
     let Some(app) = test_app().await else { return };
-    let peer = uuid::Uuid::new_v4();
+    let peer = seed_user(app.pool(), &unique_tag("messages-empty-peer"), "billing").await;
     let (status, _) = json_request(
         &app,
         "POST",
         &format!("/api/v1/messages/{peer}"),
-        &auth_header("ceo"),
+        &app.auth_header("ceo"),
         Some(json!({"message": "   \n\t  "})),
     )
     .await;
@@ -316,8 +379,8 @@ async fn send_whitespace_only_message_rejected() {
 #[tokio::test]
 async fn bidirectional_conversation() {
     let Some(app) = test_app().await else { return };
-    let user_a = uuid::Uuid::new_v4();
-    let user_b = uuid::Uuid::new_v4();
+    let user_a = seed_user(app.pool(), &unique_tag("messages-bi-a"), "ceo").await;
+    let user_b = seed_user(app.pool(), &unique_tag("messages-bi-b"), "interpreter").await;
     let auth_a = auth_header_with_id("ceo", user_a);
     let auth_b = auth_header_with_id("interpreter", user_b);
 
@@ -361,8 +424,8 @@ async fn bidirectional_conversation() {
 #[tokio::test]
 async fn conversation_limit_works() {
     let Some(app) = test_app().await else { return };
-    let user_a = uuid::Uuid::new_v4();
-    let user_b = uuid::Uuid::new_v4();
+    let user_a = seed_user(app.pool(), &unique_tag("messages-limit-a"), "ceo").await;
+    let user_b = seed_user(app.pool(), &unique_tag("messages-limit-b"), "billing").await;
     let auth_a = auth_header_with_id("ceo", user_a);
 
     // Send 5 messages
@@ -397,10 +460,10 @@ async fn conversation_limit_works() {
 #[tokio::test]
 async fn mark_read_and_unread_count() {
     let Some(app) = test_app().await else { return };
-    let user_a = uuid::Uuid::new_v4();
-    let user_b = uuid::Uuid::new_v4();
+    let user_a = seed_user(app.pool(), &unique_tag("messages-read-a"), "ceo").await;
+    let user_b = seed_user(app.pool(), &unique_tag("messages-read-b"), "billing").await;
     let auth_a = auth_header_with_id("ceo", user_a);
-    let auth_b = auth_header_with_id("sales", user_b);
+    let auth_b = auth_header_with_id("billing", user_b);
 
     // A sends 3 messages to B
     for i in 0..3 {
@@ -455,9 +518,9 @@ async fn mark_read_and_unread_count() {
 #[tokio::test]
 async fn conversations_list_shows_peers() {
     let Some(app) = test_app().await else { return };
-    let user_a = uuid::Uuid::new_v4();
-    let user_b = uuid::Uuid::new_v4();
-    let user_c = uuid::Uuid::new_v4();
+    let user_a = seed_user(app.pool(), &unique_tag("messages-convos-a"), "ceo").await;
+    let user_b = seed_user(app.pool(), &unique_tag("messages-convos-b"), "billing").await;
+    let user_c = seed_user(app.pool(), &unique_tag("messages-convos-c"), "interpreter").await;
     let auth_a = auth_header_with_id("ceo", user_a);
 
     // A -> B and A -> C
@@ -495,7 +558,7 @@ async fn conversations_list_shows_peers() {
 #[tokio::test]
 async fn empty_conversations_for_new_user() {
     let Some(app) = test_app().await else { return };
-    let new_user = uuid::Uuid::new_v4();
+    let new_user = seed_user(app.pool(), &unique_tag("messages-empty-user"), "concierge").await;
     let auth = auth_header_with_id("concierge", new_user);
     let (status, body) =
         json_request(&app, "GET", "/api/v1/messages/conversations", &auth, None).await;
@@ -510,15 +573,15 @@ async fn empty_conversations_for_new_user() {
 #[tokio::test]
 async fn upload_file_with_message() {
     let Some(app) = test_app().await else { return };
-    let user_a = uuid::Uuid::new_v4();
-    let user_b = uuid::Uuid::new_v4();
+    let user_a = seed_user(app.pool(), &unique_tag("messages-upload-a"), "ceo").await;
+    let user_b = seed_user(app.pool(), &unique_tag("messages-upload-b"), "billing").await;
     let auth_a = auth_header_with_id("ceo", user_a);
 
     let (status, body) = multipart_request(
         &app,
         &format!("/api/v1/messages/{user_b}/upload"),
         &auth_a,
-        b"Hello PDF content",
+        b"%PDF-1.4\nHello PDF content",
         "report.pdf",
         "application/pdf",
         Some("Check this report"),
@@ -530,21 +593,21 @@ async fn upload_file_with_message() {
     assert!(body["attachment_key"].is_string());
     assert_eq!(body["attachment_filename"], "report.pdf");
     assert_eq!(body["attachment_mime"], "application/pdf");
-    assert_eq!(body["attachment_size"], 17); // b"Hello PDF content".len()
+    assert_eq!(body["attachment_size"], 26);
 }
 
 #[tokio::test]
 async fn upload_file_without_message() {
     let Some(app) = test_app().await else { return };
-    let user_a = uuid::Uuid::new_v4();
-    let user_b = uuid::Uuid::new_v4();
+    let user_a = seed_user(app.pool(), &unique_tag("messages-upload-a"), "ceo").await;
+    let user_b = seed_user(app.pool(), &unique_tag("messages-upload-b"), "billing").await;
     let auth_a = auth_header_with_id("ceo", user_a);
 
     let (status, body) = multipart_request(
         &app,
         &format!("/api/v1/messages/{user_b}/upload"),
         &auth_a,
-        b"image data here",
+        &[0xFF, 0xD8, 0xFF, 0xE0, b'J', b'F', b'I', b'F'],
         "photo.jpg",
         "image/jpeg",
         None,
@@ -559,10 +622,10 @@ async fn upload_file_without_message() {
 #[tokio::test]
 async fn uploaded_file_appears_in_conversation() {
     let Some(app) = test_app().await else { return };
-    let user_a = uuid::Uuid::new_v4();
-    let user_b = uuid::Uuid::new_v4();
+    let user_a = seed_user(app.pool(), &unique_tag("messages-uploaded-a"), "ceo").await;
+    let user_b = seed_user(app.pool(), &unique_tag("messages-uploaded-b"), "billing").await;
     let auth_a = auth_header_with_id("ceo", user_a);
-    let auth_b = auth_header_with_id("sales", user_b);
+    let auth_b = auth_header_with_id("billing", user_b);
 
     // Upload file from A to B
     multipart_request(
@@ -604,11 +667,11 @@ async fn uploaded_file_appears_in_conversation() {
 #[tokio::test]
 async fn download_uploaded_file() {
     let Some(app) = test_app().await else { return };
-    let user_a = uuid::Uuid::new_v4();
-    let user_b = uuid::Uuid::new_v4();
+    let user_a = seed_user(app.pool(), &unique_tag("messages-download-a"), "ceo").await;
+    let user_b = seed_user(app.pool(), &unique_tag("messages-download-b"), "billing").await;
     let auth_a = auth_header_with_id("ceo", user_a);
 
-    let file_content = b"download-test-content-12345";
+    let file_content = b"PK\x03\x04download-test-content-12345";
 
     // Upload
     let (_, upload_body) = multipart_request(
@@ -616,8 +679,8 @@ async fn download_uploaded_file() {
         &format!("/api/v1/messages/{user_b}/upload"),
         &auth_a,
         file_content,
-        "download-test.bin",
-        "application/octet-stream",
+        "download-test.zip",
+        "application/zip",
         None,
     )
     .await;
@@ -638,7 +701,7 @@ async fn download_uploaded_file() {
         .unwrap()
         .to_str()
         .unwrap();
-    assert_eq!(ct, "application/octet-stream");
+    assert_eq!(ct, "application/zip");
 
     let cd = resp
         .headers()
@@ -646,7 +709,7 @@ async fn download_uploaded_file() {
         .unwrap()
         .to_str()
         .unwrap();
-    assert!(cd.contains("download-test.bin"));
+    assert!(cd.contains("download-test.zip"));
 
     let bytes = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
         .await
@@ -657,8 +720,13 @@ async fn download_uploaded_file() {
 #[tokio::test]
 async fn download_by_recipient_works() {
     let Some(app) = test_app().await else { return };
-    let user_a = uuid::Uuid::new_v4();
-    let user_b = uuid::Uuid::new_v4();
+    let user_a = seed_user(app.pool(), &unique_tag("messages-download-a"), "ceo").await;
+    let user_b = seed_user(
+        app.pool(),
+        &unique_tag("messages-download-b"),
+        "interpreter",
+    )
+    .await;
     let auth_a = auth_header_with_id("ceo", user_a);
     let auth_b = auth_header_with_id("interpreter", user_b);
 
@@ -667,7 +735,7 @@ async fn download_by_recipient_works() {
         &app,
         &format!("/api/v1/messages/{user_b}/upload"),
         &auth_a,
-        b"recipient-can-download",
+        b"%PDF-1.4\nrecipient-can-download",
         "shared.pdf",
         "application/pdf",
         None,
@@ -688,9 +756,9 @@ async fn download_by_recipient_works() {
 #[tokio::test]
 async fn download_by_non_participant_denied() {
     let Some(app) = test_app().await else { return };
-    let user_a = uuid::Uuid::new_v4();
-    let user_b = uuid::Uuid::new_v4();
-    let user_c = uuid::Uuid::new_v4();
+    let user_a = seed_user(app.pool(), &unique_tag("messages-download-a"), "ceo").await;
+    let user_b = seed_user(app.pool(), &unique_tag("messages-download-b"), "billing").await;
+    let user_c = seed_user(app.pool(), &unique_tag("messages-download-c"), "billing").await;
     let auth_a = auth_header_with_id("ceo", user_a);
     let auth_c = auth_header_with_id("billing", user_c);
 
@@ -722,10 +790,10 @@ async fn download_nonexistent_file_returns_404() {
     let Some(app) = test_app().await else { return };
     let req = Request::builder()
         .uri("/api/v1/messages/file/nonexistent-key-12345")
-        .header("Authorization", &auth_header("ceo"))
+        .header("Authorization", &app.auth_header("ceo"))
         .body(Body::empty())
         .unwrap();
-    let resp = app.oneshot(req).await.unwrap();
+    let resp = app.router().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
 
@@ -736,8 +804,8 @@ async fn download_nonexistent_file_returns_404() {
 #[tokio::test]
 async fn get_conversation_with_no_messages() {
     let Some(app) = test_app().await else { return };
-    let me = uuid::Uuid::new_v4();
-    let stranger = uuid::Uuid::new_v4();
+    let me = seed_user(app.pool(), &unique_tag("messages-empty-me"), "ceo").await;
+    let stranger = seed_user(app.pool(), &unique_tag("messages-empty-peer"), "billing").await;
     let auth = auth_header_with_id("ceo", me);
 
     let (status, body) = json_request(
@@ -755,12 +823,12 @@ async fn get_conversation_with_no_messages() {
 #[tokio::test]
 async fn mark_read_on_empty_conversation_ok() {
     let Some(app) = test_app().await else { return };
-    let stranger = uuid::Uuid::new_v4();
+    let stranger = seed_user(app.pool(), &unique_tag("messages-empty-peer"), "billing").await;
     let (status, body) = json_request(
         &app,
         "POST",
         &format!("/api/v1/messages/{stranger}/read"),
-        &auth_header("ceo"),
+        &app.auth_header("ceo"),
         None,
     )
     .await;
@@ -771,8 +839,8 @@ async fn mark_read_on_empty_conversation_ok() {
 #[tokio::test]
 async fn send_long_message() {
     let Some(app) = test_app().await else { return };
-    let user_a = uuid::Uuid::new_v4();
-    let user_b = uuid::Uuid::new_v4();
+    let user_a = seed_user(app.pool(), &unique_tag("messages-long-a"), "ceo").await;
+    let user_b = seed_user(app.pool(), &unique_tag("messages-long-b"), "billing").await;
     let auth_a = auth_header_with_id("ceo", user_a);
 
     let long_msg = "A".repeat(5000);
@@ -791,8 +859,8 @@ async fn send_long_message() {
 #[tokio::test]
 async fn send_unicode_message() {
     let Some(app) = test_app().await else { return };
-    let user_a = uuid::Uuid::new_v4();
-    let user_b = uuid::Uuid::new_v4();
+    let user_a = seed_user(app.pool(), &unique_tag("messages-unicode-a"), "ceo").await;
+    let user_b = seed_user(app.pool(), &unique_tag("messages-unicode-b"), "billing").await;
     let auth_a = auth_header_with_id("ceo", user_a);
 
     let unicode_msg = "Привет! 你好 مرحبا 🎉🇺🇦";
@@ -823,27 +891,36 @@ async fn send_unicode_message() {
 #[tokio::test]
 async fn upload_various_file_types() {
     let Some(app) = test_app().await else { return };
-    let user_a = uuid::Uuid::new_v4();
-    let user_b = uuid::Uuid::new_v4();
+    let user_a = seed_user(app.pool(), &unique_tag("messages-types-a"), "ceo").await;
+    let user_b = seed_user(app.pool(), &unique_tag("messages-types-b"), "billing").await;
     let auth_a = auth_header_with_id("ceo", user_a);
 
     let cases = vec![
-        ("test.png", "image/png"),
+        (
+            "test.png",
+            "image/png",
+            vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A],
+        ),
         (
             "document.docx",
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            vec![b'P', b'K', 0x03, 0x04],
         ),
-        ("data.csv", "text/csv"),
-        ("scan.pdf", "application/pdf"),
-        ("archive.zip", "application/zip"),
+        ("data.csv", "text/csv", b"col1,col2\n1,2\n".to_vec()),
+        ("scan.pdf", "application/pdf", b"%PDF-1.4\nscan".to_vec()),
+        (
+            "archive.zip",
+            "application/zip",
+            vec![b'P', b'K', 0x03, 0x04],
+        ),
     ];
 
-    for (filename, mime) in cases {
+    for (filename, mime, bytes) in cases {
         let (status, body) = multipart_request(
             &app,
             &format!("/api/v1/messages/{user_b}/upload"),
             &auth_a,
-            b"file-content",
+            &bytes,
             filename,
             mime,
             None,
@@ -858,8 +935,8 @@ async fn upload_various_file_types() {
 #[tokio::test]
 async fn messages_ordered_by_time_desc() {
     let Some(app) = test_app().await else { return };
-    let user_a = uuid::Uuid::new_v4();
-    let user_b = uuid::Uuid::new_v4();
+    let user_a = seed_user(app.pool(), &unique_tag("messages-order-a"), "ceo").await;
+    let user_b = seed_user(app.pool(), &unique_tag("messages-order-b"), "billing").await;
     let auth_a = auth_header_with_id("ceo", user_a);
 
     for i in 0..5 {
@@ -890,8 +967,8 @@ async fn messages_ordered_by_time_desc() {
 #[tokio::test]
 async fn unread_count_zero_for_sender() {
     let Some(app) = test_app().await else { return };
-    let user_a = uuid::Uuid::new_v4();
-    let user_b = uuid::Uuid::new_v4();
+    let user_a = seed_user(app.pool(), &unique_tag("messages-unread-a"), "ceo").await;
+    let user_b = seed_user(app.pool(), &unique_tag("messages-unread-b"), "billing").await;
     let auth_a = auth_header_with_id("ceo", user_a);
 
     // A sends to B — A's unread should not increase

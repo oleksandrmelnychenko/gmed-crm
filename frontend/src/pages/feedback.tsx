@@ -403,8 +403,23 @@ function PatientFeedbackWorkspace() {
         </div>
       </section>
 
-      {notice ? <section className={shellCard("border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-700")}>{notice}</section> : null}
-      {error ? <section className={shellCard("border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700")}>{error}</section> : null}
+      {notice ? (
+        <section
+          role="status"
+          aria-live="polite"
+          className={shellCard("border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-700")}
+        >
+          {notice}
+        </section>
+      ) : null}
+      {error ? (
+        <section
+          role="alert"
+          className={shellCard("border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700")}
+        >
+          {error}
+        </section>
+      ) : null}
 
       <section className="grid gap-4 md:grid-cols-4">
         {metricCard("Submitted feedback", feedback.length)}
@@ -764,8 +779,23 @@ function StaffFeedbackWorkspace() {
         </div>
       </section>
 
-      {notice ? <section className={shellCard("border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-700")}>{notice}</section> : null}
-      {error ? <section className={shellCard("border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700")}>{error}</section> : null}
+      {notice ? (
+        <section
+          role="status"
+          aria-live="polite"
+          className={shellCard("border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-700")}
+        >
+          {notice}
+        </section>
+      ) : null}
+      {error ? (
+        <section
+          role="alert"
+          className={shellCard("border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700")}
+        >
+          {error}
+        </section>
+      ) : null}
 
       <section className="grid gap-4 md:grid-cols-4">
         {metricCard("Total feedback", summary?.total_feedback ?? 0)}

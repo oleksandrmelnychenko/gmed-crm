@@ -25,7 +25,6 @@ import {
   getLocalMessageKey,
   importKeyRingBackup,
   type MessageKeyEnvelope,
-  type MessageKeyRecord,
 } from "@/lib/chat-e2e";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
@@ -173,7 +172,6 @@ export function ChatPage() {
   const [allUsers, setAllUsers] = useState<UserItem[]>([]);
   const [userSearch, setUserSearch] = useState("");
   const [pendingFile, setPendingFile] = useState<File | null>(null);
-  const [myMessageKey, setMyMessageKey] = useState<MessageKeyRecord | null>(null);
   const [activePeerMessageKey, setActivePeerMessageKey] =
     useState<MessageKeyEnvelope | null>(null);
   const [secureStatus, setSecureStatus] = useState<string | null>(null);
@@ -303,7 +301,6 @@ export function ChatPage() {
   useEffect(() => {
     let cancelled = false;
     if (!canViewChat) {
-      setMyMessageKey(null);
       setSecureStatus(null);
       return () => {
         cancelled = true;
@@ -312,10 +309,7 @@ export function ChatPage() {
 
     void (async () => {
       try {
-        const key = await ensureServerMessageKey();
-        if (!cancelled) {
-          setMyMessageKey(key);
-        }
+        await ensureServerMessageKey();
       } catch {
         if (!cancelled) {
           setSecureStatus("Secure chat setup failed on this device.");
@@ -653,8 +647,7 @@ export function ChatPage() {
       const caption = input.trim();
       try {
         if (activePeerMessageKey) {
-          const senderKey = myMessageKey ?? (await ensureServerMessageKey());
-          setMyMessageKey(senderKey);
+          const senderKey = await ensureServerMessageKey();
           const encryptedAttachment = await encryptAttachmentForPeer(
             new Uint8Array(await pendingFile.arrayBuffer()),
             senderKey,
@@ -744,8 +737,7 @@ export function ChatPage() {
     const msg = input.trim();
     setInput("");
     try {
-      const senderKey = myMessageKey ?? (await ensureServerMessageKey());
-      setMyMessageKey(senderKey);
+      const senderKey = await ensureServerMessageKey();
       const payload = await encryptMessageForPeer(
         msg,
         senderKey,
