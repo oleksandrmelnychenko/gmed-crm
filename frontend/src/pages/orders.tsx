@@ -8,7 +8,7 @@ import {
   type FormEvent,
   type ReactNode,
 } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import {
   Building2,
   CalendarClock,
@@ -43,11 +43,19 @@ import {
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
+import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
 
 type OrderPhase = "discovery" | "intake" | "execution" | "closure" | "followup";
 type OrderStatus = "active" | "paused" | "completed" | "cancelled";
 type LeistungStatus = "draft" | "delivered" | "approved" | "cancelled";
+type ExternalInvoiceStatus =
+  | "expected"
+  | "received"
+  | "approved"
+  | "paid"
+  | "overdue"
+  | "cancelled";
 
 type OrderSummary = {
   id: string;
@@ -77,6 +85,33 @@ type Leistung = {
   provider_name: string | null;
   doctor_id: string | null;
   doctor_name: string | null;
+  source_interpreter_report_id?: string | null;
+  source_medical_appointment_id?: string | null;
+  agency_service_id?: string | null;
+  agency_service_key?: string | null;
+  agency_service_name?: string | null;
+  external_document_id?: string | null;
+  external_document_auto_name?: string | null;
+  external_document_filename?: string | null;
+};
+
+type ExternalInvoice = {
+  id: string;
+  provider_id: string | null;
+  provider_name: string | null;
+  external_invoice_number: string;
+  invoice_date: string | null;
+  due_date: string | null;
+  amount_net: unknown;
+  amount_vat: unknown;
+  amount_gross: unknown;
+  currency: string;
+  status: ExternalInvoiceStatus | string;
+  received_at?: string | null;
+  paid_at?: string | null;
+  notes?: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 type OrderDetail = {
@@ -93,6 +128,7 @@ type OrderDetail = {
   total_estimated: unknown;
   total_actual: unknown;
   leistungen: Leistung[];
+  external_invoices?: ExternalInvoice[];
   process_gates?: OrderProcessGates | null;
   planning_preparation?: OrderPlanningPreparation | null;
   execution_flow?: OrderExecutionFlow | null;
@@ -498,8 +534,33 @@ type LeistungFormState = {
   vatRate: string;
   providerId: string;
   doctorId: string;
+  externalDocumentId: string;
   notes: string;
   isCostPassthrough: boolean;
+};
+
+type SupportingDocumentOption = {
+  id: string;
+  order_id?: string | null;
+  auto_name: string;
+  original_filename?: string | null;
+  art?: string | null;
+  category?: string | null;
+  has_stored_file?: boolean;
+  file_deleted_at?: string | null;
+};
+
+type ExternalInvoiceFormState = {
+  providerId: string;
+  externalInvoiceNumber: string;
+  invoiceDate: string;
+  dueDate: string;
+  amountNet: string;
+  amountVat: string;
+  amountGross: string;
+  currency: string;
+  status: ExternalInvoiceStatus;
+  notes: string;
 };
 
 type OrdersPermissions = {
@@ -508,6 +569,7 @@ type OrdersPermissions = {
   canManagePhase: boolean;
   canAddLeistung: boolean;
   canApproveLeistung: boolean;
+  canManageExternalInvoices: boolean;
 };
 
 type StatCardProps = {
@@ -544,6 +606,14 @@ const ORDER_PHASES: OrderPhase[] = [
   "followup",
 ];
 const ORDER_STATUSES: OrderStatus[] = ["active", "paused", "completed", "cancelled"];
+const EXTERNAL_INVOICE_STATUSES: ExternalInvoiceStatus[] = [
+  "expected",
+  "received",
+  "approved",
+  "paid",
+  "overdue",
+  "cancelled",
+];
 
 const DEFAULT_FILTERS: OrdersFilters = {
   search: "",
@@ -569,6 +639,7 @@ function orderPermissions(role?: string): OrdersPermissions {
         canManagePhase: true,
         canAddLeistung: true,
         canApproveLeistung: true,
+        canManageExternalInvoices: true,
       };
     case "billing":
       return {
@@ -577,6 +648,7 @@ function orderPermissions(role?: string): OrdersPermissions {
         canManagePhase: false,
         canAddLeistung: false,
         canApproveLeistung: false,
+        canManageExternalInvoices: true,
       };
     default:
       return {
@@ -585,6 +657,7 @@ function orderPermissions(role?: string): OrdersPermissions {
         canManagePhase: false,
         canAddLeistung: false,
         canApproveLeistung: false,
+        canManageExternalInvoices: false,
       };
   }
 }
@@ -601,8 +674,24 @@ function blankLeistungForm(): LeistungFormState {
     vatRate: "19",
     providerId: "",
     doctorId: "",
+    externalDocumentId: "",
     notes: "",
     isCostPassthrough: false,
+  };
+}
+
+function blankExternalInvoiceForm(): ExternalInvoiceFormState {
+  return {
+    providerId: "",
+    externalInvoiceNumber: "",
+    invoiceDate: "",
+    dueDate: "",
+    amountNet: "",
+    amountVat: "",
+    amountGross: "",
+    currency: "EUR",
+    status: "expected",
+    notes: "",
   };
 }
 
@@ -813,6 +902,14 @@ function statusClassName(status: string) {
       return "border-amber-200 bg-amber-100 text-amber-700";
     case "approved":
       return "border-emerald-200 bg-emerald-100 text-emerald-700";
+    case "received":
+      return "border-sky-200 bg-sky-100 text-sky-700";
+    case "overdue":
+      return "border-rose-200 bg-rose-100 text-rose-700";
+    case "paid":
+      return "border-emerald-200 bg-emerald-100 text-emerald-700";
+    case "expected":
+      return "border-violet-200 bg-violet-100 text-violet-700";
     default:
       return "border-slate-200 bg-slate-100 text-slate-700";
   }
@@ -821,6 +918,13 @@ function statusClassName(status: string) {
 function optString(value: string) {
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function formatDate(value: string | null | undefined) {
+  if (!value) return "Not set";
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("en-GB", { dateStyle: "medium" }).format(date);
 }
 
 function numberFromUnknown(value: unknown) {
@@ -971,7 +1075,7 @@ export function OrdersPage() {
   const { t } = useLang();
   const tx = t as unknown as Record<string, string>;
   const { user } = useAuth();
-  const navigate = useNavigate();
+  const { staffGo } = useStaffNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const permissions = orderPermissions(user?.role);
 
@@ -986,6 +1090,7 @@ export function OrdersPage() {
   const [patients, setPatients] = useState<PatientOption[]>([]);
   const [providers, setProviders] = useState<ProviderOption[]>([]);
   const [providerDoctors, setProviderDoctors] = useState<Record<string, DoctorOption[]>>({});
+  const [orderDocuments, setOrderDocuments] = useState<SupportingDocumentOption[]>([]);
 
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [orderDetail, setOrderDetail] = useState<OrderDetail | null>(null);
@@ -1040,6 +1145,11 @@ export function OrdersPage() {
   const [leistungForm, setLeistungForm] = useState<LeistungFormState>(blankLeistungForm);
   const [leistungSaving, setLeistungSaving] = useState(false);
   const [leistungError, setLeistungError] = useState<string | null>(null);
+  const [externalInvoiceForm, setExternalInvoiceForm] =
+    useState<ExternalInvoiceFormState>(blankExternalInvoiceForm);
+  const [externalInvoiceSaving, setExternalInvoiceSaving] = useState(false);
+  const [externalInvoiceError, setExternalInvoiceError] = useState<string | null>(null);
+  const [externalInvoiceUpdatingId, setExternalInvoiceUpdatingId] = useState<string | null>(null);
 
   const filterDoctorOptions = useMemo(
     () => (filters.providerId ? (providerDoctors[filters.providerId] ?? []) : []),
@@ -1048,6 +1158,16 @@ export function OrdersPage() {
   const leistungDoctorOptions = useMemo(
     () => (leistungForm.providerId ? (providerDoctors[leistungForm.providerId] ?? []) : []),
     [leistungForm.providerId, providerDoctors],
+  );
+  const supportingDocumentOptions = useMemo(
+    () =>
+      orderDocuments.filter(
+        (document) =>
+          document.order_id === selectedOrderId &&
+          document.has_stored_file !== false &&
+          !document.file_deleted_at,
+      ),
+    [orderDocuments, selectedOrderId],
   );
 
   const metrics = useMemo(() => {
@@ -1074,6 +1194,18 @@ export function OrdersPage() {
       delivered: items.filter((item) => item.status === "delivered").length,
       approved: items.filter((item) => item.status === "approved").length,
       gross: sumLeistungTotals(items),
+    };
+  }, [orderDetail]);
+  const externalInvoiceMetrics = useMemo(() => {
+    const items = orderDetail?.external_invoices ?? [];
+    return {
+      total: items.length,
+      overdue: items.filter((item) => item.status === "overdue").length,
+      paid: items.filter((item) => item.status === "paid").length,
+      gross: items.reduce(
+        (sum, item) => sum + (numberFromUnknown(item.amount_gross) ?? 0),
+        0,
+      ),
     };
   }, [orderDetail]);
   const workflowChecklistGroups = useMemo(() => {
@@ -1410,6 +1542,7 @@ export function OrdersPage() {
   useEffect(() => {
     if (!selectedOrderId) {
       setOrderDetail(null);
+      setOrderDocuments([]);
       setWorkflowChecklist(null);
       setWorkflowAssignments([]);
       setPhaseDraft("");
@@ -1430,17 +1563,21 @@ export function OrdersPage() {
 
     async function loadDetail() {
       try {
-        const detail = await apiFetch<OrderDetail>(`/orders/${selectedOrderId}`);
-        const [workflow, assignments] = await Promise.all([
+        const [detail, documents, workflow] = await Promise.all([
+          apiFetch<OrderDetail>(`/orders/${selectedOrderId}`),
+          apiFetch<SupportingDocumentOption[]>(`/documents?order_id=${selectedOrderId}`).catch(
+            () => [],
+          ),
           apiFetch<WorkflowChecklistResponse>(
             `/orders/${selectedOrderId}/workflow-checklist`
           ).catch(() => null),
-          apiFetch<PatientAssignmentOption[]>(
-            `/patients/${detail.patient_id}/assignments`
-          ).catch(() => []),
         ]);
+        const assignments = await apiFetch<PatientAssignmentOption[]>(
+          `/patients/${detail.patient_id}/assignments`
+        ).catch(() => []);
         if (cancelled) return;
         setOrderDetail(detail);
+        setOrderDocuments(documents);
         setWorkflowChecklist(workflow);
         setWorkflowAssignments(assignments);
         setPhaseDraft(detail.phase);
@@ -1455,6 +1592,7 @@ export function OrdersPage() {
       } catch (error) {
         if (cancelled) return;
         setOrderDetail(null);
+        setOrderDocuments([]);
         setWorkflowChecklist(null);
         setWorkflowAssignments([]);
         setProcessGateForm(blankOrderProcessGateForm());
@@ -1770,6 +1908,7 @@ export function OrdersPage() {
           is_cost_passthrough: leistungForm.isCostPassthrough,
           provider_id: optString(leistungForm.providerId),
           doctor_id: optString(leistungForm.doctorId),
+          external_document_id: optString(leistungForm.externalDocumentId),
           notes: optString(leistungForm.notes),
         }),
       });
@@ -1795,6 +1934,86 @@ export function OrdersPage() {
       setDetailError(error instanceof Error ? error.message : "Failed to approve Leistung");
     } finally {
       setApprovingLeistungId(null);
+    }
+  }
+
+  async function handleCreateExternalInvoice(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedOrderId) {
+      setExternalInvoiceError("Select an order first");
+      return;
+    }
+    if (!externalInvoiceForm.externalInvoiceNumber.trim()) {
+      setExternalInvoiceError("External invoice number is required");
+      return;
+    }
+
+    const amountNet = Number(externalInvoiceForm.amountNet.replace(",", "."));
+    const amountVat = Number(externalInvoiceForm.amountVat.replace(",", "."));
+    const amountGross = Number(externalInvoiceForm.amountGross.replace(",", "."));
+
+    if (!Number.isFinite(amountGross) || amountGross < 0) {
+      setExternalInvoiceError("Gross amount must be numeric");
+      return;
+    }
+    if (externalInvoiceForm.amountNet.trim() && (!Number.isFinite(amountNet) || amountNet < 0)) {
+      setExternalInvoiceError("Net amount must be numeric");
+      return;
+    }
+    if (externalInvoiceForm.amountVat.trim() && (!Number.isFinite(amountVat) || amountVat < 0)) {
+      setExternalInvoiceError("VAT amount must be numeric");
+      return;
+    }
+
+    setExternalInvoiceSaving(true);
+    setExternalInvoiceError(null);
+    try {
+      await apiFetch(`/orders/${selectedOrderId}/external-invoices`, {
+        method: "POST",
+        body: JSON.stringify({
+          provider_id: optString(externalInvoiceForm.providerId),
+          external_invoice_number: externalInvoiceForm.externalInvoiceNumber.trim(),
+          invoice_date: optString(externalInvoiceForm.invoiceDate),
+          due_date: optString(externalInvoiceForm.dueDate),
+          amount_net: externalInvoiceForm.amountNet.trim() ? amountNet : 0,
+          amount_vat: externalInvoiceForm.amountVat.trim() ? amountVat : 0,
+          amount_gross: amountGross,
+          currency: optString(externalInvoiceForm.currency) ?? "EUR",
+          status: externalInvoiceForm.status,
+          notes: optString(externalInvoiceForm.notes),
+        }),
+      });
+      setExternalInvoiceForm(blankExternalInvoiceForm());
+      triggerReload();
+    } catch (error) {
+      setExternalInvoiceError(
+        error instanceof Error ? error.message : "Failed to create external invoice",
+      );
+    } finally {
+      setExternalInvoiceSaving(false);
+    }
+  }
+
+  async function handleUpdateExternalInvoiceStatus(
+    externalInvoiceId: string,
+    status: ExternalInvoiceStatus,
+  ) {
+    if (!selectedOrderId) return;
+
+    setExternalInvoiceUpdatingId(externalInvoiceId);
+    setDetailError(null);
+    try {
+      await apiFetch(`/orders/${selectedOrderId}/external-invoices/${externalInvoiceId}/update`, {
+        method: "POST",
+        body: JSON.stringify({ status }),
+      });
+      triggerReload();
+    } catch (error) {
+      setDetailError(
+        error instanceof Error ? error.message : "Failed to update external invoice",
+      );
+    } finally {
+      setExternalInvoiceUpdatingId(null);
     }
   }
 
@@ -2315,7 +2534,7 @@ export function OrdersPage() {
                       type="button"
                       variant="outline"
                       className="rounded-2xl"
-                      onClick={() => navigate(`/patients?patient=${orderDetail.patient_id}`)}
+                      onClick={() => staffGo(`/patients?patient=${orderDetail.patient_id}`)}
                     >
                       Patient
                     </Button>
@@ -2323,7 +2542,7 @@ export function OrdersPage() {
                       type="button"
                       variant="outline"
                       className="rounded-2xl"
-                      onClick={() => navigate(`/cases?patient=${orderDetail.patient_id}`)}
+                      onClick={() => staffGo(`/cases?patient=${orderDetail.patient_id}`)}
                     >
                       Cases
                     </Button>
@@ -2331,7 +2550,7 @@ export function OrdersPage() {
                       type="button"
                       variant="outline"
                       className="rounded-2xl"
-                      onClick={() => navigate(`/appointments?patient=${orderDetail.patient_id}`)}
+                      onClick={() => staffGo(`/appointments?patient=${orderDetail.patient_id}`)}
                     >
                       Appointments
                     </Button>
@@ -2339,7 +2558,7 @@ export function OrdersPage() {
                       type="button"
                       variant="outline"
                       className="rounded-2xl"
-                      onClick={() => navigate(`/contracts?order=${orderDetail.id}&patient=${orderDetail.patient_id}&tab=quotes`)}
+                      onClick={() => staffGo(`/contracts?order=${orderDetail.id}&patient=${orderDetail.patient_id}&tab=quotes`)}
                     >
                       Contracts
                     </Button>
@@ -2347,7 +2566,7 @@ export function OrdersPage() {
                       type="button"
                       variant="outline"
                       className="rounded-2xl"
-                      onClick={() => navigate(`/invoices?order=${orderDetail.id}&patient=${orderDetail.patient_id}`)}
+                      onClick={() => staffGo(`/invoices?order=${orderDetail.id}&patient=${orderDetail.patient_id}`)}
                     >
                       Invoices
                     </Button>
@@ -2355,7 +2574,7 @@ export function OrdersPage() {
                       type="button"
                       variant="outline"
                       className="rounded-2xl"
-                      onClick={() => navigate(`/documents?order=${orderDetail.id}&patient=${orderDetail.patient_id}`)}
+                      onClick={() => staffGo(`/documents?order=${orderDetail.id}&patient=${orderDetail.patient_id}`)}
                     >
                       Documents
                     </Button>
@@ -2881,7 +3100,7 @@ export function OrdersPage() {
                                 variant="outline"
                                 className="justify-start rounded-xl"
                                 onClick={() =>
-                                  navigate(`/appointments?order=${orderDetail.id}&patient=${orderDetail.patient_id}`)
+                                  staffGo(`/appointments?order=${orderDetail.id}&patient=${orderDetail.patient_id}`)
                                 }
                               >
                                 Medical and non-medical appointments
@@ -2891,7 +3110,7 @@ export function OrdersPage() {
                                 variant="outline"
                                 className="justify-start rounded-xl"
                                 onClick={() =>
-                                  navigate(`/documents?order=${orderDetail.id}&patient=${orderDetail.patient_id}`)
+                                  staffGo(`/documents?order=${orderDetail.id}&patient=${orderDetail.patient_id}`)
                                 }
                               >
                                 Preparation documents
@@ -2901,7 +3120,7 @@ export function OrdersPage() {
                                 variant="outline"
                                 className="justify-start rounded-xl"
                                 onClick={() =>
-                                  navigate(`/appointments?order=${orderDetail.id}&patient=${orderDetail.patient_id}`)
+                                  staffGo(`/appointments?order=${orderDetail.id}&patient=${orderDetail.patient_id}`)
                                 }
                               >
                                 Interpreter assignment and briefing
@@ -3156,7 +3375,7 @@ export function OrdersPage() {
                                 variant="outline"
                                 className="rounded-xl"
                                 onClick={() =>
-                                  navigate(`/appointments?order=${orderDetail.id}&patient=${orderDetail.patient_id}`)
+                                  staffGo(`/appointments?order=${orderDetail.id}&patient=${orderDetail.patient_id}`)
                                 }
                               >
                                 Appointments
@@ -3166,7 +3385,7 @@ export function OrdersPage() {
                                 variant="outline"
                                 className="rounded-xl"
                                 onClick={() =>
-                                  navigate(`/documents?order=${orderDetail.id}&patient=${orderDetail.patient_id}`)
+                                  staffGo(`/documents?order=${orderDetail.id}&patient=${orderDetail.patient_id}`)
                                 }
                               >
                                 Documents
@@ -3176,7 +3395,7 @@ export function OrdersPage() {
                                 variant="outline"
                                 className="rounded-xl"
                                 onClick={() =>
-                                  navigate(`/providers?patient=${orderDetail.patient_id}`)
+                                  staffGo(`/providers?patient=${orderDetail.patient_id}`)
                                 }
                               >
                                 Providers
@@ -3442,7 +3661,7 @@ export function OrdersPage() {
                                 variant="outline"
                                 className="rounded-xl"
                                 onClick={() =>
-                                  navigate(`/appointments?order=${orderDetail.id}&patient=${orderDetail.patient_id}`)
+                                  staffGo(`/appointments?order=${orderDetail.id}&patient=${orderDetail.patient_id}`)
                                 }
                               >
                                 Appointments
@@ -3452,7 +3671,7 @@ export function OrdersPage() {
                                 variant="outline"
                                 className="rounded-xl"
                                 onClick={() =>
-                                  navigate(`/documents?order=${orderDetail.id}&patient=${orderDetail.patient_id}`)
+                                  staffGo(`/documents?order=${orderDetail.id}&patient=${orderDetail.patient_id}`)
                                 }
                               >
                                 Documents
@@ -3462,7 +3681,7 @@ export function OrdersPage() {
                                 variant="outline"
                                 className="rounded-xl"
                                 onClick={() =>
-                                  navigate(`/patients/${orderDetail.patient_id}`)
+                                  staffGo(`/patients/${orderDetail.patient_id}`)
                                 }
                               >
                                 Patient profile
@@ -3902,6 +4121,31 @@ export function OrdersPage() {
                                     Cost pass-through
                                   </Badge>
                                 ) : null}
+                                {leistung.source_interpreter_report_id ? (
+                                  <Badge
+                                    variant="outline"
+                                    className="rounded-full border-emerald-200 bg-emerald-100 text-emerald-700"
+                                  >
+                                    Auto-billed from interpreter report
+                                  </Badge>
+                                ) : null}
+                                {leistung.source_medical_appointment_id ? (
+                                  <Badge
+                                    variant="outline"
+                                    className="rounded-full border-amber-200 bg-amber-100 text-amber-700"
+                                  >
+                                    Auto-billed from completed appointment
+                                  </Badge>
+                                ) : null}
+                                {leistung.agency_service_name || leistung.agency_service_key ? (
+                                  <Badge
+                                    variant="outline"
+                                    className="rounded-full border-sky-200 bg-sky-100 text-sky-700"
+                                  >
+                                    {leistung.agency_service_name ||
+                                      leistung.agency_service_key}
+                                  </Badge>
+                                ) : null}
                               </div>
 
                               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -3913,7 +4157,7 @@ export function OrdersPage() {
                                         type="button"
                                         className="text-left font-medium text-sky-700 hover:text-sky-800"
                                         onClick={() =>
-                                          navigate(`/providers?provider=${leistung.provider_id}`)
+                                          staffGo(`/providers?provider=${leistung.provider_id}`)
                                         }
                                       >
                                         {leistung.provider_name || "Open provider"}
@@ -3931,7 +4175,7 @@ export function OrdersPage() {
                                         type="button"
                                         className="text-left font-medium text-sky-700 hover:text-sky-800"
                                         onClick={() =>
-                                          navigate(
+                                          staffGo(
                                             `/appointments?provider=${leistung.provider_id}&doctor=${leistung.doctor_id}`,
                                           )
                                         }
@@ -3971,6 +4215,48 @@ export function OrdersPage() {
                                   label={tx.common_active}
                                   value={formatDateTime(leistung.approved_at)}
                                 />
+                                <DetailField
+                                  label="Supporting document"
+                                  value={
+                                    leistung.external_document_id ? (
+                                      <button
+                                        type="button"
+                                        className="text-left font-medium text-sky-700 hover:text-sky-800"
+                                        onClick={() =>
+                                          staffGo(
+                                            `/documents?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
+                                          )
+                                        }
+                                      >
+                                        {leistung.external_document_auto_name ||
+                                          leistung.external_document_filename ||
+                                          "Open linked document"}
+                                      </button>
+                                    ) : leistung.is_cost_passthrough ? (
+                                      "Auto-link if exactly one receipt or invoice document exists"
+                                    ) : (
+                                      "Not linked"
+                                    )
+                                  }
+                                />
+                                <DetailField
+                                  label="Billing source"
+                                  value={
+                                    leistung.source_interpreter_report_id
+                                      ? `Interpreter report ${leistung.source_interpreter_report_id}`
+                                      : leistung.source_medical_appointment_id
+                                        ? `Completed appointment ${leistung.source_medical_appointment_id}`
+                                      : "Manual or provider-linked"
+                                  }
+                                />
+                                <DetailField
+                                  label="Agency service"
+                                  value={
+                                    leistung.agency_service_name ||
+                                    leistung.agency_service_key ||
+                                    "Not catalog-linked"
+                                  }
+                                />
                               </div>
 
                               {leistung.notes ? (
@@ -4000,6 +4286,309 @@ export function OrdersPage() {
                       ))}
                     </div>
                   )}
+                </SectionCard>
+
+                <SectionCard
+                  title="External invoices"
+                  description="Track supplier and clinic invoices that must be reviewed, paid or escalated inside the order context."
+                >
+                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                    <StatCard
+                      label="Tracked invoices"
+                      value={String(externalInvoiceMetrics.total)}
+                      description="External invoices linked to the current order."
+                      icon={<Wallet className="size-4" />}
+                    />
+                    <StatCard
+                      label="Overdue"
+                      value={String(externalInvoiceMetrics.overdue)}
+                      description="Invoices whose due date already passed."
+                      icon={<CalendarClock className="size-4" />}
+                    />
+                    <StatCard
+                      label="Paid"
+                      value={String(externalInvoiceMetrics.paid)}
+                      description="Invoices already marked as settled."
+                      icon={<CheckCircle2 className="size-4" />}
+                    />
+                    <StatCard
+                      label="Gross tracked"
+                      value={formatCurrency(externalInvoiceMetrics.gross)}
+                      description="Total gross exposure of all linked external invoices."
+                      icon={<Building2 className="size-4" />}
+                    />
+                  </div>
+
+                  <div className="mt-5 space-y-5">
+                    {permissions.canManageExternalInvoices ? (
+                      <form
+                        onSubmit={handleCreateExternalInvoice}
+                        className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                      >
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <h3 className="text-sm font-semibold text-slate-900">
+                              Register external invoice
+                            </h3>
+                            <p className="mt-1 text-sm text-slate-500">
+                              Use this for inbound clinic or partner invoices that need deadline tracking.
+                            </p>
+                          </div>
+                        </div>
+                        {externalInvoiceError ? (
+                          <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                            {externalInvoiceError}
+                          </div>
+                        ) : null}
+                        <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                          <div>
+                            <Label>Invoice number</Label>
+                            <Input
+                              value={externalInvoiceForm.externalInvoiceNumber}
+                              onChange={(event) =>
+                                setExternalInvoiceForm((current) => ({
+                                  ...current,
+                                  externalInvoiceNumber: event.target.value,
+                                }))
+                              }
+                              className="mt-1 h-10 rounded-xl bg-white"
+                            />
+                          </div>
+                          <div>
+                            <Label>{t.common_provider}</Label>
+                            <select
+                              value={externalInvoiceForm.providerId}
+                              onChange={(event) =>
+                                setExternalInvoiceForm((current) => ({
+                                  ...current,
+                                  providerId: event.target.value,
+                                }))
+                              }
+                              className={`mt-1 ${selectClassName}`}
+                            >
+                              <option value="">{t.common_not_set}</option>
+                              {providers.map((provider) => (
+                                <option key={provider.id} value={provider.id}>
+                                  {provider.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <Label>Invoice date</Label>
+                            <Input
+                              type="date"
+                              value={externalInvoiceForm.invoiceDate}
+                              onChange={(event) =>
+                                setExternalInvoiceForm((current) => ({
+                                  ...current,
+                                  invoiceDate: event.target.value,
+                                }))
+                              }
+                              className="mt-1 h-10 rounded-xl bg-white"
+                            />
+                          </div>
+                          <div>
+                            <Label>Due date</Label>
+                            <Input
+                              type="date"
+                              value={externalInvoiceForm.dueDate}
+                              onChange={(event) =>
+                                setExternalInvoiceForm((current) => ({
+                                  ...current,
+                                  dueDate: event.target.value,
+                                }))
+                              }
+                              className="mt-1 h-10 rounded-xl bg-white"
+                            />
+                          </div>
+                          <div>
+                            <Label>Net</Label>
+                            <Input
+                              value={externalInvoiceForm.amountNet}
+                              onChange={(event) =>
+                                setExternalInvoiceForm((current) => ({
+                                  ...current,
+                                  amountNet: event.target.value,
+                                }))
+                              }
+                              className="mt-1 h-10 rounded-xl bg-white"
+                            />
+                          </div>
+                          <div>
+                            <Label>VAT</Label>
+                            <Input
+                              value={externalInvoiceForm.amountVat}
+                              onChange={(event) =>
+                                setExternalInvoiceForm((current) => ({
+                                  ...current,
+                                  amountVat: event.target.value,
+                                }))
+                              }
+                              className="mt-1 h-10 rounded-xl bg-white"
+                            />
+                          </div>
+                          <div>
+                            <Label>Gross</Label>
+                            <Input
+                              value={externalInvoiceForm.amountGross}
+                              onChange={(event) =>
+                                setExternalInvoiceForm((current) => ({
+                                  ...current,
+                                  amountGross: event.target.value,
+                                }))
+                              }
+                              className="mt-1 h-10 rounded-xl bg-white"
+                            />
+                          </div>
+                          <div>
+                            <Label>Status</Label>
+                            <select
+                              value={externalInvoiceForm.status}
+                              onChange={(event) =>
+                                setExternalInvoiceForm((current) => ({
+                                  ...current,
+                                  status: event.target.value as ExternalInvoiceStatus,
+                                }))
+                              }
+                              className={`mt-1 ${selectClassName}`}
+                            >
+                              {EXTERNAL_INVOICE_STATUSES.map((status) => (
+                                <option key={status} value={status}>
+                                  {status}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="md:col-span-2 xl:col-span-4">
+                            <Label>{t.patients_notes}</Label>
+                            <textarea
+                              value={externalInvoiceForm.notes}
+                              onChange={(event) =>
+                                setExternalInvoiceForm((current) => ({
+                                  ...current,
+                                  notes: event.target.value,
+                                }))
+                              }
+                              className={`mt-1 ${textareaClassName}`}
+                            />
+                          </div>
+                        </div>
+                        <div className="mt-4 flex justify-end">
+                          <Button type="submit" disabled={externalInvoiceSaving}>
+                            {externalInvoiceSaving ? (
+                              <LoaderCircle className="mr-2 size-4 animate-spin" />
+                            ) : (
+                              <Plus className="mr-2 size-4" />
+                            )}
+                            Add external invoice
+                          </Button>
+                        </div>
+                      </form>
+                    ) : null}
+
+                    {(orderDetail.external_invoices ?? []).length === 0 ? (
+                      <EmptyState
+                        title="No external invoices yet"
+                        description="Register inbound provider or clinic invoices here to track due dates and overdue follow-up."
+                      />
+                    ) : (
+                      <div className="space-y-3">
+                        {(orderDetail.external_invoices ?? []).map((invoice) => (
+                          <div
+                            key={invoice.id}
+                            className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                          >
+                            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                              <div className="space-y-3">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <div className="text-base font-semibold text-slate-950">
+                                    {invoice.external_invoice_number}
+                                  </div>
+                                  <Badge
+                                    variant="outline"
+                                    className={cn("rounded-full", statusClassName(invoice.status))}
+                                  >
+                                    {invoice.status}
+                                  </Badge>
+                                  {invoice.provider_name ? (
+                                    <Badge
+                                      variant="outline"
+                                      className="rounded-full border-sky-200 bg-sky-50 text-sky-700"
+                                    >
+                                      {invoice.provider_name}
+                                    </Badge>
+                                  ) : null}
+                                </div>
+                                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                                  <DetailField label="Invoice date" value={formatDate(invoice.invoice_date)} />
+                                  <DetailField label="Due date" value={formatDate(invoice.due_date)} />
+                                  <DetailField label="Net" value={formatCurrency(invoice.amount_net, invoice.currency)} />
+                                  <DetailField label="VAT" value={formatCurrency(invoice.amount_vat, invoice.currency)} />
+                                  <DetailField label="Gross" value={formatCurrency(invoice.amount_gross, invoice.currency)} />
+                                  <DetailField label="Received" value={formatDateTime(invoice.received_at)} />
+                                  <DetailField label="Paid" value={formatDateTime(invoice.paid_at)} />
+                                  <DetailField label="Last update" value={formatDateTime(invoice.updated_at)} />
+                                </div>
+                                {invoice.notes ? (
+                                  <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+                                    {invoice.notes}
+                                  </div>
+                                ) : null}
+                              </div>
+
+                              {permissions.canManageExternalInvoices ? (
+                                <div className="flex shrink-0 flex-wrap gap-2">
+                                  {invoice.status !== "approved" ? (
+                                    <Button
+                                      variant="outline"
+                                      onClick={() =>
+                                        void handleUpdateExternalInvoiceStatus(invoice.id, "approved")
+                                      }
+                                      disabled={externalInvoiceUpdatingId === invoice.id}
+                                    >
+                                      {externalInvoiceUpdatingId === invoice.id ? (
+                                        <LoaderCircle className="mr-2 size-4 animate-spin" />
+                                      ) : null}
+                                      Mark approved
+                                    </Button>
+                                  ) : null}
+                                  {invoice.status !== "paid" ? (
+                                    <Button
+                                      variant="outline"
+                                      onClick={() =>
+                                        void handleUpdateExternalInvoiceStatus(invoice.id, "paid")
+                                      }
+                                      disabled={externalInvoiceUpdatingId === invoice.id}
+                                    >
+                                      {externalInvoiceUpdatingId === invoice.id ? (
+                                        <LoaderCircle className="mr-2 size-4 animate-spin" />
+                                      ) : null}
+                                      Mark paid
+                                    </Button>
+                                  ) : null}
+                                  {invoice.status !== "cancelled" ? (
+                                    <Button
+                                      variant="outline"
+                                      onClick={() =>
+                                        void handleUpdateExternalInvoiceStatus(invoice.id, "cancelled")
+                                      }
+                                      disabled={externalInvoiceUpdatingId === invoice.id}
+                                    >
+                                      {externalInvoiceUpdatingId === invoice.id ? (
+                                        <LoaderCircle className="mr-2 size-4 animate-spin" />
+                                      ) : null}
+                                      Cancel
+                                    </Button>
+                                  ) : null}
+                                </div>
+                              ) : null}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </SectionCard>
               </>
             )}
@@ -4185,7 +4774,7 @@ export function OrdersPage() {
                         type="button"
                         variant="outline"
                         className="rounded-xl"
-                        onClick={() => navigate(`/patients?patient=${createForm.patientId}`)}
+                        onClick={() => staffGo(`/patients?patient=${createForm.patientId}`)}
                       >
                         Open patient profile
                       </Button>
@@ -4374,6 +4963,9 @@ export function OrdersPage() {
                     setLeistungForm((current) => ({
                       ...current,
                       isCostPassthrough: event.target.checked,
+                      externalDocumentId: event.target.checked
+                        ? current.externalDocumentId
+                        : "",
                     }))
                   }
                   className="mt-1 size-4 rounded border-slate-300"
@@ -4386,6 +4978,35 @@ export function OrdersPage() {
                 </span>
               </label>
             </div>
+
+            {leistungForm.isCostPassthrough ? (
+              <div>
+                <Label>Supporting document</Label>
+                <select
+                  value={leistungForm.externalDocumentId}
+                  onChange={(event) =>
+                    setLeistungForm((current) => ({
+                      ...current,
+                      externalDocumentId: event.target.value,
+                    }))
+                  }
+                  className={`mt-1 ${selectClassName}`}
+                >
+                  <option value="">Auto-link if there is exactly one matching document</option>
+                  {supportingDocumentOptions.map((document) => (
+                    <option key={document.id} value={document.id}>
+                      {document.auto_name || document.original_filename || document.id}
+                      {document.art ? ` · ${document.art}` : ""}
+                      {document.original_filename ? ` · ${document.original_filename}` : ""}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-2 text-xs text-slate-500">
+                  Pin a specific receipt or provider invoice when the order has more than one
+                  candidate file.
+                </p>
+              </div>
+            ) : null}
 
             <div className="flex items-center justify-end gap-2">
               <Button type="button" variant="outline" onClick={() => resetLeistungDialog(false)}>

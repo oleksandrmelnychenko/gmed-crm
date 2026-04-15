@@ -267,26 +267,32 @@ struct LeadConversionReadiness {
     payload: Value,
 }
 
-fn build_lead_conversion_readiness(row: &sqlx::postgres::PgRow) -> LeadConversionReadiness {
-    let qualification_status: String = row.try_get("qualification_status").unwrap_or_default();
-    let compliance_status: String = row.try_get("compliance_status").unwrap_or_default();
-    let converted_patient_id: Option<Uuid> =
-        row.try_get("converted_patient_id").unwrap_or_default();
-    let date_of_birth: Option<NaiveDate> = row.try_get("date_of_birth").unwrap_or_default();
-    let legal_sex: Option<String> = row.try_get("legal_sex").unwrap_or_default();
-    let email: Option<String> = row.try_get("email").unwrap_or_default();
-    let phone: Option<String> = row.try_get("phone").unwrap_or_default();
-    let consent_privacy_practices: bool = row.try_get("consent_privacy_practices").unwrap_or(false);
-    let consent_healthcare: bool = row.try_get("consent_healthcare").unwrap_or(false);
+#[derive(Default)]
+struct LeadConversionReadinessInput {
+    qualification_status: String,
+    compliance_status: String,
+    converted_patient_id: Option<Uuid>,
+    date_of_birth: Option<NaiveDate>,
+    legal_sex: Option<String>,
+    email: Option<String>,
+    phone: Option<String>,
+    consent_privacy_practices: bool,
+    consent_healthcare: bool,
+}
 
-    let lead_qualified = qualification_status == "qualified";
-    let compliance_completed = compliance_status == "signed";
-    let birth_date_present = date_of_birth.is_some();
-    let legal_sex_present = legal_sex.as_deref().is_some_and(is_valid_legal_sex);
-    let primary_contact_present = email
+fn evaluate_lead_conversion_readiness(
+    input: &LeadConversionReadinessInput,
+) -> LeadConversionReadiness {
+    let lead_qualified = input.qualification_status == "qualified";
+    let compliance_completed = input.compliance_status == "signed";
+    let birth_date_present = input.date_of_birth.is_some();
+    let legal_sex_present = input.legal_sex.as_deref().is_some_and(is_valid_legal_sex);
+    let primary_contact_present = input
+        .email
         .as_deref()
         .is_some_and(|value| !value.trim().is_empty())
-        || phone
+        || input
+            .phone
             .as_deref()
             .is_some_and(|value| !value.trim().is_empty());
 
@@ -324,13 +330,13 @@ fn build_lead_conversion_readiness(row: &sqlx::postgres::PgRow) -> LeadConversio
         json!({
             "key": "privacy_consent",
             "label": "Privacy practices accepted",
-            "passed": consent_privacy_practices,
+            "passed": input.consent_privacy_practices,
             "blocking_for": "qualification",
         }),
         json!({
             "key": "healthcare_consent",
             "label": "Healthcare consent captured",
-            "passed": consent_healthcare,
+            "passed": input.consent_healthcare,
             "blocking_for": "qualification",
         }),
     ];
@@ -348,10 +354,10 @@ fn build_lead_conversion_readiness(row: &sqlx::postgres::PgRow) -> LeadConversio
     if !primary_contact_present {
         qualification_reasons.push("Email or phone is required".to_string());
     }
-    if !consent_privacy_practices {
+    if !input.consent_privacy_practices {
         qualification_reasons.push("Privacy practices consent is missing".to_string());
     }
-    if !consent_healthcare {
+    if !input.consent_healthcare {
         qualification_reasons.push("Healthcare consent is missing".to_string());
     }
 
@@ -360,7 +366,7 @@ fn build_lead_conversion_readiness(row: &sqlx::postgres::PgRow) -> LeadConversio
     if !lead_qualified {
         conversion_reasons.insert(0, "Lead must be qualified before conversion".to_string());
     }
-    if converted_patient_id.is_some() {
+    if input.converted_patient_id.is_some() {
         conversion_reasons.push("Lead is already converted".to_string());
     }
     let conversion_ready = conversion_reasons.is_empty();
@@ -378,6 +384,20 @@ fn build_lead_conversion_readiness(row: &sqlx::postgres::PgRow) -> LeadConversio
             "checks": checks,
         }),
     }
+}
+
+fn build_lead_conversion_readiness(row: &sqlx::postgres::PgRow) -> LeadConversionReadiness {
+    evaluate_lead_conversion_readiness(&LeadConversionReadinessInput {
+        qualification_status: row.try_get("qualification_status").unwrap_or_default(),
+        compliance_status: row.try_get("compliance_status").unwrap_or_default(),
+        converted_patient_id: row.try_get("converted_patient_id").unwrap_or_default(),
+        date_of_birth: row.try_get("date_of_birth").unwrap_or_default(),
+        legal_sex: row.try_get("legal_sex").unwrap_or_default(),
+        email: row.try_get("email").unwrap_or_default(),
+        phone: row.try_get("phone").unwrap_or_default(),
+        consent_privacy_practices: row.try_get("consent_privacy_practices").unwrap_or(false),
+        consent_healthcare: row.try_get("consent_healthcare").unwrap_or(false),
+    })
 }
 
 async fn load_lead_conversion_readiness(
@@ -2160,6 +2180,65 @@ pub async fn auto_purge_stale_archived(
     }
 
     Ok(report)
+}
+
+#[cfg(test)]
+mod lead_conversion_readiness_tests {
+    use super::*;
+
+    fn ready_input() -> LeadConversionReadinessInput {
+        LeadConversionReadinessInput {
+            qualification_status: "qualified".to_string(),
+            compliance_status: "signed".to_string(),
+            converted_patient_id: None,
+            date_of_birth: Some(
+                NaiveDate::from_ymd_opt(1990, 1, 1).expect("static test date must be valid"),
+            ),
+            legal_sex: Some("female".to_string()),
+            email: Some("lead@example.com".to_string()),
+            phone: None,
+            consent_privacy_practices: true,
+            consent_healthcare: true,
+        }
+    }
+
+    #[test]
+    fn conversion_readiness_is_true_for_fully_ready_qualified_lead() {
+        let readiness = evaluate_lead_conversion_readiness(&ready_input());
+
+        assert!(readiness.qualification_ready);
+        assert!(readiness.conversion_ready);
+        assert!(readiness.qualification_reasons.is_empty());
+        assert!(readiness.conversion_reasons.is_empty());
+    }
+
+    #[test]
+    fn converted_patient_id_forces_conversion_ready_false() {
+        let mut input = ready_input();
+        input.converted_patient_id = Some(Uuid::new_v4());
+
+        let readiness = evaluate_lead_conversion_readiness(&input);
+
+        assert!(readiness.qualification_ready);
+        assert!(!readiness.conversion_ready);
+        assert_eq!(
+            readiness.conversion_reasons,
+            vec!["Lead is already converted".to_string()]
+        );
+        assert_eq!(
+            readiness.payload["conversion_ready"].as_bool(),
+            Some(false),
+            "payload must mirror the computed conversion gate"
+        );
+        assert!(
+            readiness.payload["blocking_reasons"]
+                .as_array()
+                .is_some_and(|reasons| reasons
+                    .iter()
+                    .any(|value| value == "Lead is already converted")),
+            "payload must keep the converted-lead blocking reason"
+        );
+    }
 }
 
 #[cfg(test)]

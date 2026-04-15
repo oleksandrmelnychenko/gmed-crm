@@ -1,3 +1,5 @@
+mod support;
+
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use chrono::{Duration, Utc};
@@ -7,29 +9,11 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 use gmed_server::auth::jwt;
-use gmed_server::settings::{SettingsCache, TokenSettings};
-use gmed_server::state::AppState;
-
 const TEST_SECRET: &str = "test-secret-at-least-32-characters-long!!";
 
 async fn test_context() -> Option<(axum::Router, PgPool, Uuid)> {
-    let db_url = std::env::var("DATABASE_URL").ok()?;
-    let pool = gmed_db::create_pool(&db_url).await.ok()?;
-    gmed_db::run_migrations(&pool).await.ok()?;
-
-    let admin_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE email = $1")
-        .bind("admin@gmed.de")
-        .fetch_one(&pool)
-        .await
-        .ok()?;
-
-    let state = AppState::new(
-        pool.clone(),
-        TEST_SECRET,
-        SettingsCache::new(TokenSettings::default()),
-    );
-    let app = gmed_server::build_app(state);
-    Some((app, pool, admin_id))
+    let ctx = support::suite_context(TEST_SECRET).await?;
+    Some((ctx.app, ctx.pool, ctx.admin_id))
 }
 
 async fn json_request(
@@ -142,6 +126,11 @@ async fn insert_order_appointment(
     checklist_phase: &str,
     status: &str,
 ) {
+    let date = match checklist_phase {
+        "execution" => Utc::now().date_naive() + Duration::days(10),
+        "followup" => Utc::now().date_naive() + Duration::days(20),
+        _ => Utc::now().date_naive(),
+    };
     sqlx::query(
         r#"INSERT INTO appointments (
                 patient_id, order_id, appointment_type, title, date,
@@ -153,7 +142,7 @@ async fn insert_order_appointment(
     .bind(patient_id)
     .bind(order_id)
     .bind(format!("Lifecycle {checklist_phase} appointment"))
-    .bind(Utc::now().date_naive())
+    .bind(date)
     .bind(status)
     .bind(checklist_phase)
     .bind(created_by)
@@ -177,6 +166,24 @@ async fn insert_order_appointment_with_context(
     created_by: Uuid,
     context: AppointmentInsertContext<'_>,
 ) {
+    let phase_offset = match context.checklist_phase {
+        "preparation" => 0,
+        "execution" => 10,
+        "followup" => 20,
+        _ => 30,
+    };
+    let type_offset = match context.appointment_type {
+        "medical" => 0,
+        "non_medical" => 1,
+        other => {
+            if context.interpreter_id.is_some() || other.contains("interpreter") {
+                2
+            } else {
+                3
+            }
+        }
+    };
+    let date = Utc::now().date_naive() + Duration::days(phase_offset + type_offset);
     sqlx::query(
         r#"INSERT INTO appointments (
                 patient_id, order_id, appointment_type, title, date,
@@ -192,7 +199,7 @@ async fn insert_order_appointment_with_context(
         "{} {} appointment",
         context.appointment_type, context.checklist_phase
     ))
-    .bind(Utc::now().date_naive())
+    .bind(date)
     .bind(context.status)
     .bind(context.checklist_phase)
     .bind(created_by)
@@ -230,13 +237,16 @@ async fn insert_patient_document(
     art: &str,
     category: &str,
 ) {
+    let document_id = Uuid::new_v4();
     sqlx::query(
         r#"INSERT INTO documents (
-                patient_id, auto_name, original_filename, art, category, uploaded_by
+                id, patient_id, auto_name, original_filename, art, category,
+                version_root_document_id, version_number, uploaded_by
            ) VALUES (
-                $1, $2, $3, $4, $5, $6
+                $1, $2, $3, $4, $5, $6, $1, 1, $7
            )"#,
     )
+    .bind(document_id)
     .bind(patient_id)
     .bind(format!("{art}-document"))
     .bind(format!("{art}.pdf"))
@@ -424,6 +434,44 @@ async fn overdue_debt_blocks_execution_even_with_billing_release() {
     let patient_id = create_patient(&app, &pm_bearer, &tag).await;
     let order_id = create_order(&app, &pm_bearer, patient_id).await;
 
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/phase"),
+        &pm_bearer,
+        Some(json!({ "phase": "intake" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/planning-preparation"),
+        &pm_bearer,
+        Some(json!({
+            "treatment_plan_status": "finalized",
+            "preparation_documents_status": "sent"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    insert_order_appointment_with_context(
+        &pool,
+        order_id,
+        patient_id,
+        pm_id,
+        AppointmentInsertContext {
+            appointment_type: "medical",
+            checklist_phase: "preparation",
+            status: "confirmed",
+            interpreter_id: None,
+            interpreter_response: None,
+        },
+    )
+    .await;
+
     sqlx::query("UPDATE orders SET signed_patient = true, signed_agency = true WHERE id = $1")
         .bind(order_id)
         .execute(&pool)
@@ -473,10 +521,10 @@ async fn overdue_debt_blocks_execution_even_with_billing_release() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|item| item
-                .as_str()
-                .unwrap_or_default()
-                .contains("debt-management hold"))
+            .any(|item| {
+                let reason = item.as_str().unwrap_or_default();
+                reason.contains("debt-management") || reason.contains("overdue invoice")
+            })
     );
 }
 
@@ -586,6 +634,16 @@ async fn package_coverage_can_unblock_execution_for_repeat_order() {
     let patient_id = create_patient(&app, &pm_bearer, &tag).await;
     let order_id = create_order(&app, &pm_bearer, patient_id).await;
 
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/phase"),
+        &pm_bearer,
+        Some(json!({ "phase": "intake" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
     let (status, gates) = json_request(
         &app,
         "POST",
@@ -599,6 +657,45 @@ async fn package_coverage_can_unblock_execution_for_repeat_order() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(gates["execution_ready"], true);
+
+    let (status, _planning) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/planning-preparation"),
+        &pm_bearer,
+        Some(json!({
+            "treatment_plan_status": "finalized",
+            "preparation_documents_status": "sent"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    insert_order_appointment_with_context(
+        &pool,
+        order_id,
+        patient_id,
+        pm_id,
+        AppointmentInsertContext {
+            appointment_type: "medical",
+            checklist_phase: "preparation",
+            status: "confirmed",
+            interpreter_id: None,
+            interpreter_response: None,
+        },
+    )
+    .await;
+
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail["planning_preparation"]["planning_ready"], true);
 
     let (status, _) = json_request(
         &app,
@@ -792,7 +889,7 @@ async fn existing_customer_recheck_reports_missing_data_and_debt_hold() {
             .any(|item| item
                 .as_str()
                 .unwrap_or_default()
-                .contains("debt-management hold"))
+                .contains("debt-management"))
     );
 }
 
@@ -1102,6 +1199,45 @@ async fn order_lifecycle_blocks_closure_and_followup_until_evidence_exists() {
     .await;
     assert_eq!(status, StatusCode::OK);
 
+    let (status, _planning) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/planning-preparation"),
+        &pm_bearer,
+        Some(json!({
+            "treatment_plan_status": "finalized",
+            "preparation_documents_status": "sent"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    insert_order_appointment_with_context(
+        &pool,
+        order_id,
+        patient_id,
+        pm_id,
+        AppointmentInsertContext {
+            appointment_type: "medical",
+            checklist_phase: "preparation",
+            status: "confirmed",
+            interpreter_id: None,
+            interpreter_response: None,
+        },
+    )
+    .await;
+
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail["planning_preparation"]["planning_ready"], true);
+
     let (status, _) = json_request(
         &app,
         "POST",
@@ -1142,10 +1278,25 @@ async fn order_lifecycle_blocks_closure_and_followup_until_evidence_exists() {
             .any(|item| item
                 .as_str()
                 .unwrap_or_default()
-                .contains("execution appointment"))
+                .contains("Medical execution"))
     );
 
     insert_order_appointment(&pool, order_id, patient_id, pm_id, "execution", "completed").await;
+    complete_order_workflow_group(&pool, order_id, "order_execution").await;
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/execution-flow"),
+        &pm_bearer,
+        Some(json!({
+            "arrival_status": "arrived",
+            "medical_execution_status": "completed",
+            "issue_status": "resolved"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
 
     let (status, _) = json_request(
         &app,
@@ -1171,13 +1322,28 @@ async fn order_lifecycle_blocks_closure_and_followup_until_evidence_exists() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|item| item
-                .as_str()
-                .unwrap_or_default()
-                .contains("follow-up appointment"))
+            .any(|item| item.as_str().unwrap_or_default().contains("follow-up"))
     );
 
     insert_order_appointment(&pool, order_id, patient_id, pm_id, "followup", "planned").await;
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/followup-flow"),
+        &pm_bearer,
+        Some(json!({
+            "doctor_followup_status": "not_required",
+            "followup_1w_status": "not_required",
+            "followup_1m_status": "not_required",
+            "followup_6m_status": "not_required",
+            "package_end_status": "not_required",
+            "results_handoff_status": "completed",
+            "followup_summary": "Minimal follow-up trail recorded for lifecycle progression."
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
 
     let (status, _) = json_request(
         &app,
@@ -1286,7 +1452,7 @@ async fn execution_flow_blocks_closure_until_arrival_scope_and_checklists_are_cl
                 patient_id, order_id, appointment_type, title, date, status,
                 checklist_phase, created_by, interpreter_id, interpreter_response
            ) VALUES (
-                $1, $2, 'medical', 'Execution visit', CURRENT_DATE, 'completed',
+                $1, $2, 'medical', 'Execution visit', CURRENT_DATE + 10, 'completed',
                 'execution', $3, $4, 'accepted'
            ) RETURNING id"#,
     )

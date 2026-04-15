@@ -8,7 +8,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import timeGridPlugin from "@fullcalendar/timegrid";
@@ -53,6 +53,7 @@ import {
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useAuth } from "@/lib/auth";
 import { useLang, type Translations } from "@/lib/i18n";
+import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { apiFetch } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import {
@@ -66,6 +67,11 @@ import {
 import { PatientAppointmentsPage } from "@/pages/patient-appointments";
 
 type AppointmentKind = "medical" | "non_medical" | "internal";
+type AppointmentCarePathKind =
+  | "regular"
+  | "preventive"
+  | "control"
+  | "followup";
 type AppointmentStatus =
   | "planned"
   | "confirmed"
@@ -83,6 +89,7 @@ type AppointmentListItem = {
   time_start: string | null;
   time_end: string | null;
   type: AppointmentKind;
+  care_path_kind: AppointmentCarePathKind | null;
   status: AppointmentStatus;
   location: string | null;
   interpreter_response: InterpreterResponse | null;
@@ -251,6 +258,9 @@ type ReportSummary = {
   approved_by_name: string | null;
   approved_at: string | null;
   created_at: string;
+  billing_leistung_id?: string | null;
+  billing_sync_status?: string | null;
+  billing_service_key?: string | null;
 };
 
 type TaskEntry = {
@@ -388,6 +398,7 @@ type OperationalScope =
 type FiltersState = {
   search: string;
   appointmentType: string;
+  carePathKind: string;
   status: string;
   patientId: string;
   providerId: string;
@@ -405,6 +416,7 @@ type AppointmentFormState = {
   ownerUserId: string;
   interpreterId: string;
   appointmentType: AppointmentKind;
+  carePathKind: AppointmentCarePathKind;
   title: string;
   date: string;
   timeStart: string;
@@ -620,6 +632,12 @@ const STATUS_OPTIONS: AppointmentStatus[] = [
   "cancelled",
 ];
 const TYPE_OPTIONS: AppointmentKind[] = ["medical", "non_medical", "internal"];
+const CARE_PATH_KIND_OPTIONS: AppointmentCarePathKind[] = [
+  "regular",
+  "preventive",
+  "control",
+  "followup",
+];
 const RECURRENCE_FREQUENCY_OPTIONS: AppointmentRecurrenceFrequency[] = [
   "daily",
   "weekly",
@@ -706,6 +724,7 @@ const CALENDAR_STORAGE_DATE_KEY = "gmed_appointments_calendar_date";
 const DEFAULT_FILTERS: FiltersState = {
   search: "",
   appointmentType: "",
+  carePathKind: "",
   status: "",
   patientId: "",
   providerId: "",
@@ -856,6 +875,7 @@ function blankAppointmentForm(): AppointmentFormState {
     ownerUserId: "",
     interpreterId: "",
     appointmentType: "medical",
+    carePathKind: "regular",
     title: "",
     date: today,
     timeStart: "",
@@ -895,6 +915,7 @@ function buildFollowUpVisitForm(
     ownerUserId: detail.owner_user_id ?? "",
     interpreterId: detail.interpreter_id ?? "",
     appointmentType: detail.type,
+    carePathKind: "followup",
     title: detail.category
       ? `${detail.category} ${followUpLabel}`
       : `${followUpLabel}: ${detail.title}`,
@@ -1117,6 +1138,28 @@ function appointmentTypeLabel(type: AppointmentKind, tr?: Record<string, string>
   return tr?.common_doctor ?? "Medical";
 }
 
+function carePathKindLabel(value?: string | null) {
+  switch (value) {
+    case "preventive":
+      return "Preventive";
+    case "control":
+      return "Control";
+    case "followup":
+      return "Follow-up";
+    case "regular":
+      return "Regular";
+    default:
+      return "Regular";
+  }
+}
+
+function normalizeCarePathKindForAppointmentType(
+  appointmentType: AppointmentKind,
+  carePathKind: AppointmentCarePathKind,
+): AppointmentCarePathKind {
+  return appointmentType === "medical" ? carePathKind : "regular";
+}
+
 function statusLabel(status: AppointmentStatus) {
   return status.replace("_", " ");
 }
@@ -1164,6 +1207,35 @@ function reportApprovalBadgeClass(status: string) {
       return "bg-rose-100 text-rose-700 border-rose-200";
     default:
       return "bg-amber-100 text-amber-700 border-amber-200";
+  }
+}
+
+function interpreterReportBillingSyncLabel(status: string | null | undefined) {
+  switch (status) {
+    case "synced":
+      return "Auto-billed into order services";
+    case "missing_catalog":
+      return "Missing interpreter_hours catalog entry";
+    case "missing_order":
+      return "Appointment is not linked to an order";
+    case "pending_sync":
+      return "Approved, waiting for billing sync";
+    default:
+      return "No billing sync state yet";
+  }
+}
+
+function interpreterReportBillingSyncClass(status: string | null | undefined) {
+  switch (status) {
+    case "synced":
+      return "border-emerald-200 bg-emerald-50 text-emerald-800";
+    case "missing_catalog":
+    case "missing_order":
+      return "border-amber-200 bg-amber-50 text-amber-800";
+    case "pending_sync":
+      return "border-sky-200 bg-sky-50 text-sky-800";
+    default:
+      return "border-slate-200 bg-slate-50 text-slate-700";
   }
 }
 
@@ -1477,6 +1549,7 @@ function buildAppointmentsQuery(filters: FiltersState) {
   if (filters.search.trim()) params.set("search", filters.search.trim());
   if (filters.appointmentType)
     params.set("appointment_type", filters.appointmentType);
+  if (filters.carePathKind) params.set("care_path_kind", filters.carePathKind);
   if (filters.status) params.set("status", filters.status);
   if (filters.patientId) params.set("patient_id", filters.patientId);
   if (filters.providerId) params.set("provider_id", filters.providerId);
@@ -2018,7 +2091,7 @@ function StaffAppointmentsPage() {
   const { user } = useAuth();
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
-  const navigate = useNavigate();
+  const { staffGo } = useStaffNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const permissions = appointmentPermissions(user?.role);
   const isMobile = useIsMobile();
@@ -3014,6 +3087,7 @@ function StaffAppointmentsPage() {
           ownerUserId: appointmentDetail.owner_user_id ?? "",
           interpreterId: appointmentDetail.interpreter_id ?? "",
           appointmentType: appointmentDetail.type,
+          carePathKind: appointmentDetail.care_path_kind ?? "regular",
           title: appointmentDetail.title,
           date: appointmentDetail.date,
           timeStart: appointmentDetail.time_start ?? "",
@@ -3437,6 +3511,10 @@ function StaffAppointmentsPage() {
           owner_user_id: createForm.ownerUserId || null,
           interpreter_id: createForm.interpreterId || null,
           appointment_type: createForm.appointmentType,
+          care_path_kind: normalizeCarePathKindForAppointmentType(
+            createForm.appointmentType,
+            createForm.carePathKind,
+          ),
           title: createForm.title.trim(),
           date: createForm.date,
           time_start: createForm.timeStart || null,
@@ -3655,6 +3733,10 @@ function StaffAppointmentsPage() {
           doctor_id: editForm.doctorId || null,
           owner_user_id: editForm.ownerUserId || null,
           interpreter_id: editForm.interpreterId || null,
+          care_path_kind: normalizeCarePathKindForAppointmentType(
+            detail.type,
+            editForm.carePathKind,
+          ),
           title: editForm.title.trim(),
           date: editForm.date,
           time_start: editForm.timeStart || null,
@@ -4047,7 +4129,7 @@ function StaffAppointmentsPage() {
       role,
       draft,
     });
-    navigate(`/chat?${params.toString()}`);
+    staffGo(`/chat?${params.toString()}`);
   }
 
   function openAppointmentChat(peer: HandoffStakeholder) {
@@ -4706,6 +4788,10 @@ function StaffAppointmentsPage() {
           interpreter_id: followUpVisitForm.interpreterId || null,
           order_id: followUpVisitForm.linkOrder ? detail.order_id : null,
           appointment_type: followUpVisitForm.appointmentType,
+          care_path_kind: normalizeCarePathKindForAppointmentType(
+            followUpVisitForm.appointmentType,
+            followUpVisitForm.carePathKind,
+          ),
           title: followUpVisitForm.title.trim(),
           date: followUpVisitForm.date,
           time_start: followUpVisitForm.timeStart || null,
@@ -5165,6 +5251,25 @@ function StaffAppointmentsPage() {
                     {TYPE_OPTIONS.map((value) => (
                       <option key={value} value={value}>
                         {appointmentTypeLabel(value, tr)}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Care path">
+                  <select
+                    value={filters.carePathKind}
+                    onChange={(event) =>
+                      setFilters((current) => ({
+                        ...current,
+                        carePathKind: event.target.value,
+                      }))
+                    }
+                    className={selectClassName}
+                  >
+                    <option value="">{t.providers_all}</option>
+                    {CARE_PATH_KIND_OPTIONS.map((value) => (
+                      <option key={value} value={value}>
+                        {carePathKindLabel(value)}
                       </option>
                     ))}
                   </select>
@@ -5735,6 +5840,10 @@ function StaffAppointmentsPage() {
                       setCreateForm((current) => ({
                         ...current,
                         appointmentType: event.target.value as AppointmentKind,
+                        carePathKind:
+                          event.target.value === "medical"
+                            ? current.carePathKind
+                            : "regular",
                         providerId:
                           event.target.value === "internal"
                             ? ""
@@ -5750,6 +5859,25 @@ function StaffAppointmentsPage() {
                     {TYPE_OPTIONS.map((value) => (
                       <option key={value} value={value}>
                         {appointmentTypeLabel(value, tr)}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Care path">
+                  <select
+                    value={createForm.carePathKind}
+                    onChange={(event) =>
+                      setCreateForm((current) => ({
+                        ...current,
+                        carePathKind: event.target.value as AppointmentCarePathKind,
+                      }))
+                    }
+                    className={selectClassName}
+                    disabled={createForm.appointmentType !== "medical"}
+                  >
+                    {CARE_PATH_KIND_OPTIONS.map((value) => (
+                      <option key={value} value={value}>
+                        {carePathKindLabel(value)}
                       </option>
                     ))}
                   </select>
@@ -6145,6 +6273,11 @@ function StaffAppointmentsPage() {
                     >
                       {appointmentTypeLabel(detail.type, tr)}
                     </span>
+                    {detail.care_path_kind ? (
+                      <span className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-violet-700">
+                        {carePathKindLabel(detail.care_path_kind)}
+                      </span>
+                    ) : null}
                     <span
                       className={cn(
                         "rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em]",
@@ -6453,7 +6586,7 @@ function StaffAppointmentsPage() {
                       variant="outline"
                       className="rounded-2xl"
                       onClick={() =>
-                        navigate(`/patients?patient=${detail.patient_id}`)
+                        staffGo(`/patients?patient=${detail.patient_id}`)
                       }
                     >
                       Patient
@@ -6464,7 +6597,7 @@ function StaffAppointmentsPage() {
                         variant="outline"
                         className="rounded-2xl"
                         onClick={() =>
-                          navigate(`/orders?order=${detail.order_id}`)
+                          staffGo(`/orders?order=${detail.order_id}`)
                         }
                       >
                         Order
@@ -6476,7 +6609,7 @@ function StaffAppointmentsPage() {
                         variant="outline"
                         className="rounded-2xl"
                         onClick={() =>
-                          navigate(`/providers?provider=${detail.provider_id}`)
+                          staffGo(`/providers?provider=${detail.provider_id}`)
                         }
                       >
                         Clinic
@@ -6487,7 +6620,7 @@ function StaffAppointmentsPage() {
                       variant="outline"
                       className="rounded-2xl"
                       onClick={() =>
-                        navigate(
+                        staffGo(
                           `/documents?appointment=${detail.id}&patient=${detail.patient_id}`,
                         )
                       }
@@ -6499,7 +6632,7 @@ function StaffAppointmentsPage() {
                       variant="outline"
                       className="rounded-2xl"
                       onClick={() =>
-                        navigate(`/cases?patient=${detail.patient_id}`)
+                        staffGo(`/cases?patient=${detail.patient_id}`)
                       }
                     >
                       Cases
@@ -6895,6 +7028,30 @@ function StaffAppointmentsPage() {
                         </Field>
                       </div>
                       <div className="grid gap-4 md:grid-cols-2">
+                        <Field label="Care path">
+                          <select
+                            value={followUpVisitForm.carePathKind}
+                            onChange={(event) =>
+                              setFollowUpVisitForm((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      carePathKind:
+                                        event.target.value as AppointmentCarePathKind,
+                                    }
+                                  : current,
+                              )
+                            }
+                            className={selectClassName}
+                            disabled={followUpVisitForm.appointmentType !== "medical"}
+                          >
+                            {CARE_PATH_KIND_OPTIONS.map((value) => (
+                              <option key={value} value={value}>
+                                {carePathKindLabel(value)}
+                              </option>
+                            ))}
+                          </select>
+                        </Field>
                         <Field label={t.appointments_location}>
                           <Input
                             value={followUpVisitForm.location}
@@ -9013,6 +9170,30 @@ function StaffAppointmentsPage() {
                           className="h-10 rounded-xl bg-slate-50"
                         />
                       </Field>
+                      <Field label="Care path">
+                        <select
+                          value={editForm.carePathKind}
+                          onChange={(event) =>
+                            setEditForm((current) =>
+                              current
+                                ? {
+                                    ...current,
+                                    carePathKind:
+                                      event.target.value as AppointmentCarePathKind,
+                                  }
+                                : current,
+                            )
+                          }
+                          className={selectClassName}
+                          disabled={detail.type !== "medical"}
+                        >
+                          {CARE_PATH_KIND_OPTIONS.map((value) => (
+                            <option key={value} value={value}>
+                              {carePathKindLabel(value)}
+                            </option>
+                          ))}
+                        </select>
+                      </Field>
                       <div className="grid gap-4 md:grid-cols-3">
                         <Field label={t.appointments_date}>
                           <Input
@@ -9653,7 +9834,9 @@ function StaffAppointmentsPage() {
                             value={`${detailReport.hours} h`}
                             meta={
                               detailReport.approval_status === "approved"
-                                ? "Approved for payroll handoff"
+                                ? interpreterReportBillingSyncLabel(
+                                    detailReport.billing_sync_status,
+                                  )
                                 : detailReport.approval_status === "rejected"
                                   ? "Needs interpreter revision"
                                   : "Waiting for teamlead review"
@@ -9682,6 +9865,40 @@ function StaffAppointmentsPage() {
                             <span className="font-medium">Reviewer notes:</span>{" "}
                             {detailReport.notes}
                           </Banner>
+                        ) : null}
+
+                        {detailReport.approval_status === "approved" ? (
+                          <div
+                            className={cn(
+                              "rounded-2xl border px-4 py-3 text-sm",
+                              interpreterReportBillingSyncClass(
+                                detailReport.billing_sync_status,
+                              ),
+                            )}
+                          >
+                            <div className="font-medium">Billing sync</div>
+                            <div className="mt-1">
+                              {interpreterReportBillingSyncLabel(
+                                detailReport.billing_sync_status,
+                              )}
+                            </div>
+                            <div className="mt-1 text-xs opacity-80">
+                              {detailReport.billing_service_key ? (
+                                <span>
+                                  Catalog key: {detailReport.billing_service_key}
+                                </span>
+                              ) : null}
+                              {detailReport.billing_service_key &&
+                              detailReport.billing_leistung_id
+                                ? " · "
+                                : null}
+                              {detailReport.billing_leistung_id ? (
+                                <span>
+                                  Order line: {detailReport.billing_leistung_id}
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
                         ) : null}
 
                         <div className="rounded-2xl border border-slate-200/80 bg-white px-4 py-3">

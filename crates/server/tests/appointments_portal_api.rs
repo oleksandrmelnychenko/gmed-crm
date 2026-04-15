@@ -1,3 +1,5 @@
+mod support;
+
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use serde_json::{Value, json};
@@ -6,29 +8,11 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 use gmed_server::auth::jwt;
-use gmed_server::settings::{SettingsCache, TokenSettings};
-use gmed_server::state::AppState;
-
 const TEST_SECRET: &str = "test-secret-at-least-32-characters-long!!";
 
 async fn test_context() -> Option<(axum::Router, PgPool, Uuid)> {
-    let db_url = std::env::var("DATABASE_URL").ok()?;
-    let pool = gmed_db::create_pool(&db_url).await.ok()?;
-    gmed_db::run_migrations(&pool).await.ok()?;
-
-    let admin_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE email = $1")
-        .bind("admin@gmed.de")
-        .fetch_one(&pool)
-        .await
-        .ok()?;
-
-    let state = AppState::new(
-        pool.clone(),
-        TEST_SECRET,
-        SettingsCache::new(TokenSettings::default()),
-    );
-
-    Some((gmed_server::build_app(state), pool, admin_id))
+    let ctx = support::suite_context(TEST_SECRET).await?;
+    Some((ctx.app, ctx.pool, ctx.admin_id))
 }
 
 async fn json_request(
@@ -302,7 +286,7 @@ async fn sales_billing_ceo_assistant_and_it_admin_cannot_open_appointments_works
 
         let (status, body) = json_request(&app, "GET", "/api/v1/appointments", &bearer, None).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "role {role} must be denied");
-        assert_eq!(body["message"], "Forbidden");
+        assert_eq!(body["message"], "Insufficient permissions");
     }
 }
 
@@ -333,6 +317,7 @@ async fn approved_request_can_be_converted_and_patient_sees_schedule() {
         &patient_bearer,
         Some(json!({
             "appointment_type": "medical",
+            "care_path_kind": "control",
             "order_id": order_id,
             "preferred_date_from": "2026-05-20",
             "preferred_time_of_day": "afternoon",
@@ -345,6 +330,7 @@ async fn approved_request_can_be_converted_and_patient_sees_schedule() {
     assert_eq!(body["status"], "requested");
     assert_eq!(body["order_id"], order_id.to_string());
     assert_eq!(body["appointment_type"], "medical");
+    assert_eq!(body["care_path_kind"], "control");
     assert!(body["requested_at"].as_str().unwrap_or_default().len() > 10);
 
     let (status, body) = json_request(
@@ -360,6 +346,7 @@ async fn approved_request_can_be_converted_and_patient_sees_schedule() {
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["id"], request_id);
     assert_eq!(items[0]["status"], "requested");
+    assert_eq!(items[0]["care_path_kind"], "control");
     assert!(items[0]["converted_appointment_id"].is_null());
 
     let (status, body) = json_request(
@@ -375,6 +362,7 @@ async fn approved_request_can_be_converted_and_patient_sees_schedule() {
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["id"], request_id);
     assert_eq!(items[0]["status"], "requested");
+    assert_eq!(items[0]["care_path_kind"], "control");
 
     let (status, body) = json_request(
         &app,
@@ -450,6 +438,7 @@ async fn approved_request_can_be_converted_and_patient_sees_schedule() {
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["id"], appointment_id);
     assert_eq!(items[0]["title"], "Scheduled cardiology consultation");
+    assert_eq!(items[0]["care_path_kind"], "control");
     assert_eq!(items[0]["provider_name"], format!("Clinic {tag}"));
     assert_eq!(items[0]["doctor_name"], format!("Doctor {tag}"));
     assert_eq!(items[0]["status"], "planned");
@@ -478,6 +467,7 @@ async fn approved_request_can_be_converted_and_patient_sees_schedule() {
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["id"], request_id);
     assert_eq!(items[0]["status"], "converted");
+    assert_eq!(items[0]["care_path_kind"], "control");
     assert_eq!(items[0]["converted_appointment_id"], appointment_id);
     assert_eq!(
         items[0]["converted_appointment_title"],
@@ -495,6 +485,7 @@ async fn approved_request_can_be_converted_and_patient_sees_schedule() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body.as_array().unwrap()[0]["status"], "converted");
+    assert_eq!(body.as_array().unwrap()[0]["care_path_kind"], "control");
     assert_eq!(
         body.as_array().unwrap()[0]["converted_appointment_id"],
         appointment_id

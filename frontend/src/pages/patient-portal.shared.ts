@@ -124,6 +124,7 @@ export type PortalAppointmentItem = {
   time_start: string | null;
   time_end: string | null;
   appointment_type: string;
+  care_path_kind: string;
   status: string;
   location: string | null;
   category: string | null;
@@ -140,6 +141,7 @@ export type PortalAppointmentRequestItem = {
   order_id: string | null;
   order_number?: string | null;
   appointment_type: string;
+  care_path_kind: string;
   preferred_date_from: string | null;
   preferred_date_to: string | null;
   preferred_time_of_day: string | null;
@@ -476,6 +478,13 @@ export function appointmentTypeLabel(value: string) {
   if (value === "non_medical") return "Non-medical";
   if (value === "internal") return "Internal";
   return value.replaceAll("_", " ");
+}
+
+export function appointmentCarePathKindLabel(value?: string | null) {
+  if (value === "preventive") return "Preventive";
+  if (value === "control") return "Control";
+  if (value === "followup") return "Follow-up";
+  return "Regular";
 }
 
 export function appointmentTimeOfDayLabel(value?: string | null) {

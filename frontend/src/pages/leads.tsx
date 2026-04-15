@@ -7,7 +7,7 @@ import {
   type FormEvent,
   type ReactNode,
 } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import {
   ArrowDownRight,
   ArrowUpRight,
@@ -49,6 +49,7 @@ import { convertLead as apiConvertLead, downloadLeadAttachment } from "@/lib/api
 import { computeLeadConversionGate } from "./leads.helpers";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
+import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import type {
   CreateLeadBody,
   Lead,
@@ -311,7 +312,7 @@ function StatCard({
 export function LeadsPage() {
   const { user } = useAuth();
   const { t } = useLang();
-  const navigate = useNavigate();
+  const { staffGo } = useStaffNavigate();
   const failedLoadMessage = t.common_failed_load;
   const [searchParams, setSearchParams] = useSearchParams();
   const permissions = useMemo(() => leadPermissions(user?.role), [user?.role]);
@@ -557,7 +558,7 @@ export function LeadsPage() {
       reload();
       // Give the banner a beat to register before routing away.
       window.setTimeout(() => {
-        navigate(`/patients/${result.patient_id}`);
+        staffGo(`/patients/${result.patient_id}`);
       }, 400);
     } catch (actionError) {
       const message =
@@ -1257,8 +1258,9 @@ export function LeadsPage() {
 
                     <form className="mt-4 space-y-4" onSubmit={handleSaveGateForm}>
                       <div className="grid gap-4 md:grid-cols-2">
-                        <LeadField label={t.patients_email}>
+                        <LeadField label={t.patients_email} htmlFor="lead-gate-email">
                           <Input
+                            id="lead-gate-email"
                             value={gateForm.email}
                             onChange={(event) =>
                               setGateForm((current) =>
@@ -1269,8 +1271,9 @@ export function LeadsPage() {
                             }
                           />
                         </LeadField>
-                        <LeadField label={t.field_phone}>
+                        <LeadField label={t.field_phone} htmlFor="lead-gate-phone">
                           <Input
+                            id="lead-gate-phone"
                             value={gateForm.phone}
                             onChange={(event) =>
                               setGateForm((current) =>
@@ -1281,8 +1284,9 @@ export function LeadsPage() {
                             }
                           />
                         </LeadField>
-                        <LeadField label={t.providers_country}>
+                        <LeadField label={t.providers_country} htmlFor="lead-gate-country">
                           <Input
+                            id="lead-gate-country"
                             value={gateForm.country}
                             onChange={(event) =>
                               setGateForm((current) =>
@@ -1293,8 +1297,12 @@ export function LeadsPage() {
                             }
                           />
                         </LeadField>
-                        <LeadField label="Primary language">
+                        <LeadField
+                          label="Primary language"
+                          htmlFor="lead-gate-primary-language"
+                        >
                           <Input
+                            id="lead-gate-primary-language"
                             value={gateForm.primaryLanguage}
                             onChange={(event) =>
                               setGateForm((current) =>
@@ -1305,8 +1313,12 @@ export function LeadsPage() {
                             }
                           />
                         </LeadField>
-                        <LeadField label="Date of birth">
+                        <LeadField
+                          label="Date of birth"
+                          htmlFor="lead-gate-date-of-birth"
+                        >
                           <Input
+                            id="lead-gate-date-of-birth"
                             type="date"
                             value={gateForm.dateOfBirth}
                             onChange={(event) =>
@@ -1318,8 +1330,9 @@ export function LeadsPage() {
                             }
                           />
                         </LeadField>
-                        <LeadField label="Legal sex">
+                        <LeadField label="Legal sex" htmlFor="lead-gate-legal-sex">
                           <select
+                            id="lead-gate-legal-sex"
                             value={gateForm.legalSex}
                             onChange={(event) =>
                               setGateForm((current) =>
@@ -1338,8 +1351,12 @@ export function LeadsPage() {
                             ))}
                           </select>
                         </LeadField>
-                        <LeadField label="Compliance status">
+                        <LeadField
+                          label="Compliance status"
+                          htmlFor="lead-gate-compliance-status"
+                        >
                           <select
+                            id="lead-gate-compliance-status"
                             value={gateForm.complianceStatus}
                             onChange={(event) =>
                               setGateForm((current) =>
@@ -1357,8 +1374,9 @@ export function LeadsPage() {
                             ))}
                           </select>
                         </LeadField>
-                        <LeadField label={t.patients_notes}>
+                        <LeadField label={t.patients_notes} htmlFor="lead-gate-notes">
                           <Input
+                            id="lead-gate-notes"
                             value={gateForm.notes}
                             onChange={(event) =>
                               setGateForm((current) =>
@@ -1472,8 +1490,9 @@ export function LeadsPage() {
                     {detail.failed_outcome.status === "none" ? (
                       <form className="mt-4 space-y-4" onSubmit={handleResolveFailedLead}>
                         <div className="grid gap-4 md:grid-cols-2">
-                          <LeadField label="Resolution">
+                          <LeadField label="Resolution" htmlFor="lead-failed-resolution">
                             <select
+                              id="lead-failed-resolution"
                               value={failedLeadForm.resolution}
                               onChange={(event) =>
                                 setFailedLeadForm((current) => ({
@@ -1489,8 +1508,9 @@ export function LeadsPage() {
                               ) : null}
                             </select>
                           </LeadField>
-                          <LeadField label="Failure reason">
+                          <LeadField label="Failure reason" htmlFor="lead-failed-reason">
                             <Input
+                              id="lead-failed-reason"
                               value={failedLeadForm.reason}
                               onChange={(event) =>
                                 setFailedLeadForm((current) => ({
@@ -1503,8 +1523,9 @@ export function LeadsPage() {
                           </LeadField>
                         </div>
 
-                        <LeadField label="Internal note">
+                        <LeadField label="Internal note" htmlFor="lead-failed-note">
                           <textarea
+                            id="lead-failed-note"
                             value={failedLeadForm.note}
                             onChange={(event) =>
                               setFailedLeadForm((current) => ({
@@ -1824,10 +1845,18 @@ function FilterField({ label, children }: { label: string; children: ReactNode }
   );
 }
 
-function LeadField({ label, children }: { label: string; children: ReactNode }) {
+function LeadField({
+  label,
+  htmlFor,
+  children,
+}: {
+  label: string;
+  htmlFor?: string;
+  children: ReactNode;
+}) {
   return (
     <div className="space-y-2">
-      <Label>{label}</Label>
+      <Label htmlFor={htmlFor}>{label}</Label>
       {children}
     </div>
   );

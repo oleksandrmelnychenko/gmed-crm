@@ -6,7 +6,7 @@ use axum::{
     routing::{get, post},
 };
 use chrono::Datelike;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use uuid::Uuid;
@@ -18,6 +18,50 @@ use crate::routes::me::resolve_self_patient_id;
 use crate::state::AppState;
 use gmed_domain::role::Role;
 use sqlx::Row;
+
+const APPOINTMENT_SCHEDULE_CONSTRAINTS: &[&str] = &[
+    "appointments_patient_timed_schedule_excl",
+    "appointments_interpreter_timed_schedule_excl",
+    "appointments_doctor_timed_schedule_excl",
+    "appointments_patient_all_day_schedule_excl",
+    "appointments_interpreter_all_day_schedule_excl",
+    "appointments_doctor_all_day_schedule_excl",
+];
+
+const INTERPRETER_HOURS_SERVICE_KEY: &str = "interpreter_hours";
+const MEDICAL_TREATMENT_ORGANIZATION_SERVICE_KEY: &str = "treatment_organization";
+const INTERPRETER_REPORT_BILLING_SYNC_INTERVAL_SECS: u64 = 60 * 60;
+
+#[derive(Default, Clone, Copy, Debug)]
+pub struct InterpreterReportBillingSyncSummary {
+    pub leistungen_created: u64,
+    pub already_synced: u64,
+    pub missing_order: u64,
+    pub missing_catalog: u64,
+}
+
+struct InterpreterReportBillingCandidate {
+    report_id: Uuid,
+    appointment_id: Uuid,
+    order_id: Option<Uuid>,
+    patient_id: Uuid,
+    appointment_title: String,
+    appointment_date: chrono::NaiveDate,
+    interpreter_name: String,
+    hours: rust_decimal::Decimal,
+    report_text: Option<String>,
+    approved_by: Option<Uuid>,
+    approved_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+struct AgencyServiceBillingItem {
+    id: Uuid,
+    service_key: String,
+    service_name: String,
+    unit_price: rust_decimal::Decimal,
+    currency: String,
+    vat_rate: rust_decimal::Decimal,
+}
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -95,6 +139,7 @@ struct CreateAppointment {
     interpreter_id: Option<Uuid>,
     order_id: Option<Uuid>,
     appointment_type: String,
+    care_path_kind: Option<String>,
     title: String,
     date: String,
     time_start: Option<String>,
@@ -114,6 +159,7 @@ struct UpdateAppointment {
     doctor_id: Option<Uuid>,
     owner_user_id: Option<Uuid>,
     interpreter_id: Option<Uuid>,
+    care_path_kind: Option<String>,
     title: String,
     date: String,
     time_start: Option<String>,
@@ -122,8 +168,18 @@ struct UpdateAppointment {
     recurrence_frequency: Option<String>,
     recurrence_interval: Option<i32>,
     recurrence_count: Option<i32>,
-    recurrence_until: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_explicit_nullable_string")]
+    recurrence_until: Option<Option<String>>,
     recurrence_scope: Option<String>,
+}
+
+fn deserialize_explicit_nullable_string<'de, D>(
+    deserializer: D,
+) -> Result<Option<Option<String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(Some(Option::<String>::deserialize(deserializer)?))
 }
 
 struct AppointmentRecurrence {
@@ -215,6 +271,7 @@ struct RejectReport {
 struct ListAppointmentsQuery {
     search: Option<String>,
     appointment_type: Option<String>,
+    care_path_kind: Option<String>,
     status: Option<String>,
     patient_id: Option<Uuid>,
     provider_id: Option<Uuid>,
@@ -234,6 +291,7 @@ struct ListAppointmentRequestsQuery {
 #[derive(Deserialize)]
 struct CreateMyAppointmentRequest {
     appointment_type: String,
+    care_path_kind: Option<String>,
     order_id: Option<Uuid>,
     preferred_date_from: Option<String>,
     preferred_date_to: Option<String>,
@@ -328,6 +386,7 @@ fn build_patient_appointment_json(row: &sqlx::postgres::PgRow) -> serde_json::Va
         "time_start": row.try_get::<Option<chrono::NaiveTime>, _>("time_start").unwrap_or_default().map(|value| value.format("%H:%M").to_string()),
         "time_end": row.try_get::<Option<chrono::NaiveTime>, _>("time_end").unwrap_or_default().map(|value| value.format("%H:%M").to_string()),
         "appointment_type": row.try_get::<String, _>("appointment_type").unwrap_or_default(),
+        "care_path_kind": row.try_get::<String, _>("care_path_kind").unwrap_or_else(|_| "regular".to_string()),
         "status": row.try_get::<String, _>("status").unwrap_or_default(),
         "location": row.try_get::<Option<String>, _>("location").unwrap_or_default(),
         "category": row.try_get::<Option<String>, _>("category").unwrap_or_default(),
@@ -346,6 +405,7 @@ fn build_appointment_request_json(row: &sqlx::postgres::PgRow) -> serde_json::Va
         "order_id": row.try_get::<Option<Uuid>, _>("order_id").unwrap_or_default(),
         "order_number": row.try_get::<Option<String>, _>("order_number").unwrap_or_default(),
         "appointment_type": row.try_get::<String, _>("appointment_type").unwrap_or_default(),
+        "care_path_kind": row.try_get::<String, _>("care_path_kind").unwrap_or_else(|_| "regular".to_string()),
         "preferred_date_from": row.try_get::<Option<chrono::NaiveDate>, _>("preferred_date_from").unwrap_or_default().map(|value| value.to_string()),
         "preferred_date_to": row.try_get::<Option<chrono::NaiveDate>, _>("preferred_date_to").unwrap_or_default().map(|value| value.to_string()),
         "preferred_time_of_day": row.try_get::<Option<String>, _>("preferred_time_of_day").unwrap_or_default(),
@@ -375,6 +435,7 @@ async fn load_appointment_request_row(
 ) -> Result<Option<sqlx::postgres::PgRow>, axum::response::Response> {
     sqlx::query(
         r#"SELECT par.id, par.patient_id, par.requested_by, par.order_id, par.appointment_type,
+                  par.care_path_kind,
                   par.preferred_date_from, par.preferred_date_to, par.preferred_time_of_day,
                   par.requested_provider_id, par.requested_doctor_id, par.specialty, par.location,
                   par.reason, par.notes, par.status, par.review_note, par.reviewed_by,
@@ -423,6 +484,7 @@ async fn list_my_appointments(
 
     match sqlx::query(
         r#"SELECT a.id, a.title, a.date, a.time_start, a.time_end, a.appointment_type,
+                  a.care_path_kind,
                   a.status, a.location, a.category, a.created_at,
                   provider.name AS provider_name,
                   doctor.name AS doctor_name
@@ -471,6 +533,7 @@ async fn list_my_appointment_requests(
 
     match sqlx::query(
         r#"SELECT par.id, par.patient_id, par.requested_by, par.order_id, par.appointment_type,
+                  par.care_path_kind,
                   par.preferred_date_from, par.preferred_date_to, par.preferred_time_of_day,
                   par.requested_provider_id, par.requested_doctor_id, par.specialty, par.location,
                   par.reason, par.notes, par.status, par.review_note, par.reviewed_by,
@@ -534,6 +597,12 @@ async fn create_my_appointment_request(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Appointment request type must be medical or non_medical",
         );
+    }
+    let care_path_kind = normalize_care_path_kind_input(body.care_path_kind.clone());
+    if let Err(message) =
+        validate_care_path_kind_for_appointment_type(&body.appointment_type, &care_path_kind)
+    {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, message);
     }
 
     let preferred_date_from = match parse_query_date(body.preferred_date_from.clone(), "date_from")
@@ -622,12 +691,14 @@ async fn create_my_appointment_request(
                WHERE patient_id = $1
                  AND requested_by = $2
                  AND appointment_type = $3
+                 AND care_path_kind = $4
                  AND status IN ('requested', 'approved')
            )"#,
     )
     .bind(patient_id)
     .bind(auth.user_id)
     .bind(&body.appointment_type)
+    .bind(&care_path_kind)
     .fetch_one(&state.db)
     .await
     .unwrap_or(false);
@@ -641,13 +712,13 @@ async fn create_my_appointment_request(
 
     let request_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO patient_appointment_requests (
-                patient_id, requested_by, order_id, appointment_type, preferred_date_from,
+                patient_id, requested_by, order_id, appointment_type, care_path_kind, preferred_date_from,
                 preferred_date_to, preferred_time_of_day, requested_provider_id,
                 requested_doctor_id, specialty, location, reason, notes
            ) VALUES (
-                $1, $2, $3, $4, $5,
-                $6, $7, $8,
-                $9, $10, $11, $12, $13
+                $1, $2, $3, $4, $5, $6,
+                $7, $8, $9,
+                $10, $11, $12, $13, $14
            )
            RETURNING id"#,
     )
@@ -655,6 +726,7 @@ async fn create_my_appointment_request(
     .bind(auth.user_id)
     .bind(body.order_id)
     .bind(&body.appointment_type)
+    .bind(&care_path_kind)
     .bind(preferred_date_from)
     .bind(preferred_date_to)
     .bind(preferred_time_of_day.clone())
@@ -685,6 +757,7 @@ async fn create_my_appointment_request(
         serde_json::json!({
             "patient_id": patient_id,
             "appointment_type": body.appointment_type,
+            "care_path_kind": care_path_kind,
             "preferred_date_from": preferred_date_from.map(|value| value.to_string()),
             "preferred_date_to": preferred_date_to.map(|value| value.to_string()),
             "preferred_time_of_day": preferred_time_of_day,
@@ -774,6 +847,7 @@ async fn list_appointment_requests(
 
     match sqlx::query(
         r#"SELECT par.id, par.patient_id, par.requested_by, par.order_id, par.appointment_type,
+                  par.care_path_kind,
                   par.preferred_date_from, par.preferred_date_to, par.preferred_time_of_day,
                   par.requested_provider_id, par.requested_doctor_id, par.specialty, par.location,
                   par.reason, par.notes, par.status, par.review_note, par.reviewed_by,
@@ -955,6 +1029,9 @@ async fn convert_appointment_request(
     let request_type = request_row
         .try_get::<String, _>("appointment_type")
         .unwrap_or_default();
+    let request_care_path_kind = request_row
+        .try_get::<String, _>("care_path_kind")
+        .unwrap_or_else(|_| "regular".to_string());
     let request_order_id = request_row
         .try_get::<Option<Uuid>, _>("order_id")
         .unwrap_or_default();
@@ -1057,8 +1134,8 @@ async fn convert_appointment_request(
     let notes = normalize_optional_text(body.notes);
 
     let inserted = match sqlx::query(
-        "INSERT INTO appointments (patient_id, provider_id, doctor_id, owner_user_id, interpreter_id, order_id, appointment_type, title, date, time_start, time_end, location, category, notes, created_by, interpreter_response)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+        "INSERT INTO appointments (patient_id, provider_id, doctor_id, owner_user_id, interpreter_id, order_id, appointment_type, care_path_kind, title, date, time_start, time_end, location, category, notes, created_by, interpreter_response)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
          RETURNING id, created_at",
     )
     .bind(patient_id)
@@ -1068,6 +1145,7 @@ async fn convert_appointment_request(
     .bind(body.interpreter_id)
     .bind(order_id)
     .bind(&request_type)
+    .bind(&request_care_path_kind)
     .bind(body.title.trim())
     .bind(date)
     .bind(time_start)
@@ -1219,6 +1297,11 @@ async fn list_appointments(
     {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid type");
     }
+    if let Some(ref care_path_kind) = query.care_path_kind
+        && !is_valid_care_path_kind(care_path_kind)
+    {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid care_path_kind");
+    }
     if let Some(ref status) = query.status
         && !is_valid_appointment_status(status)
     {
@@ -1250,7 +1333,7 @@ async fn list_appointments(
     };
 
     match sqlx::query(
-        r#"SELECT a.id, a.title, a.date, a.time_start, a.time_end, a.appointment_type, a.status,
+        r#"SELECT a.id, a.title, a.date, a.time_start, a.time_end, a.appointment_type, a.care_path_kind, a.status,
                   a.location, a.interpreter_response, a.checklist_phase, a.patient_id, a.interpreter_id,
                   a.provider_id, a.doctor_id, a.owner_user_id,
                   a.recurrence_series_id, a.recurrence_frequency, a.recurrence_interval,
@@ -1286,19 +1369,21 @@ async fn list_appointments(
                   OR COALESCE(owner.name, '') ILIKE $1
            )
              AND ($2::text IS NULL OR a.appointment_type = $2)
-             AND ($3::text IS NULL OR a.status = $3)
-             AND ($4::uuid IS NULL OR a.patient_id = $4)
-             AND ($5::uuid IS NULL OR a.provider_id = $5)
-             AND ($6::uuid IS NULL OR a.doctor_id = $6)
-             AND ($7::uuid IS NULL OR a.owner_user_id = $7)
-             AND ($8::uuid IS NULL OR a.interpreter_id = $8)
-             AND ($9::date IS NULL OR a.date >= $9)
-             AND ($10::date IS NULL OR a.date <= $10)
+             AND ($3::text IS NULL OR a.care_path_kind = $3)
+             AND ($4::text IS NULL OR a.status = $4)
+             AND ($5::uuid IS NULL OR a.patient_id = $5)
+             AND ($6::uuid IS NULL OR a.provider_id = $6)
+             AND ($7::uuid IS NULL OR a.doctor_id = $7)
+             AND ($8::uuid IS NULL OR a.owner_user_id = $8)
+             AND ($9::uuid IS NULL OR a.interpreter_id = $9)
+             AND ($10::date IS NULL OR a.date >= $10)
+             AND ($11::date IS NULL OR a.date <= $11)
            ORDER BY a.date DESC, a.time_start
            LIMIT 200"#,
     )
     .bind(search_pattern)
     .bind(query.appointment_type)
+    .bind(query.care_path_kind)
     .bind(query.status)
     .bind(query.patient_id)
     .bind(query.provider_id)
@@ -1368,6 +1453,11 @@ async fn list_attention_items(
     {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid type");
     }
+    if let Some(ref care_path_kind) = query.care_path_kind
+        && !is_valid_care_path_kind(care_path_kind)
+    {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid care_path_kind");
+    }
     if let Some(ref status) = query.status
         && !is_valid_appointment_status(status)
     {
@@ -1401,7 +1491,7 @@ async fn list_attention_items(
     };
 
     match sqlx::query(
-        r#"SELECT a.id, a.title, a.date, a.time_start, a.time_end, a.appointment_type, a.status,
+        r#"SELECT a.id, a.title, a.date, a.time_start, a.time_end, a.appointment_type, a.care_path_kind, a.status,
                   a.location, a.interpreter_response, a.checklist_phase, a.patient_id, a.interpreter_id,
                   a.provider_id, a.doctor_id, a.owner_user_id,
                   a.recurrence_series_id, a.recurrence_frequency, a.recurrence_interval,
@@ -1474,19 +1564,21 @@ async fn list_attention_items(
                   OR COALESCE(d.name, '') ILIKE $1
                   OR COALESCE(owner.name, '') ILIKE $1)
              AND ($2::text IS NULL OR a.appointment_type = $2)
-             AND ($3::text IS NULL OR a.status = $3)
-             AND ($4::uuid IS NULL OR a.patient_id = $4)
-             AND ($5::uuid IS NULL OR a.provider_id = $5)
-             AND ($6::uuid IS NULL OR a.doctor_id = $6)
-             AND ($7::uuid IS NULL OR a.owner_user_id = $7)
-             AND ($8::uuid IS NULL OR a.interpreter_id = $8)
-             AND ($9::date IS NULL OR a.date >= $9)
-             AND ($10::date IS NULL OR a.date <= $10)
+             AND ($3::text IS NULL OR a.care_path_kind = $3)
+             AND ($4::text IS NULL OR a.status = $4)
+             AND ($5::uuid IS NULL OR a.patient_id = $5)
+             AND ($6::uuid IS NULL OR a.provider_id = $6)
+             AND ($7::uuid IS NULL OR a.doctor_id = $7)
+             AND ($8::uuid IS NULL OR a.owner_user_id = $8)
+             AND ($9::uuid IS NULL OR a.interpreter_id = $9)
+             AND ($10::date IS NULL OR a.date >= $10)
+             AND ($11::date IS NULL OR a.date <= $11)
            ORDER BY a.date DESC, a.time_start
            LIMIT 200"#,
     )
     .bind(search_pattern)
     .bind(query.appointment_type)
+    .bind(query.care_path_kind)
     .bind(query.status)
     .bind(query.patient_id)
     .bind(query.provider_id)
@@ -1833,6 +1925,12 @@ async fn create_appointment(
     if !is_valid_appointment_type(&body.appointment_type) {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid type");
     }
+    let care_path_kind = normalize_care_path_kind_input(body.care_path_kind.clone());
+    if let Err(message) =
+        validate_care_path_kind_for_appointment_type(&body.appointment_type, &care_path_kind)
+    {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, message);
+    }
     if auth.role == Role::Concierge
         && !matches!(body.appointment_type.as_str(), "non_medical" | "internal")
     {
@@ -1886,6 +1984,7 @@ async fn create_appointment(
         interpreter_id,
         order_id,
         appointment_type,
+        care_path_kind: _,
         title,
         date: _,
         time_start: _,
@@ -1909,6 +2008,10 @@ async fn create_appointment(
 
     let root_appointment_id = Uuid::new_v4();
     let recurrence_series_id = recurrence.as_ref().map(|_| root_appointment_id);
+    let materialized_recurrence_count = recurrence.as_ref().map(|_| appointment_dates.len() as i32);
+    let materialized_recurrence_until = recurrence
+        .as_ref()
+        .and_then(|_| appointment_dates.last().copied());
     let mut created_at = String::new();
     let mut created_appointments = Vec::with_capacity(appointment_dates.len());
 
@@ -1932,7 +2035,7 @@ async fn create_appointment(
             occurrence_date,
             time_start,
             time_end,
-            None,
+            &[],
         )
         .await
         {
@@ -1946,8 +2049,8 @@ async fn create_appointment(
         };
 
         let insert_result = sqlx::query(
-            "INSERT INTO appointments (id, patient_id, provider_id, doctor_id, owner_user_id, interpreter_id, order_id, appointment_type, title, date, time_start, time_end, location, category, notes, recurrence_series_id, recurrence_frequency, recurrence_interval, recurrence_count, recurrence_until, recurrence_index, created_by, interpreter_response)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
+            "INSERT INTO appointments (id, patient_id, provider_id, doctor_id, owner_user_id, interpreter_id, order_id, appointment_type, care_path_kind, title, date, time_start, time_end, location, category, notes, recurrence_series_id, recurrence_frequency, recurrence_interval, recurrence_count, recurrence_until, recurrence_index, created_by, interpreter_response)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
              RETURNING created_at",
         )
         .bind(appointment_id)
@@ -1958,6 +2061,7 @@ async fn create_appointment(
         .bind(interpreter_id)
         .bind(order_id)
         .bind(&appointment_type)
+        .bind(&care_path_kind)
         .bind(&title)
         .bind(occurrence_date)
         .bind(time_start)
@@ -1968,8 +2072,8 @@ async fn create_appointment(
         .bind(recurrence_series_id)
         .bind(recurrence.as_ref().map(|value| value.frequency.as_str()))
         .bind(recurrence.as_ref().map(|value| value.interval))
-        .bind(recurrence.as_ref().and_then(|value| value.count))
-        .bind(recurrence.as_ref().and_then(|value| value.until))
+        .bind(materialized_recurrence_count)
+        .bind(materialized_recurrence_until)
         .bind(index as i32)
         .bind(auth.user_id)
         .bind(interpreter_id.map(|_| "pending"))
@@ -2085,11 +2189,12 @@ async fn create_appointment(
             "doctor_id": doctor_id,
             "owner_user_id": owner_user_id,
             "interpreter_id": interpreter_id,
+            "care_path_kind": care_path_kind,
             "series_created_count": created_appointments.len(),
             "recurrence_frequency": recurrence.as_ref().map(|value| value.frequency.as_str()),
             "recurrence_interval": recurrence.as_ref().map(|value| value.interval),
-            "recurrence_count": recurrence.as_ref().and_then(|value| value.count),
-            "recurrence_until": recurrence.as_ref().and_then(|value| value.until.map(|date| date.to_string())),
+            "recurrence_count": materialized_recurrence_count,
+            "recurrence_until": materialized_recurrence_until.map(|date| date.to_string()),
         }),
     ));
     tracing::info!(by = %auth.user_id, apt = %root_appointment_id, series_created_count = created_appointments.len(), "Appointment created");
@@ -2107,6 +2212,30 @@ async fn create_appointment(
 
 fn is_valid_appointment_type(value: &str) -> bool {
     matches!(value, "medical" | "non_medical" | "internal")
+}
+
+fn is_valid_care_path_kind(value: &str) -> bool {
+    matches!(value, "regular" | "preventive" | "control" | "followup")
+}
+
+fn normalize_care_path_kind_input(value: Option<String>) -> String {
+    value
+        .map(|raw| raw.trim().to_lowercase().replace('-', "_"))
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "regular".to_string())
+}
+
+fn validate_care_path_kind_for_appointment_type(
+    appointment_type: &str,
+    care_path_kind: &str,
+) -> Result<(), &'static str> {
+    if !is_valid_care_path_kind(care_path_kind) {
+        return Err("care_path_kind must be regular, preventive, control or followup");
+    }
+    if appointment_type != "medical" && care_path_kind != "regular" {
+        return Err("Only medical appointments can use preventive, control or followup care paths");
+    }
+    Ok(())
 }
 
 fn is_valid_appointment_status(value: &str) -> bool {
@@ -2199,6 +2328,26 @@ async fn recompute_appointment_series_metadata(
     Ok(())
 }
 
+async fn defer_appointment_schedule_constraints(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+) -> Result<(), axum::response::Response> {
+    let statement = format!(
+        "SET CONSTRAINTS {} DEFERRED",
+        APPOINTMENT_SCHEDULE_CONSTRAINTS.join(", ")
+    );
+    sqlx::query(&statement)
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "defer appointment schedule constraints");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate appointment schedule",
+            )
+        })?;
+    Ok(())
+}
+
 async fn load_active_recurring_scope_preview(
     state: &AppState,
     series_id: Uuid,
@@ -2253,10 +2402,10 @@ async fn load_recurring_series_lineage_history(
     series_id: Uuid,
 ) -> Result<Vec<serde_json::Value>, axum::response::Response> {
     match sqlx::query(
-        r#"WITH series_stats AS (
+        r#"WITH RECURSIVE series_stats AS (
                SELECT recurrence_series_id AS series_id,
-                      MIN(recurrence_parent_series_id) AS parent_series_id,
-                      MIN(recurrence_split_from_appointment_id) AS split_from_appointment_id,
+                      MIN(recurrence_parent_series_id::text)::uuid AS parent_series_id,
+                      MIN(recurrence_split_from_appointment_id::text)::uuid AS split_from_appointment_id,
                       MIN(recurrence_split_from_index) AS split_from_index,
                       MIN(date) AS first_date,
                       MAX(date) AS last_date,
@@ -2829,7 +2978,7 @@ async fn get_appointment(
     match sqlx::query(
         r#"SELECT a.id, a.patient_id, a.provider_id, a.doctor_id, a.order_id, a.interpreter_id,
                   a.owner_user_id,
-                  a.appointment_type, a.title, a.date, a.time_start, a.time_end, a.location,
+                  a.appointment_type, a.care_path_kind, a.title, a.date, a.time_start, a.time_end, a.location,
                   a.category, a.status, a.interpreter_response, a.checklist_phase,
                   a.preparation_notes, a.followup_notes, a.notes, a.created_at,
                   a.recurrence_series_id, a.recurrence_frequency, a.recurrence_interval,
@@ -2953,7 +3102,7 @@ async fn update_appointment(
     }
 
     let current = match sqlx::query(
-        r#"SELECT patient_id, appointment_type, status, provider_id, doctor_id, owner_user_id,
+        r#"SELECT patient_id, appointment_type, care_path_kind, status, provider_id, doctor_id, owner_user_id,
                   interpreter_id, interpreter_response, title, date, time_start, time_end,
                   location, order_id, category, notes, recurrence_series_id, recurrence_index,
                   recurrence_frequency, recurrence_interval, recurrence_count, recurrence_until
@@ -2979,6 +3128,9 @@ async fn update_appointment(
     let current_type: String = current
         .try_get("appointment_type")
         .unwrap_or_else(|_| String::new());
+    let current_care_path_kind: String = current
+        .try_get("care_path_kind")
+        .unwrap_or_else(|_| "regular".to_string());
     let current_status: String = current.try_get("status").unwrap_or_else(|_| String::new());
     let current_provider_id: Option<Uuid> = current.try_get("provider_id").unwrap_or_default();
     let current_doctor_id: Option<Uuid> = current.try_get("doctor_id").unwrap_or_default();
@@ -3056,6 +3208,15 @@ async fn update_appointment(
             StatusCode::FORBIDDEN,
             "Concierge can only reschedule non-medical or internal appointments",
         );
+    }
+    let care_path_kind = match body.care_path_kind.clone() {
+        Some(value) => normalize_care_path_kind_input(Some(value)),
+        None => current_care_path_kind.clone(),
+    };
+    if let Err(message) =
+        validate_care_path_kind_for_appointment_type(&current_type, &care_path_kind)
+    {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, message);
     }
     if matches!(current_status.as_str(), "completed" | "cancelled") {
         return err(
@@ -3148,6 +3309,11 @@ async fn update_appointment(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
+    if recurrence_scope != AppointmentRecurrenceScope::Single
+        && let Err(resp) = defer_appointment_schedule_constraints(&mut tx).await
+    {
+        return resp;
+    }
     let location = normalize_optional_text(body.location);
     let shift_days = date.signed_duration_since(current_date).num_days();
     let mut effective_series_id = current_recurrence_series_id;
@@ -3267,8 +3433,8 @@ async fn update_appointment(
     } else {
         date
     };
-    let resolved_recurrence_until = if body.recurrence_until.is_some() {
-        body.recurrence_until.clone()
+    let resolved_recurrence_until = if let Some(value) = body.recurrence_until.as_ref() {
+        value.clone()
     } else {
         current_recurrence_until.map(|value| value.to_string())
     };
@@ -3333,6 +3499,7 @@ async fn update_appointment(
     let mut updated_targets = Vec::new();
     let mut created_targets = Vec::new();
     let mut archived_series_id = None;
+    let target_ids: Vec<Uuid> = targets.iter().map(|target| target.id).collect();
     for (index, target) in targets.iter().take(keep_count).enumerate() {
         let target_date = if let Some(value) = recurrence_dates.get(index).copied() {
             value
@@ -3385,7 +3552,7 @@ async fn update_appointment(
             target_date,
             time_start,
             time_end,
-            Some(target.id),
+            &target_ids,
         )
         .await
         {
@@ -3404,10 +3571,11 @@ async fn update_appointment(
                    time_end = $9,
                    location = $10,
                    interpreter_response = $11,
-                   recurrence_frequency = $12,
-                   recurrence_interval = $13,
-                   recurrence_count = $14,
-                   recurrence_until = $15
+                   care_path_kind = $12,
+                   recurrence_frequency = $13,
+                   recurrence_interval = $14,
+                   recurrence_count = $15,
+                   recurrence_until = $16
                WHERE id = $1"#,
         )
         .bind(target.id)
@@ -3421,6 +3589,7 @@ async fn update_appointment(
         .bind(time_end)
         .bind(&location)
         .bind(interpreter_response)
+        .bind(&care_path_kind)
         .bind(resolved_recurrence_frequency)
         .bind(resolved_recurrence_interval)
         .bind(resolved_recurrence_count)
@@ -3476,7 +3645,7 @@ async fn update_appointment(
                 target_date,
                 time_start,
                 time_end,
-                None,
+                &[],
             )
             .await
             {
@@ -3686,6 +3855,7 @@ async fn update_appointment(
             "previous_time_end": current_time_end,
             "previous_location": current_location,
             "previous_title": current_title,
+            "previous_care_path_kind": current_care_path_kind,
             "provider_id": body.provider_id,
             "doctor_id": body.doctor_id,
             "owner_user_id": owner_user_id,
@@ -3695,6 +3865,7 @@ async fn update_appointment(
             "time_end": time_end,
             "location": location,
             "title": title,
+            "care_path_kind": care_path_kind,
             "recurrence_frequency": resolved_recurrence_frequency,
             "recurrence_interval": resolved_recurrence_interval,
             "recurrence_count": resolved_recurrence_count,
@@ -3917,6 +4088,16 @@ async fn update_status(
 
     if body.status == "completed" {
         for appointment_id in &target_ids {
+            if let Err(error) =
+                sync_completed_medical_appointment_to_billing(&state, auth.user_id, *appointment_id)
+                    .await
+            {
+                tracing::error!(
+                    error = %error,
+                    appointment_id = %appointment_id,
+                    "sync completed medical appointment to billing"
+                );
+            }
             let _ = crate::routes::concierge_services::mark_services_ready_for_billing(
                 &state,
                 auth.user_id,
@@ -3924,6 +4105,43 @@ async fn update_status(
             )
             .await;
             let _ = bootstrap_billing_handoff(&state, auth.user_id, *appointment_id).await;
+        }
+    }
+
+    let mut auto_preparation_templates_matched = 0usize;
+    let mut auto_preparation_documents_created = 0usize;
+    let mut auto_preparation_documents_reused = 0usize;
+    let mut auto_preparation_portal_shares_created = 0usize;
+    let mut auto_preparation_marked_sent_count = 0usize;
+    let mut auto_preparation_error_count = 0usize;
+    if body.status == "confirmed" {
+        for appointment_id in &target_ids {
+            match crate::routes::documents::auto_send_provider_preparation_documents_for_confirmed_appointment(
+                &state,
+                auth.user_id,
+                *appointment_id,
+            )
+            .await
+            {
+                Ok(result) => {
+                    auto_preparation_templates_matched += result.template_count;
+                    auto_preparation_documents_created += result.generated_document_count;
+                    auto_preparation_documents_reused += result.reused_document_count;
+                    auto_preparation_portal_shares_created += result.portal_release_count;
+                    if result.marked_sent {
+                        auto_preparation_marked_sent_count += 1;
+                    }
+                }
+                Err(error_response) => {
+                    auto_preparation_error_count += 1;
+                    tracing::error!(
+                        appointment_id = %appointment_id,
+                        body = ?body.status,
+                        status = ?error_response.status(),
+                        "auto-send preparation documents after appointment confirmation failed"
+                    );
+                }
+            }
         }
     }
 
@@ -3959,6 +4177,14 @@ async fn update_status(
         },
         "split_performed": split_performed,
         "affected_count": rows_affected,
+        "auto_preparation_documents": {
+            "templates_matched": auto_preparation_templates_matched,
+            "documents_created": auto_preparation_documents_created,
+            "documents_reused": auto_preparation_documents_reused,
+            "portal_shares_created": auto_preparation_portal_shares_created,
+            "orders_marked_sent": auto_preparation_marked_sent_count,
+            "error_count": auto_preparation_error_count,
+        },
     }))
     .into_response()
 }
@@ -4713,6 +4939,430 @@ async fn submit_report(
     }
 }
 
+async fn load_interpreter_hours_catalog_item(
+    state: &AppState,
+    service_date: chrono::NaiveDate,
+) -> Result<Option<AgencyServiceBillingItem>, sqlx::Error> {
+    load_agency_service_catalog_item(state, INTERPRETER_HOURS_SERVICE_KEY, service_date).await
+}
+
+async fn load_medical_treatment_organization_catalog_item(
+    state: &AppState,
+    service_date: chrono::NaiveDate,
+) -> Result<Option<AgencyServiceBillingItem>, sqlx::Error> {
+    load_agency_service_catalog_item(
+        state,
+        MEDICAL_TREATMENT_ORGANIZATION_SERVICE_KEY,
+        service_date,
+    )
+    .await
+}
+
+async fn load_agency_service_catalog_item(
+    state: &AppState,
+    service_key: &str,
+    service_date: chrono::NaiveDate,
+) -> Result<Option<AgencyServiceBillingItem>, sqlx::Error> {
+    sqlx::query(
+        r#"SELECT id, service_key, service_name, unit_price, currency, vat_rate
+           FROM agency_service_catalog
+           WHERE service_key = $1
+             AND is_active = true
+             AND valid_from <= $2
+             AND (valid_to IS NULL OR valid_to >= $2)
+           ORDER BY valid_from DESC, updated_at DESC
+           LIMIT 1"#,
+    )
+    .bind(service_key)
+    .bind(service_date)
+    .fetch_optional(&state.db)
+    .await
+    .map(|row| {
+        row.map(|row| AgencyServiceBillingItem {
+            id: row.try_get::<Uuid, _>("id").unwrap_or_default(),
+            service_key: row.try_get::<String, _>("service_key").unwrap_or_default(),
+            service_name: row.try_get::<String, _>("service_name").unwrap_or_default(),
+            unit_price: row
+                .try_get::<rust_decimal::Decimal, _>("unit_price")
+                .unwrap_or(rust_decimal::Decimal::ZERO),
+            currency: row
+                .try_get::<String, _>("currency")
+                .unwrap_or_else(|_| "EUR".to_string()),
+            vat_rate: row
+                .try_get::<rust_decimal::Decimal, _>("vat_rate")
+                .unwrap_or(rust_decimal::Decimal::ZERO),
+        })
+    })
+}
+
+async fn sync_completed_medical_appointment_to_billing(
+    state: &AppState,
+    created_by: Uuid,
+    appointment_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    let row = sqlx::query(
+        r#"SELECT a.order_id, a.patient_id, a.provider_id, a.doctor_id, a.title, a.date, a.status,
+                  a.appointment_type, pr.name AS provider_name, d.name AS doctor_name
+           FROM appointments a
+           LEFT JOIN providers pr ON pr.id = a.provider_id
+           LEFT JOIN provider_doctors d ON d.id = a.doctor_id
+           WHERE a.id = $1"#,
+    )
+    .bind(appointment_id)
+    .fetch_optional(&state.db)
+    .await?;
+
+    let Some(row) = row else {
+        return Ok(());
+    };
+
+    let appointment_type: String = row.try_get("appointment_type").unwrap_or_default();
+    let appointment_status: String = row.try_get("status").unwrap_or_default();
+    if appointment_type != "medical" || appointment_status != "completed" {
+        return Ok(());
+    }
+
+    let Some(order_id) = row
+        .try_get::<Option<Uuid>, _>("order_id")
+        .unwrap_or_default()
+    else {
+        return Ok(());
+    };
+
+    let appointment_date = row
+        .try_get::<chrono::NaiveDate, _>("date")
+        .unwrap_or_else(|_| chrono::Utc::now().date_naive());
+    let Some(catalog_item) =
+        load_medical_treatment_organization_catalog_item(state, appointment_date).await?
+    else {
+        return Ok(());
+    };
+
+    let provider_id = row
+        .try_get::<Option<Uuid>, _>("provider_id")
+        .unwrap_or_default();
+    let doctor_id = row
+        .try_get::<Option<Uuid>, _>("doctor_id")
+        .unwrap_or_default();
+    let patient_id = row.try_get::<Uuid, _>("patient_id").unwrap_or_default();
+    let appointment_title = row.try_get::<String, _>("title").unwrap_or_default();
+    let provider_name = row
+        .try_get::<Option<String>, _>("provider_name")
+        .unwrap_or_default();
+    let doctor_name = row
+        .try_get::<Option<String>, _>("doctor_name")
+        .unwrap_or_default();
+
+    let mut notes = vec![
+        format!("Auto-created from completed medical appointment {appointment_id}"),
+        format!("Appointment: {appointment_title}"),
+        format!("Date: {appointment_date}"),
+        format!("Catalog key: {}", catalog_item.service_key),
+    ];
+    if let Some(provider_name) = provider_name.as_deref()
+        && !provider_name.trim().is_empty()
+    {
+        notes.push(format!("Provider: {provider_name}"));
+    }
+    if let Some(doctor_name) = doctor_name.as_deref()
+        && !doctor_name.trim().is_empty()
+    {
+        notes.push(format!("Doctor: {doctor_name}"));
+    }
+
+    let result = sqlx::query(
+        r#"INSERT INTO order_leistungen (
+                order_id, description, quantity, unit_price, currency, vat_rate,
+                is_cost_passthrough, provider_id, doctor_id, status, delivered_at, notes,
+                source_medical_appointment_id, agency_service_id
+           ) VALUES (
+                $1, $2, 1, $3, $4, $5,
+                false, $6, $7, 'delivered', now(), $8,
+                $9, $10
+           )
+           ON CONFLICT (source_medical_appointment_id)
+               WHERE source_medical_appointment_id IS NOT NULL
+           DO NOTHING"#,
+    )
+    .bind(order_id)
+    .bind(catalog_item.service_name.clone())
+    .bind(catalog_item.unit_price)
+    .bind(catalog_item.currency.clone())
+    .bind(catalog_item.vat_rate)
+    .bind(provider_id)
+    .bind(doctor_id)
+    .bind(notes.join("\n"))
+    .bind(appointment_id)
+    .bind(catalog_item.id)
+    .execute(&state.db)
+    .await?;
+
+    if result.rows_affected() > 0 {
+        state.audit_sender.try_send(audit::domain_event(
+            "auto_create_medical_order_leistung".to_string(),
+            Some(created_by),
+            "order",
+            Some(order_id),
+            serde_json::json!({
+                "patient_id": patient_id,
+                "appointment_id": appointment_id,
+                "service_key": catalog_item.service_key,
+                "provider_id": provider_id,
+                "doctor_id": doctor_id,
+            }),
+        ));
+    }
+
+    Ok(())
+}
+
+async fn load_interpreter_report_billing_candidates(
+    state: &AppState,
+    appointment_id: Option<Uuid>,
+) -> Result<Vec<InterpreterReportBillingCandidate>, sqlx::Error> {
+    let rows = sqlx::query(
+        r#"SELECT ir.id AS report_id,
+                  ir.appointment_id,
+                  a.order_id,
+                  a.patient_id,
+                  a.title AS appointment_title,
+                  a.date AS appointment_date,
+                  u.name AS interpreter_name,
+                  ir.hours,
+                  ir.report_text,
+                  ir.approved_by,
+                  ir.approved_at
+           FROM interpreter_reports ir
+           JOIN appointments a ON a.id = ir.appointment_id
+           JOIN users u ON u.id = ir.interpreter_id
+           LEFT JOIN order_leistungen ol
+                  ON ol.source_interpreter_report_id = ir.id
+           WHERE ir.approval_status = 'approved'
+             AND ol.id IS NULL
+             AND ($1::UUID IS NULL OR ir.appointment_id = $1)
+           ORDER BY ir.approved_at NULLS LAST, ir.created_at, ir.id"#,
+    )
+    .bind(appointment_id)
+    .fetch_all(&state.db)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| InterpreterReportBillingCandidate {
+            report_id: row.try_get::<Uuid, _>("report_id").unwrap_or_default(),
+            appointment_id: row.try_get::<Uuid, _>("appointment_id").unwrap_or_default(),
+            order_id: row
+                .try_get::<Option<Uuid>, _>("order_id")
+                .unwrap_or_default(),
+            patient_id: row.try_get::<Uuid, _>("patient_id").unwrap_or_default(),
+            appointment_title: row
+                .try_get::<String, _>("appointment_title")
+                .unwrap_or_default(),
+            appointment_date: row
+                .try_get::<chrono::NaiveDate, _>("appointment_date")
+                .unwrap_or_else(|_| chrono::Utc::now().date_naive()),
+            interpreter_name: row
+                .try_get::<String, _>("interpreter_name")
+                .unwrap_or_default(),
+            hours: row
+                .try_get::<rust_decimal::Decimal, _>("hours")
+                .unwrap_or(rust_decimal::Decimal::ZERO),
+            report_text: row
+                .try_get::<Option<String>, _>("report_text")
+                .unwrap_or_default(),
+            approved_by: row
+                .try_get::<Option<Uuid>, _>("approved_by")
+                .unwrap_or_default(),
+            approved_at: row
+                .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("approved_at")
+                .unwrap_or_default(),
+        })
+        .collect())
+}
+
+async fn sync_interpreter_report_billing_candidates(
+    state: &AppState,
+    appointment_id: Option<Uuid>,
+) -> Result<InterpreterReportBillingSyncSummary, sqlx::Error> {
+    let candidates = load_interpreter_report_billing_candidates(state, appointment_id).await?;
+    let mut summary = InterpreterReportBillingSyncSummary::default();
+
+    for candidate in candidates {
+        let Some(order_id) = candidate.order_id else {
+            summary.missing_order += 1;
+            continue;
+        };
+
+        let Some(catalog_item) =
+            load_interpreter_hours_catalog_item(state, candidate.appointment_date).await?
+        else {
+            summary.missing_catalog += 1;
+            continue;
+        };
+
+        let approved_at = candidate.approved_at.unwrap_or_else(chrono::Utc::now);
+        let description = format!(
+            "{} · {} · {}",
+            catalog_item.service_name, candidate.appointment_title, candidate.appointment_date
+        );
+
+        let notes = {
+            let mut parts = vec![
+                format!(
+                    "Auto-created from approved interpreter report {}",
+                    candidate.report_id
+                ),
+                format!("Interpreter: {}", candidate.interpreter_name),
+                format!("Hours: {}", candidate.hours.normalize()),
+                format!("Appointment: {}", candidate.appointment_id),
+                format!("Catalog key: {}", catalog_item.service_key),
+            ];
+            if let Some(text) = candidate.report_text.as_ref().map(|value| value.trim())
+                && !text.is_empty()
+            {
+                parts.push(format!("Report: {text}"));
+            }
+            parts.join("\n")
+        };
+
+        let result = sqlx::query(
+            r#"INSERT INTO order_leistungen (
+                    order_id, description, quantity, unit_price, currency, vat_rate,
+                    is_cost_passthrough, status, delivered_at, approved_by, approved_at,
+                    notes, source_interpreter_report_id, agency_service_id
+               ) VALUES (
+                    $1, $2, $3, $4, $5, $6,
+                    false, 'approved', $7, $8, $7,
+                    $9, $10, $11
+               )
+               ON CONFLICT (source_interpreter_report_id)
+                   WHERE source_interpreter_report_id IS NOT NULL
+               DO NOTHING"#,
+        )
+        .bind(order_id)
+        .bind(description)
+        .bind(candidate.hours)
+        .bind(catalog_item.unit_price)
+        .bind(catalog_item.currency)
+        .bind(catalog_item.vat_rate)
+        .bind(approved_at)
+        .bind(candidate.approved_by)
+        .bind(notes)
+        .bind(candidate.report_id)
+        .bind(catalog_item.id)
+        .execute(&state.db)
+        .await?;
+
+        if result.rows_affected() == 0 {
+            summary.already_synced += 1;
+            continue;
+        }
+
+        summary.leistungen_created += result.rows_affected();
+
+        state.audit_sender.try_send(audit::domain_event(
+            "auto_create_interpreter_order_leistung".to_string(),
+            candidate.approved_by,
+            "order",
+            Some(order_id),
+            serde_json::json!({
+                "patient_id": candidate.patient_id,
+                "appointment_id": candidate.appointment_id,
+                "interpreter_report_id": candidate.report_id,
+                "service_key": catalog_item.service_key,
+                "hours": candidate.hours.normalize().to_string(),
+            }),
+        ));
+    }
+
+    Ok(summary)
+}
+
+async fn load_interpreter_report_billing_projection(
+    state: &AppState,
+    report_id: Uuid,
+    order_id: Option<Uuid>,
+    appointment_date: chrono::NaiveDate,
+    approval_status: &str,
+) -> Result<(Option<Uuid>, Option<String>, Option<String>), sqlx::Error> {
+    if approval_status != "approved" {
+        return Ok((None, None, None));
+    }
+
+    let existing = sqlx::query(
+        r#"SELECT ol.id, catalog.service_key
+           FROM order_leistungen ol
+           LEFT JOIN agency_service_catalog catalog ON catalog.id = ol.agency_service_id
+           WHERE ol.source_interpreter_report_id = $1"#,
+    )
+    .bind(report_id)
+    .fetch_optional(&state.db)
+    .await?;
+
+    if let Some(row) = existing {
+        return Ok((
+            row.try_get::<Uuid, _>("id").ok(),
+            Some("synced".to_string()),
+            row.try_get::<Option<String>, _>("service_key")
+                .unwrap_or_else(|_| Some(INTERPRETER_HOURS_SERVICE_KEY.to_string())),
+        ));
+    }
+
+    let Some(_) = order_id else {
+        return Ok((None, Some("missing_order".to_string()), None));
+    };
+
+    let catalog = load_interpreter_hours_catalog_item(state, appointment_date).await?;
+    Ok((
+        None,
+        Some(if catalog.is_some() {
+            "pending_sync".to_string()
+        } else {
+            "missing_catalog".to_string()
+        }),
+        catalog.map(|item| item.service_key),
+    ))
+}
+
+pub async fn run_interpreter_report_billing_sync_once(
+    state: &AppState,
+) -> Result<InterpreterReportBillingSyncSummary, sqlx::Error> {
+    sync_interpreter_report_billing_candidates(state, None).await
+}
+
+pub fn spawn_interpreter_report_billing_sync_scheduler(state: AppState) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(
+            INTERPRETER_REPORT_BILLING_SYNC_INTERVAL_SECS,
+        ));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        interval.tick().await;
+
+        loop {
+            interval.tick().await;
+            match run_interpreter_report_billing_sync_once(&state).await {
+                Ok(summary) => {
+                    if summary.leistungen_created > 0
+                        || summary.missing_order > 0
+                        || summary.missing_catalog > 0
+                    {
+                        tracing::info!(
+                            leistungen_created = summary.leistungen_created,
+                            already_synced = summary.already_synced,
+                            missing_order = summary.missing_order,
+                            missing_catalog = summary.missing_catalog,
+                            "Interpreter report billing sync applied"
+                        );
+                    }
+                }
+                Err(error) => {
+                    tracing::error!(error = %error, "Interpreter report billing sync failed");
+                }
+            }
+        }
+    });
+}
+
 async fn get_report(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -4749,19 +5399,68 @@ async fn get_report(
     .fetch_optional(&state.db)
     .await
     {
-        Ok(Some(row)) => Json(serde_json::json!({
-            "id": row.try_get::<Uuid, _>("id").unwrap_or(apt_id),
-            "interpreter_id": row.try_get::<Uuid, _>("interpreter_id").unwrap_or(auth.user_id),
-            "interpreter_name": row.try_get::<String, _>("interpreter_name").unwrap_or_default(),
-            "hours": row.try_get::<rust_decimal::Decimal, _>("hours").map(|value| value.to_string()).unwrap_or_default(),
-            "report_text": row.try_get::<Option<String>, _>("report_text").unwrap_or_default(),
-            "approval_status": row.try_get::<String, _>("approval_status").unwrap_or_default(),
-            "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
-            "approved_by_name": row.try_get::<Option<String>, _>("approved_by_name").unwrap_or_default(),
-            "approved_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("approved_at").unwrap_or_default().map(|value| value.to_rfc3339()),
-            "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
-        }))
-        .into_response(),
+        Ok(Some(row)) => {
+            let report_id = row.try_get::<Uuid, _>("id").unwrap_or(apt_id);
+            let approval_status = row
+                .try_get::<String, _>("approval_status")
+                .unwrap_or_default();
+            let appointment_meta = sqlx::query(
+                r#"SELECT order_id, date
+                   FROM appointments
+                   WHERE id = $1"#,
+            )
+            .bind(apt_id)
+            .fetch_optional(&state.db)
+            .await;
+
+            let (order_id, appointment_date) = match appointment_meta {
+                Ok(Some(meta)) => (
+                    meta.try_get::<Option<Uuid>, _>("order_id")
+                        .unwrap_or_default(),
+                    meta.try_get::<chrono::NaiveDate, _>("date")
+                        .unwrap_or_else(|_| chrono::Utc::now().date_naive()),
+                ),
+                Ok(None) => (None, chrono::Utc::now().date_naive()),
+                Err(error) => {
+                    tracing::error!(error = %error, appointment_id = %apt_id, "load appointment billing projection");
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+                }
+            };
+
+            let (billing_leistung_id, billing_sync_status, billing_service_key) =
+                match load_interpreter_report_billing_projection(
+                    &state,
+                    report_id,
+                    order_id,
+                    appointment_date,
+                    &approval_status,
+                )
+                .await
+                {
+                    Ok(result) => result,
+                    Err(error) => {
+                        tracing::error!(error = %error, appointment_id = %apt_id, report_id = %report_id, "load interpreter billing projection");
+                        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+                    }
+                };
+
+            Json(serde_json::json!({
+                "id": report_id,
+                "interpreter_id": row.try_get::<Uuid, _>("interpreter_id").unwrap_or(auth.user_id),
+                "interpreter_name": row.try_get::<String, _>("interpreter_name").unwrap_or_default(),
+                "hours": row.try_get::<rust_decimal::Decimal, _>("hours").map(|value| value.to_string()).unwrap_or_default(),
+                "report_text": row.try_get::<Option<String>, _>("report_text").unwrap_or_default(),
+                "approval_status": approval_status,
+                "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
+                "approved_by_name": row.try_get::<Option<String>, _>("approved_by_name").unwrap_or_default(),
+                "approved_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("approved_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+                "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+                "billing_leistung_id": billing_leistung_id.map(|value| value.to_string()),
+                "billing_sync_status": billing_sync_status,
+                "billing_service_key": billing_service_key,
+            }))
+            .into_response()
+        }
         Ok(None) => Json(serde_json::Value::Null).into_response(),
         Err(e) => {
             tracing::error!(error = %e, "get report");
@@ -4785,14 +5484,45 @@ async fn approve_report(
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
     }
-    match sqlx::query!("UPDATE interpreter_reports SET approval_status = 'approved', approved_by = $2, approved_at = now() WHERE appointment_id = $1 AND approval_status = 'pending'",
-        apt_id, auth.user_id).execute(&state.db).await {
+    match sqlx::query(
+        r#"UPDATE interpreter_reports
+           SET approval_status = 'approved', approved_by = $2, approved_at = now()
+           WHERE appointment_id = $1
+             AND approval_status = 'pending'"#,
+    )
+    .bind(apt_id)
+    .bind(auth.user_id)
+    .execute(&state.db)
+    .await
+    {
         Ok(r) if r.rows_affected() > 0 => {
-            tracing::info!(by = %auth.user_id, apt = %apt_id, "Report approved");
+            let sync_summary = match sync_interpreter_report_billing_candidates(
+                &state,
+                Some(apt_id),
+            )
+            .await
+            {
+                Ok(summary) => summary,
+                Err(error) => {
+                    tracing::error!(error = %error, appointment_id = %apt_id, "sync approved interpreter report to billing");
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+                }
+            };
+            tracing::info!(
+                by = %auth.user_id,
+                apt = %apt_id,
+                leistungen_created = sync_summary.leistungen_created,
+                missing_order = sync_summary.missing_order,
+                missing_catalog = sync_summary.missing_catalog,
+                "Report approved"
+            );
             Json(serde_json::json!({"ok": true})).into_response()
         }
         Ok(_) => err(StatusCode::NOT_FOUND, "No pending report"),
-        Err(e) => { tracing::error!(error = %e, "approve report"); err(StatusCode::INTERNAL_SERVER_ERROR, "Failed") }
+        Err(e) => {
+            tracing::error!(error = %e, "approve report");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+        }
     }
 }
 
@@ -5305,6 +6035,7 @@ fn build_appointment_list_json(
         "time_start": row.try_get::<Option<chrono::NaiveTime>, _>("time_start").unwrap_or_default().map(|v| v.format("%H:%M").to_string()),
         "time_end": row.try_get::<Option<chrono::NaiveTime>, _>("time_end").unwrap_or_default().map(|v| v.format("%H:%M").to_string()),
         "type": appointment_type,
+        "care_path_kind": if blocked { None::<String> } else { Some(row.try_get::<String, _>("care_path_kind").unwrap_or_else(|_| "regular".to_string())) },
         "status": row.try_get::<String, _>("status").unwrap_or_default(),
         "location": if blocked { None::<String> } else { row.try_get::<Option<String>, _>("location").unwrap_or_default() },
         "interpreter_response": if blocked { None::<String> } else { row.try_get::<Option<String>, _>("interpreter_response").unwrap_or_default() },
@@ -5359,6 +6090,7 @@ fn build_appointment_detail_json(
         "time_start": row.try_get::<Option<chrono::NaiveTime>, _>("time_start").unwrap_or_default().map(|v| v.format("%H:%M").to_string()),
         "time_end": row.try_get::<Option<chrono::NaiveTime>, _>("time_end").unwrap_or_default().map(|v| v.format("%H:%M").to_string()),
         "type": appointment_type,
+        "care_path_kind": if blocked { None::<String> } else { Some(row.try_get::<String, _>("care_path_kind").unwrap_or_else(|_| "regular".to_string())) },
         "status": row.try_get::<String, _>("status").unwrap_or_default(),
         "location": if blocked { None::<String> } else { row.try_get::<Option<String>, _>("location").unwrap_or_default() },
         "category": if blocked { None::<String> } else { row.try_get::<Option<String>, _>("category").unwrap_or_default() },
@@ -5585,26 +6317,26 @@ async fn ensure_no_overlapping_appointments_in_tx(
     date: chrono::NaiveDate,
     time_start: Option<chrono::NaiveTime>,
     time_end: Option<chrono::NaiveTime>,
-    exclude_appointment_id: Option<Uuid>,
+    exclude_appointment_ids: &[Uuid],
 ) -> Result<(), axum::response::Response> {
     let rows = sqlx::query(
         r#"SELECT id, patient_id, interpreter_id, doctor_id, time_start, time_end
            FROM appointments
            WHERE date = $1
              AND status <> 'cancelled'
-             AND (
-                patient_id = $2
-                OR ($3::uuid IS NOT NULL AND interpreter_id = $3)
-                OR ($4::uuid IS NOT NULL AND doctor_id = $4)
-             )
-             AND ($5::uuid IS NULL OR id <> $5)
-           FOR UPDATE"#,
+              AND (
+                 patient_id = $2
+                 OR ($3::uuid IS NOT NULL AND interpreter_id = $3)
+                 OR ($4::uuid IS NOT NULL AND doctor_id = $4)
+              )
+              AND NOT (id = ANY($5))
+            FOR UPDATE"#,
     )
     .bind(date)
     .bind(patient_id)
     .bind(interpreter_id)
     .bind(doctor_id)
-    .bind(exclude_appointment_id)
+    .bind(exclude_appointment_ids)
     .fetch_all(&mut **tx)
     .await
     .map_err(|e| {
@@ -5721,7 +6453,7 @@ async fn load_conflicts_for_scope(
     }
 
     let rows = sqlx::query(
-        r#"SELECT a.id, a.title, a.date, a.time_start, a.time_end, a.appointment_type, a.status,
+        r#"SELECT a.id, a.title, a.date, a.time_start, a.time_end, a.appointment_type, a.care_path_kind, a.status,
                   a.location, a.interpreter_response, a.checklist_phase, a.patient_id, a.interpreter_id,
                   a.provider_id, a.doctor_id, a.owner_user_id,
                   p.first_name, p.last_name, p.patient_id AS patient_code,

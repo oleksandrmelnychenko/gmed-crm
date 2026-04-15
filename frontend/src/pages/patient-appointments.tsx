@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { apiFetch } from "@/lib/api";
 import {
+  appointmentCarePathKindLabel,
   appointmentRequestStatusTone,
   appointmentStatusTone,
   appointmentTimeOfDayLabel,
@@ -26,6 +27,7 @@ function shellCard(extra?: string) {
 
 type RequestFormState = {
   appointmentType: "medical" | "non_medical";
+  carePathKind: "regular" | "preventive" | "control" | "followup";
   preferredDateFrom: string;
   preferredDateTo: string;
   preferredTimeOfDay: string;
@@ -38,6 +40,7 @@ type RequestFormState = {
 function blankRequestForm(): RequestFormState {
   return {
     appointmentType: "medical",
+    carePathKind: "regular",
     preferredDateFrom: "",
     preferredDateTo: "",
     preferredTimeOfDay: "flexible",
@@ -129,6 +132,7 @@ export function PatientAppointmentsPage() {
         method: "POST",
         body: JSON.stringify({
           appointment_type: requestForm.appointmentType,
+          care_path_kind: requestForm.appointmentType === "medical" ? requestForm.carePathKind : "regular",
           preferred_date_from: requestForm.preferredDateFrom || undefined,
           preferred_date_to: requestForm.preferredDateTo || undefined,
           preferred_time_of_day: requestForm.preferredTimeOfDay || undefined,
@@ -224,15 +228,18 @@ export function PatientAppointmentsPage() {
             appointments.map((item) => (
               <article key={item.id} className={shellCard("p-5")}>
                 <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <div className="flex flex-wrap gap-2">
-                      <Badge variant="outline" className={cn("rounded-full", appointmentStatusTone(item.status))}>
-                        {item.status.replaceAll("_", " ")}
-                      </Badge>
-                      <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
-                        {appointmentTypeLabel(item.appointment_type)}
-                      </Badge>
-                    </div>
+                    <div>
+                      <div className="flex flex-wrap gap-2">
+                        <Badge variant="outline" className={cn("rounded-full", appointmentStatusTone(item.status))}>
+                          {item.status.replaceAll("_", " ")}
+                        </Badge>
+                        <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
+                          {appointmentTypeLabel(item.appointment_type)}
+                        </Badge>
+                        <Badge variant="outline" className="rounded-full border-violet-200 bg-violet-50 text-violet-700">
+                          {appointmentCarePathKindLabel(item.care_path_kind)}
+                        </Badge>
+                      </div>
                     <h2 className="mt-3 text-xl font-semibold text-slate-950">{item.title}</h2>
                     <p className="mt-2 text-sm text-slate-500">
                       {[item.provider_name, item.doctor_name, item.location].filter(Boolean).join(" · ")}
@@ -355,6 +362,9 @@ export function PatientAppointmentsPage() {
                           {appointmentTypeLabel(item.appointment_type)} request
                         </p>
                         <p className="mt-1 text-xs text-slate-500">
+                          {appointmentCarePathKindLabel(item.care_path_kind)}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
                           Requested {formatPortalDateTime(item.requested_at)}
                         </p>
                       </div>
@@ -402,12 +412,32 @@ export function PatientAppointmentsPage() {
                   setRequestForm((current) => ({
                     ...current,
                     appointmentType: event.target.value as "medical" | "non_medical",
+                    carePathKind:
+                      event.target.value === "medical" ? current.carePathKind : "regular",
                   }))
                 }
                 className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
               >
                 <option value="medical">Medical</option>
                 <option value="non_medical">Non-medical</option>
+              </select>
+            </Field>
+            <Field label="Care path">
+              <select
+                value={requestForm.carePathKind}
+                onChange={(event) =>
+                  setRequestForm((current) => ({
+                    ...current,
+                    carePathKind: event.target.value as "regular" | "preventive" | "control" | "followup",
+                  }))
+                }
+                disabled={requestForm.appointmentType !== "medical"}
+                className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+              >
+                <option value="regular">Regular</option>
+                <option value="preventive">Preventive</option>
+                <option value="control">Control</option>
+                <option value="followup">Follow-up</option>
               </select>
             </Field>
             <div className="grid gap-4 sm:grid-cols-2">

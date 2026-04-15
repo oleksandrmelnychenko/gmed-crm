@@ -47,6 +47,14 @@ pub fn router() -> Router<AppState> {
             get(list_leistungen).post(add_leistung),
         )
         .route(
+            "/orders/{order_id}/external-invoices",
+            get(list_external_invoices).post(create_external_invoice),
+        )
+        .route(
+            "/orders/{order_id}/external-invoices/{external_invoice_id}/update",
+            post(update_external_invoice),
+        )
+        .route(
             "/orders/{order_id}/leistungen/{leistung_id}/approve",
             post(approve_leistung),
         )
@@ -125,6 +133,34 @@ struct AddLeistungRequest {
     is_cost_passthrough: Option<bool>,
     provider_id: Option<Uuid>,
     doctor_id: Option<Uuid>,
+    external_document_id: Option<Uuid>,
+    notes: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CreateExternalInvoiceRequest {
+    provider_id: Option<Uuid>,
+    external_invoice_number: String,
+    invoice_date: Option<String>,
+    due_date: Option<String>,
+    amount_net: Option<f64>,
+    amount_vat: Option<f64>,
+    amount_gross: f64,
+    currency: Option<String>,
+    status: Option<String>,
+    notes: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct UpdateExternalInvoiceRequest {
+    provider_id: Option<Uuid>,
+    invoice_date: Option<String>,
+    due_date: Option<String>,
+    amount_net: Option<f64>,
+    amount_vat: Option<f64>,
+    amount_gross: Option<f64>,
+    currency: Option<String>,
+    status: Option<String>,
     notes: Option<String>,
 }
 
@@ -145,8 +181,40 @@ struct ListDebtManagementQuery {
     open_only: Option<bool>,
 }
 
+const EXTERNAL_INVOICE_CHECK_INTERVAL_SECS: u64 = 60 * 60 * 6;
+
+#[derive(Default, Clone, Copy, Debug)]
+pub struct ExternalInvoiceDeadlineRunSummary {
+    pub overdue_marked: u64,
+    pub notifications_created: u64,
+}
+
 fn gen_order_number(seq: i64) -> String {
     format!("A-{}-{:04}", chrono::Utc::now().format("%Y%m%d"), seq)
+}
+
+fn is_valid_external_invoice_status(value: &str) -> bool {
+    matches!(
+        value,
+        "expected" | "received" | "approved" | "paid" | "overdue" | "cancelled"
+    )
+}
+
+#[allow(clippy::result_large_err)]
+fn parse_optional_order_date(
+    value: Option<&str>,
+) -> Result<Option<chrono::NaiveDate>, axum::response::Response> {
+    match value.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(raw) => chrono::NaiveDate::parse_from_str(raw, "%Y-%m-%d")
+            .map(Some)
+            .map_err(|_| {
+                err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Invalid date (YYYY-MM-DD)",
+                )
+            }),
+        None => Ok(None),
+    }
 }
 
 async fn list_orders(
@@ -1962,11 +2030,18 @@ async fn get_order(
     let leistungen = sqlx::query(
         r#"SELECT ol.id, ol.description, ol.quantity, ol.unit_price, ol.currency, ol.vat_rate,
                   ol.is_cost_passthrough, ol.status, ol.delivered_at, ol.approved_at, ol.notes,
-                  ol.provider_id, ol.doctor_id,
-                  pr.name AS provider_name, d.name AS doctor_name
+                  ol.provider_id, ol.doctor_id, ol.source_interpreter_report_id,
+                  ol.source_medical_appointment_id, ol.agency_service_id,
+                  ol.external_document_id,
+                  pr.name AS provider_name, d.name AS doctor_name,
+                  catalog.service_key AS agency_service_key, catalog.service_name AS agency_service_name,
+                  doc.auto_name AS external_document_auto_name,
+                  doc.original_filename AS external_document_filename
            FROM order_leistungen ol
            LEFT JOIN providers pr ON pr.id = ol.provider_id
            LEFT JOIN provider_doctors d ON d.id = ol.doctor_id
+           LEFT JOIN agency_service_catalog catalog ON catalog.id = ol.agency_service_id
+           LEFT JOIN documents doc ON doc.id = ol.external_document_id
            WHERE ol.order_id = $1
            ORDER BY ol.created_at"#,
     )
@@ -1993,6 +2068,51 @@ async fn get_order(
             "provider_name": l.try_get::<Option<String>, _>("provider_name").unwrap_or_default(),
             "doctor_id": l.try_get::<Option<Uuid>, _>("doctor_id").unwrap_or_default(),
             "doctor_name": l.try_get::<Option<String>, _>("doctor_name").unwrap_or_default(),
+            "source_interpreter_report_id": l.try_get::<Option<Uuid>, _>("source_interpreter_report_id").unwrap_or_default(),
+            "source_medical_appointment_id": l.try_get::<Option<Uuid>, _>("source_medical_appointment_id").unwrap_or_default(),
+            "agency_service_id": l.try_get::<Option<Uuid>, _>("agency_service_id").unwrap_or_default(),
+            "agency_service_key": l.try_get::<Option<String>, _>("agency_service_key").unwrap_or_default(),
+            "agency_service_name": l.try_get::<Option<String>, _>("agency_service_name").unwrap_or_default(),
+            "external_document_id": l.try_get::<Option<Uuid>, _>("external_document_id").unwrap_or_default(),
+            "external_document_auto_name": l.try_get::<Option<String>, _>("external_document_auto_name").unwrap_or_default(),
+            "external_document_filename": l.try_get::<Option<String>, _>("external_document_filename").unwrap_or_default(),
+        }));
+    }
+
+    let external_invoice_rows = sqlx::query(
+        r#"SELECT ei.id, ei.provider_id, ei.external_invoice_number, ei.invoice_date,
+                  ei.due_date, ei.amount_net, ei.amount_vat, ei.amount_gross, ei.currency,
+                  ei.status, ei.received_at, ei.paid_at, ei.notes, ei.created_at, ei.updated_at,
+                  pr.name AS provider_name
+           FROM external_invoices ei
+           LEFT JOIN providers pr ON pr.id = ei.provider_id
+           WHERE ei.order_id = $1
+           ORDER BY ei.created_at DESC"#,
+    )
+    .bind(order_id)
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
+
+    let mut external_invoices_json = Vec::new();
+    for row in external_invoice_rows {
+        external_invoices_json.push(serde_json::json!({
+            "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+            "provider_id": row.try_get::<Option<Uuid>, _>("provider_id").unwrap_or_default(),
+            "provider_name": row.try_get::<Option<String>, _>("provider_name").unwrap_or_default(),
+            "external_invoice_number": row.try_get::<String, _>("external_invoice_number").unwrap_or_default(),
+            "invoice_date": row.try_get::<Option<chrono::NaiveDate>, _>("invoice_date").unwrap_or_default().map(|value| value.to_string()),
+            "due_date": row.try_get::<Option<chrono::NaiveDate>, _>("due_date").unwrap_or_default().map(|value| value.to_string()),
+            "amount_net": row.try_get::<rust_decimal::Decimal, _>("amount_net").unwrap_or(rust_decimal::Decimal::ZERO),
+            "amount_vat": row.try_get::<rust_decimal::Decimal, _>("amount_vat").unwrap_or(rust_decimal::Decimal::ZERO),
+            "amount_gross": row.try_get::<rust_decimal::Decimal, _>("amount_gross").unwrap_or(rust_decimal::Decimal::ZERO),
+            "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
+            "status": row.try_get::<String, _>("status").unwrap_or_default(),
+            "received_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("received_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+            "paid_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("paid_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+            "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
+            "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").unwrap_or_else(|_| chrono::Utc::now()).to_rfc3339(),
+            "updated_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").unwrap_or_else(|_| chrono::Utc::now()).to_rfc3339(),
         }));
     }
 
@@ -2037,6 +2157,7 @@ async fn get_order(
         "signed_patient": order.signed_patient, "signed_agency": order.signed_agency,
         "total_estimated": order.total_estimated, "total_actual": order.total_actual,
         "leistungen": leist_json,
+        "external_invoices": external_invoices_json,
         "process_gates": process_gates,
         "planning_preparation": planning_preparation,
         "execution_flow": execution_flow,
@@ -3108,6 +3229,349 @@ async fn list_my_followup_milestones(
     Json(items).into_response()
 }
 
+async fn list_external_invoices(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(order_id): Path<Uuid>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Billing]) {
+        return e;
+    }
+    match can_access_order(&state, &auth, order_id, None).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(resp) => return resp,
+    }
+
+    match sqlx::query(
+        r#"SELECT ei.id, ei.provider_id, ei.external_invoice_number, ei.invoice_date,
+                  ei.due_date, ei.amount_net, ei.amount_vat, ei.amount_gross, ei.currency,
+                  ei.status, ei.received_at, ei.paid_at, ei.notes, ei.created_at, ei.updated_at,
+                  pr.name AS provider_name
+           FROM external_invoices ei
+           LEFT JOIN providers pr ON pr.id = ei.provider_id
+           WHERE ei.order_id = $1
+           ORDER BY ei.created_at DESC"#,
+    )
+    .bind(order_id)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => {
+            let mut items = Vec::with_capacity(rows.len());
+            for row in rows {
+                items.push(serde_json::json!({
+                    "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                    "provider_id": row.try_get::<Option<Uuid>, _>("provider_id").unwrap_or_default(),
+                    "provider_name": row.try_get::<Option<String>, _>("provider_name").unwrap_or_default(),
+                    "external_invoice_number": row.try_get::<String, _>("external_invoice_number").unwrap_or_default(),
+                    "invoice_date": row.try_get::<Option<chrono::NaiveDate>, _>("invoice_date").unwrap_or_default().map(|value| value.to_string()),
+                    "due_date": row.try_get::<Option<chrono::NaiveDate>, _>("due_date").unwrap_or_default().map(|value| value.to_string()),
+                    "amount_net": row.try_get::<rust_decimal::Decimal, _>("amount_net").unwrap_or(rust_decimal::Decimal::ZERO),
+                    "amount_vat": row.try_get::<rust_decimal::Decimal, _>("amount_vat").unwrap_or(rust_decimal::Decimal::ZERO),
+                    "amount_gross": row.try_get::<rust_decimal::Decimal, _>("amount_gross").unwrap_or(rust_decimal::Decimal::ZERO),
+                    "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
+                    "status": row.try_get::<String, _>("status").unwrap_or_default(),
+                    "received_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("received_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+                    "paid_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("paid_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+                    "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
+                    "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").unwrap_or_else(|_| chrono::Utc::now()).to_rfc3339(),
+                    "updated_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").unwrap_or_else(|_| chrono::Utc::now()).to_rfc3339(),
+                }));
+            }
+            Json(items).into_response()
+        }
+        Err(error) => {
+            tracing::error!(error = %error, order_id = %order_id, "list external invoices");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load external invoices",
+            )
+        }
+    }
+}
+
+async fn create_external_invoice(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(order_id): Path<Uuid>,
+    Json(body): Json<CreateExternalInvoiceRequest>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Billing]) {
+        return e;
+    }
+    match can_access_order(&state, &auth, order_id, None).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(resp) => return resp,
+    }
+
+    let external_invoice_number = body.external_invoice_number.trim();
+    if external_invoice_number.is_empty() {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "External invoice number is required",
+        );
+    }
+    let status = body.status.as_deref().unwrap_or("expected");
+    if !is_valid_external_invoice_status(status) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid external invoice status",
+        );
+    }
+    if let Err(resp) = validate_provider_doctor_context(&state, body.provider_id, None).await {
+        return resp;
+    }
+    let invoice_date = match parse_optional_order_date(body.invoice_date.as_deref()) {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let due_date = match parse_optional_order_date(body.due_date.as_deref()) {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let amount_net =
+        rust_decimal::Decimal::try_from(body.amount_net.unwrap_or(0.0)).unwrap_or_default();
+    let amount_vat =
+        rust_decimal::Decimal::try_from(body.amount_vat.unwrap_or(0.0)).unwrap_or_default();
+    let amount_gross =
+        rust_decimal::Decimal::try_from(body.amount_gross).unwrap_or(rust_decimal::Decimal::ZERO);
+    let currency = body
+        .currency
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("EUR")
+        .to_uppercase();
+    let notes = body
+        .notes
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+
+    let patient_id: Uuid = match sqlx::query_scalar("SELECT patient_id FROM orders WHERE id = $1")
+        .bind(order_id)
+        .fetch_optional(&state.db)
+        .await
+    {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Order not found"),
+        Err(error) => {
+            tracing::error!(error = %error, order_id = %order_id, "load order patient");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create external invoice",
+            );
+        }
+    };
+
+    match sqlx::query(
+        r#"INSERT INTO external_invoices (
+                order_id, patient_id, provider_id, external_invoice_number, invoice_date,
+                due_date, amount_net, amount_vat, amount_gross, currency, status, notes,
+                received_at, paid_at, created_by
+           ) VALUES (
+                $1, $2, $3, $4, $5,
+                $6, $7, $8, $9, $10, $11, $12,
+                CASE WHEN $11 IN ('received', 'approved', 'paid', 'overdue') THEN now() ELSE NULL END,
+                CASE WHEN $11 = 'paid' THEN now() ELSE NULL END,
+                $13
+           )
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .bind(body.provider_id)
+    .bind(external_invoice_number)
+    .bind(invoice_date)
+    .bind(due_date)
+    .bind(amount_net)
+    .bind(amount_vat)
+    .bind(amount_gross)
+    .bind(currency)
+    .bind(status)
+    .bind(notes)
+    .bind(auth.user_id)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(row) => {
+            let id: Uuid = row.try_get("id").unwrap_or_default();
+            if let Err(error) =
+                crate::routes::invoices::sync_external_invoice_accounting_entries_from_current_state(
+                    &state,
+                    id,
+                    Some(auth.user_id),
+                )
+                .await
+            {
+                tracing::error!(error = %error, order_id = %order_id, external_invoice_id = %id, "sync external invoice accounting entries on create");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to create external invoice accounting ledger",
+                );
+            }
+            state.audit_sender.try_send(audit::domain_event(
+                "create_external_invoice".to_string(),
+                Some(auth.user_id),
+                "order",
+                Some(order_id),
+                serde_json::json!({
+                    "external_invoice_id": id,
+                    "external_invoice_number": external_invoice_number,
+                    "status": status,
+                    "amount_gross": amount_gross.to_string(),
+                }),
+            ));
+            (StatusCode::CREATED, Json(serde_json::json!({ "id": id }))).into_response()
+        }
+        Err(error) => {
+            tracing::error!(error = %error, order_id = %order_id, "create external invoice");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create external invoice",
+            )
+        }
+    }
+}
+
+async fn update_external_invoice(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((order_id, external_invoice_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<UpdateExternalInvoiceRequest>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Billing]) {
+        return e;
+    }
+    match can_access_order(&state, &auth, order_id, None).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(resp) => return resp,
+    }
+
+    let status = body
+        .status
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if let Some(value) = status
+        && !is_valid_external_invoice_status(value)
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid external invoice status",
+        );
+    }
+    if let Err(resp) = validate_provider_doctor_context(&state, body.provider_id, None).await {
+        return resp;
+    }
+    let invoice_date = match parse_optional_order_date(body.invoice_date.as_deref()) {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let due_date = match parse_optional_order_date(body.due_date.as_deref()) {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let amount_net = body
+        .amount_net
+        .map(|value| rust_decimal::Decimal::try_from(value).unwrap_or_default());
+    let amount_vat = body
+        .amount_vat
+        .map(|value| rust_decimal::Decimal::try_from(value).unwrap_or_default());
+    let amount_gross = body
+        .amount_gross
+        .map(|value| rust_decimal::Decimal::try_from(value).unwrap_or_default());
+    let currency = body
+        .currency
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_uppercase());
+    let notes = body.notes.as_deref().map(str::trim).map(str::to_string);
+
+    match sqlx::query(
+        r#"UPDATE external_invoices
+           SET provider_id = COALESCE($3, provider_id),
+               invoice_date = COALESCE($4, invoice_date),
+               due_date = COALESCE($5, due_date),
+               amount_net = COALESCE($6, amount_net),
+               amount_vat = COALESCE($7, amount_vat),
+               amount_gross = COALESCE($8, amount_gross),
+               currency = COALESCE($9, currency),
+               status = COALESCE($10, status),
+               notes = CASE
+                   WHEN $11 IS NULL THEN notes
+                   ELSE NULLIF($11, '')
+               END,
+               received_at = CASE
+                   WHEN COALESCE($10, status) IN ('received', 'approved', 'paid', 'overdue')
+                        AND received_at IS NULL THEN now()
+                   ELSE received_at
+               END,
+               paid_at = CASE
+                   WHEN COALESCE($10, status) = 'paid' AND paid_at IS NULL THEN now()
+                   WHEN COALESCE($10, status) <> 'paid' THEN NULL
+                   ELSE paid_at
+               END
+           WHERE id = $1
+             AND order_id = $2
+           RETURNING id"#,
+    )
+    .bind(external_invoice_id)
+    .bind(order_id)
+    .bind(body.provider_id)
+    .bind(invoice_date)
+    .bind(due_date)
+    .bind(amount_net)
+    .bind(amount_vat)
+    .bind(amount_gross)
+    .bind(currency)
+    .bind(status)
+    .bind(notes)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(_)) => {
+            if let Err(error) =
+                crate::routes::invoices::sync_external_invoice_accounting_entries_from_current_state(
+                    &state,
+                    external_invoice_id,
+                    Some(auth.user_id),
+                )
+                .await
+            {
+                tracing::error!(error = %error, order_id = %order_id, external_invoice_id = %external_invoice_id, "sync external invoice accounting entries on update");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to update external invoice accounting ledger",
+                );
+            }
+            state.audit_sender.try_send(audit::domain_event(
+                "update_external_invoice".to_string(),
+                Some(auth.user_id),
+                "order",
+                Some(order_id),
+                serde_json::json!({
+                    "external_invoice_id": external_invoice_id,
+                    "status": status,
+                }),
+            ));
+            Json(serde_json::json!({ "ok": true })).into_response()
+        }
+        Ok(None) => err(StatusCode::NOT_FOUND, "External invoice not found"),
+        Err(error) => {
+            tracing::error!(error = %error, order_id = %order_id, external_invoice_id = %external_invoice_id, "update external invoice");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update external invoice",
+            )
+        }
+    }
+}
+
 async fn list_leistungen(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -3125,10 +3589,17 @@ async fn list_leistungen(
     match sqlx::query(
         r#"SELECT ol.id, ol.description, ol.quantity, ol.unit_price, ol.currency, ol.vat_rate,
                   ol.is_cost_passthrough, ol.status, ol.notes, ol.provider_id, ol.doctor_id,
-                  pr.name AS provider_name, d.name AS doctor_name
+                  ol.source_interpreter_report_id, ol.source_medical_appointment_id,
+                  ol.agency_service_id, ol.external_document_id,
+                  pr.name AS provider_name, d.name AS doctor_name,
+                  catalog.service_key AS agency_service_key, catalog.service_name AS agency_service_name,
+                  doc.auto_name AS external_document_auto_name,
+                  doc.original_filename AS external_document_filename
            FROM order_leistungen ol
            LEFT JOIN providers pr ON pr.id = ol.provider_id
            LEFT JOIN provider_doctors d ON d.id = ol.doctor_id
+           LEFT JOIN agency_service_catalog catalog ON catalog.id = ol.agency_service_id
+           LEFT JOIN documents doc ON doc.id = ol.external_document_id
            WHERE ol.order_id = $1
            ORDER BY ol.created_at"#,
     )
@@ -3153,6 +3624,14 @@ async fn list_leistungen(
                     "provider_name": r.try_get::<Option<String>, _>("provider_name").unwrap_or_default(),
                     "doctor_id": r.try_get::<Option<Uuid>, _>("doctor_id").unwrap_or_default(),
                     "doctor_name": r.try_get::<Option<String>, _>("doctor_name").unwrap_or_default(),
+                    "source_interpreter_report_id": r.try_get::<Option<Uuid>, _>("source_interpreter_report_id").unwrap_or_default(),
+                    "source_medical_appointment_id": r.try_get::<Option<Uuid>, _>("source_medical_appointment_id").unwrap_or_default(),
+                    "agency_service_id": r.try_get::<Option<Uuid>, _>("agency_service_id").unwrap_or_default(),
+                    "agency_service_key": r.try_get::<Option<String>, _>("agency_service_key").unwrap_or_default(),
+                    "agency_service_name": r.try_get::<Option<String>, _>("agency_service_name").unwrap_or_default(),
+                    "external_document_id": r.try_get::<Option<Uuid>, _>("external_document_id").unwrap_or_default(),
+                    "external_document_auto_name": r.try_get::<Option<String>, _>("external_document_auto_name").unwrap_or_default(),
+                    "external_document_filename": r.try_get::<Option<String>, _>("external_document_filename").unwrap_or_default(),
                 }));
             }
             Json(items).into_response()
@@ -3190,10 +3669,21 @@ async fn add_leistung(
     {
         return resp;
     }
+    let external_document_id = match resolve_external_document_id_for_leistung(
+        &state,
+        order_id,
+        passthrough,
+        body.external_document_id,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
 
     match sqlx::query(
-        "INSERT INTO order_leistungen (order_id, description, quantity, unit_price, vat_rate, is_cost_passthrough, provider_id, doctor_id, notes)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        "INSERT INTO order_leistungen (order_id, description, quantity, unit_price, vat_rate, is_cost_passthrough, provider_id, doctor_id, external_document_id, notes)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          RETURNING id",
     )
     .bind(order_id)
@@ -3204,6 +3694,7 @@ async fn add_leistung(
     .bind(passthrough)
     .bind(body.provider_id)
     .bind(body.doctor_id)
+    .bind(external_document_id)
     .bind(body.notes)
     .fetch_one(&state.db)
     .await
@@ -3300,6 +3791,243 @@ async fn validate_provider_doctor_context(
         }
         (None, None) => Ok(()),
     }
+}
+
+async fn resolve_external_document_id_for_leistung(
+    state: &AppState,
+    order_id: Uuid,
+    is_cost_passthrough: bool,
+    requested_document_id: Option<Uuid>,
+) -> Result<Option<Uuid>, axum::response::Response> {
+    if let Some(document_id) = requested_document_id {
+        let exists = sqlx::query_scalar::<_, bool>(
+            r#"SELECT EXISTS(
+                    SELECT 1
+                    FROM documents
+                    WHERE id = $1
+                      AND order_id = $2
+                      AND status <> 'archived'
+                      AND file_deleted_at IS NULL
+               )"#,
+        )
+        .bind(document_id)
+        .bind(order_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|error| {
+            tracing::error!(error = %error, order_id = %order_id, document_id = %document_id, "validate order supporting document");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate supporting document",
+            )
+        })?;
+
+        if !exists {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Supporting document must belong to the same order and stay active",
+            ));
+        }
+
+        return Ok(Some(document_id));
+    }
+
+    if !is_cost_passthrough {
+        return Ok(None);
+    }
+
+    let candidates = sqlx::query_scalar::<_, Uuid>(
+        r#"SELECT d.id
+           FROM documents d
+           WHERE d.order_id = $1
+             AND d.status <> 'archived'
+             AND d.file_deleted_at IS NULL
+             AND (
+                    lower(COALESCE(d.art, '')) IN ('receipt', 'payment_proof', 'invoice')
+                 OR lower(COALESCE(d.category, '')) IN ('receipt', 'payment', 'invoice')
+                 OR lower(COALESCE(d.auto_name, '')) LIKE ANY($2)
+                 OR lower(COALESCE(d.original_filename, '')) LIKE ANY($2)
+             )
+           ORDER BY d.created_at DESC
+           LIMIT 2"#,
+    )
+    .bind(order_id)
+    .bind(vec![
+        "%receipt%".to_string(),
+        "%payment proof%".to_string(),
+        "%invoice%".to_string(),
+        "%beleg%".to_string(),
+        "%rechnung%".to_string(),
+        "%quittung%".to_string(),
+    ])
+    .fetch_all(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, order_id = %order_id, "load supporting document candidates");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to resolve supporting document",
+        )
+    })?;
+
+    if candidates.len() == 1 {
+        Ok(candidates.into_iter().next())
+    } else {
+        Ok(None)
+    }
+}
+
+async fn resolve_external_invoice_notification_recipients(
+    state: &AppState,
+) -> Result<Vec<Uuid>, sqlx::Error> {
+    let billing_users = sqlx::query_scalar(
+        r#"SELECT id
+           FROM users
+           WHERE is_active = true
+             AND role = 'billing'
+           ORDER BY created_at"#,
+    )
+    .fetch_all(&state.db)
+    .await?;
+
+    if !billing_users.is_empty() {
+        return Ok(billing_users);
+    }
+
+    let fallback = sqlx::query_scalar(
+        r#"SELECT id
+           FROM users
+           WHERE is_active = true
+             AND role IN ('ceo', 'ceo_assistant')
+           ORDER BY CASE role
+               WHEN 'ceo' THEN 0
+               ELSE 1
+           END,
+           created_at
+           LIMIT 1"#,
+    )
+    .fetch_optional(&state.db)
+    .await?;
+
+    Ok(fallback.into_iter().collect())
+}
+
+pub async fn run_external_invoice_deadline_scheduler_once(
+    state: &AppState,
+) -> Result<ExternalInvoiceDeadlineRunSummary, sqlx::Error> {
+    let today = chrono::Utc::now().date_naive();
+    let mut summary = ExternalInvoiceDeadlineRunSummary::default();
+    let recipients = resolve_external_invoice_notification_recipients(state).await?;
+
+    let candidates = sqlx::query(
+        r#"SELECT ei.id, ei.order_id, ei.patient_id, ei.external_invoice_number, ei.due_date,
+                  ei.amount_gross, ei.currency, o.order_number
+           FROM external_invoices ei
+           JOIN orders o ON o.id = ei.order_id
+           WHERE ei.due_date IS NOT NULL
+             AND ei.due_date < $1
+             AND ei.status NOT IN ('paid', 'cancelled', 'overdue')
+           ORDER BY ei.due_date, ei.created_at"#,
+    )
+    .bind(today)
+    .fetch_all(&state.db)
+    .await?;
+
+    for row in candidates {
+        let external_invoice_id: Uuid = row.try_get("id").unwrap_or_default();
+        let order_id: Uuid = row.try_get("order_id").unwrap_or_default();
+        let patient_id: Uuid = row.try_get("patient_id").unwrap_or_default();
+        let external_invoice_number: String =
+            row.try_get("external_invoice_number").unwrap_or_default();
+        let due_date: chrono::NaiveDate = row.try_get("due_date").unwrap_or(today);
+        let amount_gross: rust_decimal::Decimal = row
+            .try_get("amount_gross")
+            .unwrap_or(rust_decimal::Decimal::ZERO);
+        let currency: String = row
+            .try_get("currency")
+            .unwrap_or_else(|_| "EUR".to_string());
+        let order_number: String = row.try_get("order_number").unwrap_or_default();
+
+        let result = sqlx::query(
+            r#"UPDATE external_invoices
+               SET status = 'overdue'
+               WHERE id = $1
+                 AND status NOT IN ('paid', 'cancelled', 'overdue')"#,
+        )
+        .bind(external_invoice_id)
+        .execute(&state.db)
+        .await?;
+
+        if result.rows_affected() == 0 {
+            continue;
+        }
+
+        summary.overdue_marked += result.rows_affected();
+
+        for recipient_id in &recipients {
+            sqlx::query(
+                r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
+                   VALUES ($1, $2, $3, $4, 'order', $5)"#,
+            )
+            .bind(recipient_id)
+            .bind("external_invoice_overdue")
+            .bind(format!("External invoice overdue for {order_number}"))
+            .bind(format!(
+                "External invoice {} became overdue on {} ({} {}).",
+                external_invoice_number,
+                due_date,
+                amount_gross,
+                currency
+            ))
+            .bind(order_id)
+            .execute(&state.db)
+            .await?;
+            summary.notifications_created += 1;
+        }
+
+        state.audit_sender.try_send(audit::domain_event(
+            "auto_mark_external_invoice_overdue".to_string(),
+            None,
+            "order",
+            Some(order_id),
+            serde_json::json!({
+                "external_invoice_id": external_invoice_id,
+                "external_invoice_number": external_invoice_number,
+                "patient_id": patient_id,
+                "due_date": due_date.to_string(),
+            }),
+        ));
+    }
+
+    Ok(summary)
+}
+
+pub fn spawn_external_invoice_deadline_scheduler(state: AppState) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(
+            EXTERNAL_INVOICE_CHECK_INTERVAL_SECS,
+        ));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        interval.tick().await;
+
+        loop {
+            interval.tick().await;
+            match run_external_invoice_deadline_scheduler_once(&state).await {
+                Ok(summary) => {
+                    if summary.overdue_marked > 0 || summary.notifications_created > 0 {
+                        tracing::info!(
+                            overdue_marked = summary.overdue_marked,
+                            notifications_created = summary.notifications_created,
+                            "External invoice deadline scheduler applied updates"
+                        );
+                    }
+                }
+                Err(error) => {
+                    tracing::error!(error = %error, "External invoice deadline scheduler failed");
+                }
+            }
+        }
+    });
 }
 
 fn err(status: StatusCode, message: &str) -> axum::response::Response {
