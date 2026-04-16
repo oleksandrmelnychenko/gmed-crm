@@ -74,14 +74,9 @@ async fn seed_full_smoke(state: &AppState) -> Result<serde_json::Value, String> 
     let sales = create_user(state, &tag, "sales", "Sales", "sales").await?;
     let concierge = create_user(state, &tag, "concierge", "Concierge", "concierge").await?;
     let it_admin = create_user(state, &tag, "it_admin", "IT Admin", "itadmin").await?;
-    let teamlead = create_user(
-        state,
-        &tag,
-        "teamlead_interpreter",
-        "Teamlead Interpreter",
-        "teamlead",
-    )
-    .await?;
+    let teamlead =
+        create_user(state, &tag, "teamlead_interpreter", "Teamlead Interpreter", "teamlead")
+            .await?;
     let interpreter = create_user(state, &tag, "interpreter", "Interpreter", "interpreter").await?;
     let patient_user = create_user(state, &tag, "patient", "Portal Patient", "patient").await?;
     let mfa_staff =

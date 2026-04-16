@@ -3,6 +3,7 @@ import { CalendarClock, LoaderCircle, RefreshCw, Send, Stethoscope } from "lucid
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import {
@@ -450,7 +451,7 @@ export function PatientAppointmentsPage() {
             </Field>
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label={l("Bevorzugt ab", "Предпочтительно с", "Preferred from")}>
-                <input
+                <Input
                   type="date"
                   value={requestForm.preferredDateFrom}
                   onChange={(event) => setRequestForm((current) => ({ ...current, preferredDateFrom: event.target.value }))}
@@ -458,7 +459,7 @@ export function PatientAppointmentsPage() {
                 />
               </Field>
               <Field label={l("Bevorzugt bis", "Предпочтительно до", "Preferred to")}>
-                <input
+                <Input
                   type="date"
                   value={requestForm.preferredDateTo}
                   onChange={(event) => setRequestForm((current) => ({ ...current, preferredDateTo: event.target.value }))}

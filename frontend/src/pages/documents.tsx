@@ -2668,316 +2668,304 @@ function StaffDocumentsPage() {
       </section>
 
       <Dialog open={templateOpen} onOpenChange={setTemplateOpen}>
-        <DialogContent className="flex max-h-[calc(100vh-2rem)] max-w-4xl flex-col overflow-hidden rounded-[1.75rem] p-0">
+        <DialogContent className="max-w-4xl rounded-[1.75rem] p-0">
           <DialogHeader className="border-b border-border/70 px-6 pt-6 pb-4">
             <DialogTitle>{t.documents_generate_title}</DialogTitle>
             <DialogDescription>{t.documents_generate_description}</DialogDescription>
           </DialogHeader>
-          <form onSubmit={handleGenerateDocument} className="flex min-h-0 flex-1 flex-col">
-            <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5">
-              {generateError ? (
-                <Banner tone="error">{generateError}</Banner>
-              ) : null}
-              {selectedTemplate ? (
-                <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-4 text-sm text-sky-900">
-                  <p className="font-semibold">{selectedTemplate.label}</p>
-                  <p className="mt-1 text-sky-800/80">
-                    {selectedTemplate.description}
-                  </p>
-                </div>
-              ) : null}
-              {generateForm.replaceDocumentId && detail?.id === generateForm.replaceDocumentId ? (
-                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900">
-                  {t.documents_generate_replace_warning}{" "}
-                  {detail.version_number}.
-                </div>
-              ) : null}
-              <div className="grid gap-4 md:grid-cols-2">
-                <Field label={t.documents_category} required>
-                  <select
-                    value={generateForm.templateId}
-                    onChange={(event) =>
-                      applyGenerateTemplate(event.target.value)
-                    }
-                    className={selectClassName}
-                  >
-                    <option value="">{t.documents_select_template}</option>
-                    {templates.map((template) => (
-                      <option key={template.id} value={template.id}>
-                        {template.provider_name
-                          ? `${template.label} · ${template.provider_name}`
-                          : template.label}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label={t.patients_languages} required>
-                  <select
-                    value={generateForm.language}
-                    onChange={(event) =>
-                      setGenerateForm((current) => ({
-                        ...current,
-                        language: event.target.value,
-                      }))
-                    }
-                    className={selectClassName}
-                    disabled={!selectedTemplate}
-                  >
-                    {(selectedTemplate?.supported_languages ?? ["de"]).map(
-                      (language) => (
-                        <option key={language} value={language}>
-                          {formatLanguageLabel(language)}
-                        </option>
-                      ),
-                    )}
-                  </select>
-                </Field>
-                <Field label={t.documents_filename}>
-                  <Input
-                    value={generateForm.autoName}
-                    onChange={(event) =>
-                      setGenerateForm((current) => ({
-                        ...current,
-                        autoName: event.target.value,
-                      }))
-                    }
-                    className="h-10 rounded-xl border-slate-200 bg-slate-50"
-                  />
-                </Field>
-                <Field label={t.orders_patient} required>
-                  <select
-                    value={generateForm.patientId}
-                    onChange={(event) => {
-                      const patientId = event.target.value;
-                      setGenerateForm((current) => ({
-                        ...current,
-                        patientId,
-                        orderId: "",
-                        appointmentId: "",
-                        replaceDocumentId: "",
-                        language: resolveTemplateLanguage(
-                          patientId,
-                          selectedTemplate,
-                          patients,
-                        ),
-                      }));
-                    }}
-                    className={selectClassName}
-                  >
-                    <option value="">{t.documents_select_patient}</option>
-                    {patients.map((patient) => (
-                      <option key={patient.id} value={patient.id}>
-                        {patientOptionLabel(patient)}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label={t.orders_title}>
-                  <select
-                    value={generateForm.orderId}
-                    onChange={(event) =>
-                      setGenerateForm((current) => ({
-                        ...current,
-                        orderId: event.target.value,
-                      }))
-                    }
-                    className={selectClassName}
-                    disabled={!generateForm.patientId}
-                  >
-                    <option value="">{t.documents_patient_wide_context}</option>
-                    {generateOrders.map((order) => (
-                      <option key={order.id} value={order.id}>
-                        {order.order_number} · {order.patient_pid}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label={t.appointments_title}>
-                  <select
-                    value={generateForm.appointmentId}
-                    onChange={(event) =>
-                      setGenerateForm((current) => ({
-                        ...current,
-                        appointmentId: event.target.value,
-                      }))
-                    }
-                    className={selectClassName}
-                    disabled={!generateForm.patientId}
-                  >
-                    <option value="">{t.documents_all_appointments_scope}</option>
-                    {generateAppointments.map((appointment) => (
-                      <option key={appointment.id} value={appointment.id}>
-                        {appointment.title} · {formatDate(appointment.date)}
-                        {appointment.time_start
-                          ? ` · ${appointment.time_start}`
-                          : ""}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label={t.users_status}>
-                  <select
-                    value={generateForm.status}
-                    onChange={(event) =>
-                      setGenerateForm((current) => ({
-                        ...current,
-                        status: event.target.value as DocumentStatus,
-                      }))
-                    }
-                    className={selectClassName}
-                  >
-                    {STATUS_OPTIONS.map((status) => (
-                      <option key={status} value={status}>
-                        {formatDocumentStatusLabel(status, t)}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label={t.users_status}>
-                  <select
-                    value={generateForm.visibility}
-                    onChange={(event) =>
-                      setGenerateForm((current) => ({
-                        ...current,
-                        visibility: event.target.value as DocumentVisibility,
-                      }))
-                    }
-                    className={selectClassName}
-                  >
-                    {VISIBILITY_OPTIONS.map((value) => (
-                      <option key={value} value={value}>
-                        {formatVisibilityLabel(value, t)}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label={t.documents_filename}>
-                  <Input
-                    value={generateForm.titleOverride}
-                    onChange={(event) =>
-                      setGenerateForm((current) => ({
-                        ...current,
-                        titleOverride: event.target.value,
-                      }))
-                    }
-                    className="h-10 rounded-xl border-slate-200 bg-slate-50"
-                    placeholder={t.patients_notes}
-                  />
-                </Field>
-                <Field label={t.common_provider}>
-                  <Input
-                    value={generateForm.klinik}
-                    onChange={(event) =>
-                      setGenerateForm((current) => ({
-                        ...current,
-                        klinik: event.target.value,
-                      }))
-                    }
-                    className="h-10 rounded-xl border-slate-200 bg-slate-50"
-                    placeholder={t.common_provider}
-                  />
-                </Field>
-                <Field label={t.documents_source}>
-                  <Input
-                    value={generateForm.ursprung}
-                    onChange={(event) =>
-                      setGenerateForm((current) => ({
-                        ...current,
-                        ursprung: event.target.value,
-                      }))
-                    }
-                    className="h-10 rounded-xl border-slate-200 bg-slate-50"
-                    placeholder={t.documents_default_template_source.replace(
-                      "{id}",
-                      selectedTemplate?.id ?? "{id}",
-                    )}
-                  />
-                </Field>
+          <form
+            onSubmit={handleGenerateDocument}
+            className="space-y-5 px-6 py-5"
+          >
+            {generateError ? (
+              <Banner tone="error">{generateError}</Banner>
+            ) : null}
+            {selectedTemplate ? (
+              <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-4 text-sm text-sky-900">
+                <p className="font-semibold">{selectedTemplate.label}</p>
+                <p className="mt-1 text-sky-800/80">
+                  {selectedTemplate.description}
+                </p>
               </div>
-              {availableTemplateBlocks.length > 0 ? (
-                <div className="space-y-3 rounded-[1.6rem] border border-slate-200 bg-slate-50/80 p-4">
-                  <div>
-                    <p className="text-sm font-semibold text-slate-950">
-                      {t.documents_text_blocks}
-                    </p>
-                    <p className="mt-1 text-xs text-slate-500">
-                      {t.documents_text_blocks_hint}
-                    </p>
-                  </div>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    {availableTemplateBlocks.map((block) => {
-                      const checked = generateForm.textBlockKeys.includes(
-                        block.key,
-                      );
-                      return (
-                        <label
-                          key={block.key}
-                          className="flex gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={(event) =>
-                              setGenerateForm((current) => ({
-                                ...current,
-                                textBlockKeys: event.target.checked
-                                  ? [...current.textBlockKeys, block.key]
-                                  : current.textBlockKeys.filter(
-                                      (item) => item !== block.key,
-                                    ),
-                              }))
-                            }
-                            className="mt-0.5 size-4 rounded border-slate-300"
-                          />
-                          <span>
-                            <span className="block font-medium text-slate-900">
-                              {block.label}
-                            </span>
-                            <span className="mt-1 block text-xs text-slate-500">
-                              {block.description}
-                            </span>
-                          </span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
-              ) : null}
-              <div className="grid gap-4 md:grid-cols-2">
-                <Field label={t.patients_notes}>
-                  <textarea
-                    value={generateForm.introduction}
-                    onChange={(event) =>
-                      setGenerateForm((current) => ({
-                        ...current,
-                        introduction: event.target.value,
-                      }))
-                    }
-                    className={textareaClassName}
-                    placeholder={t.patients_notes}
-                  />
-                </Field>
-                <Field label={t.patients_notes}>
-                  <textarea
-                    value={generateForm.closingNote}
-                    onChange={(event) =>
-                      setGenerateForm((current) => ({
-                        ...current,
-                        closingNote: event.target.value,
-                      }))
-                    }
-                    className={textareaClassName}
-                    placeholder={t.patients_notes}
-                  />
-                </Field>
+            ) : null}
+            {generateForm.replaceDocumentId && detail?.id === generateForm.replaceDocumentId ? (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900">
+                {t.documents_generate_replace_warning}{" "}
+                {detail.version_number}.
               </div>
-              <Field label={t.patients_notes}>
-                <textarea
-                  value={generateForm.notes}
+            ) : null}
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field label={t.documents_category} required>
+                <select
+                  value={generateForm.templateId}
+                  onChange={(event) =>
+                    applyGenerateTemplate(event.target.value)
+                  }
+                  className={selectClassName}
+                >
+                  <option value="">{t.documents_select_template}</option>
+                  {templates.map((template) => (
+                    <option key={template.id} value={template.id}>
+                      {template.provider_name
+                        ? `${template.label} · ${template.provider_name}`
+                        : template.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label={t.patients_languages} required>
+                <select
+                  value={generateForm.language}
                   onChange={(event) =>
                     setGenerateForm((current) => ({
                       ...current,
-                      notes: event.target.value,
+                      language: event.target.value,
+                    }))
+                  }
+                  className={selectClassName}
+                  disabled={!selectedTemplate}
+                >
+                  {(selectedTemplate?.supported_languages ?? ["de"]).map(
+                    (language) => (
+                      <option key={language} value={language}>
+                        {formatLanguageLabel(language)}
+                      </option>
+                    ),
+                  )}
+                </select>
+              </Field>
+              <Field label={t.documents_filename}>
+                <Input
+                  value={generateForm.autoName}
+                  onChange={(event) =>
+                    setGenerateForm((current) => ({
+                      ...current,
+                      autoName: event.target.value,
+                    }))
+                  }
+                  className="h-10 rounded-xl border-slate-200 bg-slate-50"
+                />
+              </Field>
+              <Field label={t.orders_patient} required>
+                <select
+                  value={generateForm.patientId}
+                  onChange={(event) => {
+                    const patientId = event.target.value;
+                    setGenerateForm((current) => ({
+                      ...current,
+                      patientId,
+                      orderId: "",
+                      appointmentId: "",
+                      replaceDocumentId: "",
+                      language: resolveTemplateLanguage(
+                        patientId,
+                        selectedTemplate,
+                        patients,
+                      ),
+                    }));
+                  }}
+                  className={selectClassName}
+                >
+                  <option value="">{t.documents_select_patient}</option>
+                  {patients.map((patient) => (
+                    <option key={patient.id} value={patient.id}>
+                      {patientOptionLabel(patient)}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label={t.orders_title}>
+                <select
+                  value={generateForm.orderId}
+                  onChange={(event) =>
+                    setGenerateForm((current) => ({
+                      ...current,
+                      orderId: event.target.value,
+                    }))
+                  }
+                  className={selectClassName}
+                  disabled={!generateForm.patientId}
+                >
+                  <option value="">{t.documents_patient_wide_context}</option>
+                  {generateOrders.map((order) => (
+                    <option key={order.id} value={order.id}>
+                      {order.order_number} · {order.patient_pid}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label={t.appointments_title}>
+                <select
+                  value={generateForm.appointmentId}
+                  onChange={(event) =>
+                    setGenerateForm((current) => ({
+                      ...current,
+                      appointmentId: event.target.value,
+                    }))
+                  }
+                  className={selectClassName}
+                  disabled={!generateForm.patientId}
+                >
+                  <option value="">{t.documents_all_appointments_scope}</option>
+                  {generateAppointments.map((appointment) => (
+                    <option key={appointment.id} value={appointment.id}>
+                      {appointment.title} · {formatDate(appointment.date)}
+                      {appointment.time_start
+                        ? ` · ${appointment.time_start}`
+                        : ""}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label={t.users_status}>
+                <select
+                  value={generateForm.status}
+                  onChange={(event) =>
+                    setGenerateForm((current) => ({
+                      ...current,
+                      status: event.target.value as DocumentStatus,
+                    }))
+                  }
+                  className={selectClassName}
+                >
+                  {STATUS_OPTIONS.map((status) => (
+                    <option key={status} value={status}>
+                      {formatDocumentStatusLabel(status, t)}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label={t.users_status}>
+                <select
+                  value={generateForm.visibility}
+                  onChange={(event) =>
+                    setGenerateForm((current) => ({
+                      ...current,
+                      visibility: event.target.value as DocumentVisibility,
+                    }))
+                  }
+                  className={selectClassName}
+                >
+                  {VISIBILITY_OPTIONS.map((value) => (
+                    <option key={value} value={value}>
+                      {formatVisibilityLabel(value, t)}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label={t.documents_filename}>
+                <Input
+                  value={generateForm.titleOverride}
+                  onChange={(event) =>
+                    setGenerateForm((current) => ({
+                      ...current,
+                      titleOverride: event.target.value,
+                    }))
+                  }
+                  className="h-10 rounded-xl border-slate-200 bg-slate-50"
+                  placeholder={t.patients_notes}
+                />
+              </Field>
+              <Field label={t.common_provider}>
+                <Input
+                  value={generateForm.klinik}
+                  onChange={(event) =>
+                    setGenerateForm((current) => ({
+                      ...current,
+                      klinik: event.target.value,
+                    }))
+                  }
+                  className="h-10 rounded-xl border-slate-200 bg-slate-50"
+                  placeholder={t.common_provider}
+                />
+              </Field>
+              <Field label={t.documents_source}>
+                <Input
+                  value={generateForm.ursprung}
+                  onChange={(event) =>
+                    setGenerateForm((current) => ({
+                      ...current,
+                      ursprung: event.target.value,
+                    }))
+                  }
+                  className="h-10 rounded-xl border-slate-200 bg-slate-50"
+                  placeholder={t.documents_default_template_source.replace(
+                    "{id}",
+                    selectedTemplate?.id ?? "{id}",
+                  )}
+                />
+              </Field>
+            </div>
+            {availableTemplateBlocks.length > 0 ? (
+              <div className="space-y-3 rounded-[1.6rem] border border-slate-200 bg-slate-50/80 p-4">
+                <div>
+                  <p className="text-sm font-semibold text-slate-950">
+                    {t.documents_text_blocks}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {t.documents_text_blocks_hint}
+                  </p>
+                </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  {availableTemplateBlocks.map((block) => {
+                    const checked = generateForm.textBlockKeys.includes(
+                      block.key,
+                    );
+                    return (
+                      <label
+                        key={block.key}
+                        className="flex gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(event) =>
+                            setGenerateForm((current) => ({
+                              ...current,
+                              textBlockKeys: event.target.checked
+                                ? [...current.textBlockKeys, block.key]
+                                : current.textBlockKeys.filter(
+                                    (item) => item !== block.key,
+                                  ),
+                            }))
+                          }
+                          className="mt-0.5 size-4 rounded border-slate-300"
+                        />
+                        <span>
+                          <span className="block font-medium text-slate-900">
+                            {block.label}
+                          </span>
+                          <span className="mt-1 block text-xs text-slate-500">
+                            {block.description}
+                          </span>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field label={t.patients_notes}>
+                <textarea
+                  value={generateForm.introduction}
+                  onChange={(event) =>
+                    setGenerateForm((current) => ({
+                      ...current,
+                      introduction: event.target.value,
+                    }))
+                  }
+                  className={textareaClassName}
+                  placeholder={t.patients_notes}
+                />
+              </Field>
+              <Field label={t.patients_notes}>
+                <textarea
+                  value={generateForm.closingNote}
+                  onChange={(event) =>
+                    setGenerateForm((current) => ({
+                      ...current,
+                      closingNote: event.target.value,
                     }))
                   }
                   className={textareaClassName}
@@ -2985,7 +2973,20 @@ function StaffDocumentsPage() {
                 />
               </Field>
             </div>
-            <div className="flex flex-col-reverse gap-2 border-t border-slate-200 bg-slate-50/80 px-6 py-4 sm:flex-row sm:justify-end">
+            <Field label={t.patients_notes}>
+              <textarea
+                value={generateForm.notes}
+                onChange={(event) =>
+                  setGenerateForm((current) => ({
+                    ...current,
+                    notes: event.target.value,
+                  }))
+                }
+                className={textareaClassName}
+                placeholder={t.patients_notes}
+              />
+            </Field>
+            <DialogFooter className="rounded-b-[1.75rem] border-slate-200 bg-slate-50/80 px-0">
               <Button
                 type="button"
                 variant="outline"
@@ -3008,13 +3009,13 @@ function StaffDocumentsPage() {
                   ? t.documents_generating
                   : t.documents_generate_document}
               </Button>
-            </div>
+            </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
 
       <Dialog open={uploadOpen} onOpenChange={setUploadOpen}>
-        <DialogContent className="max-w-5xl rounded-[1.75rem] p-0">
+        <DialogContent className="max-w-3xl rounded-[1.75rem] p-0">
           <DialogHeader className="border-b border-border/70 px-6 pt-6 pb-4">
             <DialogTitle>{t.documents_upload}</DialogTitle>
             <DialogDescription>
@@ -3030,7 +3031,7 @@ function StaffDocumentsPage() {
                   : t.documents_upload_teamlead_hint}
               </Banner>
             ) : null}
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <div className="grid gap-4 md:grid-cols-2">
               <Field label={t.documents_filename} required>
                 <Input
                   type="file"

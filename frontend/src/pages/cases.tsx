@@ -2274,18 +2274,14 @@ export function CasesPage() {
           <SheetHeader className="border-b border-border/70 px-6 py-5">
             <SheetTitle>{detail?.case_id ?? selectedSummary?.case_id ?? t.cases_title}</SheetTitle>
             <SheetDescription>
-              {caseText(
-                "Vollständige Erzählung und strukturierter Anamnese-Editor für den ausgewählten Patientenfall.",
-                "Полное повествование и структурированный редактор анамнеза для выбранного кейса пациента.",
-                "Full narrative and structured anamnesis editor for the selected patient case.",
-              )}
+              Full narrative and structured anamnesis editor for the selected patient case.
             </SheetDescription>
           </SheetHeader>
           <div className="space-y-6 px-6 py-6">
             {detailBusy ? (
               <div className="flex min-h-[320px] items-center justify-center text-sm text-slate-500">
                 <LoaderCircle className="mr-2 size-4 animate-spin" />
-                {caseText("Fall wird geladen", "Загрузка кейса", "Loading case")}
+                Loading case
               </div>
             ) : detailError ? (
               <Banner tone="error">{detailError}</Banner>
@@ -2831,23 +2827,15 @@ export function CasesPage() {
                         <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
                           <div className="flex flex-wrap items-center gap-2">
                             <Badge variant="outline" className="rounded-full border-amber-300 bg-white text-amber-700">
-                              {caseText("Abgelaufen", "Истекло", "Expired")}
+                              Expired
                             </Badge>
                             {item.pending_expiry_confirmation ? (
                               <Badge variant="outline" className="rounded-full border-rose-300 bg-white text-rose-700">
-                                {caseText(
-                                  "Bestätigung erforderlich",
-                                  "Требуется подтверждение",
-                                  "Confirmation required",
-                                )}
+                                Confirmation required
                               </Badge>
                             ) : (
                               <Badge variant="outline" className="rounded-full border-emerald-300 bg-white text-emerald-700">
-                                {caseText(
-                                  "Überprüfung bestätigt",
-                                  "Проверка подтверждена",
-                                  "Review confirmed",
-                                )}
+                                Review confirmed
                               </Badge>
                             )}
                             <span>
@@ -2860,12 +2848,7 @@ export function CasesPage() {
                           </div>
                           {item.pending_expiry_notification_sent_at ? (
                             <p className="mt-2 text-xs text-amber-700">
-                              {caseText(
-                                "Benachrichtigung gesendet",
-                                "Уведомление отправлено",
-                                "Notification sent",
-                              )}{" "}
-                              {formatDateTime(item.pending_expiry_notification_sent_at)}.
+                              Notification sent {formatDateTime(item.pending_expiry_notification_sent_at)}.
                             </p>
                           ) : null}
                         </div>
@@ -2884,11 +2867,7 @@ export function CasesPage() {
                             }}
                             disabled={sectionBusy === "medikamente"}
                           >
-                            {caseText(
-                              "Ablauf-Prüfung bestätigen",
-                              "Подтвердить проверку срока",
-                              "Confirm expiry review",
-                            )}
+                            Confirm expiry review
                           </Button>
                         ) : null}
                         <Button type="button" variant="outline" size="sm" className="rounded-2xl" onClick={() => setMedikamente((current) => removeItemAtIndex(current, index))}>{caseText("Entfernen", "Удалить", "Remove")}</Button>
@@ -2901,42 +2880,18 @@ export function CasesPage() {
                   {painRecords.map((item, index) => (
                     <div key={`pain-${index}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                        <Field label={caseText("Lokalisation", "Локализация", "Location")}>
-                          <Input value={item.lokalisierung} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { lokalisierung: event.target.value }))} className="h-10 rounded-xl bg-white" />
-                        </Field>
-                        <Field label={caseText("Seit wann", "С какого времени", "Since when")}>
-                          <Input value={item.seit_wann ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { seit_wann: event.target.value }))} className="h-10 rounded-xl bg-white" />
-                        </Field>
-                        <Field label={caseText("Ursache", "Причина", "Cause")}>
-                          <Input value={item.ursache ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { ursache: event.target.value }))} className="h-10 rounded-xl bg-white" />
-                        </Field>
-                        <Field label={caseText("Qualität", "Характер боли", "Quality")}>
-                          <Input value={item.qualitaet ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { qualitaet: event.target.value }))} className="h-10 rounded-xl bg-white" />
-                        </Field>
-                        <Field label={caseText("Kontinuität", "Постоянство", "Continuity")}>
-                          <Input value={item.kontinuitaet ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { kontinuitaet: event.target.value }))} className="h-10 rounded-xl bg-white" />
-                        </Field>
-                        <Field label={caseText("Entwicklung", "Динамика", "Progression")}>
-                          <Input value={item.entwicklung ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { entwicklung: event.target.value }))} className="h-10 rounded-xl bg-white" />
-                        </Field>
-                        <Field label={caseText("NRS aktuell", "NRS сейчас", "NRS current")}>
-                          <Input type="number" min={0} max={10} value={item.nrs_aktuell == null ? "" : String(item.nrs_aktuell)} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { nrs_aktuell: parsePainNumber(event.target.value) }))} className="h-10 rounded-xl bg-white" />
-                        </Field>
-                        <Field label={caseText("NRS zu Beginn", "NRS в начале", "NRS at onset")}>
-                          <Input type="number" min={0} max={10} value={item.nrs_anfang == null ? "" : String(item.nrs_anfang)} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { nrs_anfang: parsePainNumber(event.target.value) }))} className="h-10 rounded-xl bg-white" />
-                        </Field>
-                        <Field label={caseText("Dauer zu Beginn", "Длительность в начале", "Duration at onset")}>
-                          <Input value={item.dauer_anfang ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { dauer_anfang: event.target.value }))} className="h-10 rounded-xl bg-white" />
-                        </Field>
-                        <Field label={caseText("Dauer aktuell", "Длительность сейчас", "Current duration")}>
-                          <Input value={item.dauer_aktuell ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { dauer_aktuell: event.target.value }))} className="h-10 rounded-xl bg-white" />
-                        </Field>
-                        <Field label={caseText("Ausstrahlung", "Иррадиация", "Radiation")}>
-                          <Input value={item.ausstrahlung ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { ausstrahlung: event.target.value }))} className="h-10 rounded-xl bg-white" />
-                        </Field>
-                        <Field label={caseText("Auftreten", "Когда возникает", "Occurrence")}>
-                          <Input value={item.auftreten ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { auftreten: event.target.value }))} className="h-10 rounded-xl bg-white" />
-                        </Field>
+                        <Field label={t.appointments_location}><Input value={item.lokalisierung} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { lokalisierung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.providers_service_valid_from}><Input value={item.seit_wann ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { seit_wann: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.cases_preconditions}><Input value={item.ursache ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { ursache: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.cases_symptoms}><Input value={item.qualitaet ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { qualitaet: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.cases_symptoms}><Input value={item.kontinuitaet ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { kontinuitaet: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.cases_symptoms}><Input value={item.entwicklung ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { entwicklung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.cases_pain}><Input value={item.nrs_aktuell == null ? "" : String(item.nrs_aktuell)} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { nrs_aktuell: parsePainNumber(event.target.value) }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.cases_pain}><Input value={item.nrs_anfang == null ? "" : String(item.nrs_anfang)} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { nrs_anfang: parsePainNumber(event.target.value) }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.cases_pain}><Input value={item.dauer_anfang ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { dauer_anfang: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.cases_pain}><Input value={item.dauer_aktuell ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { dauer_aktuell: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.cases_pain}><Input value={item.ausstrahlung ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { ausstrahlung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.cases_pain}><Input value={item.auftreten ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { auftreten: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                       </div>
                       <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-2xl" onClick={() => setPainRecords((current) => removeItemAtIndex(current, index))}>{caseText("Entfernen", "Удалить", "Remove")}</Button></div>
                     </div>
@@ -3990,7 +3945,7 @@ function ItemEditorSection({
         <div className="flex justify-end border-t border-border/70 pt-4">
           <Button type="submit" className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800" disabled={busy || !canEdit}>
             {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-            {caseText("Abschnitt speichern", "Сохранить раздел", "Save section")}
+            Save section
           </Button>
         </div>
       </form>

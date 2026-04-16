@@ -584,10 +584,10 @@ async fn confirm_my_document_release(
     .into_response()
 }
 
-pub(crate) async fn resolve_linked_patient_id(
+pub(crate) async fn resolve_self_patient_id(
     state: &AppState,
     user_id: Uuid,
-) -> Result<Option<Uuid>, axum::response::Response> {
+) -> Result<Uuid, axum::response::Response> {
     let rows = sqlx::query(
         r#"SELECT patient_id
            FROM patient_assignments
@@ -607,6 +607,13 @@ pub(crate) async fn resolve_linked_patient_id(
         )
     })?;
 
+    if rows.is_empty() {
+        return Err(err(
+            StatusCode::NOT_FOUND,
+            "Linked patient record not found",
+        ));
+    }
+
     if rows.len() > 1 {
         return Err(err(
             StatusCode::CONFLICT,
@@ -614,87 +621,9 @@ pub(crate) async fn resolve_linked_patient_id(
         ));
     }
 
-    if let Some(row) = rows.first() {
-        return Ok(Some(
-            row.try_get::<Uuid, _>("patient_id")
-                .unwrap_or_else(|_| Uuid::nil()),
-        ));
-    }
-
-    let email_rows = sqlx::query(
-        r#"SELECT p.id AS patient_id
-           FROM users u
-           JOIN patients p
-             ON lower(trim(p.email)) = lower(trim(u.email))
-          WHERE u.id = $1
-            AND u.role = 'patient'
-            AND p.is_active = true
-            AND p.email IS NOT NULL
-            AND trim(p.email) <> ''
-          ORDER BY p.created_at DESC
-          LIMIT 2"#,
-    )
-    .bind(user_id)
-    .fetch_all(&state.db)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, user_id = %user_id, "resolve self patient id via email");
-        err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to validate linked patient",
-        )
-    })?;
-
-    if email_rows.len() > 1 {
-        return Err(err(
-            StatusCode::CONFLICT,
-            "Patient account is linked to multiple patient records",
-        ));
-    }
-
-    let Some(row) = email_rows.first() else {
-        return Ok(None);
-    };
-
-    let patient_id = row
+    Ok(rows[0]
         .try_get::<Uuid, _>("patient_id")
-        .unwrap_or_else(|_| Uuid::nil());
-
-    if !patient_id.is_nil() {
-        if let Err(error) = sqlx::query(
-            r#"INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
-               VALUES ($1, $2, $2)
-               ON CONFLICT (patient_id, user_id)
-               DO UPDATE SET revoked_at = NULL, assigned_by = $2, assigned_at = now()"#,
-        )
-        .bind(patient_id)
-        .bind(user_id)
-        .execute(&state.db)
-        .await
-        {
-            tracing::warn!(
-                error = %error,
-                user_id = %user_id,
-                patient_id = %patient_id,
-                "failed to restore self patient assignment from email link"
-            );
-        }
-    }
-
-    Ok(Some(patient_id))
-}
-
-pub(crate) async fn resolve_self_patient_id(
-    state: &AppState,
-    user_id: Uuid,
-) -> Result<Uuid, axum::response::Response> {
-    match resolve_linked_patient_id(state, user_id).await? {
-        Some(patient_id) => Ok(patient_id),
-        None => Err(err(
-            StatusCode::NOT_FOUND,
-            "Linked patient record not found",
-        )),
-    }
+        .unwrap_or_else(|_| Uuid::nil()))
 }
 
 async fn load_numeric_setting(state: &AppState, key: &str, default: i64) -> i64 {
