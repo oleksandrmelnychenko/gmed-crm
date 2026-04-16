@@ -155,6 +155,9 @@ async fn force_password_reset(
         return e;
     }
 
+    // The literal `'2000-01-01'` is a sentinel recognised by the login flow
+    // as an expired password: any password_changed_at far enough in the past
+    // triggers a forced password change on the user's next sign-in.
     let _ = sqlx::query!(
         "UPDATE users SET password_changed_at = '2000-01-01'::timestamptz WHERE id = $1",
         user_id

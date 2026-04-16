@@ -16,7 +16,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { apiFetch, getAccessToken } from "@/lib/api";
+import { apiFetch, buildApiUrl, getAccessToken } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
@@ -232,7 +232,7 @@ function formatCurrency(value: unknown) {
 
 async function fetchProtectedBlob(path: string) {
   const token = getAccessToken();
-  const response = await fetch(`/api/v1${path}`, {
+  const response = await fetch(buildApiUrl(path), {
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
   });
 

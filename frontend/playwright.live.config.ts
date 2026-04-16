@@ -1,6 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const skipManagedSetup = process.env.PLAYWRIGHT_LIVE_SKIP_SETUP === "1";
+const liveBaseUrl =
+  process.env.PLAYWRIGHT_LIVE_BASE_URL ?? "http://127.0.0.1:4174";
 
 export default defineConfig({
   testDir: "./tests/e2e-live",
@@ -20,7 +22,7 @@ export default defineConfig({
     ? undefined
     : "./tests/e2e-live/support/global-teardown.ts",
   use: {
-    baseURL: "http://127.0.0.1:4174",
+    baseURL: liveBaseUrl,
     trace: "off",
     screenshot: "only-on-failure",
     video: "off",

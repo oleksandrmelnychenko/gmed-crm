@@ -11,7 +11,7 @@ import {
   MessageSquare,
   Shield,
 } from "lucide-react";
-import { apiFetch, getAccessToken } from "@/lib/api";
+import { apiFetch, buildApiUrl, buildApiWebSocketUrl, getAccessToken } from "@/lib/api";
 import {
   CHAT_E2E_PREVIEW,
   CHAT_E2E_UNAVAILABLE,
@@ -148,7 +148,9 @@ function canAccessChat(role?: string) {
   );
 }
 
-const FILE_BASE = "/api/v1/messages/file/";
+function buildMessageAttachmentUrl(fileKey: string) {
+  return buildApiUrl(`/messages/file/${fileKey}`);
+}
 
 // ── Component ──
 
@@ -416,8 +418,7 @@ export function ChatPage() {
     const token = getAccessToken();
     if (!token) return;
 
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const url = `${protocol}//${window.location.host}/api/v1/messages/ws?token=${encodeURIComponent(token)}`;
+    const url = buildApiWebSocketUrl("/messages/ws", { token });
     let socket: WebSocket | null = null;
     let reconnectTimer: number | null = null;
     let disposed = false;
@@ -566,7 +567,7 @@ export function ChatPage() {
       setAttachmentBusyId(message.id);
       try {
         const token = getAccessToken();
-        const response = await fetch(`${FILE_BASE}${message.attachment_key}`, {
+        const response = await fetch(buildMessageAttachmentUrl(message.attachment_key), {
           headers: token ? { Authorization: `Bearer ${token}` } : {},
         });
         if (!response.ok) {
@@ -698,7 +699,7 @@ export function ChatPage() {
         }
 
         const token = getAccessToken();
-        const response = await fetch(`/api/v1/messages/${activePeer}/upload`, {
+        const response = await fetch(buildApiUrl(`/messages/${activePeer}/upload`), {
           method: "POST",
           headers: token ? { Authorization: `Bearer ${token}` } : {},
           body: formData,
@@ -951,7 +952,9 @@ export function ChatPage() {
                 const hasText = !!m.message?.trim();
                 const hasAttachment = !!m.attachment_key;
                 const isSecureAttachment = m.attachment_is_e2e ?? false;
-                const downloadUrl = `${FILE_BASE}${m.attachment_key ?? ""}`;
+                const downloadUrl = m.attachment_key
+                  ? buildMessageAttachmentUrl(m.attachment_key)
+                  : "";
                 const isImage =
                   !isSecureAttachment && (m.attachment_mime?.startsWith("image/") ?? false);
                 const readReceipt =

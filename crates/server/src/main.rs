@@ -26,7 +26,16 @@ async fn main() {
     }
     tracing::info!("Migrations applied");
 
-    let token_settings = settings::load_from_db(&pool).await.unwrap_or_default();
+    let token_settings = match settings::load_from_db(&pool).await {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!(
+                error = %e,
+                "Failed to load token settings from system_settings — falling back to defaults"
+            );
+            settings::TokenSettings::default()
+        }
+    };
     tracing::info!(
         access_token_min = token_settings.access_token_minutes,
         refresh_token_days = token_settings.refresh_token_days,
@@ -53,12 +62,19 @@ async fn main() {
     spawn_message_rewrap_sweeper(app_state.clone());
     spawn_lead_purger(app_state.clone());
 
+    let cors_origin = match cfg.cors_origin.parse::<http::HeaderValue>() {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::error!(
+                error = %e,
+                value = %cfg.cors_origin,
+                "CORS_ORIGIN is not a valid HTTP header value"
+            );
+            std::process::exit(1);
+        }
+    };
     let cors = CorsLayer::new()
-        .allow_origin(
-            cfg.cors_origin
-                .parse::<http::HeaderValue>()
-                .expect("Invalid CORS_ORIGIN"),
-        )
+        .allow_origin(cors_origin)
         .allow_methods([
             http::Method::GET,
             http::Method::POST,
@@ -192,17 +208,23 @@ fn spawn_blacklist_purger(pool: gmed_db::DbPool) {
 
 async fn shutdown_signal() {
     let ctrl_c = async {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("Failed to install Ctrl+C handler");
+        if let Err(e) = tokio::signal::ctrl_c().await {
+            tracing::warn!(error = %e, "Ctrl+C handler failed; graceful shutdown via SIGINT disabled");
+            std::future::pending::<()>().await;
+        }
     };
 
     #[cfg(unix)]
     let terminate = async {
-        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("Failed to install SIGTERM handler")
-            .recv()
-            .await;
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut signal) => {
+                signal.recv().await;
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "SIGTERM handler install failed; graceful shutdown via SIGTERM disabled");
+                std::future::pending::<()>().await;
+            }
+        }
     };
 
     #[cfg(not(unix))]

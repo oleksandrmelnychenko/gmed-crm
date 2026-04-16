@@ -1,5 +1,5 @@
 import { get, post } from "./client";
-import { getAccessToken } from "@/lib/api";
+import { buildApiUrl, getAccessToken } from "@/lib/api";
 import type {
   Lead,
   LeadDetail,
@@ -57,7 +57,7 @@ export async function downloadLeadAttachment(
   const headers = new Headers();
   if (token) headers.set("Authorization", `Bearer ${token}`);
   const res = await fetch(
-    `/api/v1/leads/${leadId}/attachments/${attachmentId}`,
+    buildApiUrl(`/leads/${leadId}/attachments/${attachmentId}`),
     { headers },
   );
   if (!res.ok) {

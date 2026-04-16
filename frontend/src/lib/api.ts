@@ -1,4 +1,6 @@
-const API_BASE = "/api/v1";
+const CLIENT_API_ORIGIN =
+  (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/+$/, "") ?? "";
+const API_PREFIX = "/api/v1";
 const ACCESS_TOKEN_KEY = "gmed_access_token";
 
 type ApiErrorBody = {
@@ -8,6 +10,43 @@ type ApiErrorBody = {
 
 export function getAccessToken() {
   return localStorage.getItem(ACCESS_TOKEN_KEY);
+}
+
+function normalizeApiPath(path: string) {
+  return `${API_PREFIX}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
+function resolveApiBaseOrigin() {
+  if (CLIENT_API_ORIGIN) {
+    return CLIENT_API_ORIGIN;
+  }
+  if (typeof window !== "undefined" && window.location?.origin) {
+    return window.location.origin;
+  }
+  return "http://localhost";
+}
+
+function applySearchParams(
+  url: URL,
+  params?: Record<string, string | number | boolean | null | undefined>,
+) {
+  if (!params) return;
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null) continue;
+    url.searchParams.set(key, String(value));
+  }
+}
+
+export function buildApiUrl(
+  path: string,
+  params?: Record<string, string | number | boolean | null | undefined>,
+) {
+  const url = new URL(normalizeApiPath(path), resolveApiBaseOrigin());
+  applySearchParams(url, params);
+  if (CLIENT_API_ORIGIN) {
+    return url.toString();
+  }
+  return `${url.pathname}${url.search}${url.hash}`;
 }
 
 function buildApiHeaders(init: RequestInit = {}) {
@@ -43,7 +82,7 @@ function parseContentDispositionFilename(header: string | null) {
 
 export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = buildApiHeaders(init);
-  const res = await fetch(`${API_BASE}${path}`, { ...init, headers });
+  const res = await fetch(buildApiUrl(path), { ...init, headers });
 
   if (!res.ok) {
     let body: ApiErrorBody | null = null;
@@ -63,9 +102,19 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
   return res.json() as Promise<T>;
 }
 
+export function buildApiWebSocketUrl(
+  path: string,
+  params?: Record<string, string | number | boolean | null | undefined>,
+) {
+  const url = new URL(normalizeApiPath(path), resolveApiBaseOrigin());
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  applySearchParams(url, params);
+  return url.toString();
+}
+
 export async function apiFetchFile(path: string, init: RequestInit = {}) {
   const headers = buildApiHeaders(init);
-  const res = await fetch(`${API_BASE}${path}`, { ...init, headers });
+  const res = await fetch(buildApiUrl(path), { ...init, headers });
 
   if (!res.ok) {
     let body: ApiErrorBody | null = null;

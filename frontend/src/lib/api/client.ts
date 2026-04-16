@@ -3,11 +3,9 @@
  * Re-exports the existing apiFetch from @/lib/api and adds convenience helpers.
  */
 
-import { apiFetch, getAccessToken } from "@/lib/api";
+import { apiFetch, buildApiUrl, getAccessToken } from "@/lib/api";
 
 export { apiFetch };
-
-const API_BASE = "/api/v1";
 
 /** GET shorthand */
 export function get<T>(path: string): Promise<T> {
@@ -34,7 +32,7 @@ export async function uploadFile<T>(path: string, formData: FormData): Promise<T
   if (token) headers.set("Authorization", `Bearer ${token}`);
   // Do NOT set Content-Type — browser sets it with boundary
 
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetch(buildApiUrl(path), {
     method: "POST",
     headers,
     body: formData,

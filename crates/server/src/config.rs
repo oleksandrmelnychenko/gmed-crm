@@ -41,7 +41,14 @@ impl Config {
             )
         });
 
-        let audit_ip_salt = std::env::var("AUDIT_IP_SALT").unwrap_or_else(|_| jwt_secret.clone());
+        let audit_ip_salt = std::env::var("AUDIT_IP_SALT").unwrap_or_else(|_| {
+            tracing::warn!(
+                "AUDIT_IP_SALT is not set — reusing JWT_SECRET as the salt. Rotating JWT_SECRET will \
+                 invalidate all historical audit-IP hash correlations. Set a dedicated AUDIT_IP_SALT \
+                 (e.g. `openssl rand -base64 32`) to keep hash stability across rotations."
+            );
+            jwt_secret.clone()
+        });
 
         Self {
             database_url: std::env::var("DATABASE_URL").expect("DATABASE_URL must be set"),

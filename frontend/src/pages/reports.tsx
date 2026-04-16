@@ -15,7 +15,7 @@ import {
 import { StaffLink } from "@/components/staff-link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { apiFetch, getAccessToken } from "@/lib/api";
+import { apiFetch, buildApiUrl, getAccessToken } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -860,7 +860,7 @@ export function ReportsPage() {
     return () => {
       cancelled = true;
     };
-  }, [loading, user?.role, version]);
+  }, [loading, text.loadError, user?.role, version]);
 
   const allowedSections = useMemo(
     () => new Set(data?.allowed_sections ?? []),
@@ -905,7 +905,7 @@ export function ReportsPage() {
         params.set("provider_id", selectedClinicId);
       }
 
-      const response = await fetch(`/api/v1/stats/reports/export?${params.toString()}`, {
+      const response = await fetch(buildApiUrl(`/stats/reports/export?${params.toString()}`), {
         headers: token ? { Authorization: `Bearer ${token}` } : undefined,
       });
       if (!response.ok) {

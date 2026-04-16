@@ -114,13 +114,22 @@ pub async fn require_auth(State(state): State<AppState>, mut req: Request, next:
         Ok(false) => {}
     }
 
+    let Some(access_token_expires_at) = DateTime::<Utc>::from_timestamp(data.claims.exp, 0) else {
+        tracing::warn!(
+            user_id = %data.claims.sub,
+            jti = %data.claims.jti,
+            exp = data.claims.exp,
+            "Rejected token with unrepresentable exp claim"
+        );
+        return unauthorized();
+    };
+
     req.extensions_mut().insert(AuthUser {
         user_id: data.claims.sub,
         role,
         family_id: data.claims.fam,
         access_token_jti: data.claims.jti,
-        access_token_expires_at: DateTime::<Utc>::from_timestamp(data.claims.exp, 0)
-            .unwrap_or_else(Utc::now),
+        access_token_expires_at,
     });
 
     next.run(req).await

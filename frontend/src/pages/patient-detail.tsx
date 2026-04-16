@@ -43,7 +43,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
-import { apiFetch, downloadApiFile } from "@/lib/api";
+import { apiFetch, buildApiUrl, downloadApiFile } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { getLang, useLang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
@@ -940,13 +940,21 @@ function priorityLabel(priority: string) {
   }
 }
 
-function timelineRangeOptions(): Array<{ value: PatientTimelineRangeFilter; label: string }> {
+function timelineRangeOptions(
+  lang: string,
+): Array<{ value: PatientTimelineRangeFilter; label: string }> {
+  const translate = (de: string, ru: string, en: string) => {
+    if (lang === "de") return de;
+    if (lang === "ru") return ru;
+    return en;
+  };
+
   return [
-    { value: "all", label: patientDetailText("Gesamter Zeitraum", "Всё время", "All time") },
-    { value: "30d", label: patientDetailText("Letzte 30 Tage", "Последние 30 дней", "Last 30 days") },
-    { value: "90d", label: patientDetailText("Letzte 90 Tage", "Последние 90 дней", "Last 90 days") },
-    { value: "180d", label: patientDetailText("Letzte 180 Tage", "Последние 180 дней", "Last 180 days") },
-    { value: "365d", label: patientDetailText("Letzte 365 Tage", "Последние 365 дней", "Last 365 days") },
+    { value: "all", label: translate("Gesamter Zeitraum", "Всё время", "All time") },
+    { value: "30d", label: translate("Letzte 30 Tage", "Последние 30 дней", "Last 30 days") },
+    { value: "90d", label: translate("Letzte 90 Tage", "Последние 90 дней", "Last 90 days") },
+    { value: "180d", label: translate("Letzte 180 Tage", "Последние 180 дней", "Last 180 days") },
+    { value: "365d", label: translate("Letzte 365 Tage", "Последние 365 дней", "Last 365 days") },
   ];
 }
 
@@ -1249,7 +1257,7 @@ export function PatientDetailPage() {
   );
 
   const timelineSummary = useMemo(() => buildPatientTimelineSummary(timeline), [timeline]);
-  const localizedTimelineRangeOptions = useMemo(() => timelineRangeOptions(), [lang]);
+  const localizedTimelineRangeOptions = useMemo(() => timelineRangeOptions(lang), [lang]);
   const timelineHasNextPage = timelineOffset + timeline.length < timelineTotal;
   const workflowChecklistGroups = useMemo(() => {
     const items = workflowChecklist?.items ?? [];
@@ -3768,7 +3776,7 @@ export function PatientDetailPage() {
                     "grid grid-cols-[2fr_1fr_1fr_1fr_1fr] gap-3 items-center px-5 py-3 hover:bg-slate-50/60 transition-colors cursor-pointer",
                     idx < documents.length - 1 && "border-b border-border/30"
                   )}
-                  onClick={() => window.open(`/api/v1/documents/${doc.id}/download`, "_blank")}
+                  onClick={() => window.open(buildApiUrl(`/documents/${doc.id}/download`), "_blank")}
                 >
                   <span className="text-sm font-medium text-slate-900 truncate">{doc.filename}</span>
                   <span className="text-xs text-slate-500">{doc.category ?? t.common_not_set}</span>

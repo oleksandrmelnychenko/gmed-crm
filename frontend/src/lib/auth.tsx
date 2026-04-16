@@ -1,5 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 
+import { buildApiUrl } from "@/lib/api";
+
 export interface User {
   id: string;
   email: string;
@@ -45,7 +47,6 @@ interface ApiErrorBody {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-const API_BASE = "/api/v1";
 const ACCESS_TOKEN_KEY = "gmed_access_token";
 const REFRESH_TOKEN_KEY = "gmed_refresh_token";
 
@@ -113,7 +114,7 @@ async function fetchJson<T>(
     headers.set("Authorization", `Bearer ${accessToken}`);
   }
 
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await fetch(buildApiUrl(path), {
     ...init,
     headers,
   });
@@ -236,7 +237,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const accessToken = getAccessToken();
 
     try {
-      await fetch(`${API_BASE}/auth/logout`, {
+      await fetch(buildApiUrl("/auth/logout"), {
         method: "POST",
         headers: accessToken
           ? { Authorization: `Bearer ${accessToken}` }

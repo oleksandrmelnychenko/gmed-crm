@@ -5,15 +5,22 @@ import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  server: {
+    proxy: {
+      '/api': {
+        target: process.env.VITE_PROXY_TARGET ?? 'http://localhost:3000',
+        changeOrigin: true,
+        ws: true,
+      },
+      '/auth': {
+        target: process.env.VITE_PROXY_TARGET ?? 'http://localhost:3000',
+        changeOrigin: true,
+      },
+    },
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
-    },
-  },
-  server: {
-    proxy: {
-      '/api': process.env.VITE_PROXY_TARGET ?? 'http://localhost:3000',
-      '/auth': process.env.VITE_PROXY_TARGET ?? 'http://localhost:3000',
     },
   },
 })

@@ -95,7 +95,7 @@
 //!    row, not about adding coverage.
 
 use std::net::{IpAddr, SocketAddr};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use axum::body::Body;
 use axum::extract::{ConnectInfo, Extension, MatchedPath, Request, State};
@@ -152,20 +152,24 @@ impl AuditContext {
         Self::default()
     }
 
+    /// Lock the annotation, recovering from a poisoned mutex. A panic in
+    /// a single handler should not cascade and disable audit for every
+    /// subsequent request for the lifetime of the process.
+    fn lock(&self) -> MutexGuard<'_, AuditAnnotation> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     /// Attach a domain entity to the event. Typical handler call:
     /// `audit.set_entity("patient", patient_id)`.
     pub fn set_entity(&self, entity_type: impl Into<String>, entity_id: Uuid) {
-        let mut slot = self.0.lock().expect("audit annotation mutex poisoned");
+        let mut slot = self.lock();
         slot.entity_type = Some(entity_type.into());
         slot.entity_id = Some(entity_id);
     }
 
     /// Override the action string — e.g. `"read_patient"`, `"create_case"`.
     pub fn set_action(&self, action: impl Into<String>) {
-        self.0
-            .lock()
-            .expect("audit annotation mutex poisoned")
-            .action = Some(action.into());
+        self.lock().action = Some(action.into());
     }
 
     /// Provide a handler-specific context JSON blob. The middleware
@@ -174,35 +178,23 @@ impl AuditContext {
     /// collision but never displace the infrastructure fields unless
     /// the handler intentionally overrides them.
     pub fn set_context(&self, context: Value) {
-        self.0
-            .lock()
-            .expect("audit annotation mutex poisoned")
-            .context = Some(context);
+        self.lock().context = Some(context);
     }
 
     /// Attach an `old_value` snapshot for a diff-style audit. Pair with
     /// [`Self::set_new_value`]. See the module docs for the correctness
     /// rules that apply to this pattern.
     pub fn set_old_value(&self, value: Value) {
-        self.0
-            .lock()
-            .expect("audit annotation mutex poisoned")
-            .old_value = Some(value);
+        self.lock().old_value = Some(value);
     }
 
     /// Attach a `new_value` snapshot for a diff-style audit.
     pub fn set_new_value(&self, value: Value) {
-        self.0
-            .lock()
-            .expect("audit annotation mutex poisoned")
-            .new_value = Some(value);
+        self.lock().new_value = Some(value);
     }
 
     fn take(&self) -> AuditAnnotation {
-        self.0
-            .lock()
-            .expect("audit annotation mutex poisoned")
-            .clone()
+        self.lock().clone()
     }
 }
 

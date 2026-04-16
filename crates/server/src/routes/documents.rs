@@ -1281,55 +1281,70 @@ async fn extract_text_from_image_bytes_windows(
     Err(IMAGE_OCR_UNAVAILABLE_MESSAGE)
 }
 
+/// Upper bound for a single tesseract process. The child is run with
+/// `kill_on_drop`, so a timeout tears it down instead of just abandoning
+/// the waiter and leaving the OCR process running in the background.
+const OCR_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 async fn extract_text_from_image_bytes_tesseract(
     bytes: &[u8],
     original_filename: Option<&str>,
 ) -> Result<Option<String>, &'static str> {
     let extension = document_file_extension(original_filename).unwrap_or_else(|| "png".to_string());
-    let input_bytes = bytes.to_vec();
+    let mut temp_path = std::env::temp_dir();
+    temp_path.push(format!("gmed-doc-ocr-{}.{}", Uuid::new_v4(), extension));
 
-    tokio::task::spawn_blocking(move || {
-        let mut temp_path = std::env::temp_dir();
-        temp_path.push(format!("gmed-doc-ocr-{}.{}", Uuid::new_v4(), extension));
+    let result = async {
+        tokio::fs::write(&temp_path, bytes)
+            .await
+            .map_err(|_| IMAGE_OCR_FAILED_MESSAGE)?;
 
-        let result = (|| -> Result<Option<String>, &'static str> {
-            std::fs::write(&temp_path, &input_bytes).map_err(|_| IMAGE_OCR_FAILED_MESSAGE)?;
+        let executables: &[&str] = if cfg!(windows) {
+            &["tesseract.exe", "tesseract"]
+        } else {
+            &["tesseract"]
+        };
 
-            let executables: &[&str] = if cfg!(windows) {
-                &["tesseract.exe", "tesseract"]
-            } else {
-                &["tesseract"]
-            };
+        for executable in executables {
+            let mut command = tokio::process::Command::new(executable);
+            command
+                .arg(&temp_path)
+                .arg("stdout")
+                .arg("--psm")
+                .arg("6")
+                .kill_on_drop(true);
 
-            for executable in executables {
-                match std::process::Command::new(executable)
-                    .arg(&temp_path)
-                    .arg("stdout")
-                    .arg("--psm")
-                    .arg("6")
-                    .output()
-                {
-                    Ok(output) => {
-                        if output.status.success() {
-                            let text = String::from_utf8_lossy(&output.stdout);
-                            return Ok(normalize_extracted_text(&text));
-                        }
-
-                        return Err(IMAGE_OCR_FAILED_MESSAGE);
+            match tokio::time::timeout(OCR_TIMEOUT, command.output()).await {
+                Ok(Ok(output)) => {
+                    if output.status.success() {
+                        let text = String::from_utf8_lossy(&output.stdout);
+                        return Ok(normalize_extracted_text(&text));
                     }
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-                    Err(_) => return Err(IMAGE_OCR_FAILED_MESSAGE),
+
+                    return Err(IMAGE_OCR_FAILED_MESSAGE);
+                }
+                Ok(Err(error)) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Ok(Err(error)) => {
+                    tracing::warn!(error = %error, executable, "tesseract OCR process failed");
+                    return Err(IMAGE_OCR_FAILED_MESSAGE);
+                }
+                Err(_) => {
+                    tracing::warn!(
+                        timeout_secs = OCR_TIMEOUT.as_secs(),
+                        executable,
+                        "tesseract OCR timed out"
+                    );
+                    return Err(IMAGE_OCR_FAILED_MESSAGE);
                 }
             }
+        }
 
-            Err(IMAGE_OCR_UNAVAILABLE_MESSAGE)
-        })();
+        Err(IMAGE_OCR_UNAVAILABLE_MESSAGE)
+    }
+    .await;
 
-        let _ = std::fs::remove_file(&temp_path);
-        result
-    })
-    .await
-    .unwrap_or(Err(IMAGE_OCR_FAILED_MESSAGE))
+    let _ = tokio::fs::remove_file(&temp_path).await;
+    result
 }
 
 async fn extract_text_from_image_bytes(
@@ -6980,7 +6995,7 @@ async fn persist_document_file(
         }
     }
 
-    let inserted = match sqlx::query(
+    if let Err(e) = sqlx::query(
         r#"INSERT INTO documents (
                 id, patient_id, order_id, appointment_id, auto_name, original_filename,
                 art, category, status, visibility, is_medical, mime_type, file_size,
@@ -6991,8 +7006,7 @@ async fn persist_document_file(
                 $7, $8, $9, $10, $11, $12, $13,
                 $14, $15, $16, $17, $18,
                 $19, $20, $21
-           )
-           RETURNING id"#,
+           )"#,
     )
     .bind(document_id)
     .bind(input.patient_id)
@@ -7015,21 +7029,17 @@ async fn persist_document_file(
     .bind(input.replaces_document_id)
     .bind(input.version_number)
     .bind(input.uploaded_by)
-    .fetch_one(&state.db)
+    .execute(&state.db)
     .await
     {
-        Ok(row) => row,
-        Err(e) => {
-            tracing::error!(error = %e, "insert document row");
-            let _ = tokio::fs::remove_file(&path).await;
-            return Err(err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to save document",
-            ));
-        }
-    };
+        tracing::error!(error = %e, "insert document row");
+        let _ = tokio::fs::remove_file(&path).await;
+        return Err(err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to save document",
+        ));
+    }
 
-    let document_id: Uuid = inserted.try_get("id").unwrap_or_else(|_| Uuid::nil());
     Ok((document_id, file_size, original_filename, storage_key))
 }
 

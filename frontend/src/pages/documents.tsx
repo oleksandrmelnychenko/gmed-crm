@@ -45,7 +45,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { apiFetch, getAccessToken } from "@/lib/api";
+import { apiFetch, buildApiUrl, getAccessToken } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { getLang, t as translateCatalog, useLang } from "@/lib/i18n";
 import { PatientDocumentsPage } from "@/pages/patient-documents";
@@ -749,7 +749,7 @@ function detailToEditForm(detail: DocumentItem): EditFormState {
 
 async function downloadDocument(id: string, filename: string) {
   const token = getAccessToken();
-  const response = await fetch(`/api/v1/documents/${id}/download`, {
+  const response = await fetch(buildApiUrl(`/documents/${id}/download`), {
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
   });
   if (!response.ok)
@@ -786,7 +786,7 @@ function openBlobPreviewWindow(previewWindow: Window | null, blob: Blob) {
 async function openDocumentPreview(id: string, previewWindow?: Window | null) {
   const tr = runtimeTranslations();
   const token = getAccessToken();
-  const response = await fetch(`/api/v1/documents/${id}/download`, {
+  const response = await fetch(buildApiUrl(`/documents/${id}/download`), {
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
   });
   if (!response.ok)

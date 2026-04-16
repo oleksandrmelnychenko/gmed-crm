@@ -1,4 +1,4 @@
-import { getAccessToken } from "@/lib/api";
+import { buildApiUrl, getAccessToken } from "@/lib/api";
 import { getLang } from "@/lib/i18n";
 
 export type PortalDocumentItem = {
@@ -580,7 +580,7 @@ export function conciergeServiceSourceLabel(value: string) {
 
 async function fetchPortalBlob(path: string) {
   const token = getAccessToken();
-  const response = await fetch(`/api/v1${path}`, {
+  const response = await fetch(buildApiUrl(path), {
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
   });
 
