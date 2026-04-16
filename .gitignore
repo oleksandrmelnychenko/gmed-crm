@@ -13,3 +13,5 @@ node_modules/
 /uploads/
 /frontend/test-results/
 /frontend/playwright-report/
+/.vs
+/.idea
