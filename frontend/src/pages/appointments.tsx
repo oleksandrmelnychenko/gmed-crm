@@ -52,6 +52,13 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import {
+  Select as ShadSelect,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useAuth } from "@/lib/auth";
 import {
@@ -746,6 +753,9 @@ const selectClassName =
   "h-10 w-full rounded-xl border border-input bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100";
 const textareaClassName =
   "min-h-[96px] w-full rounded-xl border border-input bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100";
+const createSheetInputClassName = "h-9 rounded-lg bg-card";
+const createSheetTextareaClassName =
+  "min-h-[80px] w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
 
 function appointmentPermissions(role?: string): AppointmentPermissions {
   switch (role) {
@@ -1160,10 +1170,12 @@ function appointmentTypeLabel(
   type: AppointmentKind,
   tr?: Record<string, string>,
 ) {
-  if (type === "non_medical") return tr?.role_concierge ?? "Concierge";
+  if (type === "non_medical")
+    return tr?.role_concierge ??
+      appointmentText("Concierge", "РљРѕРЅСЃСЊРµСЂР¶", "Concierge");
   if (type === "internal")
     return appointmentText("Intern", "Внутренний", "Internal");
-  return tr?.common_doctor ?? "Medical";
+  return tr?.common_doctor ?? appointmentText("Arzt", "Р’СЂР°С‡", "Medical");
 }
 
 function carePathKindLabel(value?: string | null) {
@@ -2299,10 +2311,24 @@ function timelineToneClass(tone: AppointmentTimelineEvent["tone"]) {
   }
 }
 
-function Field({ label, children }: { label: string; children: ReactNode }) {
+function Field({
+  label,
+  children,
+  compact = false,
+}: {
+  label: string;
+  children: ReactNode;
+  compact?: boolean;
+}) {
   return (
-    <label className="block space-y-2">
-      <span className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">
+    <label className={compact ? "flex flex-col gap-1.5" : "block space-y-2"}>
+      <span
+        className={
+          compact
+            ? "text-[11.5px] font-medium text-muted-foreground leading-tight"
+            : "text-xs font-medium uppercase tracking-[0.12em] text-slate-500"
+        }
+      >
         {label}
       </span>
       {children}
@@ -3817,6 +3843,10 @@ function StaffAppointmentsPage() {
     setCreateBusy(true);
     setCreateError("");
     try {
+      if (!createForm.patientId) {
+        setCreateError(`${t.orders_patient}: ${t.cf_required}`);
+        return;
+      }
       const repeatInterval = parsePositiveIntegerInput(
         createForm.repeatInterval,
       );
@@ -5230,15 +5260,16 @@ function StaffAppointmentsPage() {
     <>
       <div className="space-y-4">
         {/* Page header */}
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
             <h1 className="text-[22px] font-semibold tracking-tight text-foreground leading-tight">
               {tr.appointments_title ?? "Appointments"}
             </h1>
             {permissions.canCreate ? (
               <Button
+                type="button"
                 size="sm"
-                className="h-8 rounded-lg gap-1.5"
+                className="h-9 rounded-lg gap-1.5 px-3.5"
                 onClick={() => openCreateSheetFromDate()}
               >
                 <Plus className="size-3.5" />
@@ -5249,7 +5280,7 @@ function StaffAppointmentsPage() {
           <Button
             variant="ghost"
             size="sm"
-            className="h-8 w-8 rounded-lg p-0 text-muted-foreground"
+            className="h-9 w-9 rounded-lg p-0 text-muted-foreground"
             onClick={refreshAppointments}
             title="Refresh"
           >
@@ -6245,89 +6276,97 @@ function StaffAppointmentsPage() {
 
       <Sheet open={createOpen} onOpenChange={setCreateOpen}>
         <SheetContent side="right" className="w-full sm:max-w-[760px]">
-          <SheetHeader className="border-b border-border/70 pb-4">
-            <SheetTitle>{tr.appointments_new}</SheetTitle>
-            <SheetDescription>
-              Build a new medical, concierge or internal slot and validate
-              conflicts before it lands in the calendar.
-            </SheetDescription>
-          </SheetHeader>
-          <div className="flex-1 overflow-y-auto px-4 pb-6">
-            <form onSubmit={handleCreateSubmit} className="space-y-6 pt-5">
-              {createError ? <Banner tone="error">{createError}</Banner> : null}
-              <div className="grid gap-4 md:grid-cols-2">
-                <Field label={t.orders_patient}>
-                  <select
+          <form onSubmit={handleCreateSubmit} className="flex flex-col flex-1 min-h-0">
+            <SheetHeader className="shrink-0 px-4 pt-3 pb-1">
+              <SheetTitle>{tr.appointments_new}</SheetTitle>
+            </SheetHeader>
+            <div className="flex-1 overflow-y-auto px-4 py-2">
+              <div className="space-y-4">
+                {createError ? <Banner tone="error">{createError}</Banner> : null}
+                <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
+                  <div className="grid gap-4 md:grid-cols-2">
+                <Field compact label={t.orders_patient}>
+                  <ShadSelect
                     value={createForm.patientId}
-                    onChange={(event) =>
+                    onValueChange={(value) =>
                       setCreateForm((current) => ({
                         ...current,
-                        patientId: event.target.value,
+                        patientId: value ?? "",
                       }))
                     }
-                    required
-                    className={selectClassName}
                   >
-                    <option value="">{t.orders_patient}</option>
-                    {patients.map((patient) => (
-                      <option key={patient.id} value={patient.id}>
+                    <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
+                      <SelectValue placeholder={t.orders_patient} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">{t.orders_patient}</SelectItem>
+                      {patients.map((patient) => (
+                      <SelectItem key={patient.id} value={patient.id}>
                         {patient.patient_id} · {patientName(patient)}
-                      </option>
-                    ))}
-                  </select>
+                      </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </ShadSelect>
                 </Field>
-                <Field label={t.appointments_type}>
-                  <select
+                <Field compact label={t.appointments_type}>
+                  <ShadSelect
                     value={createForm.appointmentType}
-                    onChange={(event) =>
+                    onValueChange={(value) =>
                       setCreateForm((current) => ({
                         ...current,
-                        appointmentType: event.target.value as AppointmentKind,
+                        appointmentType: (value as AppointmentKind) ?? current.appointmentType,
                         carePathKind:
-                          event.target.value === "medical"
-                            ? current.carePathKind
-                            : "regular",
-                        providerId:
-                          event.target.value === "internal"
-                            ? ""
-                            : current.providerId,
-                        doctorId:
-                          event.target.value === "internal"
-                            ? ""
-                            : current.doctorId,
+                          value === "medical" ? current.carePathKind : "regular",
+                        providerId: value === "internal" ? "" : current.providerId,
+                        doctorId: value === "internal" ? "" : current.doctorId,
                       }))
                     }
-                    className={selectClassName}
                   >
-                    {TYPE_OPTIONS.map((value) => (
-                      <option key={value} value={value}>
-                        {appointmentTypeLabel(value, tr)}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
+                      <SelectValue>
+                        {appointmentTypeLabel(createForm.appointmentType, tr)}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {TYPE_OPTIONS.map((value) => (
+                        <SelectItem key={value} value={value}>
+                          {appointmentTypeLabel(value, tr)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </ShadSelect>
                 </Field>
-                <Field label={appointmentText("Versorgungspfad", "Траектория лечения", "Care path")}>
-                  <select
+                <Field compact label={appointmentText("Versorgungspfad", "Траектория лечения", "Care path")}>
+                  <ShadSelect
                     value={createForm.carePathKind}
-                    onChange={(event) =>
+                    onValueChange={(value) =>
                       setCreateForm((current) => ({
                         ...current,
-                        carePathKind: event.target
-                          .value as AppointmentCarePathKind,
+                        carePathKind: (value as AppointmentCarePathKind) ?? current.carePathKind,
                       }))
                     }
-                    className={selectClassName}
                     disabled={createForm.appointmentType !== "medical"}
                   >
-                    {CARE_PATH_KIND_OPTIONS.map((value) => (
-                      <option key={value} value={value}>
-                        {carePathKindLabel(value)}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
+                      <SelectValue
+                        placeholder={appointmentText(
+                          "Versorgungspfad",
+                          "РўСЂР°РµРєС‚РѕСЂРёСЏ Р»РµС‡РµРЅРёСЏ",
+                          "Care path",
+                        )}
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {CARE_PATH_KIND_OPTIONS.map((value) => (
+                        <SelectItem key={value} value={value}>
+                          {carePathKindLabel(value)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </ShadSelect>
                 </Field>
               </div>
-              <Field label={t.appointments_title_col}>
+              <Field compact label={t.appointments_title_col}>
                 <Input
                   value={createForm.title}
                   onChange={(event) =>
@@ -6338,11 +6377,11 @@ function StaffAppointmentsPage() {
                   }
                   placeholder={tr.appointments_title_col}
                   required
-                  className="h-10 rounded-xl bg-slate-50"
+                  className={createSheetInputClassName}
                 />
               </Field>
               <div className="grid gap-4 md:grid-cols-3">
-                <Field label={t.appointments_date}>
+                <Field compact label={t.appointments_date}>
                   <Input
                     type="date"
                     value={createForm.date}
@@ -6353,10 +6392,10 @@ function StaffAppointmentsPage() {
                       }))
                     }
                     required
-                    className="h-10 rounded-xl bg-slate-50"
+                    className={createSheetInputClassName}
                   />
                 </Field>
-                <Field label={t.appointments_time}>
+                <Field compact label={t.appointments_time}>
                   <Input
                     type="time"
                     value={createForm.timeStart}
@@ -6366,10 +6405,10 @@ function StaffAppointmentsPage() {
                         timeStart: event.target.value,
                       }))
                     }
-                    className="h-10 rounded-xl bg-slate-50"
+                    className={createSheetInputClassName}
                   />
                 </Field>
-                <Field label={t.appointments_time}>
+                <Field compact label={t.appointments_time}>
                   <Input
                     type="time"
                     value={createForm.timeEnd}
@@ -6379,12 +6418,12 @@ function StaffAppointmentsPage() {
                         timeEnd: event.target.value,
                       }))
                     }
-                    className="h-10 rounded-xl bg-slate-50"
+                    className={createSheetInputClassName}
                   />
                 </Field>
               </div>
-              <div className="space-y-4 rounded-3xl border border-slate-200 bg-slate-50/80 p-4">
-                <label className="flex items-start gap-3 text-sm text-slate-700">
+              <div className="space-y-3 rounded-lg border border-border/60 bg-card p-3">
+                <label className="flex items-start gap-3 text-sm text-foreground">
                   <input
                     type="checkbox"
                     checked={createForm.repeatEnabled}
@@ -6399,13 +6438,13 @@ function StaffAppointmentsPage() {
                             : current.repeatCount,
                       }))
                     }
-                    className="mt-0.5 size-4 rounded border-slate-300 text-slate-950"
+                    className="mt-0.5 size-4 rounded border-input bg-card text-[var(--brand)]"
                   />
                   <span>
-                    <span className="block font-medium text-slate-900">
+                    <span className="block font-medium text-foreground">
                       Repeat this appointment
                     </span>
-                    <span className="block text-xs text-slate-500">
+                    <span className="block text-xs text-muted-foreground">
                       Create a recurring series from the current date and time
                       slot.
                     </span>
@@ -6413,26 +6452,32 @@ function StaffAppointmentsPage() {
                 </label>
                 {createForm.repeatEnabled ? (
                   <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                    <Field label="Frequency">
-                      <select
+                    <Field compact label="Frequency">
+                      <ShadSelect
                         value={createForm.repeatFrequency}
-                        onChange={(event) =>
+                        onValueChange={(value) =>
                           setCreateForm((current) => ({
                             ...current,
-                            repeatFrequency: event.target
-                              .value as AppointmentRecurrenceFrequency,
+                            repeatFrequency:
+                              (value as AppointmentRecurrenceFrequency) ?? current.repeatFrequency,
                           }))
                         }
-                        className={selectClassName}
                       >
-                        {RECURRENCE_FREQUENCY_OPTIONS.map((value) => (
-                          <option key={value} value={value}>
-                            {recurrenceFrequencyLabel(value)}
-                          </option>
-                        ))}
-                      </select>
+                        <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
+                          <SelectValue>
+                            {recurrenceFrequencyLabel(createForm.repeatFrequency)}
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {RECURRENCE_FREQUENCY_OPTIONS.map((value) => (
+                            <SelectItem key={value} value={value}>
+                              {recurrenceFrequencyLabel(value)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </ShadSelect>
                     </Field>
-                    <Field label="Every">
+                    <Field compact label="Every">
                       <Input
                         type="number"
                         min="1"
@@ -6444,10 +6489,10 @@ function StaffAppointmentsPage() {
                             repeatInterval: event.target.value,
                           }))
                         }
-                        className="h-10 rounded-xl bg-white"
+                        className={createSheetInputClassName}
                       />
                     </Field>
-                    <Field label={appointmentText("Anzahl Termine", "Всего повторов", "Total occurrences")}>
+                    <Field compact label={appointmentText("Anzahl Termine", "Всего повторов", "Total occurrences")}>
                       <Input
                         type="number"
                         min="2"
@@ -6464,10 +6509,10 @@ function StaffAppointmentsPage() {
                           "Необязательно, если указана дата окончания",
                           "Optional if until date is set",
                         )}
-                        className="h-10 rounded-xl bg-white"
+                        className={createSheetInputClassName}
                       />
                     </Field>
-                    <Field label={appointmentText("Wiederholen bis", "Повторять до", "Repeat until")}>
+                    <Field compact label={appointmentText("Wiederholen bis", "Повторять до", "Repeat until")}>
                       <Input
                         type="date"
                         value={createForm.repeatUntil}
@@ -6477,100 +6522,120 @@ function StaffAppointmentsPage() {
                             repeatUntil: event.target.value,
                           }))
                         }
-                        className="h-10 rounded-xl bg-white"
+                        className={createSheetInputClassName}
                       />
                     </Field>
                   </div>
                 ) : null}
-              </div>
-              <div className="grid gap-4 md:grid-cols-2">
-                <Field label={t.common_provider}>
-                  <select
+                  </div>
+                </section>
+                <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
+                  <div className="grid gap-4 md:grid-cols-2">
+                <Field compact label={t.common_provider}>
+                  <ShadSelect
                     value={createForm.providerId}
-                    onChange={(event) =>
+                    onValueChange={(value) =>
                       setCreateForm((current) => ({
                         ...current,
-                        providerId: event.target.value,
+                        providerId: value ?? "",
                         doctorId: "",
                       }))
                     }
-                    className={selectClassName}
                     disabled={createForm.appointmentType === "internal"}
                   >
-                    <option value="">{t.common_not_set}</option>
+                    <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
+                      <SelectValue placeholder={t.common_not_set} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">{t.common_not_set}</SelectItem>
                     {providers.map((provider) => (
-                      <option key={provider.id} value={provider.id}>
+                      <SelectItem key={provider.id} value={provider.id}>
                         {provider.name}
                         {provider.address_city
                           ? ` · ${provider.address_city}`
                           : ""}
-                      </option>
+                      </SelectItem>
                     ))}
-                  </select>
+                    </SelectContent>
+                  </ShadSelect>
                 </Field>
-                <Field label={t.common_doctor}>
-                  <select
+                <Field compact label={t.common_doctor}>
+                  <ShadSelect
                     value={createForm.doctorId}
-                    onChange={(event) =>
+                    onValueChange={(value) =>
                       setCreateForm((current) => ({
                         ...current,
-                        doctorId: event.target.value,
+                        doctorId: value ?? "",
                       }))
                     }
-                    className={selectClassName}
                     disabled={!createForm.providerId}
                   >
-                    <option value="">{t.common_not_set}</option>
-                    {createDoctors.map((doctor) => (
-                      <option key={doctor.id} value={doctor.id}>
-                        {doctorLabel(doctor)}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
+                      <SelectValue placeholder={t.common_not_set} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">{t.common_not_set}</SelectItem>
+                      {createDoctors.map((doctor) => (
+                        <SelectItem key={doctor.id} value={doctor.id}>
+                          {doctorLabel(doctor)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </ShadSelect>
                 </Field>
-              </div>
-              <div className="grid gap-4 md:grid-cols-2">
-                <Field label={t.patients_assign_owner}>
-                  <select
+                  </div>
+                </section>
+                <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
+                  <div className="grid gap-4 md:grid-cols-2">
+                <Field compact label={t.patients_assign_owner}>
+                  <ShadSelect
                     value={createForm.ownerUserId}
-                    onChange={(event) =>
+                    onValueChange={(value) =>
                       setCreateForm((current) => ({
                         ...current,
-                        ownerUserId: event.target.value,
+                        ownerUserId: value ?? "",
                       }))
                     }
-                    className={selectClassName}
                   >
-                    <option value="">{t.common_not_set}</option>
+                    <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
+                      <SelectValue placeholder={t.common_not_set} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">{t.common_not_set}</SelectItem>
                     {staff.map((member) => (
-                      <option key={member.id} value={member.id}>
+                      <SelectItem key={member.id} value={member.id}>
                         {member.name} · {roleLabel(member.role)}
-                      </option>
+                      </SelectItem>
                     ))}
-                  </select>
+                    </SelectContent>
+                  </ShadSelect>
                 </Field>
-                <Field label={t.common_doctor}>
-                  <select
+                <Field compact label={t.common_doctor}>
+                  <ShadSelect
                     value={createForm.interpreterId}
-                    onChange={(event) =>
+                    onValueChange={(value) =>
                       setCreateForm((current) => ({
                         ...current,
-                        interpreterId: event.target.value,
+                        interpreterId: value ?? "",
                       }))
                     }
-                    className={selectClassName}
                   >
-                    <option value="">{tr.common_not_set}</option>
+                    <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
+                      <SelectValue placeholder={tr.common_not_set} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">{tr.common_not_set}</SelectItem>
                     {interpreters.map((member) => (
-                      <option key={member.id} value={member.id}>
+                      <SelectItem key={member.id} value={member.id}>
                         {member.name} · {roleLabel(member.role)}
-                      </option>
+                      </SelectItem>
                     ))}
-                  </select>
+                    </SelectContent>
+                  </ShadSelect>
                 </Field>
               </div>
               <div className="grid gap-4 md:grid-cols-2">
-                <Field label={t.appointments_location}>
+                <Field compact label={t.appointments_location}>
                   <Input
                     value={createForm.location}
                     onChange={(event) =>
@@ -6580,10 +6645,10 @@ function StaffAppointmentsPage() {
                       }))
                     }
                     placeholder={tr.appointments_location}
-                    className="h-10 rounded-xl bg-slate-50"
+                    className={createSheetInputClassName}
                   />
                 </Field>
-                <Field label={tr.documents_category}>
+                <Field compact label={tr.documents_category}>
                   <Input
                     value={createForm.category}
                     onChange={(event) =>
@@ -6593,11 +6658,11 @@ function StaffAppointmentsPage() {
                       }))
                     }
                     placeholder={tr.documents_category}
-                    className="h-10 rounded-xl bg-slate-50"
+                    className={createSheetInputClassName}
                   />
                 </Field>
               </div>
-              <Field label={t.patients_notes}>
+              <Field compact label={t.patients_notes}>
                 <textarea
                   value={createForm.notes}
                   onChange={(event) =>
@@ -6607,36 +6672,38 @@ function StaffAppointmentsPage() {
                     }))
                   }
                   placeholder={tr.patients_notes}
-                  className={textareaClassName}
+                  className={createSheetTextareaClassName}
                   rows={4}
                 />
               </Field>
-              <ConflictPanel conflicts={createConflicts} />
-              <ScheduleWarningsPanel warnings={createLocalWarnings} />
-              <div className="flex justify-end gap-3 border-t border-border/70 pt-4">
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="rounded-2xl"
-                  onClick={() => setCreateOpen(false)}
-                >
-                  {tr.common_cancel}
-                </Button>
-                <Button
-                  type="submit"
-                  className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
-                  disabled={createBusy}
-                >
-                  {createBusy ? (
-                    <LoaderCircle className="size-4 animate-spin" />
-                  ) : (
-                    <Plus className="size-4" />
-                  )}
-                  {createBusy ? t.patients_creating : t.appointments_new}
-                </Button>
+                </section>
+                <ConflictPanel conflicts={createConflicts} />
+                <ScheduleWarningsPanel warnings={createLocalWarnings} />
               </div>
-            </form>
-          </div>
+            </div>
+            <div className="shrink-0 flex justify-end gap-2 px-4 py-3 bg-popover">
+              <Button
+                type="button"
+                variant="outline"
+                className="h-9 rounded-lg"
+                onClick={() => setCreateOpen(false)}
+              >
+                {tr.common_cancel}
+              </Button>
+              <Button
+                type="submit"
+                className="h-9 rounded-lg gap-1.5 px-3.5"
+                disabled={createBusy}
+              >
+                {createBusy ? (
+                  <LoaderCircle className="size-4 animate-spin" />
+                ) : (
+                  <Plus className="size-4" />
+                )}
+                {createBusy ? t.patients_creating : t.appointments_new}
+              </Button>
+            </div>
+          </form>
         </SheetContent>
       </Sheet>
 
