@@ -1,0 +1,248 @@
+-- Keep only the refreshed demo dataset and remove legacy / ad-hoc business rows
+-- that survived earlier seed migrations or manual local testing.
+
+TRUNCATE TABLE
+    refresh_tokens,
+    token_families,
+    revoked_access_tokens,
+    pending_logins,
+    direct_messages,
+    user_notifications,
+    case_versions,
+    audit_log
+RESTART IDENTITY;
+
+DELETE FROM document_shares
+WHERE id::text NOT LIKE '13100000-%';
+
+DELETE FROM document_translation_requests
+WHERE id::text NOT LIKE '13200000-%';
+
+DELETE FROM appointment_provider_template_deliveries
+WHERE id::text NOT LIKE 'c3100000-%';
+
+DELETE FROM appointment_checklists
+WHERE id::text NOT LIKE '12700000-%';
+
+DELETE FROM reminders
+WHERE id::text NOT LIKE '12800000-%';
+
+DELETE FROM order_leistungen
+WHERE id::text NOT LIKE '12400000-%';
+
+DELETE FROM interpreter_reports
+WHERE id::text NOT LIKE '12500000-%';
+
+DELETE FROM appointment_communications
+WHERE id::text NOT LIKE '12600000-%';
+
+DELETE FROM lead_attachments
+WHERE id::text NOT LIKE '14300000-%';
+
+DELETE FROM visitor_intake_attachments
+WHERE id::text NOT LIKE '14310000-%';
+
+DELETE FROM workflow_checklist_items
+WHERE id::text NOT LIKE '14400000-%';
+
+DELETE FROM workflow_lifecycle_events
+WHERE id::text NOT LIKE '14600000-%';
+
+DELETE FROM tasks
+WHERE id::text NOT LIKE '12900000-%';
+
+DELETE FROM concierge_services
+WHERE id::text NOT LIKE '13300000-%';
+
+DELETE FROM medication_expiry_events
+WHERE id::text NOT LIKE '14500000-%';
+
+DELETE FROM patient_feedback_forms
+WHERE id::text NOT LIKE '13500000-%';
+
+DELETE FROM patient_privacy_requests
+WHERE id::text NOT LIKE '14000000-%';
+
+DELETE FROM patient_appointment_requests
+WHERE id::text NOT LIKE '14100000-%';
+
+DELETE FROM patient_vital_measurements
+WHERE id::text NOT LIKE '13600000-%';
+
+DELETE FROM patient_medical_orders
+WHERE id::text NOT LIKE '13700000-%';
+
+DELETE FROM patient_card_entries
+WHERE id::text NOT LIKE '13800000-%';
+
+DELETE FROM patient_risk_scores
+WHERE id::text NOT LIKE '13900000-%';
+
+DELETE FROM patient_relations
+WHERE id::text NOT LIKE '13400000-%';
+
+DELETE FROM consent_records
+WHERE id::text NOT LIKE '13410000-%';
+
+DELETE FROM patient_assignments
+WHERE (patient_id, user_id) NOT IN (
+    ('b0000000-0000-0000-0000-000000000001'::uuid, 'a0000000-0000-0000-0000-000000000003'::uuid),
+    ('b0000000-0000-0000-0000-000000000001'::uuid, 'a0000000-0000-0000-0000-000000000007'::uuid),
+    ('b0000000-0000-0000-0000-000000000002'::uuid, 'a0000000-0000-0000-0000-000000000003'::uuid),
+    ('b0000000-0000-0000-0000-000000000002'::uuid, 'a0000000-0000-0000-0000-000000000006'::uuid),
+    ('b0000000-0000-0000-0000-000000000002'::uuid, 'a0000000-0000-0000-0000-000000000011'::uuid),
+    ('b0000000-0000-0000-0000-000000000003'::uuid, 'a0000000-0000-0000-0000-000000000003'::uuid),
+    ('b0000000-0000-0000-0000-000000000004'::uuid, 'a0000000-0000-0000-0000-000000000003'::uuid),
+    ('b0000000-0000-0000-0000-000000000005'::uuid, 'a0000000-0000-0000-0000-000000000003'::uuid),
+    ('b0000000-0000-0000-0000-000000000006'::uuid, 'a0000000-0000-0000-0000-000000000003'::uuid),
+    ('b0000000-0000-0000-0000-000000000007'::uuid, 'a0000000-0000-0000-0000-000000000003'::uuid),
+    ('b0000000-0000-0000-0000-000000000007'::uuid, 'a0000000-0000-0000-0000-000000000005'::uuid),
+    ('b0000000-0000-0000-0000-000000000007'::uuid, 'a0000000-0000-0000-0000-000000000007'::uuid),
+    ('b0000000-0000-0000-0000-000000000007'::uuid, 'a0000000-0000-0000-0000-000000000012'::uuid),
+    ('b0000000-0000-0000-0000-000000000008'::uuid, 'a0000000-0000-0000-0000-000000000003'::uuid),
+    ('b0000000-0000-0000-0000-000000000008'::uuid, 'a0000000-0000-0000-0000-000000000006'::uuid),
+    ('b0000000-0000-0000-0000-000000000008'::uuid, 'a0000000-0000-0000-0000-000000000007'::uuid),
+    ('b0000000-0000-0000-0000-000000000008'::uuid, 'a0000000-0000-0000-0000-000000000015'::uuid),
+    ('b0000000-0000-0000-0000-000000000009'::uuid, 'a0000000-0000-0000-0000-000000000003'::uuid),
+    ('b0000000-0000-0000-0000-000000000010'::uuid, 'a0000000-0000-0000-0000-000000000003'::uuid),
+    ('b0000000-0000-0000-0000-000000000011'::uuid, 'a0000000-0000-0000-0000-000000000003'::uuid),
+    ('b0000000-0000-0000-0000-000000000012'::uuid, 'a0000000-0000-0000-0000-000000000003'::uuid),
+    ('b0000000-0000-0000-0000-000000000012'::uuid, 'a0000000-0000-0000-0000-000000000014'::uuid),
+    ('b0000000-0000-0000-0000-000000000013'::uuid, 'a0000000-0000-0000-0000-000000000003'::uuid),
+    ('b0000000-0000-0000-0000-000000000014'::uuid, 'a0000000-0000-0000-0000-000000000003'::uuid),
+    ('b0000000-0000-0000-0000-000000000014'::uuid, 'a0000000-0000-0000-0000-000000000013'::uuid),
+    ('b0000000-0000-0000-0000-000000000015'::uuid, 'a0000000-0000-0000-0000-000000000003'::uuid)
+);
+
+DELETE FROM pain_records
+WHERE id::text NOT LIKE 'e1050000-%';
+
+DELETE FROM medikamente
+WHERE id::text NOT LIKE 'e1040000-%';
+
+DELETE FROM operationen
+WHERE id::text NOT LIKE 'e1030000-%';
+
+DELETE FROM allergien
+WHERE id::text NOT LIKE 'e1020000-%';
+
+DELETE FROM vorerkrankungen
+WHERE id::text NOT LIKE 'e1010000-%';
+
+DELETE FROM symptome
+WHERE id::text NOT LIKE 'e1060000-%';
+
+DELETE FROM vegetative_anamnese
+WHERE case_id::text NOT LIKE 'e0000000-0000-0000-0000-0000000000__';
+
+DELETE FROM impfstatus
+WHERE case_id::text NOT LIKE 'e0000000-0000-0000-0000-0000000000__';
+
+DELETE FROM case_cardiology_assessments
+WHERE case_id::text NOT LIKE 'e0000000-0000-0000-0000-0000000000__';
+
+DELETE FROM case_orthopedics_assessments
+WHERE case_id::text NOT LIKE 'e0000000-0000-0000-0000-0000000000__';
+
+DELETE FROM case_neurology_assessments
+WHERE case_id::text NOT LIKE 'e0000000-0000-0000-0000-0000000000__';
+
+DELETE FROM case_gastroenterology_assessments
+WHERE case_id::text NOT LIKE 'e0000000-0000-0000-0000-0000000000__';
+
+DELETE FROM case_urology_assessments
+WHERE case_id::text NOT LIKE 'e0000000-0000-0000-0000-0000000000__';
+
+DELETE FROM case_pulmonology_assessments
+WHERE case_id::text NOT LIKE 'e0000000-0000-0000-0000-0000000000__';
+
+DELETE FROM case_text_snippets
+WHERE id::text NOT LIKE '14700000-%';
+
+DELETE FROM accounting_entries
+WHERE id::text NOT LIKE '12220000-%';
+
+DELETE FROM quote_versions
+WHERE id::text NOT LIKE '12110000-%';
+
+DELETE FROM invoices
+WHERE id::text NOT LIKE '12200000-%';
+
+DELETE FROM external_invoices
+WHERE id::text NOT LIKE '12210000-%';
+
+DELETE FROM quotes
+WHERE id::text NOT LIKE '12100000-%';
+
+DELETE FROM order_planning_preparation
+WHERE order_id::text NOT LIKE 'f0000000-0000-0000-0000-0000000000__';
+
+DELETE FROM order_execution_flows
+WHERE order_id::text NOT LIKE 'f0000000-0000-0000-0000-0000000000__';
+
+DELETE FROM order_followup_flows
+WHERE order_id::text NOT LIKE 'f0000000-0000-0000-0000-0000000000__';
+
+DELETE FROM documents
+WHERE id::text NOT LIKE '13000000-%';
+
+DELETE FROM appointments
+WHERE id::text NOT LIKE '11000000-0000-0000-0000-0000000000__';
+
+DELETE FROM cases
+WHERE id::text NOT LIKE 'e0000000-0000-0000-0000-0000000000__';
+
+DELETE FROM orders
+WHERE id::text NOT LIKE 'f0000000-0000-0000-0000-0000000000__';
+
+DELETE FROM framework_contracts
+WHERE id::text NOT LIKE '12000000-%';
+
+DELETE FROM lead_attachments
+WHERE lead_id NOT IN (
+    'd0000000-0000-0000-0000-000000000001'::uuid,
+    'd0000000-0000-0000-0000-000000000002'::uuid,
+    'd0000000-0000-0000-0000-000000000003'::uuid,
+    'd0000000-0000-0000-0000-000000000004'::uuid,
+    'd0000000-0000-0000-0000-000000000005'::uuid,
+    'd0000000-0000-0000-0000-000000000006'::uuid,
+    'd0000000-0000-0000-0000-000000000007'::uuid,
+    'd0000000-0000-0000-0000-000000000008'::uuid,
+    'd0000000-0000-0000-0000-000000000009'::uuid,
+    'd0000000-0000-0000-0000-000000000010'::uuid
+);
+
+DELETE FROM leads
+WHERE id NOT IN (
+    'd0000000-0000-0000-0000-000000000001'::uuid,
+    'd0000000-0000-0000-0000-000000000002'::uuid,
+    'd0000000-0000-0000-0000-000000000003'::uuid,
+    'd0000000-0000-0000-0000-000000000004'::uuid,
+    'd0000000-0000-0000-0000-000000000005'::uuid,
+    'd0000000-0000-0000-0000-000000000006'::uuid,
+    'd0000000-0000-0000-0000-000000000007'::uuid,
+    'd0000000-0000-0000-0000-000000000008'::uuid,
+    'd0000000-0000-0000-0000-000000000009'::uuid,
+    'd0000000-0000-0000-0000-000000000010'::uuid
+);
+
+DELETE FROM visitor_intakes
+WHERE id::text NOT LIKE '14200000-%';
+
+DELETE FROM provider_templates
+WHERE id::text NOT LIKE 'c3000000-%';
+
+DELETE FROM service_catalog
+WHERE id::text NOT LIKE 'c2000000-%';
+
+DELETE FROM provider_doctors
+WHERE id::text NOT LIKE 'c1000000-%';
+
+DELETE FROM providers
+WHERE id::text NOT LIKE 'c0000000-0000-0000-0000-00000000000_';
+
+DELETE FROM agency_service_catalog
+WHERE id::text NOT LIKE '12300000-%';
+
+DELETE FROM patients
+WHERE id::text NOT LIKE 'b0000000-0000-0000-0000-0000000000__';
