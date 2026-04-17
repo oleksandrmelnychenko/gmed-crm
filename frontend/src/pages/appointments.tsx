@@ -408,6 +408,14 @@ type OperationalScope =
   | "my_interpreter_queue"
   | "concierge_flow"
   | "blocked_medical";
+type SchedulerQuickScope =
+  | "all"
+  | "today"
+  | "week"
+  | "mine"
+  | "medical"
+  | "non_medical"
+  | "internal";
 
 type FiltersState = {
   search: string;
@@ -1844,6 +1852,16 @@ function doctorLabel(doctor: DoctorOption) {
     : doctor.name;
 }
 
+function providerLabel(provider: ProviderSummary) {
+  return provider.address_city
+    ? `${provider.name} · ${provider.address_city}`
+    : provider.name;
+}
+
+function staffLabel(option: { name: string; role: string }) {
+  return `${option.name} · ${roleLabel(option.role)}`;
+}
+
 function recurrenceFrequencyLabel(value: AppointmentRecurrenceFrequency) {
   switch (value) {
     case "daily":
@@ -2525,6 +2543,20 @@ function StaffAppointmentsPage() {
       ? filters.interpreterId === user.id
       : filters.ownerUserId === user.id
     : false;
+  const schedulerQuickScopeValue: SchedulerQuickScope =
+    filters.dateFrom === todayDate && filters.dateTo === todayDate
+      ? "today"
+      : filters.dateFrom === weekStart && filters.dateTo === weekEnd
+        ? "week"
+        : mineFilterActive
+          ? "mine"
+          : filters.appointmentType === "medical"
+            ? "medical"
+            : filters.appointmentType === "non_medical"
+              ? "non_medical"
+              : filters.appointmentType === "internal"
+                ? "internal"
+                : "all";
   const createLocalWarnings = buildLocalScheduleWarnings(
     appointments,
     {
@@ -2584,6 +2616,86 @@ function StaffAppointmentsPage() {
   const canShowConciergeSection =
     permissions.canViewConciergeServices && detail?.type === "non_medical";
   const scopeOptions = operationalScopeOptions(user?.role, tr);
+  const selectedOperationalScopeLabel =
+    scopeOptions.find((option) => option.id === operationalScope)?.label ??
+    t.providers_all;
+  const schedulerQuickScopeOptions: Array<{
+    id: SchedulerQuickScope;
+    label: string;
+  }> = [
+    {
+      id: "all",
+      label: t.providers_all,
+    },
+    {
+      id: "today",
+      label:
+        tr.appointments_today ??
+        appointmentText("Heute", "Сегодня", "Today"),
+    },
+    {
+      id: "week",
+      label:
+        tr.dash_this_week ??
+        appointmentText("Diese Woche", "Эта неделя", "This week"),
+    },
+    ...(user?.id
+      ? [
+          {
+            id: "mine" as const,
+            label: appointmentText("Bei mir", "Мои", "Mine"),
+          },
+        ]
+      : []),
+    {
+      id: "medical",
+      label: appointmentTypeLabel("medical", tr),
+    },
+    {
+      id: "non_medical",
+      label: appointmentTypeLabel("non_medical", tr),
+    },
+    {
+      id: "internal",
+      label: appointmentTypeLabel("internal", tr),
+    },
+  ];
+  const selectedSchedulerQuickScopeLabel =
+    schedulerQuickScopeOptions.find(
+      (option) => option.id === schedulerQuickScopeValue,
+    )?.label ?? t.providers_all;
+  const selectedCreatePatientLabel = createForm.patientId
+    ? (() => {
+        const patient = patients.find((item) => item.id === createForm.patientId);
+        return patient ? `${patient.patient_id} · ${patientName(patient)}` : t.orders_patient;
+      })()
+    : t.orders_patient;
+  const selectedCreateProviderLabel = createForm.providerId
+    ? (() => {
+        const provider = providers.find((item) => item.id === createForm.providerId);
+        return provider ? providerLabel(provider) : t.common_not_set;
+      })()
+    : t.common_not_set;
+  const selectedCreateDoctorLabel = createForm.doctorId
+    ? (() => {
+        const doctor = createDoctors.find((item) => item.id === createForm.doctorId);
+        return doctor ? doctorLabel(doctor) : t.common_not_set;
+      })()
+    : t.common_not_set;
+  const selectedCreateOwnerLabel = createForm.ownerUserId
+    ? (() => {
+        const owner = staff.find((item) => item.id === createForm.ownerUserId);
+        return owner ? staffLabel(owner) : t.common_not_set;
+      })()
+    : t.common_not_set;
+  const selectedCreateInterpreterLabel = createForm.interpreterId
+    ? (() => {
+        const interpreter = interpreters.find(
+          (item) => item.id === createForm.interpreterId,
+        );
+        return interpreter ? staffLabel(interpreter) : t.common_not_set;
+      })()
+    : t.common_not_set;
   const handoffStakeholders =
     detail && !detail.is_blocked
       ? buildHandoffStakeholders(detail, detailAssignments, tr)
@@ -3605,15 +3717,83 @@ function StaffAppointmentsPage() {
     });
   }
 
-  function applyTypeScope(type: AppointmentKind) {
-    setOperationalScope("all");
-    startTransition(() => {
-      setFilters((current) => ({ ...current, appointmentType: type }));
-    });
-  }
-
   function applyOperationalScope(scope: OperationalScope) {
     setOperationalScope(scope);
+  }
+
+  function applySchedulerQuickScope(scope: SchedulerQuickScope) {
+    if (scope === "today") {
+      startTransition(() => {
+        setFilters((current) => ({
+          ...current,
+          dateFrom: todayDate,
+          dateTo: todayDate,
+          ownerUserId: "",
+          interpreterId: "",
+          appointmentType: "",
+        }));
+      });
+      syncCalendar("timeGridDay", todayDate);
+      return;
+    }
+    if (scope === "week") {
+      startTransition(() => {
+        setFilters((current) => ({
+          ...current,
+          dateFrom: weekStart,
+          dateTo: weekEnd,
+          ownerUserId: "",
+          interpreterId: "",
+          appointmentType: "",
+        }));
+      });
+      syncCalendar("timeGridWeek", weekStart);
+      return;
+    }
+    if (scope === "mine") {
+      const currentUser = user;
+      if (!currentUser?.id) return;
+      setOperationalScope("all");
+      startTransition(() => {
+        setFilters((current) => ({
+          ...current,
+          dateFrom: "",
+          dateTo: "",
+          appointmentType: "",
+          ownerUserId: currentUser.role === "interpreter" ? "" : currentUser.id,
+          interpreterId: currentUser.role === "interpreter" ? currentUser.id : "",
+        }));
+      });
+      return;
+    }
+    if (
+      scope === "medical" ||
+      scope === "non_medical" ||
+      scope === "internal"
+    ) {
+      setOperationalScope("all");
+      startTransition(() => {
+        setFilters((current) => ({
+          ...current,
+          dateFrom: "",
+          dateTo: "",
+          ownerUserId: "",
+          interpreterId: "",
+          appointmentType: scope,
+        }));
+      });
+      return;
+    }
+    startTransition(() => {
+      setFilters((current) => ({
+        ...current,
+        dateFrom: "",
+        dateTo: "",
+        ownerUserId: "",
+        interpreterId: "",
+        appointmentType: "",
+      }));
+    });
   }
 
   function resetQuickScopes() {
@@ -5445,10 +5625,14 @@ function StaffAppointmentsPage() {
                     <div className="mb-4 flex items-center justify-between">
                       <div>
                         <h2 className="text-sm font-semibold text-slate-950">
-                          Filters
+                          {appointmentText("Filter", "Фильтры", "Filters")}
                         </h2>
                         <p className="text-xs text-muted-foreground">
-                          Scope controls for the scheduler.
+                          {appointmentText(
+                            "Steuerung des Scheduler-Bereichs.",
+                            "Управление областью планировщика.",
+                            "Scope controls for the scheduler.",
+                          )}
                         </p>
                       </div>
                       <Button
@@ -5456,144 +5640,66 @@ function StaffAppointmentsPage() {
                         size="sm"
                         onClick={resetQuickScopes}
                       >
-                        Reset scope
+                        {appointmentText(
+                          "Bereich zurücksetzen",
+                          "Сбросить область",
+                          "Reset scope",
+                        )}
                       </Button>
                     </div>
-                    <div className="appointments-scheduler-controls flex min-w-0 flex-wrap items-center gap-1.5">
-                      {scopeOptions.length > 1 ? (
-                        <div className="appointments-scheduler-operational-scopes appointments-hero-operational-scopes flex shrink-0 items-center">
-                          {scopeOptions.map((option) => (
-                            <ScopeCheckbox
-                              key={`scheduler-sheet-${option.id}`}
-                              checked={operationalScope === option.id}
-                              onCheckedChange={(checked) => {
-                                if (checked) {
-                                  applyOperationalScope(option.id);
-                                  return;
-                                }
-                                if (operationalScope === option.id) {
-                                  applyOperationalScope("all");
-                                }
-                              }}
-                            >
-                              {option.label}
-                            </ScopeCheckbox>
-                          ))}
-                        </div>
-                      ) : null}
-                      <div className="appointments-scheduler-quick-scopes appointments-hero-quick-scopes flex shrink-0 items-center">
-                        <ScopeCheckbox
-                          checked={
-                            filters.dateFrom === todayDate &&
-                            filters.dateTo === todayDate
+                    <div className="grid gap-3">
+                      <Field
+                        compact
+                        label={appointmentText(
+                          "Operativer Bereich",
+                          "Операционная область",
+                          "Operational scope",
+                        )}
+                      >
+                        <ShadSelect
+                          value={operationalScope}
+                          onValueChange={(value) =>
+                            applyOperationalScope((value as OperationalScope) ?? "all")
                           }
-                          onCheckedChange={(checked) => {
-                            if (checked) {
-                              applyTodayScope();
-                              return;
-                            }
-                            startTransition(() => {
-                              setFilters((current) => ({
-                                ...current,
-                                dateFrom: "",
-                                dateTo: "",
-                              }));
-                            });
-                          }}
                         >
-                          Today
-                        </ScopeCheckbox>
-                        <ScopeCheckbox
-                          checked={
-                            filters.dateFrom === weekStart &&
-                            filters.dateTo === weekEnd
+                          <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
+                            <SelectValue>{selectedOperationalScopeLabel}</SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            {scopeOptions.map((option) => (
+                              <SelectItem key={`scheduler-sheet-${option.id}`} value={option.id}>
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </ShadSelect>
+                      </Field>
+                      <Field
+                        compact
+                        label={appointmentText(
+                          "Schnellbereich",
+                          "Быстрая область",
+                          "Quick scope",
+                        )}
+                      >
+                        <ShadSelect
+                          value={schedulerQuickScopeValue}
+                          onValueChange={(value) =>
+                            applySchedulerQuickScope((value as SchedulerQuickScope) ?? "all")
                           }
-                          onCheckedChange={(checked) => {
-                            if (checked) {
-                              applyWeekScope();
-                              return;
-                            }
-                            startTransition(() => {
-                              setFilters((current) => ({
-                                ...current,
-                                dateFrom: "",
-                                dateTo: "",
-                              }));
-                            });
-                          }}
                         >
-                          This week
-                        </ScopeCheckbox>
-                        <ScopeCheckbox
-                          checked={mineFilterActive}
-                          onCheckedChange={(checked) => {
-                            if (checked) {
-                              applyMineScope();
-                              return;
-                            }
-                            startTransition(() => {
-                              setFilters((current) => ({
-                                ...current,
-                                ownerUserId: "",
-                                interpreterId: "",
-                              }));
-                            });
-                          }}
-                        >
-                          Mine
-                        </ScopeCheckbox>
-                        <ScopeCheckbox
-                          checked={filters.appointmentType === "medical"}
-                          onCheckedChange={(checked) => {
-                            if (checked) {
-                              applyTypeScope("medical");
-                              return;
-                            }
-                            startTransition(() => {
-                              setFilters((current) => ({
-                                ...current,
-                                appointmentType: "",
-                              }));
-                            });
-                          }}
-                        >
-                          Medical
-                        </ScopeCheckbox>
-                        <ScopeCheckbox
-                          checked={filters.appointmentType === "non_medical"}
-                          onCheckedChange={(checked) => {
-                            if (checked) {
-                              applyTypeScope("non_medical");
-                              return;
-                            }
-                            startTransition(() => {
-                              setFilters((current) => ({
-                                ...current,
-                                appointmentType: "",
-                              }));
-                            });
-                          }}
-                        >
-                          Concierge
-                        </ScopeCheckbox>
-                        <ScopeCheckbox
-                          checked={filters.appointmentType === "internal"}
-                          onCheckedChange={(checked) => {
-                            if (checked) {
-                              applyTypeScope("internal");
-                              return;
-                            }
-                            startTransition(() => {
-                              setFilters((current) => ({
-                                ...current,
-                                appointmentType: "",
-                              }));
-                            });
-                          }}
-                        >
-                          Internal
-                        </ScopeCheckbox>
-                      </div>
+                          <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
+                            <SelectValue>{selectedSchedulerQuickScopeLabel}</SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            {schedulerQuickScopeOptions.map((option) => (
+                              <SelectItem key={`scheduler-quick-${option.id}`} value={option.id}>
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </ShadSelect>
+                      </Field>
                     </div>
                   </section>
                 </SheetContent>
@@ -6284,7 +6390,7 @@ function StaffAppointmentsPage() {
               <div className="space-y-4">
                 {createError ? <Banner tone="error">{createError}</Banner> : null}
                 <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
-                  <div className="grid gap-4 md:grid-cols-2">
+                  <div className="grid gap-4 md:grid-cols-3">
                 <Field compact label={t.orders_patient}>
                   <ShadSelect
                     value={createForm.patientId}
@@ -6296,7 +6402,7 @@ function StaffAppointmentsPage() {
                     }
                   >
                     <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
-                      <SelectValue placeholder={t.orders_patient} />
+                      <SelectValue>{selectedCreatePatientLabel}</SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="">{t.orders_patient}</SelectItem>
@@ -6348,13 +6454,7 @@ function StaffAppointmentsPage() {
                     disabled={createForm.appointmentType !== "medical"}
                   >
                     <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
-                      <SelectValue
-                        placeholder={appointmentText(
-                          "Versorgungspfad",
-                          "РўСЂР°РµРєС‚РѕСЂРёСЏ Р»РµС‡РµРЅРёСЏ",
-                          "Care path",
-                        )}
-                      />
+                      <SelectValue>{carePathKindLabel(createForm.carePathKind)}</SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       {CARE_PATH_KIND_OPTIONS.map((value) => (
@@ -6375,7 +6475,6 @@ function StaffAppointmentsPage() {
                       title: event.target.value,
                     }))
                   }
-                  placeholder={tr.appointments_title_col}
                   required
                   className={createSheetInputClassName}
                 />
@@ -6504,11 +6603,6 @@ function StaffAppointmentsPage() {
                             repeatCount: event.target.value,
                           }))
                         }
-                        placeholder={appointmentText(
-                          "Optional, wenn ein Enddatum gesetzt ist",
-                          "Необязательно, если указана дата окончания",
-                          "Optional if until date is set",
-                        )}
                         className={createSheetInputClassName}
                       />
                     </Field>
@@ -6544,16 +6638,13 @@ function StaffAppointmentsPage() {
                     disabled={createForm.appointmentType === "internal"}
                   >
                     <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
-                      <SelectValue placeholder={t.common_not_set} />
+                      <SelectValue>{selectedCreateProviderLabel}</SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="">{t.common_not_set}</SelectItem>
                     {providers.map((provider) => (
                       <SelectItem key={provider.id} value={provider.id}>
-                        {provider.name}
-                        {provider.address_city
-                          ? ` · ${provider.address_city}`
-                          : ""}
+                        {providerLabel(provider)}
                       </SelectItem>
                     ))}
                     </SelectContent>
@@ -6571,7 +6662,7 @@ function StaffAppointmentsPage() {
                     disabled={!createForm.providerId}
                   >
                     <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
-                      <SelectValue placeholder={t.common_not_set} />
+                      <SelectValue>{selectedCreateDoctorLabel}</SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="">{t.common_not_set}</SelectItem>
@@ -6598,13 +6689,13 @@ function StaffAppointmentsPage() {
                     }
                   >
                     <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
-                      <SelectValue placeholder={t.common_not_set} />
+                      <SelectValue>{selectedCreateOwnerLabel}</SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="">{t.common_not_set}</SelectItem>
                     {staff.map((member) => (
                       <SelectItem key={member.id} value={member.id}>
-                        {member.name} · {roleLabel(member.role)}
+                        {staffLabel(member)}
                       </SelectItem>
                     ))}
                     </SelectContent>
@@ -6621,13 +6712,13 @@ function StaffAppointmentsPage() {
                     }
                   >
                     <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
-                      <SelectValue placeholder={tr.common_not_set} />
+                      <SelectValue>{selectedCreateInterpreterLabel}</SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="">{tr.common_not_set}</SelectItem>
                     {interpreters.map((member) => (
                       <SelectItem key={member.id} value={member.id}>
-                        {member.name} · {roleLabel(member.role)}
+                        {staffLabel(member)}
                       </SelectItem>
                     ))}
                     </SelectContent>
@@ -6644,7 +6735,6 @@ function StaffAppointmentsPage() {
                         location: event.target.value,
                       }))
                     }
-                    placeholder={tr.appointments_location}
                     className={createSheetInputClassName}
                   />
                 </Field>
@@ -6657,7 +6747,6 @@ function StaffAppointmentsPage() {
                         category: event.target.value,
                       }))
                     }
-                    placeholder={tr.documents_category}
                     className={createSheetInputClassName}
                   />
                 </Field>
@@ -6671,7 +6760,6 @@ function StaffAppointmentsPage() {
                       notes: event.target.value,
                     }))
                   }
-                  placeholder={tr.patients_notes}
                   className={createSheetTextareaClassName}
                   rows={4}
                 />
@@ -11804,33 +11892,6 @@ function StatsCard({
         </span>
       )}
     </div>
-  );
-}
-
-function ScopeCheckbox({
-  checked,
-  onCheckedChange,
-  children,
-}: {
-  checked: boolean;
-  onCheckedChange: (checked: boolean) => void;
-  children: ReactNode;
-}) {
-  return (
-    <label
-      className={cn(
-        "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-xs transition hover:cursor-pointer",
-        checked ? "text-slate-950" : "text-slate-700",
-      )}
-    >
-      <input
-        type="checkbox"
-        className="size-3 rounded-sm border-slate-300 align-middle"
-        checked={checked}
-        onChange={(event) => onCheckedChange(event.currentTarget.checked)}
-      />
-      <span>{children}</span>
-    </label>
   );
 }
 
