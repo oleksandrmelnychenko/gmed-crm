@@ -130,7 +130,7 @@
 }
 
 .appointments-calendar-shell .fc {
-  --fc-border-color: color-mix(in oklch, var(--color-border) 82%, white);
+  --fc-border-color: transparent;
   --fc-button-bg-color: oklch(0.205 0 0);
   --fc-button-border-color: oklch(0.205 0 0);
   --fc-button-hover-bg-color: oklch(0.27 0 0);
@@ -139,8 +139,15 @@
   --fc-button-active-border-color: oklch(0.145 0 0);
   --fc-page-bg-color: transparent;
   --fc-event-border-color: transparent;
-  --fc-event-text-color: white;
+  --fc-event-text-color: oklch(0.25 0.02 250);
   --fc-list-event-hover-bg-color: color-mix(in oklch, var(--color-muted) 70%, white);
+}
+
+.appointments-calendar-shell .fc .fc-scrollgrid,
+.appointments-calendar-shell .fc .fc-scrollgrid table,
+.appointments-calendar-shell .fc td,
+.appointments-calendar-shell .fc th {
+  border: 0 !important;
 }
 
 .appointments-calendar-shell .fc .fc-toolbar {
@@ -163,10 +170,75 @@
   font-weight: 600;
 }
 
-.appointments-calendar-shell .fc .fc-daygrid-day-frame,
 .appointments-calendar-shell .fc .fc-timegrid-slot,
 .appointments-calendar-shell .fc .fc-scrollgrid-section-header > * {
   background: transparent;
+}
+
+.appointments-calendar-shell .fc .fc-daygrid-day {
+  padding: 0.2rem;
+}
+
+.appointments-calendar-shell .fc .fc-daygrid-day-frame {
+  min-height: 9rem;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 0.35rem;
+  position: relative;
+}
+
+.appointments-calendar-shell .fc .fc-scrollgrid-sync-inner {
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.appointments-calendar-shell .fc .fc-daygrid-day-top {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.35rem;
+  left: auto;
+  z-index: 8;
+  pointer-events: auto;
+}
+
+.appointments-calendar-shell .fc .fc-daygrid-day-number {
+  position: relative;
+  z-index: 9;
+  font-weight: 600;
+}
+
+.appointments-calendar-shell .fc .fc-daygrid-day-events {
+  position: relative;
+  z-index: 1;
+  margin-top: 1.45rem;
+}
+
+.appointments-calendar-shell .fc .fc-daygrid-more-link {
+  position: relative;
+  z-index: 8;
+}
+
+.appointments-calendar-shell,
+.appointments-calendar-shell .fc,
+.appointments-calendar-shell .fc .fc-view-harness,
+.appointments-calendar-shell .fc .fc-scroller,
+.appointments-calendar-shell .fc .fc-view,
+.appointments-calendar-shell .fc .fc-scrollgrid,
+.appointments-calendar-shell .fc .fc-scrollgrid-section > *,
+.appointments-calendar-shell .fc .fc-daygrid-body,
+.appointments-calendar-shell .fc .fc-timegrid-body,
+.appointments-calendar-shell .fc .fc-timegrid-body table,
+.appointments-calendar-shell .fc .fc-daygrid-body table {
+  background: transparent !important;
+}
+
+.appointments-calendar-shell .fc-theme-standard .fc-scrollgrid,
+.appointments-calendar-shell .fc-theme-standard td,
+.appointments-calendar-shell .fc-theme-standard th,
+.appointments-calendar-shell .fc .fc-daygrid-day-bg,
+.appointments-calendar-shell .fc .fc-timegrid-col-bg,
+.appointments-calendar-shell .fc .fc-highlight {
+  background: transparent !important;
 }
 
 .appointments-calendar-shell .fc .fc-col-header-cell-cushion,
@@ -179,20 +251,68 @@
 }
 
 .appointments-calendar-shell .fc .fc-event {
-  border-radius: 1rem;
-  padding: 0.15rem;
-  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.12);
+  border: 1px solid #d8dce2;
+  border-radius: 0.65rem;
+  background: #ffffff;
+  color: #0f172a;
+  padding: 0;
+  box-shadow: none;
 }
 
 .appointments-calendar-shell .fc .fc-event-main {
-  padding: 0.35rem 0.5rem;
+  padding: 0.55rem 0.62rem 0.5rem;
+}
+
+.appointments-calendar-shell .fc .fc-daygrid-event-harness {
+  padding-left: 0.15rem;
+  padding-right: 0 !important;
+  padding-block: 0.12rem;
+  margin-right: 0 !important;
+  right: 0 !important;
+  inset-inline-end: 0 !important;
+  width: 100% !important;
+}
+
+.appointments-calendar-shell .fc .fc-daygrid-event-harness a {
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  margin-right: 0 !important;
+  padding-right: 0 !important;
+  width: 100% !important;
+  max-width: none !important;
+}
+
+.appointments-calendar-shell .fc .fc-daygrid-event-harness a .fc-event-main {
+  border-radius: 0 !important;
+  padding-right: 0 !important;
+  width: 100%;
+}
+
+.appointments-calendar-shell .fc .fc-daygrid-event-harness-abs {
+  right: 0 !important;
+  inset-inline-end: 0 !important;
+}
+
+.appointments-calendar-shell .fc .fc-daygrid-event {
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+}
+
+.appointments-calendar-shell .fc-direction-ltr .fc-daygrid-event.fc-event-start,
+.appointments-calendar-shell .fc-direction-ltr .fc-daygrid-event.fc-event-end,
+.appointments-calendar-shell .fc-direction-rtl .fc-daygrid-event.fc-event-start,
+.appointments-calendar-shell .fc-direction-rtl .fc-daygrid-event.fc-event-end {
+  margin-left: 0 !important;
+  margin-right: 0 !important;
 }
 
 .appointments-calendar-shell .fc-apt-event-card {
   display: flex;
   min-width: 0;
+  width: 100%;
   flex-direction: column;
-  gap: 0.18rem;
+  gap: 0.3rem;
 }
 
 .appointments-calendar-shell .fc-apt-event-card-list {
@@ -202,29 +322,33 @@
 .appointments-calendar-shell .fc-apt-event-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.4rem;
+  gap: 0.35rem;
+  min-height: 1.25rem;
 }
 
 .appointments-calendar-shell .fc-apt-event-time {
-  font-size: 0.66rem;
+  font-size: 0.6rem;
   font-weight: 700;
-  letter-spacing: 0.02em;
-  opacity: 0.92;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #475569;
+  opacity: 1;
 }
 
 .appointments-calendar-shell .fc-apt-event-tag {
-  max-width: 7rem;
+  max-width: 8rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.18);
-  padding: 0.15rem 0.45rem;
+  border: 0;
+  background: #f4e7cc;
+  padding: 0.16rem 0.5rem;
   font-size: 0.56rem;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+  color: #7b5b1f;
 }
 
 .appointments-calendar-shell .fc-apt-event-title,
@@ -233,50 +357,117 @@
 .appointments-calendar-shell .fc-apt-event-note {
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .appointments-calendar-shell .fc-apt-event-title {
-  font-size: 0.72rem;
+  font-size: 0.78rem;
   font-weight: 700;
-  line-height: 1.15;
+  line-height: 1.22;
+  color: #0f172a;
+  white-space: nowrap;
 }
 
 .appointments-calendar-shell .fc-apt-event-meta {
-  font-size: 0.62rem;
+  font-size: 0.66rem;
   font-weight: 600;
-  opacity: 0.95;
+  color: #475569;
+  opacity: 1;
+  white-space: nowrap;
 }
 
 .appointments-calendar-shell .fc-apt-event-submeta,
 .appointments-calendar-shell .fc-apt-event-note {
-  font-size: 0.58rem;
-  opacity: 0.84;
+  font-size: 0.64rem;
+  color: #64748b;
+  opacity: 1;
+  white-space: normal;
+  line-height: 1.25;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
-.appointments-calendar-shell .fc-apt-event-medical {
-  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+.appointments-calendar-shell .fc-apt-event-note {
+  margin-top: 0.04rem;
+  padding-top: 0;
 }
 
-.appointments-calendar-shell .fc-apt-event-concierge {
-  background: linear-gradient(135deg, #0f766e, #0d9488);
+.appointments-calendar-shell .fc-apt-event-card .absolute.top-1.right-1 {
+  top: 0.45rem;
+  right: 0.4rem;
+  border-color: transparent;
+  background: transparent;
+  color: #64748b;
+  box-shadow: none;
 }
 
-.appointments-calendar-shell .fc-apt-event-internal {
-  background: linear-gradient(135deg, #334155, #475569);
+.appointments-calendar-shell .fc-apt-event-card .absolute.top-1.right-1:hover {
+  background: #f8fafc;
+  color: #334155;
 }
 
-.appointments-calendar-shell .fc-apt-event-completed {
-  background: linear-gradient(135deg, #059669, #10b981);
+.appointments-calendar-shell .fc-apt-event-task {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 0.25rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.35rem;
+  background: #f7f8fa;
+  padding: 0.15rem 0.35rem;
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: #64748b;
 }
 
-.appointments-calendar-shell .fc-apt-event-cancelled {
-  background: linear-gradient(135deg, #b91c1c, #ef4444);
+.appointments-calendar-shell .fc-apt-event-divider {
+  margin-top: 0.2rem;
+  border-top: 1px solid #e2e8f0;
 }
 
-.appointments-calendar-shell .fc-apt-event-blocked {
-  background: linear-gradient(135deg, #9a3412, #f97316);
+.appointments-calendar-shell .fc-apt-event-footer {
+  margin-top: 0.08rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
 }
+
+.appointments-calendar-shell .fc-apt-event-avatars {
+  display: inline-flex;
+  align-items: center;
+}
+
+.appointments-calendar-shell .fc-apt-event-avatar {
+  margin-right: -0.25rem;
+  display: inline-flex;
+  height: 1.1rem;
+  width: 1.1rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #ffffff;
+  font-size: 0.56rem;
+  font-weight: 700;
+  color: #334155;
+}
+
+.appointments-calendar-shell .fc-apt-event-metrics {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.appointments-calendar-shell .fc-apt-event-metric {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.18rem;
+  font-size: 0.6rem;
+  font-weight: 600;
+  color: #64748b;
+}
+
 
 .appointments-calendar-shell .fc .fc-timegrid-now-indicator-line {
   border-color: #f97316;
@@ -286,3 +477,53 @@
   border-color: #f97316;
   color: #f97316;
 }
+
+.appointments-hero {}
+
+.appointments-hero-header {}
+
+.appointments-hero-heading {}
+
+.appointments-hero-intro {}
+
+.appointments-hero-badge {}
+
+.appointments-hero-copy {}
+
+.appointments-hero-intro-divider {}
+
+.appointments-hero-actions {}
+
+.appointments-hero-actions-left {}
+
+.appointments-hero-actions-right {}
+
+.appointments-hero-stats {}
+
+.appointments-hero-quick-scopes {}
+
+.appointments-hero-operational-scopes {}
+
+.appointments-scheduler-divider {}
+
+.appointments-scheduler-toolbar {}
+
+.appointments-scheduler-search {}
+
+.appointments-scheduler-controls {}
+
+.appointments-scheduler-operational-scopes {}
+
+.appointments-scheduler-quick-scopes {}
+
+.topbar-context {}
+
+.topbar-context-badge {}
+
+.topbar-context-badge-icon {}
+
+.topbar-context-actions {}
+
+.topbar-context-action-refresh {}
+
+.topbar-context-action-create {}

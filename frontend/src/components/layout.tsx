@@ -54,16 +54,23 @@ function AppLayoutInner() {
 
   return (
     <div className="min-h-screen bg-white">
-      <NavPanel />
       <div
         className={cn(
-          "flex flex-col min-h-screen transition-[padding-left] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]",
+          "fixed left-0 top-0 bottom-0 z-40 border-r border-border/70 transition-[width] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]",
+          collapsed ? "w-[5.5rem]" : "w-[17rem]",
+        )}
+      >
+        <NavPanel />
+      </div>
+      <div
+        className={cn(
+          "flex h-screen flex-col overflow-hidden transition-[padding-left] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]",
           collapsed ? "pl-[5.5rem]" : "pl-[17rem]"
         )}
       >
         <Topbar />
-        <div className="flex-1 overflow-hidden rounded-tl-[20px] bg-neutral-100">
-          <main className="px-6 py-6">
+        <div className="flex-1 overflow-y-auto bg-neutral-100 bg-none">
+          <main className="min-h-full bg-[#f2f2f2] px-6 py-6">
             <Outlet />
           </main>
         </div>

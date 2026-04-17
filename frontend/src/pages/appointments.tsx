@@ -30,11 +30,14 @@ import {
   CalendarDays,
   CheckCircle2,
   Clock3,
+  Eye,
+  Link2,
+  ListChecks,
   MoreHorizontal,
+  MessageCircle,
   LoaderCircle,
   MapPin,
   Plus,
-  RefreshCw,
   ShieldAlert,
   Stethoscope,
   UserRound,
@@ -2344,6 +2347,9 @@ function StaffAppointmentsPage() {
   const [filterDoctors, setFilterDoctors] = useState<DoctorOption[]>([]);
   const [metadataLoading, setMetadataLoading] = useState(true);
   const [metadataError, setMetadataError] = useState("");
+  const [filtersModalOpen, setFiltersModalOpen] = useState(false);
+  const [searchModalOpen, setSearchModalOpen] = useState(false);
+  const [queueModalOpen, setQueueModalOpen] = useState(false);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [createForm, setCreateForm] = useState<AppointmentFormState>(
@@ -3579,6 +3585,35 @@ function StaffAppointmentsPage() {
     setCreateOpen(true);
   }
 
+  useEffect(() => {
+    const handleRefreshRequest = () => {
+      refreshAppointments();
+    };
+    const handleCreateRequest = () => {
+      openCreateSheetFromDate();
+    };
+
+    window.addEventListener(
+      "appointments:refresh-request",
+      handleRefreshRequest as EventListener,
+    );
+    window.addEventListener(
+      "appointments:create-request",
+      handleCreateRequest as EventListener,
+    );
+
+    return () => {
+      window.removeEventListener(
+        "appointments:refresh-request",
+        handleRefreshRequest as EventListener,
+      );
+      window.removeEventListener(
+        "appointments:create-request",
+        handleCreateRequest as EventListener,
+      );
+    };
+  }, [permissions.canCreate]);
+
   function openDetailSheet(id: string) {
     setCalendarQuickActionMenu(null);
     startTransition(() => {
@@ -3639,6 +3674,20 @@ function StaffAppointmentsPage() {
       !props.isBlocked &&
       props.appointmentStatus !== "completed" &&
       props.appointmentStatus !== "cancelled";
+    const footerPeople = [
+      props.patientName,
+      props.doctorName,
+      props.interpreterName,
+    ].filter(Boolean) as string[];
+    const footerEyeCount = [props.providerName, props.doctorName].filter(
+      Boolean,
+    ).length;
+    const footerMessageCount =
+      props.isBlocked || Boolean(props.interpreterName) ? 1 : 0;
+    const footerLinkCount = props.recurrenceFrequency ? 1 : 0;
+    const taskLine = arg.timeText
+      ? `${arg.timeText} / ${props.patientPid}`
+      : props.patientPid;
 
     return (
       <div
@@ -3669,9 +3718,6 @@ function StaffAppointmentsPage() {
           </button>
         ) : null}
         <div className="fc-apt-event-head">
-          {arg.timeText ? (
-            <span className="fc-apt-event-time">{arg.timeText}</span>
-          ) : null}
           <span className="fc-apt-event-tag">
             {appointmentTypeLabel(props.appointmentType)}
           </span>
@@ -3688,6 +3734,38 @@ function StaffAppointmentsPage() {
             Interpreter: {props.interpreterName}
           </div>
         ) : null}
+        <div className="fc-apt-event-task">
+          <ListChecks className="size-3.5" />
+          <span>{taskLine}</span>
+        </div>
+        <div className="fc-apt-event-divider" />
+        <div className="fc-apt-event-footer">
+          <div className="fc-apt-event-avatars">
+            {footerPeople.length === 0 ? (
+              <span className="fc-apt-event-avatar">?</span>
+            ) : (
+              footerPeople.slice(0, 3).map((name) => (
+                <span key={name} className="fc-apt-event-avatar">
+                  {name.trim().charAt(0).toUpperCase()}
+                </span>
+              ))
+            )}
+          </div>
+          <div className="fc-apt-event-metrics">
+            <span className="fc-apt-event-metric">
+              <Eye className="size-3" />
+              {footerEyeCount}
+            </span>
+            <span className="fc-apt-event-metric">
+              <MessageCircle className="size-3" />
+              {footerMessageCount}
+            </span>
+            <span className="fc-apt-event-metric">
+              <Link2 className="size-3" />
+              {footerLinkCount}
+            </span>
+          </div>
+        </div>
         {canQuickManage ? (
           <div className="mt-2 flex flex-wrap gap-1">
             {props.appointmentStatus !== "confirmed" ? (
@@ -5154,141 +5232,75 @@ function StaffAppointmentsPage() {
   return (
     <>
       <div className="space-y-6">
-        <section className="relative overflow-hidden rounded-[2rem] border border-slate-200/80 bg-[linear-gradient(135deg,#f8fbff_0%,#eef5ff_42%,#ffffff_100%)] px-6 py-6 shadow-[0_30px_80px_rgba(15,23,42,0.08)]">
-          <div className="absolute inset-y-0 right-0 w-80 bg-[radial-gradient(circle_at_top_right,rgba(14,165,233,0.18),transparent_58%)]" />
-          <div className="relative flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
-            <div className="max-w-3xl space-y-3">
-              <div className="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-white/85 px-3 py-1 text-xs font-medium tracking-[0.16em] text-sky-700 uppercase">
-                <CalendarClock className="size-3.5" />
-                Appointment Control
-              </div>
-              <div className="space-y-2">
-                <h1 className="text-3xl font-semibold tracking-tight text-slate-950">
-                  Calendar, scheduling and operational follow-up in one
-                  workspace.
-                </h1>
-                <p className="max-w-2xl text-sm leading-6 text-slate-600">
-                  Manage medical slots, concierge bookings, interpreter handoff,
-                  checklist execution and reporting without leaving the
-                  appointment flow.
-                </p>
+        <section className="appointments-hero mb-[10px]">
+          <div className="appointments-hero-header flex flex-col gap-2 xl:grid xl:grid-cols-[minmax(0,1fr)_minmax(520px,620px)] xl:items-start xl:gap-2">
+            <div className="appointments-hero-heading w-full space-y-2">
+              <div className="appointments-hero-intro appointments-hero-copy flex items-stretch gap-3">
+                <div className="space-y-1.5">
+                  <h1 className="text-[34px] font-[200] leading-tight tracking-tight text-slate-950">
+                    Calendar, scheduling and operational follow-up in one workspace.
+                  </h1>
+                  <p className="hidden max-w-2xl text-[13px] leading-5 text-slate-600">
+                    Manage medical slots, concierge bookings, interpreter
+                    handoff, checklist execution and reporting without leaving
+                    the appointment flow.
+                  </p>
+                </div>
               </div>
             </div>
-            <div className="flex flex-wrap items-center gap-3">
-              <Button
-                variant="outline"
-                className="rounded-2xl bg-white/80"
-                onClick={refreshAppointments}
-              >
-                <RefreshCw className="size-4" />
-                Refresh
-              </Button>
-              {permissions.canCreate ? (
-                <Button
-                  className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
-                  onClick={() => openCreateSheetFromDate()}
-                >
-                  <Plus className="size-4" />
-                  New appointment
-                </Button>
-              ) : null}
+            <div className="appointments-hero-stats grid grid-cols-5 gap-1.5">
+              <StatsCard
+                icon={CalendarDays}
+                label={t.dash_patients_today}
+                value={String(todayAppointments)}
+                tone="sky"
+                compact
+                hideIcon
+                largeValue
+                valueRight
+              />
+              <StatsCard
+                icon={CheckCircle2}
+                label={t.common_active}
+                value={String(activeAppointments)}
+                tone="emerald"
+                compact
+                hideIcon
+                largeValue
+                valueRight
+              />
+              <StatsCard
+                icon={UsersRound}
+                label={tr.mfa_pending}
+                value={String(pendingInterpreterResponses)}
+                tone="amber"
+                compact
+                hideIcon
+                largeValue
+                valueRight
+              />
+              <StatsCard
+                icon={ShieldAlert}
+                label={tr.common_error}
+                value={String(attentionCount)}
+                tone="rose"
+                compact
+                hideIcon
+                largeValue
+                valueRight
+              />
+              <StatsCard
+                icon={UserRound}
+                label={tr.providers_all}
+                value={String(scopedAppointments.length)}
+                tone="slate"
+                compact
+                hideIcon
+                largeValue
+                valueRight
+              />
             </div>
           </div>
-          <div className="relative mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-            <StatsCard
-              icon={CalendarDays}
-              label={t.dash_patients_today}
-              value={String(todayAppointments)}
-              tone="sky"
-            />
-            <StatsCard
-              icon={CheckCircle2}
-              label={t.common_active}
-              value={String(activeAppointments)}
-              tone="emerald"
-            />
-            <StatsCard
-              icon={UsersRound}
-              label={tr.mfa_pending}
-              value={String(pendingInterpreterResponses)}
-              tone="amber"
-            />
-            <StatsCard
-              icon={ShieldAlert}
-              label={tr.common_error}
-              value={String(attentionCount)}
-              tone="rose"
-            />
-            <StatsCard
-              icon={UserRound}
-              label={tr.providers_all}
-              value={String(scopedAppointments.length)}
-              tone="slate"
-            />
-          </div>
-          <div className="relative mt-5 flex flex-wrap items-center gap-2">
-            <QuickScopeButton
-              active={
-                filters.dateFrom === todayDate && filters.dateTo === todayDate
-              }
-              onClick={applyTodayScope}
-            >
-              Today
-            </QuickScopeButton>
-            <QuickScopeButton
-              active={
-                filters.dateFrom === weekStart && filters.dateTo === weekEnd
-              }
-              onClick={applyWeekScope}
-            >
-              This week
-            </QuickScopeButton>
-            <QuickScopeButton
-              active={mineFilterActive}
-              onClick={applyMineScope}
-            >
-              Mine
-            </QuickScopeButton>
-            <QuickScopeButton
-              active={filters.appointmentType === "medical"}
-              onClick={() => applyTypeScope("medical")}
-            >
-              Medical
-            </QuickScopeButton>
-            <QuickScopeButton
-              active={filters.appointmentType === "non_medical"}
-              onClick={() => applyTypeScope("non_medical")}
-            >
-              Concierge
-            </QuickScopeButton>
-            <QuickScopeButton
-              active={filters.appointmentType === "internal"}
-              onClick={() => applyTypeScope("internal")}
-            >
-              Internal
-            </QuickScopeButton>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="rounded-full px-3"
-              onClick={resetQuickScopes}
-            >
-              Reset scope
-            </Button>
-          </div>
-          {scopeOptions.length > 1 ? (
-            <div className="relative mt-3 flex flex-wrap items-center gap-2">
-              {scopeOptions.map((option) => (
-                <QuickScopeButton
-                  key={option.id}
-                  active={operationalScope === option.id}
-                  onClick={() => applyOperationalScope(option.id)}
-                >
-                  {option.label}
-                </QuickScopeButton>
-              ))}
-            </div>
-          ) : null}
         </section>
 
         {appointmentsError ? (
@@ -5427,14 +5439,184 @@ function StaffAppointmentsPage() {
             )}
           </div>
         ) : (
-          <div className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
-            <aside className="space-y-6">
-              <section className={sectionCardClass("p-5")}>
-                <div className="mb-4 flex items-center justify-between">
-                  <div>
-                    <h2 className="text-sm font-semibold text-slate-950">
-                      {t.common_search}
-                    </h2>
+          <div className="grid gap-1">
+
+              <Sheet open={filtersModalOpen} onOpenChange={setFiltersModalOpen}>
+                <SheetContent side="right" className="w-full sm:max-w-[420px]">
+                  <section
+                    className={sectionCardClass(
+                      "h-full overflow-y-auto border-0 p-5 shadow-none",
+                    )}
+                  >
+                    <div className="mb-4 flex items-center justify-between">
+                      <div>
+                        <h2 className="text-sm font-semibold text-slate-950">
+                          Filters
+                        </h2>
+                        <p className="text-xs text-muted-foreground">
+                          Scope controls for the scheduler.
+                        </p>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={resetQuickScopes}
+                      >
+                        Reset scope
+                      </Button>
+                    </div>
+                    <div className="appointments-scheduler-controls flex min-w-0 flex-wrap items-center gap-1.5">
+                      {scopeOptions.length > 1 ? (
+                        <div className="appointments-scheduler-operational-scopes appointments-hero-operational-scopes flex shrink-0 items-center">
+                          {scopeOptions.map((option) => (
+                            <ScopeCheckbox
+                              key={`scheduler-sheet-${option.id}`}
+                              checked={operationalScope === option.id}
+                              onCheckedChange={(checked) => {
+                                if (checked) {
+                                  applyOperationalScope(option.id);
+                                  return;
+                                }
+                                if (operationalScope === option.id) {
+                                  applyOperationalScope("all");
+                                }
+                              }}
+                            >
+                              {option.label}
+                            </ScopeCheckbox>
+                          ))}
+                        </div>
+                      ) : null}
+                      <div className="appointments-scheduler-quick-scopes appointments-hero-quick-scopes flex shrink-0 items-center">
+                        <ScopeCheckbox
+                          checked={
+                            filters.dateFrom === todayDate &&
+                            filters.dateTo === todayDate
+                          }
+                          onCheckedChange={(checked) => {
+                            if (checked) {
+                              applyTodayScope();
+                              return;
+                            }
+                            startTransition(() => {
+                              setFilters((current) => ({
+                                ...current,
+                                dateFrom: "",
+                                dateTo: "",
+                              }));
+                            });
+                          }}
+                        >
+                          Today
+                        </ScopeCheckbox>
+                        <ScopeCheckbox
+                          checked={
+                            filters.dateFrom === weekStart &&
+                            filters.dateTo === weekEnd
+                          }
+                          onCheckedChange={(checked) => {
+                            if (checked) {
+                              applyWeekScope();
+                              return;
+                            }
+                            startTransition(() => {
+                              setFilters((current) => ({
+                                ...current,
+                                dateFrom: "",
+                                dateTo: "",
+                              }));
+                            });
+                          }}
+                        >
+                          This week
+                        </ScopeCheckbox>
+                        <ScopeCheckbox
+                          checked={mineFilterActive}
+                          onCheckedChange={(checked) => {
+                            if (checked) {
+                              applyMineScope();
+                              return;
+                            }
+                            startTransition(() => {
+                              setFilters((current) => ({
+                                ...current,
+                                ownerUserId: "",
+                                interpreterId: "",
+                              }));
+                            });
+                          }}
+                        >
+                          Mine
+                        </ScopeCheckbox>
+                        <ScopeCheckbox
+                          checked={filters.appointmentType === "medical"}
+                          onCheckedChange={(checked) => {
+                            if (checked) {
+                              applyTypeScope("medical");
+                              return;
+                            }
+                            startTransition(() => {
+                              setFilters((current) => ({
+                                ...current,
+                                appointmentType: "",
+                              }));
+                            });
+                          }}
+                        >
+                          Medical
+                        </ScopeCheckbox>
+                        <ScopeCheckbox
+                          checked={filters.appointmentType === "non_medical"}
+                          onCheckedChange={(checked) => {
+                            if (checked) {
+                              applyTypeScope("non_medical");
+                              return;
+                            }
+                            startTransition(() => {
+                              setFilters((current) => ({
+                                ...current,
+                                appointmentType: "",
+                              }));
+                            });
+                          }}
+                        >
+                          Concierge
+                        </ScopeCheckbox>
+                        <ScopeCheckbox
+                          checked={filters.appointmentType === "internal"}
+                          onCheckedChange={(checked) => {
+                            if (checked) {
+                              applyTypeScope("internal");
+                              return;
+                            }
+                            startTransition(() => {
+                              setFilters((current) => ({
+                                ...current,
+                                appointmentType: "",
+                              }));
+                            });
+                          }}
+                        >
+                          Internal
+                        </ScopeCheckbox>
+                      </div>
+                    </div>
+                  </section>
+                </SheetContent>
+              </Sheet>
+
+              <Sheet open={searchModalOpen} onOpenChange={setSearchModalOpen}>
+                <SheetContent side="right" className="w-full sm:max-w-[420px]">
+                  <section
+                    className={sectionCardClass(
+                      "h-full overflow-y-auto border-0 p-5 shadow-none",
+                    )}
+                  >
+              <div className="mb-4 flex items-center justify-between">
+                <div>
+                  <h2 className="text-sm font-semibold text-slate-950">
+                    {t.common_search}
+                  </h2>
                     <p className="text-xs text-muted-foreground">
                       Narrow the calendar to the exact operational slice.
                     </p>
@@ -5656,9 +5838,17 @@ function StaffAppointmentsPage() {
                     </Field>
                   </div>
                 </div>
-              </section>
+                  </section>
+                </SheetContent>
+              </Sheet>
 
-              <section className={sectionCardClass("p-5")}>
+              <Sheet open={queueModalOpen} onOpenChange={setQueueModalOpen}>
+                <SheetContent side="right" className="w-full sm:max-w-[640px]">
+                  <section
+                    className={sectionCardClass(
+                      "h-full overflow-y-auto border-0 p-5 shadow-none",
+                    )}
+                  >
                 <div className="mb-4 flex items-center justify-between">
                   <div>
                     <h2 className="text-sm font-semibold text-slate-950">
@@ -5837,19 +6027,61 @@ function StaffAppointmentsPage() {
                     ))
                   )}
                 </div>
-              </section>
-            </aside>
+                  </section>
+                </SheetContent>
+              </Sheet>
 
-            <section className={sectionCardClass("overflow-hidden p-4 md:p-5")}>
-              <div className="mb-4">
-                <h2 className="text-sm font-semibold text-slate-950">
-                  {t.appointments_title}
-                </h2>
-                <p className="text-xs text-muted-foreground">
-                  Drag to reschedule when your role allows it. Click a slot to
-                  open the full workflow.
-                </p>
+              <div className="appointments-scheduler-divider w-full rounded-[6px] p-3">
+                <div className="appointments-scheduler-toolbar flex w-full flex-col gap-2 lg:flex-row lg:items-start">
+                  <div className="appointments-scheduler-search flex w-full items-center gap-2 lg:w-auto">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      className="h-8 w-8 shrink-0 rounded-full border-slate-200 bg-transparent hover:cursor-pointer hover:bg-transparent"
+                      onClick={() => setFiltersModalOpen(true)}
+                      aria-label={t.common_search}
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="24"
+                        height="24"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        className="size-4"
+                      >
+                        <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+                        <path d="M4 4h16v2.172a2 2 0 0 1 -.586 1.414l-4.414 4.414v7l-6 2v-8.5l-4.48 -4.928a2 2 0 0 1 -.52 -1.345v-2.227" />
+                      </svg>
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-8 w-full justify-start rounded-full border-slate-200 bg-transparent px-3 text-xs font-normal text-slate-500 lg:w-[18rem] hover:cursor-pointer hover:bg-transparent"
+                      onClick={() => setSearchModalOpen(true)}
+                    >
+                      {t.common_search.replace(/[.…]+$/u, "")}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 shrink-0 rounded-full bg-transparent px-3 hover:cursor-pointer hover:bg-transparent"
+                      onClick={() => setQueueModalOpen(true)}
+                    >
+                      {t.appointments_title}
+                    </Button>
+                  </div>
+                </div>
               </div>
+            <section
+              className={sectionCardClass(
+                "overflow-hidden !rounded-[6px] !border-0 !bg-transparent !shadow-none p-0",
+              )}
+            >
               <div className="appointments-calendar-shell">
                 <FullCalendar
                   ref={calendarRef}
@@ -11442,11 +11674,19 @@ function StatsCard({
   label,
   value,
   tone,
+  compact = false,
+  hideIcon = false,
+  largeValue = false,
+  valueRight = false,
 }: {
   icon: typeof CalendarDays;
   label: string;
   value: string;
   tone: "sky" | "emerald" | "amber" | "rose" | "slate";
+  compact?: boolean;
+  hideIcon?: boolean;
+  largeValue?: boolean;
+  valueRight?: boolean;
 }) {
   const toneClass =
     tone === "sky"
@@ -11459,19 +11699,104 @@ function StatsCard({
             ? "bg-rose-100 text-rose-700"
             : "bg-slate-100 text-slate-700";
   return (
-    <div className="rounded-[1.5rem] border border-white/90 bg-white/88 p-4 shadow-sm backdrop-blur">
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">
-          {label}
+    <div
+      className={cn(
+        "relative flex h-full min-w-0 flex-col backdrop-blur",
+        compact
+          ? "min-h-[5.4rem] rounded-xl border border-slate-200 bg-slate-50 p-2"
+          : "rounded-[1.2rem] border border-white/90 bg-white/88 p-3 pr-10",
+      )}
+    >
+      {valueRight ? (
+        <div className="flex items-end justify-between gap-2">
+          <span
+            className={cn(
+              "block min-w-0 whitespace-normal break-words text-left font-semibold uppercase leading-tight text-slate-600",
+              compact
+                ? "text-[9px] tracking-[0.05em]"
+                : "text-[11px] tracking-[0.08em]",
+            )}
+          >
+            {label}
+          </span>
+          <p
+            className={cn(
+              "shrink-0 leading-none font-semibold tracking-tight text-slate-950",
+              compact
+                ? largeValue
+                  ? "text-[1.9rem]"
+                  : "text-xl"
+                : "text-[2rem]",
+            )}
+          >
+            {value}
+          </p>
+        </div>
+      ) : (
+        <>
+          <span
+            className={cn(
+              "block w-full whitespace-normal break-words text-left font-semibold uppercase leading-tight text-slate-600",
+              compact
+                ? "min-h-[1.9rem] text-[9px] tracking-[0.05em]"
+                : "text-[11px] tracking-[0.08em]",
+            )}
+          >
+            {label}
+          </span>
+          <p
+            className={cn(
+              "leading-none font-semibold tracking-tight text-slate-950",
+              compact
+                ? largeValue
+                  ? "mt-auto pt-1 text-[1.9rem]"
+                  : "mt-auto pt-1 text-xl"
+                : "mt-auto pt-2 text-[2rem]",
+            )}
+          >
+            {value}
+          </p>
+        </>
+      )}
+      {hideIcon ? null : (
+        <span
+          className={cn(
+            "absolute right-2 bottom-2 shrink-0",
+            compact ? "rounded-lg p-1" : "rounded-xl p-1.5",
+            toneClass,
+          )}
+        >
+          <Icon className={compact ? "size-3" : "size-3.5"} />
         </span>
-        <span className={cn("rounded-2xl p-2", toneClass)}>
-          <Icon className="size-4" />
-        </span>
-      </div>
-      <p className="mt-4 text-3xl font-semibold tracking-tight text-slate-950">
-        {value}
-      </p>
+      )}
     </div>
+  );
+}
+
+function ScopeCheckbox({
+  checked,
+  onCheckedChange,
+  children,
+}: {
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
+  children: ReactNode;
+}) {
+  return (
+    <label
+      className={cn(
+        "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-xs transition hover:cursor-pointer",
+        checked ? "text-slate-950" : "text-slate-700",
+      )}
+    >
+      <input
+        type="checkbox"
+        className="size-3 rounded-sm border-slate-300 align-middle"
+        checked={checked}
+        onChange={(event) => onCheckedChange(event.currentTarget.checked)}
+      />
+      <span>{children}</span>
+    </label>
   );
 }
 
@@ -11490,7 +11815,7 @@ function QuickScopeButton({
       variant={active ? "default" : "outline"}
       size="sm"
       className={cn(
-        "rounded-full px-3.5",
+        "h-8 rounded-full px-3 text-xs",
         active ? "bg-slate-950 text-white hover:bg-slate-800" : "bg-white/80",
       )}
       onClick={onClick}

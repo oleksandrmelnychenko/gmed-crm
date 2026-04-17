@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   Bell,
+  Plus,
+  RefreshCw,
   Search,
   Globe,
   X,
@@ -81,10 +83,21 @@ function notificationHref(item: Notification) {
 
 export function Topbar() {
   const { user } = useAuth();
+  const location = useLocation();
   const { lang, setLang, t } = useLang();
   const [unread, setUnread] = useState(0);
   const [onlineUsers, setOnlineUsers] = useState<ActiveSession[]>([]);
   const isPatientPortal = user?.role === "patient";
+  const showAppointmentsBadge =
+    !isPatientPortal && location.pathname.startsWith("/appointments");
+
+  const requestAppointmentsRefresh = () => {
+    window.dispatchEvent(new CustomEvent("appointments:refresh-request"));
+  };
+
+  const requestAppointmentCreate = () => {
+    window.dispatchEvent(new CustomEvent("appointments:create-request"));
+  };
 
   // Panels
   const [notifOpen, setNotifOpen] = useState(false);
@@ -124,8 +137,29 @@ export function Topbar() {
 
   return (
     <>
-      <header className="flex items-center justify-between h-14 px-6">
-        <div />
+      <header className="shrink-0 flex items-center justify-between h-14 border-b border-border/70 px-6">
+        <div className="topbar-context-actions flex items-center gap-2">
+          {showAppointmentsBadge ? (
+            <>
+              <button
+                type="button"
+                className="topbar-context-action-create inline-flex h-9 items-center gap-2 rounded-xl bg-slate-950 px-3.5 text-sm font-medium text-white transition-colors hover:bg-slate-800"
+                onClick={requestAppointmentCreate}
+              >
+                <Plus className="size-4" />
+                New appointment
+              </button>
+              <button
+                type="button"
+                className="topbar-context-action-refresh inline-flex h-9 items-center gap-2 rounded-xl border border-border bg-white px-3.5 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+                onClick={requestAppointmentsRefresh}
+              >
+                <RefreshCw className="size-4" />
+                Refresh
+              </button>
+            </>
+          ) : null}
+        </div>
 
         <div className="flex items-center gap-3">
           {/* Online users avatars */}
