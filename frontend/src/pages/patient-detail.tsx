@@ -15,6 +15,7 @@ import {
   Pencil,
   Plus,
   Printer,
+  SquarePen,
   UserX,
 } from "lucide-react";
 
@@ -28,6 +29,22 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import {
+  Field as FormField,
+  FormSection,
+  FunctionalLabelChips,
+  formInputClassName,
+  humanizeFunctionalLabel,
+  parseFunctionalLabels,
+  textareaClassName as formTextareaClassName,
+} from "@/components/patient-form-primitives";
+import { StatusActionPill } from "@/components/status-action-pill";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -72,7 +89,6 @@ import {
   PATIENT_CONTRACT_STATUS_OPTIONS,
   getPatientLegalStatusChecklist,
   getPatientLegalStatusCompletion,
-  getPatientLegalStatusSummary,
   normalizePatientLegalStatus,
   serializePatientLegalStatus,
   type PatientLegalStatus,
@@ -552,17 +568,6 @@ function toOptional(value: string) {
   return trimmed ? trimmed : null;
 }
 
-function parseFunctionalLabels(value: string) {
-  return value
-    .split(",")
-    .map((item) => item.trim().toLowerCase().replaceAll("-", "_").replaceAll(" ", "_"))
-    .filter(Boolean);
-}
-
-function humanizeFunctionalLabel(value: string) {
-  return value.replaceAll("_", " ");
-}
-
 function toDateTimeLocal(value?: string | null) {
   if (!value) return "";
   const date = new Date(value);
@@ -884,6 +889,10 @@ function workflowChecklistLabel(key: string) {
 
 function patientDetailStatusLabel(status: string) {
   switch (status) {
+    case "not_started":
+      return patientDetailText("Nicht begonnen", "Не начат", "Not started");
+    case "pending":
+      return patientDetailText("Ausstehend", "В ожидании", "Pending");
     case "open":
       return patientDetailText("Offen", "Открыто", "Open");
     case "in_progress":
@@ -1008,7 +1017,51 @@ function patientToEditForm(detail: PatientDetail): PatientEditFormState {
 }
 
 function Lbl({ children }: { children: React.ReactNode }) {
-  return <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">{children}</span>;
+  return <span className="text-[11.5px] font-medium text-muted-foreground">{children}</span>;
+}
+
+function LegalStatusPill({ status }: { status: PatientLegalStatus }) {
+  const { lang } = useLang();
+  const lp = (de: string, ru: string, en: string) =>
+    lang === "de" ? de : lang === "ru" ? ru : en;
+  const completion = getPatientLegalStatusCompletion(status);
+
+  let kind: "complete" | "partial" | "none";
+  let text: string;
+  if (status.complianceCompleted) {
+    kind = "complete";
+    text = lp("Bereit", "Готов", "Ready");
+  } else if (completion.completed === 0) {
+    kind = "none";
+    text = lp("Nicht begonnen", "Не начат", "Not started");
+  } else {
+    kind = "partial";
+    text = `${completion.completed}/${completion.total} ${lp("erledigt", "выполнено", "done")}`;
+  }
+
+  const pillClass = {
+    complete: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    partial: "border-amber-200 bg-amber-50 text-amber-700",
+    none: "border-border bg-muted text-muted-foreground",
+  }[kind];
+
+  const dotClass = {
+    complete: "bg-emerald-500",
+    partial: "bg-amber-500",
+    none: "bg-muted-foreground/60",
+  }[kind];
+
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10.5px] font-semibold uppercase tracking-[0.08em]",
+        pillClass
+      )}
+    >
+      <span className={cn("size-1.5 rounded-full", dotClass)} />
+      {text}
+    </span>
+  );
 }
 
 function InfoRow({ label, value, onEdit }: { label: string; value: string; onEdit?: () => void }) {
@@ -1182,17 +1235,70 @@ export function PatientDetailPage() {
   const canExportPatientCompliance = user?.role === "patient_manager";
   const canOpenComplianceWorkspace = user?.role === "patient_manager";
   const canPrintPatientLabel = user?.role === "ceo" || user?.role === "patient_manager";
-  const canCreateCase = user?.role === "ceo" || user?.role === "patient_manager";
-  const canCreateOrder = user?.role === "ceo" || user?.role === "patient_manager";
   const canManageWorkflowChecklist =
     user?.role === "ceo" ||
     user?.role === "patient_manager" ||
     user?.role === "concierge";
-  const canCreateAppointment =
-    user?.role === "ceo" ||
-    user?.role === "patient_manager" ||
-    user?.role === "teamlead_interpreter" ||
-    user?.role === "concierge";
+  const workspaceTabs = [
+    {
+      key: "profile",
+      label: t.patients_profile,
+    },
+    canViewOperationalSurface
+      ? {
+          key: "relations",
+          label: t.patients_relations,
+        }
+      : null,
+    canViewOperationalSurface
+      ? {
+          key: "cases",
+          label: t.cases_title,
+        }
+      : null,
+    canViewOperationalSurface
+      ? {
+          key: "orders",
+          label: t.orders_title,
+        }
+      : null,
+    canViewOperationalSurface
+      ? {
+          key: "appointments",
+          label: t.appointments_title,
+        }
+      : null,
+    canViewDocuments
+      ? {
+          key: "documents",
+          label: t.documents_title,
+        }
+      : null,
+    canViewContracts
+      ? {
+          key: "contracts",
+          label: t.contracts_title,
+        }
+      : null,
+    canViewInvoices
+      ? {
+          key: "invoices",
+          label: t.invoices_title,
+        }
+      : null,
+    canViewOperationalSurface
+      ? {
+          key: "workflow",
+          label: t.patients_workflow,
+        }
+      : null,
+    canViewOperationalSurface
+      ? {
+          key: "timeline",
+          label: t.patients_timeline,
+        }
+      : null,
+  ].filter((item): item is { key: string; label: string } => Boolean(item));
   const deferredRelationPatientSearch = useDeferredValue(relationPatientSearch);
   const deferredTimelineSearch = useDeferredValue(timelineSearch);
   const activeWorkflowAssignees = useMemo(
@@ -2259,97 +2365,73 @@ export function PatientDetailPage() {
 
   if (error || !detail) {
     return (
-      <div className="space-y-4">
-        <Button variant="ghost" className="gap-2" onClick={() => staffGo("/patients")}>
+      <div className="space-y-3">
+        <Button variant="ghost" size="sm" className="gap-1.5 h-9 rounded-lg" onClick={() => staffGo("/patients")}>
           <ArrowLeft className="size-4" /> {t.patients_title}
         </Button>
-        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">
+        <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
           {error || t.common_failed_load}
         </div>
       </div>
     );
   }
 
+  const initials = patientName(detail).split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("");
+
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon" className="rounded-xl" onClick={() => staffGo("/patients")}>
-          <ArrowLeft className="size-5" />
-        </Button>
-        <div className="flex-1">
-          <div className="flex items-center gap-3">
-            <div className="flex items-center justify-center size-12 rounded-full bg-slate-100 text-sm font-semibold text-slate-600">
-              {patientName(detail).split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase()).join("")}
-            </div>
-            <div>
-              <h1 className="text-2xl font-semibold text-slate-950">{patientName(detail)}</h1>
-              <div className="flex items-center gap-3 mt-1 text-sm text-slate-500">
-                <span className="font-mono">{detail.patient_id}</span>
-                <Badge variant="outline" className={cn("rounded-full", detail.is_active ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-slate-50 text-slate-600")}>
-                  {detail.is_active ? t.common_active : t.common_inactive}
-                </Badge>
-                {detail.functional_labels?.map((label) => (
-                  <Badge
-                    key={`${detail.id}-${label}`}
-                    variant="outline"
-                    className="rounded-full border-amber-200 bg-amber-50 text-amber-700"
-                  >
-                    {humanizeFunctionalLabel(label)}
-                  </Badge>
-                ))}
-              </div>
-            </div>
+    <div className="space-y-4">
+      {/* Top row: identity + actions */}
+      <div className="flex items-center gap-3">
+        <div className="flex items-center justify-center size-10 shrink-0 rounded-full bg-[var(--brand)] text-[12px] font-semibold text-white">
+          {initials}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h1 className="text-xl font-semibold tracking-tight text-foreground truncate">{patientName(detail)}</h1>
+            <StatusActionPill
+              isActive={detail.is_active}
+              activeLabel={t.common_active}
+              inactiveLabel={t.common_inactive}
+              toggleActiveLabel={l("Patient deaktivieren", "Деактивировать пациента", "Deactivate patient")}
+              toggleInactiveLabel={l("Patient aktivieren", "Активировать пациента", "Activate patient")}
+              onToggle={async () => {
+                const path = detail.is_active ? `/patients/${id}/deactivate` : `/patients/${id}/activate`;
+                try {
+                  await apiFetch(path, { method: "POST" });
+                } catch (error) {
+                  setError(error instanceof Error ? error.message : String(error));
+                }
+                reload();
+              }}
+            />
+            {detail.functional_labels?.map((label) => (
+              <Badge
+                key={`${detail.id}-${label}`}
+                variant="outline"
+                className="rounded-full border-amber-200 bg-amber-50 text-amber-700 text-[10.5px]"
+              >
+                {humanizeFunctionalLabel(label)}
+              </Badge>
+            ))}
           </div>
+          <p className="mt-0.5 text-[12px] font-mono text-muted-foreground">{detail.patient_id}</p>
         </div>
-        <div className="flex items-center gap-2">
-          {canEditPatientProfile ? (
-            <Button variant="outline" size="sm" className="gap-2 rounded-xl" onClick={openProfileEditor}>
-              <Pencil className="size-3.5" />
-              {l("Profil bearbeiten", "Редактировать профиль", "Edit profile")}
-            </Button>
-          ) : null}
+        {canEditPatientProfile ? (
           <Button
-            variant="outline"
             size="sm"
-            className="gap-2 rounded-xl"
-            onClick={async () => {
-              const path = detail.is_active ? `/patients/${id}/deactivate` : `/patients/${id}/activate`;
-              try {
-                await apiFetch(path, { method: "POST" });
-              } catch (error) {
-                setError(error instanceof Error ? error.message : String(error));
-              }
-              reload();
-            }}
+            className="h-9 rounded-lg gap-1.5 px-3.5"
+            onClick={openProfileEditor}
           >
-            <UserX className="size-3.5" />
-            {detail.is_active ? t.users_deactivate : t.users_activate}
+            <SquarePen className="size-3.5" />
+            {l("Profil bearbeiten", "Редактировать профиль", "Edit profile")}
           </Button>
-        </div>
+        ) : null}
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        {canCreateCase ? (
-          <Button type="button" variant="outline" className="rounded-xl" onClick={() => staffGo(`/cases?patient=${id}&create=1`)}>
-            <Plus className="mr-2 size-4" />
-            {l("Neuer Fall", "Новый кейс", "New case")}
-          </Button>
-        ) : null}
-        {canCreateOrder ? (
-          <Button type="button" variant="outline" className="rounded-xl" onClick={() => staffGo(`/orders?patient=${id}&create=1`)}>
-            <Plus className="mr-2 size-4" />
-            {l("Neuer Auftrag", "Новый заказ", "New order")}
-          </Button>
-        ) : null}
-        {canCreateAppointment ? (
-          <Button type="button" variant="outline" className="rounded-xl" onClick={() => staffGo(`/appointments?patient=${id}&create=1`)}>
-            <Plus className="mr-2 size-4" />
-            {l("Neuer Termin", "Новый приём", "New appointment")}
-          </Button>
-        ) : null}
+      {/* Quick action row */}
+      <div className="flex flex-wrap items-center gap-1.5">
         {canPrintPatientLabel ? (
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1.5 ml-auto">
             <ShadSelect
               value={patientLabelFormat}
               onValueChange={(value) =>
@@ -2358,7 +2440,7 @@ export function PatientDetailPage() {
                 )
               }
             >
-              <SelectTrigger className="w-[210px] rounded-xl bg-white">
+              <SelectTrigger className="h-10 w-[280px] rounded-lg bg-card text-[13px]">
                 <SelectValue placeholder={l("Etikettenformat", "Формат наклейки", "Label format")} />
               </SelectTrigger>
               <SelectContent>
@@ -2372,14 +2454,14 @@ export function PatientDetailPage() {
             <Button
               type="button"
               variant="outline"
-              className="rounded-xl"
+              className="h-10 rounded-lg gap-1.5"
               disabled={patientLabelBusy}
               onClick={() => void handlePrintPatientLabel()}
             >
               {patientLabelBusy ? (
-                <LoaderCircle className="mr-2 size-4 animate-spin" />
+                <LoaderCircle className="size-3.5 animate-spin" />
               ) : (
-                <Printer className="mr-2 size-4" />
+                <Printer className="size-3.5" />
               )}
               {l("Etikett drucken", "Печать наклейки", "Print sticker")}
             </Button>
@@ -2387,40 +2469,15 @@ export function PatientDetailPage() {
         ) : null}
       </div>
 
-      {/* Quick info cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div className="rounded-xl border border-slate-100 bg-white p-3">
-          <Lbl>{t.patients_birth_date}</Lbl>
-          <p className="mt-1 text-sm font-medium text-slate-900">{fmtDate(detail.birth_date, t.common_not_set)}</p>
-        </div>
-        <div className="rounded-xl border border-slate-100 bg-white p-3">
-          <Lbl>{t.patients_gender}</Lbl>
-          <p className="mt-1 text-sm font-medium text-slate-900">{genderLbl(detail.gender, tr)}</p>
-        </div>
-        <div className="rounded-xl border border-slate-100 bg-white p-3">
-          <Lbl>{t.patients_insurance_type}</Lbl>
-          <p className="mt-1 text-sm font-medium text-slate-900">{insuranceLbl(detail.insurance_type, tr)}</p>
-        </div>
-        <div className="rounded-xl border border-slate-100 bg-white p-3">
-          <Lbl>{t.patients_nationality}</Lbl>
-          <p className="mt-1 text-sm font-medium text-slate-900">{fieldVal(detail.nationality, t.common_not_set)}</p>
-        </div>
-      </div>
-
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={handleTabChange}>
-        <div className="border-b border-slate-200 flex justify-center">
-            <TabsList variant="line" className="w-auto">
-              <TabsTrigger value="profile" className="px-4 py-2">{t.patients_profile}</TabsTrigger>
-            {canViewOperationalSurface ? <TabsTrigger value="relations" className="px-4 py-2">{l("Beziehungen", "Связи", "Relations")}</TabsTrigger> : null}
-            {canViewOperationalSurface ? <TabsTrigger value="cases" className="px-4 py-2">{t.cases_title}</TabsTrigger> : null}
-            {canViewOperationalSurface ? <TabsTrigger value="orders" className="px-4 py-2">{t.orders_title}</TabsTrigger> : null}
-            {canViewOperationalSurface ? <TabsTrigger value="appointments" className="px-4 py-2">{t.appointments_title}</TabsTrigger> : null}
-            {canViewDocuments ? <TabsTrigger value="documents" className="px-4 py-2">{l("Dokumente", "Документы", "Documents")}</TabsTrigger> : null}
-            {canViewContracts ? <TabsTrigger value="contracts" className="px-4 py-2">{l("Verträge", "Договоры", "Contracts")}</TabsTrigger> : null}
-            {canViewInvoices ? <TabsTrigger value="invoices" className="px-4 py-2">{l("Rechnungen", "Счета", "Invoices")}</TabsTrigger> : null}
-            {canViewOperationalSurface ? <TabsTrigger value="workflow" className="px-4 py-2">{l("Workflow", "Workflow", "Workflow")}</TabsTrigger> : null}
-            {canViewOperationalSurface ? <TabsTrigger value="timeline" className="px-4 py-2">{l("Zeitachse", "Таймлайн", "Timeline")}</TabsTrigger> : null}
+        <div className="border-b border-slate-200 lg:hidden overflow-x-auto">
+          <TabsList variant="line" className="min-w-max">
+            {workspaceTabs.map((tab) => (
+              <TabsTrigger key={tab.key} value={tab.key} className="px-4 py-2">
+                {tab.label}
+              </TabsTrigger>
+            ))}
           </TabsList>
         </div>
 
@@ -2439,53 +2496,52 @@ export function PatientDetailPage() {
         {/* Profile tab */}
         <TabsContent value="profile" className="space-y-6 mt-4 min-h-[400px]">
           {/* Contact & Demographics */}
-          <div className={card("p-6")}>
-            <h2 className="text-sm font-semibold text-slate-950 mb-4">{t.patients_profile}</h2>
+          <FormSection title={t.patients_profile}>
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              <InfoRow label={t.patients_birth_date} value={fmtDate(detail.birth_date, t.common_not_set)} />
+              <InfoRow label={t.patients_gender} value={genderLbl(detail.gender, tr)} />
+              <InfoRow label={t.patients_nationality} value={fieldVal(detail.nationality, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
+              <InfoRow label={t.patients_residence_country} value={fieldVal(detail.residence_country, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
               <InfoRow label={t.patients_phone_primary} value={fieldVal(detail.phone_primary, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
               <InfoRow label={t.patients_phone_secondary} value={fieldVal(detail.phone_secondary, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
               <InfoRow label={t.patients_email} value={fieldVal(detail.email, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
               <InfoRow label={t.patients_languages} value={fieldVal(detail.languages, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
               <InfoRow label={l("Funktionale Labels", "Функциональные метки", "Functional labels")} value={fieldVal(detail.functional_labels, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
-              <InfoRow label={t.patients_residence_country} value={fieldVal(detail.residence_country, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
+              <InfoRow label={t.patients_insurance_type} value={insuranceLbl(detail.insurance_type, tr)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
               <InfoRow label={t.patients_insurance_provider} value={fieldVal(detail.insurance_provider, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
               <InfoRow label={t.patients_insurance_number} value={fieldVal(detail.insurance_number, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
             </div>
-          </div>
+          </FormSection>
 
           {/* Address */}
-          <div className={card("p-6")}>
-            <h2 className="text-sm font-semibold text-slate-950 mb-4">{t.patients_address_street}</h2>
+          <FormSection title={l("Adresse", "Адрес", "Address")}>
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
               <InfoRow label={t.patients_address_street} value={fieldVal(detail.address_street, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
               <InfoRow label={t.patients_address_city} value={fieldVal(detail.address_city, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
               <InfoRow label={t.patients_address_zip} value={fieldVal(detail.address_zip, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
               <InfoRow label={t.patients_address_country} value={fieldVal(detail.address_country, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
             </div>
-          </div>
+          </FormSection>
 
           {/* Emergency */}
-          <div className={card("p-6")}>
-            <h2 className="text-sm font-semibold text-slate-950 mb-4">{t.patients_emergency_name}</h2>
+          <FormSection title={l("Notfallkontakt", "Экстренный контакт", "Emergency contact")}>
             <div className="grid gap-4 md:grid-cols-3">
               <InfoRow label={t.patients_emergency_name} value={fieldVal(detail.emergency_contact_name, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
               <InfoRow label={t.patients_emergency_phone} value={fieldVal(detail.emergency_contact_phone, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
               <InfoRow label={t.patients_emergency_relation} value={fieldVal(detail.emergency_contact_relation, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
             </div>
-          </div>
+          </FormSection>
 
           <div className={card("p-6")}>
             <div className="mb-4 flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-sm font-semibold text-slate-950">{t.patients_legal_status}</h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  {getPatientLegalStatusSummary(legalStatus)}
-                </p>
+              <div className="flex items-center gap-3">
+                <h2 className="text-sm font-semibold text-foreground">{t.patients_legal_status}</h2>
+                <LegalStatusPill status={legalStatus} />
               </div>
               {canEditPatientProfile ? (
-                <Button type="button" variant="outline" className="rounded-xl" onClick={openProfileEditor}>
-                  <Pencil className="mr-2 size-3.5" />
-                  {l("Compliance aktualisieren", "Обновить compliance", "Update compliance")}
+                <Button type="button" variant="outline" size="sm" className="h-9 rounded-lg gap-1.5" onClick={openProfileEditor}>
+                  <Pencil className="size-3.5" />
+                  {l("Status aktualisieren", "Обновить статус", "Update status")}
                 </Button>
               ) : null}
             </div>
@@ -2499,11 +2555,7 @@ export function PatientDetailPage() {
                   {patientDetailStatusLabel(legalStatus.contractStatus)}
                 </p>
                 <p className="mt-1 text-xs text-slate-500">
-                  {l(
-                    `${legalStatusCompletion.completed}/${legalStatusCompletion.total} Compliance-Prüfungen erledigt`,
-                    `${legalStatusCompletion.completed}/${legalStatusCompletion.total} проверок compliance выполнено`,
-                    `${legalStatusCompletion.completed}/${legalStatusCompletion.total} compliance checks done`,
-                  )}
+                  {legalStatusCompletion.completed}/{legalStatusCompletion.total} {l("erledigt", "выполнено", "done")}
                 </p>
               </div>
               {legalStatusChecklist.map((item) => (
@@ -2529,7 +2581,7 @@ export function PatientDetailPage() {
             {legalStatus.notes ? (
               <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-                  {l("Compliance-Notizen", "Заметки по compliance", "Compliance notes")}
+                  {l("Notizen", "Заметки", "Notes")}
                 </p>
                 <p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">{legalStatus.notes}</p>
               </div>
@@ -4366,291 +4418,217 @@ export function PatientDetailPage() {
         </TabsContent>
       </Tabs>
 
-      <Dialog open={profileEditorOpen} onOpenChange={setProfileEditorOpen}>
-        <DialogContent className="sm:max-w-4xl">
-          <DialogHeader>
-            <DialogTitle>{l("Patientenprofil bearbeiten", "Редактировать профиль пациента", "Edit patient profile")}</DialogTitle>
-            <DialogDescription>
-              {l(
-                "Aktualisieren Sie Kontaktdaten, Versicherungskontext, rechtliche Compliance und Notfallkette, ohne die Patientenkarte zu verlassen.",
-                "Обновляйте контактные данные, страховой контекст, legal compliance и экстренную цепочку, не покидая карточку пациента.",
-                "Update operational contact data, insurance context, legal compliance and emergency chain without leaving the patient card.",
-              )}
-            </DialogDescription>
-          </DialogHeader>
+      <Sheet open={profileEditorOpen} onOpenChange={setProfileEditorOpen}>
+        <SheetContent side="right" className="w-full sm:max-w-[860px]">
           {profileEditForm ? (
-            <form className="space-y-5" onSubmit={handleSavePatientProfile}>
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                <div className="space-y-2">
-                  <Label htmlFor="patient-title-edit">{l("Titel", "Титул", "Title")}</Label>
-                  <Input id="patient-title-edit" value={profileEditForm.title} onChange={(event) => setProfileEditForm((current) => current ? { ...current, title: event.target.value } : current)} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="patient-first-name-edit">{l("Vorname", "Имя", "First name")}</Label>
-                  <Input id="patient-first-name-edit" value={profileEditForm.firstName} onChange={(event) => setProfileEditForm((current) => current ? { ...current, firstName: event.target.value } : current)} required />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="patient-last-name-edit">{l("Nachname", "Фамилия", "Last name")}</Label>
-                  <Input id="patient-last-name-edit" value={profileEditForm.lastName} onChange={(event) => setProfileEditForm((current) => current ? { ...current, lastName: event.target.value } : current)} required />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="patient-phone-primary-edit">{l("Primäre Telefonnummer", "Основной телефон", "Primary phone")}</Label>
-                  <Input id="patient-phone-primary-edit" value={profileEditForm.phonePrimary} onChange={(event) => setProfileEditForm((current) => current ? { ...current, phonePrimary: event.target.value } : current)} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="patient-phone-secondary-edit">{l("Sekundäre Telefonnummer", "Дополнительный телефон", "Secondary phone")}</Label>
-                  <Input id="patient-phone-secondary-edit" value={profileEditForm.phoneSecondary} onChange={(event) => setProfileEditForm((current) => current ? { ...current, phoneSecondary: event.target.value } : current)} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="patient-email-edit">{l("E-Mail", "Эл. почта", "Email")}</Label>
-                  <Input id="patient-email-edit" value={profileEditForm.email} onChange={(event) => setProfileEditForm((current) => current ? { ...current, email: event.target.value } : current)} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="patient-languages-edit">{l("Sprachen", "Языки", "Languages")}</Label>
-                  <Input id="patient-languages-edit" value={profileEditForm.languages} onChange={(event) => setProfileEditForm((current) => current ? { ...current, languages: event.target.value } : current)} placeholder="de, uk, en" />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="patient-functional-labels-edit">{l("Funktionale Labels", "Функциональные метки", "Functional labels")}</Label>
-                  <Input id="patient-functional-labels-edit" value={profileEditForm.functionalLabels} onChange={(event) => setProfileEditForm((current) => current ? { ...current, functionalLabels: event.target.value } : current)} placeholder="vip, high_risk" />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="patient-nationality-edit">{l("Nationalität", "Гражданство", "Nationality")}</Label>
-                  <Input id="patient-nationality-edit" value={profileEditForm.nationality} onChange={(event) => setProfileEditForm((current) => current ? { ...current, nationality: event.target.value } : current)} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="patient-residence-edit">{l("Wohnsitzland", "Страна проживания", "Residence country")}</Label>
-                  <Input id="patient-residence-edit" value={profileEditForm.residenceCountry} onChange={(event) => setProfileEditForm((current) => current ? { ...current, residenceCountry: event.target.value } : current)} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="patient-address-street-edit">{l("Straße", "Улица", "Street")}</Label>
-                  <Input id="patient-address-street-edit" value={profileEditForm.addressStreet} onChange={(event) => setProfileEditForm((current) => current ? { ...current, addressStreet: event.target.value } : current)} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="patient-address-city-edit">{l("Stadt", "Город", "City")}</Label>
-                  <Input id="patient-address-city-edit" value={profileEditForm.addressCity} onChange={(event) => setProfileEditForm((current) => current ? { ...current, addressCity: event.target.value } : current)} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="patient-address-zip-edit">{l("PLZ", "Индекс", "ZIP")}</Label>
-                  <Input id="patient-address-zip-edit" value={profileEditForm.addressZip} onChange={(event) => setProfileEditForm((current) => current ? { ...current, addressZip: event.target.value } : current)} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="patient-address-country-edit">{l("Adressland", "Страна адреса", "Address country")}</Label>
-                  <Input id="patient-address-country-edit" value={profileEditForm.addressCountry} onChange={(event) => setProfileEditForm((current) => current ? { ...current, addressCountry: event.target.value } : current)} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="patient-insurance-provider-edit">{l("Versicherer", "Страховая компания", "Insurance provider")}</Label>
-                  <Input id="patient-insurance-provider-edit" value={profileEditForm.insuranceProvider} onChange={(event) => setProfileEditForm((current) => current ? { ...current, insuranceProvider: event.target.value } : current)} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="patient-insurance-number-edit">{l("Versicherungsnummer", "Номер страховки", "Insurance number")}</Label>
-                  <Input id="patient-insurance-number-edit" value={profileEditForm.insuranceNumber} onChange={(event) => setProfileEditForm((current) => current ? { ...current, insuranceNumber: event.target.value } : current)} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="patient-insurance-type-edit">{l("Versicherungstyp", "Тип страховки", "Insurance type")}</Label>
-                  <select id="patient-insurance-type-edit" className={selectClassName} value={profileEditForm.insuranceType} onChange={(event) => setProfileEditForm((current) => current ? { ...current, insuranceType: event.target.value } : current)}>
-                    <option value="">{t.common_not_set}</option>
-                    <option value="private">{l("Privat", "Частная", "Private")}</option>
-                    <option value="public">{l("Gesetzlich", "Государственная", "Public")}</option>
-                    <option value="self_pay">{l("Selbstzahler", "Самооплата", "Self pay")}</option>
-                    <option value="foreign">{l("Ausland", "Иностранная", "Foreign")}</option>
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="patient-emergency-name-edit">{l("Notfallkontakt", "Контакт для экстренной связи", "Emergency contact")}</Label>
-                  <Input id="patient-emergency-name-edit" value={profileEditForm.emergencyContactName} onChange={(event) => setProfileEditForm((current) => current ? { ...current, emergencyContactName: event.target.value } : current)} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="patient-emergency-phone-edit">{l("Notfalltelefon", "Экстренный телефон", "Emergency phone")}</Label>
-                  <Input id="patient-emergency-phone-edit" value={profileEditForm.emergencyContactPhone} onChange={(event) => setProfileEditForm((current) => current ? { ...current, emergencyContactPhone: event.target.value } : current)} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="patient-emergency-relation-edit">{l("Beziehung", "Связь", "Emergency relation")}</Label>
-                  <Input id="patient-emergency-relation-edit" value={profileEditForm.emergencyContactRelation} onChange={(event) => setProfileEditForm((current) => current ? { ...current, emergencyContactRelation: event.target.value } : current)} />
-                </div>
-              </div>
-              <div className={card("p-4")}>
-                <div className="mb-4 flex items-center justify-between gap-3">
-                  <div>
-                    <h3 className="text-sm font-semibold text-slate-950">{t.patients_legal_status}</h3>
-                    <p className="mt-1 text-sm text-slate-500">
-                      {l(
-                        "Erfassen Sie den DSGVO-, Vertrags- und Dokumentenstatus direkt am Patientenstammsatz.",
-                        "Фиксируйте статус DSGVO, договора и готовности документов прямо в карточке пациента.",
-                        "Capture the DSGVO, contract and document-readiness state directly on the patient record.",
-                      )}
-                    </p>
+            <form className="flex flex-col flex-1 min-h-0" onSubmit={handleSavePatientProfile}>
+              <SheetHeader className="shrink-0 px-4 pt-3 pb-1">
+                <SheetTitle>{l("Patientenprofil bearbeiten", "Редактировать профиль пациента", "Edit patient profile")}</SheetTitle>
+              </SheetHeader>
+
+              <div className="flex-1 overflow-y-auto px-4 py-2 space-y-3">
+                <FormSection title={l("Persönliche Daten", "Личные данные", "Personal data")}>
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <FormField label={l("Titel", "Обращение", "Title")}>
+                      <Input value={profileEditForm.title} onChange={(event) => setProfileEditForm((current) => current ? { ...current, title: event.target.value } : current)} className={formInputClassName} />
+                    </FormField>
+                    <FormField label={l("Vorname", "Имя", "First name")}>
+                      <Input value={profileEditForm.firstName} onChange={(event) => setProfileEditForm((current) => current ? { ...current, firstName: event.target.value } : current)} required className={formInputClassName} />
+                    </FormField>
+                    <FormField label={l("Nachname", "Фамилия", "Last name")}>
+                      <Input value={profileEditForm.lastName} onChange={(event) => setProfileEditForm((current) => current ? { ...current, lastName: event.target.value } : current)} required className={formInputClassName} />
+                    </FormField>
                   </div>
-                  <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
-                    {getPatientLegalStatusSummary(profileEditForm.legalStatus)}
-                  </Badge>
-                </div>
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                  <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700">
-                    <input
-                      type="checkbox"
-                      checked={profileEditForm.legalStatus.dsgvoSigned}
-                      onChange={(event) =>
-                        setProfileEditForm((current) =>
-                          current
-                            ? {
-                                ...current,
-                                legalStatus: {
-                                  ...current.legalStatus,
-                                  dsgvoSigned: event.target.checked,
-                                },
-                              }
-                            : current
-                        )
-                      }
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <FormField label={l("Nationalität", "Гражданство", "Nationality")}>
+                      <Input value={profileEditForm.nationality} onChange={(event) => setProfileEditForm((current) => current ? { ...current, nationality: event.target.value } : current)} className={formInputClassName} />
+                    </FormField>
+                    <FormField label={l("Wohnsitzland", "Страна проживания", "Residence country")}>
+                      <Input value={profileEditForm.residenceCountry} onChange={(event) => setProfileEditForm((current) => current ? { ...current, residenceCountry: event.target.value } : current)} className={formInputClassName} />
+                    </FormField>
+                  </div>
+                  <FormField label={l("Sprachen", "Языки", "Languages")}>
+                    <Input value={profileEditForm.languages} onChange={(event) => setProfileEditForm((current) => current ? { ...current, languages: event.target.value } : current)} placeholder="de, uk, en" className={formInputClassName} />
+                  </FormField>
+                  <FormField label={l("Funktionale Labels", "Функциональные метки", "Functional labels")}>
+                    <FunctionalLabelChips
+                      value={profileEditForm.functionalLabels}
+                      onChange={(next) => setProfileEditForm((current) => current ? { ...current, functionalLabels: next } : current)}
                     />
-                    {l("DSGVO unterschrieben", "DSGVO подписано", "DSGVO signed")}
-                  </label>
-                  <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700">
-                    <input
-                      type="checkbox"
-                      checked={profileEditForm.legalStatus.confidentialityReleaseSigned}
-                      onChange={(event) =>
-                        setProfileEditForm((current) =>
-                          current
-                            ? {
-                                ...current,
-                                legalStatus: {
-                                  ...current.legalStatus,
-                                  confidentialityReleaseSigned: event.target.checked,
-                                },
+                  </FormField>
+                </FormSection>
+
+                <FormSection title={l("Kontakt", "Контакты", "Contact")}>
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <FormField label={l("Primäre Telefonnummer", "Основной телефон", "Primary phone")}>
+                      <Input value={profileEditForm.phonePrimary} onChange={(event) => setProfileEditForm((current) => current ? { ...current, phonePrimary: event.target.value } : current)} className={formInputClassName} />
+                    </FormField>
+                    <FormField label={l("Sekundäre Telefonnummer", "Доп. телефон", "Secondary phone")}>
+                      <Input value={profileEditForm.phoneSecondary} onChange={(event) => setProfileEditForm((current) => current ? { ...current, phoneSecondary: event.target.value } : current)} className={formInputClassName} />
+                    </FormField>
+                    <FormField label={l("E-Mail", "Эл. почта", "Email")}>
+                      <Input type="email" value={profileEditForm.email} onChange={(event) => setProfileEditForm((current) => current ? { ...current, email: event.target.value } : current)} className={formInputClassName} />
+                    </FormField>
+                  </div>
+                </FormSection>
+
+                <FormSection title={l("Adresse", "Адрес", "Address")}>
+                  <FormField label={l("Straße", "Улица", "Street")}>
+                    <Input value={profileEditForm.addressStreet} onChange={(event) => setProfileEditForm((current) => current ? { ...current, addressStreet: event.target.value } : current)} className={formInputClassName} />
+                  </FormField>
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <FormField label={l("Stadt", "Город", "City")}>
+                      <Input value={profileEditForm.addressCity} onChange={(event) => setProfileEditForm((current) => current ? { ...current, addressCity: event.target.value } : current)} className={formInputClassName} />
+                    </FormField>
+                    <FormField label={l("PLZ", "Индекс", "ZIP")}>
+                      <Input value={profileEditForm.addressZip} onChange={(event) => setProfileEditForm((current) => current ? { ...current, addressZip: event.target.value } : current)} className={formInputClassName} />
+                    </FormField>
+                    <FormField label={l("Adressland", "Страна адреса", "Address country")}>
+                      <Input value={profileEditForm.addressCountry} onChange={(event) => setProfileEditForm((current) => current ? { ...current, addressCountry: event.target.value } : current)} className={formInputClassName} />
+                    </FormField>
+                  </div>
+                </FormSection>
+
+                <FormSection title={l("Versicherung", "Страхование", "Insurance")}>
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <FormField label={l("Versicherer", "Страховая компания", "Insurance provider")}>
+                      <Input value={profileEditForm.insuranceProvider} onChange={(event) => setProfileEditForm((current) => current ? { ...current, insuranceProvider: event.target.value } : current)} className={formInputClassName} />
+                    </FormField>
+                    <FormField label={l("Versicherungsnummer", "Номер полиса", "Insurance number")}>
+                      <Input value={profileEditForm.insuranceNumber} onChange={(event) => setProfileEditForm((current) => current ? { ...current, insuranceNumber: event.target.value } : current)} className={formInputClassName} />
+                    </FormField>
+                    <FormField label={l("Versicherungstyp", "Тип страхования", "Insurance type")}>
+                      <ShadSelect value={profileEditForm.insuranceType} onValueChange={(v) => setProfileEditForm((current) => current ? { ...current, insuranceType: v ?? "" } : current)}>
+                        <SelectTrigger className={cn("w-full", formInputClassName)}>
+                          <SelectValue>
+                            {(() => {
+                              switch (profileEditForm.insuranceType) {
+                                case "private": return l("Privat", "Частная", "Private");
+                                case "public": return l("Gesetzlich", "Государственная", "Public");
+                                case "self_pay": return l("Selbstzahler", "Самооплата", "Self pay");
+                                case "foreign": return l("Ausland", "Иностранная", "Foreign");
+                                default: return t.common_not_set;
                               }
-                            : current
-                        )
-                      }
-                    />
-                    {l("Schweigepflicht freigegeben", "Разрешение на снятие врачебной тайны", "Schweigepflicht released")}
-                  </label>
-                  <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700">
-                    <input
-                      type="checkbox"
-                      checked={profileEditForm.legalStatus.identityVerified}
-                      onChange={(event) =>
-                        setProfileEditForm((current) =>
-                          current
-                            ? {
-                                ...current,
-                                legalStatus: {
-                                  ...current.legalStatus,
-                                  identityVerified: event.target.checked,
-                                },
-                              }
-                            : current
-                        )
-                      }
-                    />
-                    {l("Identität bestätigt", "Личность подтверждена", "Identity verified")}
-                  </label>
-                  <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700">
-                    <input
-                      type="checkbox"
-                      checked={profileEditForm.legalStatus.documentPackComplete}
-                      onChange={(event) =>
-                        setProfileEditForm((current) =>
-                          current
-                            ? {
-                                ...current,
-                                legalStatus: {
-                                  ...current.legalStatus,
-                                  documentPackComplete: event.target.checked,
-                                },
-                              }
-                            : current
-                        )
-                      }
-                    />
-                    {l("Dokumentenpaket vollständig", "Пакет документов собран", "Document pack complete")}
-                  </label>
-                  <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700">
-                    <input
-                      type="checkbox"
-                      checked={profileEditForm.legalStatus.complianceCompleted}
-                      onChange={(event) =>
-                        setProfileEditForm((current) =>
-                          current
-                            ? {
-                                ...current,
-                                legalStatus: {
-                                  ...current.legalStatus,
-                                  complianceCompleted: event.target.checked,
-                                },
-                              }
-                            : current
-                        )
-                      }
-                    />
-                    {l("Compliance abgeschlossen", "Compliance завершён", "Compliance completed")}
-                  </label>
-                  <div className="space-y-2">
-                    <Label htmlFor="patient-contract-status-edit">{l("Vertragsstatus", "Статус договора", "Contract status")}</Label>
-                    <select
-                      id="patient-contract-status-edit"
-                      className={selectClassName}
+                            })()}
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="">{t.common_not_set}</SelectItem>
+                          <SelectItem value="private">{l("Privat", "Частная", "Private")}</SelectItem>
+                          <SelectItem value="public">{l("Gesetzlich", "Государственная", "Public")}</SelectItem>
+                          <SelectItem value="self_pay">{l("Selbstzahler", "Самооплата", "Self pay")}</SelectItem>
+                          <SelectItem value="foreign">{l("Ausland", "Иностранная", "Foreign")}</SelectItem>
+                        </SelectContent>
+                      </ShadSelect>
+                    </FormField>
+                  </div>
+                </FormSection>
+
+                <FormSection title={l("Notfallkontakt", "Экстренный контакт", "Emergency contact")}>
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <FormField label={l("Notfallkontakt", "Контакт", "Contact")}>
+                      <Input value={profileEditForm.emergencyContactName} onChange={(event) => setProfileEditForm((current) => current ? { ...current, emergencyContactName: event.target.value } : current)} className={formInputClassName} />
+                    </FormField>
+                    <FormField label={l("Notfalltelefon", "Телефон", "Phone")}>
+                      <Input value={profileEditForm.emergencyContactPhone} onChange={(event) => setProfileEditForm((current) => current ? { ...current, emergencyContactPhone: event.target.value } : current)} className={formInputClassName} />
+                    </FormField>
+                    <FormField label={l("Beziehung", "Связь", "Relation")}>
+                      <Input value={profileEditForm.emergencyContactRelation} onChange={(event) => setProfileEditForm((current) => current ? { ...current, emergencyContactRelation: event.target.value } : current)} className={formInputClassName} />
+                    </FormField>
+                  </div>
+                </FormSection>
+
+                <FormSection
+                  title={t.patients_legal_status}
+                  accessory={<LegalStatusPill status={profileEditForm.legalStatus} />}
+                >
+                  <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                    {[
+                      { key: "dsgvoSigned", label: l("DSGVO unterschrieben", "DSGVO подписано", "DSGVO signed") },
+                      { key: "confidentialityReleaseSigned", label: l("Schweigepflicht freigegeben", "Снятие врачебной тайны", "Confidentiality released") },
+                      { key: "identityVerified", label: l("Identität bestätigt", "Личность подтверждена", "Identity verified") },
+                      { key: "documentPackComplete", label: l("Dokumentenpaket vollständig", "Пакет документов собран", "Document pack complete") },
+                      { key: "complianceCompleted", label: l("Bereit bestätigt", "Готовность подтверждена", "Readiness confirmed") },
+                    ].map((item) => {
+                      const k = item.key as keyof typeof profileEditForm.legalStatus;
+                      const checked = Boolean(profileEditForm.legalStatus[k]);
+                      return (
+                        <label
+                          key={item.key}
+                          className="flex items-center gap-2 rounded-lg border border-border/50 bg-card px-2.5 py-2 text-[12.5px] text-foreground cursor-pointer hover:bg-muted/40 transition-colors"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(event) =>
+                              setProfileEditForm((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      legalStatus: { ...current.legalStatus, [item.key]: event.target.checked },
+                                    }
+                                  : current
+                              )
+                            }
+                            className="size-3.5 accent-[var(--brand)] cursor-pointer"
+                          />
+                          {item.label}
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <FormField label={l("Vertragsstatus", "Статус договора", "Contract status")}>
+                    <ShadSelect
                       value={profileEditForm.legalStatus.contractStatus}
-                      onChange={(event) =>
+                      onValueChange={(v) =>
                         setProfileEditForm((current) =>
                           current
-                            ? {
-                                ...current,
-                                legalStatus: {
-                                  ...current.legalStatus,
-                                  contractStatus: event.target.value,
-                                },
-                              }
+                            ? { ...current, legalStatus: { ...current.legalStatus, contractStatus: v ?? "" } }
                             : current
                         )
                       }
                     >
-                      {PATIENT_CONTRACT_STATUS_OPTIONS.map((status) => (
-                        <option key={status} value={status}>
-                          {patientDetailStatusLabel(status)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                <div className="mt-4 space-y-2">
-                  <Label htmlFor="patient-legal-notes-edit">{l("Compliance-Notizen", "Заметки по compliance", "Compliance notes")}</Label>
+                      <SelectTrigger className={cn("w-full", formInputClassName)}>
+                        <SelectValue>
+                          {patientDetailStatusLabel(profileEditForm.legalStatus.contractStatus)}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {PATIENT_CONTRACT_STATUS_OPTIONS.map((status) => (
+                          <SelectItem key={status} value={status}>
+                            {patientDetailStatusLabel(status)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </ShadSelect>
+                  </FormField>
+                  <FormField label={l("Notizen", "Заметки", "Notes")}>
+                    <textarea
+                      className={formTextareaClassName}
+                      value={profileEditForm.legalStatus.notes}
+                      onChange={(event) =>
+                        setProfileEditForm((current) =>
+                          current
+                            ? { ...current, legalStatus: { ...current.legalStatus, notes: event.target.value } }
+                            : current
+                        )
+                      }
+                      placeholder={l(
+                        "Ausstehende Unterschriften, fehlende IDs, offene Compliance-Fragen",
+                        "Ожидающие подписи, отсутствующие ID, открытые вопросы compliance",
+                        "Pending signatures, missing IDs, open compliance questions",
+                      )}
+                    />
+                  </FormField>
+                </FormSection>
+
+                <FormSection title={l("CAVE-Hinweise", "Предупреждения CAVE", "CAVE warnings")}>
                   <textarea
-                    id="patient-legal-notes-edit"
-                    className={textareaClassName}
-                    value={profileEditForm.legalStatus.notes}
-                    onChange={(event) =>
-                      setProfileEditForm((current) =>
-                        current
-                          ? {
-                              ...current,
-                              legalStatus: {
-                                ...current.legalStatus,
-                                notes: event.target.value,
-                              },
-                            }
-                          : current
-                      )
-                    }
-                    placeholder={l(
-                      "Ausstehende Unterschriften, fehlende IDs, offene Compliance-Fragen",
-                      "Ожидающие подписи, отсутствующие ID, открытые вопросы compliance",
-                      "Pending signatures, missing IDs, open compliance questions",
-                    )}
-                  />
-                </div>
-              </div>
-                <div className="space-y-2">
-                  <Label htmlFor="patient-clinical-warnings-edit">{l("CAVE-Hinweise", "Заметки CAVE", "Cave notes")}</Label>
-                  <textarea
-                    id="patient-clinical-warnings-edit"
-                    className={textareaClassName}
+                    className={formTextareaClassName}
                     value={profileEditForm.clinicalWarnings}
                     onChange={(event) =>
                       setProfileEditForm((current) =>
-                        current
-                          ? { ...current, clinicalWarnings: event.target.value }
-                          : current
+                        current ? { ...current, clinicalWarnings: event.target.value } : current
                       )
                     }
                     placeholder={l(
@@ -4659,24 +4637,34 @@ export function PatientDetailPage() {
                       "Persistent clinical warnings or safety alerts",
                     )}
                   />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="patient-notes-edit">{l("Notizen", "Заметки", "Notes")}</Label>
-                  <textarea id="patient-notes-edit" className={textareaClassName} value={profileEditForm.notes} onChange={(event) => setProfileEditForm((current) => current ? { ...current, notes: event.target.value } : current)} />
-                </div>
-              <DialogFooter>
-                <Button type="button" variant="outline" className="rounded-xl" onClick={() => setProfileEditorOpen(false)}>
+                </FormSection>
+
+                <FormSection title={l("Notizen", "Заметки", "Notes")}>
+                  <textarea
+                    className={formTextareaClassName}
+                    value={profileEditForm.notes}
+                    onChange={(event) =>
+                      setProfileEditForm((current) =>
+                        current ? { ...current, notes: event.target.value } : current
+                      )
+                    }
+                  />
+                </FormSection>
+              </div>
+
+              <div className="shrink-0 flex justify-end gap-2 px-4 py-3 bg-popover">
+                <Button type="button" variant="outline" className="h-9 rounded-lg" onClick={() => setProfileEditorOpen(false)}>
                   {l("Abbrechen", "Отмена", "Cancel")}
                 </Button>
-                <Button type="submit" className="rounded-xl bg-slate-950 text-white hover:bg-slate-800" disabled={profileEditorBusy}>
-                  {profileEditorBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
+                <Button type="submit" className="h-9 rounded-lg gap-1.5 px-3.5" disabled={profileEditorBusy}>
+                  {profileEditorBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
                   {l("Patient speichern", "Сохранить пациента", "Save patient")}
                 </Button>
-              </DialogFooter>
+              </div>
             </form>
           ) : null}
-        </DialogContent>
-      </Dialog>
+        </SheetContent>
+      </Sheet>
 
       <Dialog open={relationEditorOpen} onOpenChange={setRelationEditorOpen}>
         <DialogContent className="sm:max-w-2xl">

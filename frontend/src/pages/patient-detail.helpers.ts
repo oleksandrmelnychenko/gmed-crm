@@ -49,6 +49,7 @@ export type PatientLabelPayload = {
 };
 
 export type PatientTimelineRangeFilter = "all" | "30d" | "90d" | "180d" | "365d";
+export const PATIENT_DETAIL_REFRESH_EVENT = "patient-detail-refresh";
 
 type PatientTimelineNavigationAccess = {
   canOpenDocumentsWorkspace: boolean;

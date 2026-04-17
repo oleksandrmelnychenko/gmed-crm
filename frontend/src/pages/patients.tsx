@@ -32,9 +32,17 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
+  Field,
+  FormSection,
+  FunctionalLabelChips,
+  formInputClassName,
+  humanizeFunctionalLabel,
+  parseFunctionalLabels,
+  textareaClassName,
+} from "@/components/patient-form-primitives";
+import {
   Sheet,
   SheetContent,
-  SheetDescription,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
@@ -165,10 +173,6 @@ const DEFAULT_FILTERS: PatientFilters = {
   doctorId: "",
 };
 
-const textareaClassName =
-  "min-h-[80px] w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
-
-const formInputClassName = "h-9 rounded-lg bg-card";
 
 function patientPermissions(role?: string): PatientPermissions {
   return {
@@ -232,17 +236,6 @@ function parseLanguages(value: string) {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
-}
-
-function parseFunctionalLabels(value: string) {
-  return value
-    .split(",")
-    .map((item) => item.trim().toLowerCase().replaceAll("-", "_").replaceAll(" ", "_"))
-    .filter(Boolean);
-}
-
-function humanizeFunctionalLabel(value: string) {
-  return value.replaceAll("_", " ");
 }
 
 function patientToForm(detail: PatientDetail): PatientFormState {
@@ -367,19 +360,8 @@ function fieldValue(value: string | string[] | null | undefined, fallback = "Not
 
 function cardClass(extra?: string) {
   return cn(
-    "rounded-[1.75rem] border border-border/70 bg-card shadow-[0_20px_60px_rgba(15,23,42,0.05)]",
+    "rounded-xl border border-border/50 bg-card/40",
     extra
-  );
-}
-
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <label className="flex flex-col gap-1.5">
-      <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
-        {label}
-      </span>
-      {children}
-    </label>
   );
 }
 
@@ -593,65 +575,6 @@ function ColumnFilterPopover({
         </button>
       </div>
     </div>
-  );
-}
-
-function FunctionalLabelChips({
-  value,
-  onChange,
-  l,
-}: {
-  value: string;
-  onChange: (next: string) => void;
-  l: (de: string, ru: string, en: string) => string;
-}) {
-  const options: { value: string; label: string }[] = [
-    { value: "vip", label: "VIP" },
-    { value: "high_risk", label: l("Hohes Risiko", "Высокий риск", "High risk") },
-    { value: "mobility_support", label: l("Mobilitätshilfe", "Помощь с мобильностью", "Mobility support") },
-    { value: "fall_risk", label: l("Sturzrisiko", "Риск падения", "Fall risk") },
-    { value: "complex_coordination", label: l("Komplexe Koordination", "Сложная координация", "Complex coordination") },
-  ];
-  const selected = parseFunctionalLabels(value);
-  const toggle = (v: string) => {
-    const next = selected.includes(v) ? selected.filter((s) => s !== v) : [...selected, v];
-    onChange(next.join(", "));
-  };
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      {options.map((opt) => {
-        const checked = selected.includes(opt.value);
-        return (
-          <button
-            key={opt.value}
-            type="button"
-            onClick={() => toggle(opt.value)}
-            className={cn(
-              "h-7 rounded-full border px-2.5 text-[12px] font-medium transition-colors",
-              checked
-                ? "bg-[var(--brand)] text-white border-[var(--brand)]"
-                : "bg-card text-muted-foreground border-border hover:text-foreground hover:border-foreground/30"
-            )}
-          >
-            {opt.label}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-function FormSection({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
-      <div className="flex items-center gap-2">
-        <div className="h-2 w-2 rounded-full bg-[var(--brand)]" />
-        <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
-          {title}
-        </h3>
-      </div>
-      <div className="space-y-3">{children}</div>
-    </section>
   );
 }
 
@@ -968,15 +891,6 @@ function buildPageSequence(current: number, total: number): (number | "…")[] {
   if (current + windowSize < last - 1) pages.push("…");
   pages.push(last);
   return pages;
-}
-
-function EmptyPanel({ title, text }: { title: string; text: string }) {
-  return (
-    <div className="rounded-[1.5rem] border border-dashed border-slate-200 bg-slate-50/90 px-5 py-6">
-      <p className="text-sm font-medium text-slate-900">{title}</p>
-      <p className="mt-2 text-sm leading-6 text-slate-600">{text}</p>
-    </div>
-  );
 }
 
 export function PatientsPage() {
@@ -1923,25 +1837,20 @@ export function PatientsPage() {
         }}
       >
         <SheetContent side="right" className="w-full sm:max-w-[860px]">
-          <SheetHeader className="border-b border-border/70 pb-4">
-            <SheetTitle>{detail ? patientName(detail) : t.patients_profile}</SheetTitle>
-            <SheetDescription>
-              {t.patients_subtitle}
-            </SheetDescription>
-          </SheetHeader>
+          {detailBusy ? (
+            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+              <LoaderCircle className="mr-2 size-4 animate-spin" />
+              {t.common_loading}
+            </div>
+          ) : detail ? (
+            <form onSubmit={handleUpdatePatient} className="flex flex-col flex-1 min-h-0">
+              <SheetHeader className="shrink-0 px-4 pt-3 pb-1">
+                <SheetTitle>{patientName(detail)}</SheetTitle>
+              </SheetHeader>
 
-          <div className="flex-1 overflow-y-auto px-4 pb-6">
-            {detailBusy ? (
-              <div className="flex min-h-[320px] items-center justify-center text-sm text-slate-500">
-                <LoaderCircle className="mr-2 size-4 animate-spin" />
-                Loading patient
-              </div>
-            ) : detailError ? (
-              <div className="pt-5">
-                <Banner tone="error">{detailError}</Banner>
-              </div>
-            ) : detail ? (
-              <div className="space-y-6 pt-5">
+              <div className="flex-1 overflow-y-auto px-4 py-2 space-y-4">
+                {detailError ? <Banner tone="error">{detailError}</Banner> : null}
+                {editError ? <Banner tone="error">{editError}</Banner> : null}
                 <PatientOverviewSection
                   detail={detail}
                   onOpenCases={() => staffGo(`/cases?patient=${detail.id}`)}
@@ -1953,13 +1862,10 @@ export function PatientsPage() {
                 <PatientProfileSection
                   detail={detail}
                   form={editForm}
-                  busy={editBusy}
-                  error={editError}
                   canEdit={permissions.canCreateEdit}
                   onChange={(field, value) =>
                     setEditForm((current) => ({ ...current, [field]: value }))
                   }
-                  onSubmit={handleUpdatePatient}
                 />
                 {permissions.canViewAssignments ? (
                   <AssignmentsSection
@@ -1974,12 +1880,28 @@ export function PatientsPage() {
                   />
                 ) : null}
               </div>
-            ) : (
-              <div className="flex min-h-[320px] items-center justify-center text-sm text-slate-500">
-                Select a patient to open the profile sheet.
+
+              <div className="shrink-0 flex justify-end gap-2 px-4 py-3 bg-popover">
+                <Button type="button" variant="outline" className="h-9 rounded-lg" onClick={() => setDetailOpen(false)}>
+                  {t.common_cancel}
+                </Button>
+                {permissions.canCreateEdit ? (
+                  <Button type="submit" className="h-9 rounded-lg gap-1.5 px-3.5" disabled={editBusy}>
+                    {editBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                    {editBusy ? t.patients_saving : t.patients_save}
+                  </Button>
+                ) : null}
               </div>
-            )}
-          </div>
+            </form>
+          ) : detailError ? (
+            <div className="p-4">
+              <Banner tone="error">{detailError}</Banner>
+            </div>
+          ) : (
+            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+              {t.patients_subtitle}
+            </div>
+          )}
         </SheetContent>
       </Sheet>
     </>
@@ -2005,22 +1927,22 @@ function PatientOverviewSection({
   const tr = t as unknown as Record<string, string>;
 
   return (
-    <section className={cardClass("p-5")}>
-      <div className="flex flex-wrap items-center gap-2">
+    <section className={cardClass("p-3.5 space-y-3")}>
+      <div className="flex flex-wrap items-center gap-1.5">
         <span
           className={cn(
-            "rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em]",
+            "rounded-full border px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.1em]",
             detail.is_active
               ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-              : "border-slate-200 bg-slate-100 text-slate-600"
+              : "border-border bg-muted text-muted-foreground"
           )}
         >
           {detail.is_active ? t.common_active : t.common_inactive}
         </span>
-        <Badge variant="outline" className="rounded-full border-slate-200 bg-white text-slate-700">
+        <Badge variant="outline" className="rounded-full border-border bg-card text-foreground">
           {genderLabel(detail.gender, tr)}
         </Badge>
-        <Badge variant="outline" className="rounded-full border-slate-200 bg-white text-slate-700">
+        <Badge variant="outline" className="rounded-full border-border bg-card text-foreground">
           {insuranceLabel(detail.insurance_type, tr)}
         </Badge>
         {detail.functional_labels?.map((label) => (
@@ -2034,42 +1956,42 @@ function PatientOverviewSection({
         ))}
       </div>
 
-      <div className="mt-4 flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
         <div>
-          <h2 className="text-2xl font-semibold text-slate-950">{patientName(detail)}</h2>
-          <p className="mt-2 text-sm text-slate-600">{detail.patient_id}</p>
+          <h2 className="text-lg font-semibold tracking-tight text-foreground">{patientName(detail)}</h2>
+          <p className="mt-0.5 text-[12px] text-muted-foreground">{detail.patient_id}</p>
         </div>
-        <div className="grid gap-2 text-sm text-slate-600">
+        <div className="grid gap-1 text-[12.5px] text-muted-foreground">
           <div className="flex items-center gap-2">
-            <CalendarClock className="size-4 text-slate-400" />
+            <CalendarClock className="size-3.5 text-muted-foreground/70" />
             <span>{formatDate(detail.birth_date, t.common_not_set)}</span>
           </div>
           <div className="flex items-center gap-2">
-            <Phone className="size-4 text-slate-400" />
+            <Phone className="size-3.5 text-muted-foreground/70" />
             <span>{fieldValue(detail.phone_primary, t.common_not_set)}</span>
           </div>
           <div className="flex items-center gap-2">
-            <Mail className="size-4 text-slate-400" />
+            <Mail className="size-3.5 text-muted-foreground/70" />
             <span>{fieldValue(detail.email, t.common_not_set)}</span>
           </div>
         </div>
       </div>
 
-      <div className="mt-5 flex flex-wrap gap-2">
-        <Button type="button" variant="outline" className="rounded-2xl" onClick={onOpenCases}>
+      <div className="flex flex-wrap gap-1.5 pt-1">
+        <Button type="button" variant="outline" size="sm" className="h-8 rounded-lg" onClick={onOpenCases}>
           {t.cases_title}
         </Button>
-        <Button type="button" variant="outline" className="rounded-2xl" onClick={onOpenOrders}>
+        <Button type="button" variant="outline" size="sm" className="h-8 rounded-lg" onClick={onOpenOrders}>
           {t.orders_title}
         </Button>
-        <Button type="button" variant="outline" className="rounded-2xl" onClick={onOpenAppointments}>
+        <Button type="button" variant="outline" size="sm" className="h-8 rounded-lg" onClick={onOpenAppointments}>
           {t.appointments_title}
         </Button>
-        <Button type="button" variant="outline" className="rounded-2xl" onClick={onOpenContracts}>
-          Contracts
+        <Button type="button" variant="outline" size="sm" className="h-8 rounded-lg" onClick={onOpenContracts}>
+          {t.nav_contracts}
         </Button>
-        <Button type="button" variant="outline" className="rounded-2xl" onClick={onOpenDocuments}>
-          Documents
+        <Button type="button" variant="outline" size="sm" className="h-8 rounded-lg" onClick={onOpenDocuments}>
+          {t.nav_documents}
         </Button>
       </div>
     </section>
@@ -2079,79 +2001,49 @@ function PatientOverviewSection({
 function PatientProfileSection({
   detail,
   form,
-  busy,
-  error,
   canEdit,
   onChange,
-  onSubmit,
 }: {
   detail: PatientDetail;
   form: PatientFormState;
-  busy: boolean;
-  error: string;
   canEdit: boolean;
   onChange: (field: keyof PatientFormState, value: string) => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
+  const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
   const legalStatusSummary = getPatientLegalStatusSummary(
     normalizePatientLegalStatus(detail.legal_status)
   );
 
   return (
-    <section className={cardClass("p-5")}>
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-semibold text-slate-950">{t.patients_profile}</h3>
-          <p className="mt-1 text-sm text-slate-600">
-            {t.patients_subtitle}
-          </p>
-        </div>
-        <div className="text-xs uppercase tracking-[0.12em] text-slate-500">
-          {t.users_created} {formatDateTime(detail.updated_at, t.common_not_set)}
-        </div>
-      </div>
-
-      {error ? (
-        <div className="mt-4">
-          <Banner tone="error">{error}</Banner>
-        </div>
-      ) : null}
-
-      <form onSubmit={onSubmit} className="mt-5 space-y-5">
+    <div className="space-y-3">
+      <FormSection title={l("Identifikation", "Идентификация", "Identification")}>
         <div className="grid gap-3 md:grid-cols-3">
           <Field label={t.patients_birth_date}>
-            <Input value={detail.birth_date ?? ""} disabled className="h-10 rounded-xl bg-slate-50" />
+            <Input value={detail.birth_date ?? ""} disabled className={formInputClassName} />
           </Field>
           <Field label={t.patients_gender}>
-            <Input value={genderLabel(detail.gender, tr)} disabled className="h-10 rounded-xl bg-slate-50" />
+            <Input value={genderLabel(detail.gender, tr)} disabled className={formInputClassName} />
           </Field>
           <Field label={t.patients_legal_status}>
-            <Input
-              value={legalStatusSummary}
-              disabled
-              className="h-10 rounded-xl bg-slate-50"
-            />
+            <Input value={legalStatusSummary} disabled className={formInputClassName} />
           </Field>
         </div>
+      </FormSection>
 
-        <PatientFormFields form={form} onChange={onChange} />
+      <PatientFormFields form={form} onChange={onChange} />
 
-        {canEdit ? (
-          <div className="flex justify-end border-t border-border/70 pt-4">
-            <Button type="submit" className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800" disabled={busy}>
-              {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-              {busy ? t.patients_saving : t.patients_save}
-            </Button>
-          </div>
-        ) : (
-          <div className="border-t border-border/70 pt-4 text-sm text-slate-500">
-            This role has read-only access to patient demographics and assignment context.
-          </div>
-        )}
-      </form>
-    </section>
+      {!canEdit ? (
+        <p className="text-[12px] text-muted-foreground italic">
+          {l(
+            "Diese Rolle hat nur Lesezugriff auf Patientendemografie.",
+            "Эта роль имеет доступ только для чтения.",
+            "This role has read-only access to patient demographics."
+          )}
+        </p>
+      ) : null}
+    </div>
   );
 }
 
@@ -2178,46 +2070,30 @@ function AssignmentsSection({
   const tr = t as unknown as Record<string, string>;
 
   return (
-    <section className={cardClass("p-5")}>
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-semibold text-slate-950">{t.patients_assign_owner}</h3>
-          <p className="mt-1 text-sm text-slate-600">
-            {t.patients_subtitle}
-          </p>
-        </div>
-        <div className="text-xs uppercase tracking-[0.12em] text-slate-500">
-          {assignments.length} {t.patients_records}
-        </div>
-      </div>
-
-      {assignmentError ? (
-        <div className="mt-4">
-          <Banner tone="error">{assignmentError}</Banner>
-        </div>
-      ) : null}
+    <FormSection title={t.patients_assign_owner}>
+      {assignmentError ? <Banner tone="error">{assignmentError}</Banner> : null}
 
       {assignments.length === 0 ? (
-        <div className="mt-4">
-          <EmptyPanel
-            title={t.patients_no_assignments}
-            text={t.patients_no_assignments}
-          />
-        </div>
+        <p className="text-[12.5px] text-muted-foreground italic">
+          {t.patients_no_assignments}
+        </p>
       ) : (
-        <div className="mt-4 space-y-3">
+        <div className="space-y-2">
           {assignments.map((item) => (
-            <div key={`${item.user_id}-${item.assigned_at}`} className="rounded-[1.4rem] border border-slate-200 bg-slate-50/80 p-4">
-              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                <div>
-                  <p className="text-base font-semibold text-slate-950">{item.user_name}</p>
-                  <p className="mt-1 text-sm text-slate-600">{roleLabel(item.user_role, tr)}</p>
+            <div
+              key={`${item.user_id}-${item.assigned_at}`}
+              className="rounded-lg border border-border/50 bg-card/60 px-3 py-2.5"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-[13px] font-semibold text-foreground truncate">{item.user_name}</p>
+                  <p className="text-[12px] text-muted-foreground">{roleLabel(item.user_role, tr)}</p>
                 </div>
-                <Badge variant="outline" className="rounded-full border-slate-200 bg-white text-slate-700">
+                <Badge variant="outline" className="rounded-full border-border bg-card text-foreground shrink-0">
                   {item.revoked_at ? t.patients_revoked : t.common_active}
                 </Badge>
               </div>
-              <div className="mt-4 grid gap-2 text-sm text-slate-600 md:grid-cols-2">
+              <div className="mt-2 grid gap-0.5 text-[11.5px] text-muted-foreground md:grid-cols-2">
                 <div>{t.patients_assigned_by} {formatDateTime(item.assigned_at, t.common_not_set)}</div>
                 <div>{t.patients_assigned_by} {item.assigned_by_name || t.common_unknown}</div>
                 {item.revoked_at ? <div>Revoked {formatDateTime(item.revoked_at, t.common_not_set)}</div> : null}
@@ -2229,41 +2105,39 @@ function AssignmentsSection({
       )}
 
       {canManage ? (
-        <div className="mt-5 border-t border-border/70 pt-5">
-          <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto]">
-            <Field label={t.patients_assign_owner}>
-              <ShadSelect value={selectedAssignee} onValueChange={(v) => onAssigneeChange(v ?? "")}>
-                <SelectTrigger className="w-full h-10 rounded-xl bg-slate-50">
-                  <SelectValue>
-                    {selectedAssignee
-                      ? (() => { const s = assignableStaff.find((i) => i.id === selectedAssignee); return s ? `${s.name} · ${roleLabel(s.role, tr)}` : selectedAssignee; })()
-                      : t.patients_assign_owner}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {assignableStaff.map((item) => (
-                    <SelectItem key={item.id} value={item.id}>
-                      {item.name} · {roleLabel(item.role, tr)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </ShadSelect>
-            </Field>
-            <div className="flex items-end">
-              <Button
-                type="button"
-                className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
-                disabled={assignmentBusy || !selectedAssignee}
-                onClick={onAssign}
-              >
-                {assignmentBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                {t.patients_assign_owner}
-              </Button>
-            </div>
+        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] pt-1">
+          <Field label={t.patients_assign_owner}>
+            <ShadSelect value={selectedAssignee} onValueChange={(v) => onAssigneeChange(v ?? "")}>
+              <SelectTrigger className={cn("w-full", formInputClassName)}>
+                <SelectValue>
+                  {selectedAssignee
+                    ? (() => { const s = assignableStaff.find((i) => i.id === selectedAssignee); return s ? `${s.name} · ${roleLabel(s.role, tr)}` : selectedAssignee; })()
+                    : t.patients_assign_owner}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {assignableStaff.map((item) => (
+                  <SelectItem key={item.id} value={item.id}>
+                    {item.name} · {roleLabel(item.role, tr)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </ShadSelect>
+          </Field>
+          <div className="flex items-end">
+            <Button
+              type="button"
+              className="h-9 rounded-lg gap-1.5 px-3.5"
+              disabled={assignmentBusy || !selectedAssignee}
+              onClick={onAssign}
+            >
+              {assignmentBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+              {t.patients_assign_owner}
+            </Button>
           </div>
         </div>
       ) : null}
-    </section>
+    </FormSection>
   );
 }
 
@@ -2367,7 +2241,6 @@ function PatientFormFields({
           <FunctionalLabelChips
             value={form.functionalLabels}
             onChange={(next) => onChange("functionalLabels", next)}
-            l={l}
           />
         </Field>
       </FormSection>

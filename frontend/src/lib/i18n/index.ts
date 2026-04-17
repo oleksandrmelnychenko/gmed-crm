@@ -769,6 +769,9 @@ export interface Translations {
   patients_title_field: string;
   patients_legal_status: string;
   patients_profile: string;
+  patients_relations: string;
+  patients_workflow: string;
+  patients_timeline: string;
   patients_save: string;
   patients_saving: string;
   patients_creating: string;
