@@ -13,6 +13,8 @@ import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import listPlugin from "@fullcalendar/list";
+import deLocale from "@fullcalendar/core/locales/de";
+import ruLocale from "@fullcalendar/core/locales/ru";
 import interactionPlugin, {
   type DateClickArg,
   type EventResizeDoneArg,
@@ -26,22 +28,18 @@ import type {
 } from "@fullcalendar/core";
 import {
   AlertCircle,
+  AlertTriangle,
   CalendarClock,
   CalendarDays,
   CheckCircle2,
   Clock3,
-  Eye,
-  Link2,
-  ListChecks,
   MoreHorizontal,
-  MessageCircle,
   LoaderCircle,
   MapPin,
   Plus,
   RefreshCw,
   ShieldAlert,
   Stethoscope,
-  UserRound,
   UsersRound,
 } from "lucide-react";
 
@@ -2250,6 +2248,42 @@ function sectionCardClass(extra?: string) {
   );
 }
 
+function AptKpi({
+  icon: Icon,
+  tone,
+  label,
+  value,
+}: {
+  icon: React.ElementType;
+  tone: "sky" | "emerald" | "amber" | "rose" | "neutral";
+  label: string;
+  value: number | string;
+}) {
+  const toneColor = {
+    sky: "text-sky-600",
+    emerald: "text-emerald-600",
+    amber: "text-amber-600",
+    rose: "text-rose-600",
+    neutral: "text-muted-foreground",
+  }[tone];
+  return (
+    <div className="flex items-center gap-3 px-4 py-3 min-w-0">
+      <Icon
+        strokeWidth={1.6}
+        className={cn("size-[22px] shrink-0", toneColor)}
+      />
+      <div className="min-w-0">
+        <p className="text-[22px] font-semibold tracking-tight text-foreground leading-none tabular-nums">
+          {value}
+        </p>
+        <p className="mt-1 text-[11.5px] text-muted-foreground truncate">
+          {label}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function timelineToneClass(tone: AppointmentTimelineEvent["tone"]) {
   switch (tone) {
     case "success":
@@ -2314,7 +2348,7 @@ function Banner({
 
 function StaffAppointmentsPage() {
   const { user } = useAuth();
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
   const { staffGo } = useStaffNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -3675,21 +3709,6 @@ function StaffAppointmentsPage() {
       !props.isBlocked &&
       props.appointmentStatus !== "completed" &&
       props.appointmentStatus !== "cancelled";
-    const footerPeople = [
-      props.patientName,
-      props.doctorName,
-      props.interpreterName,
-    ].filter(Boolean) as string[];
-    const footerEyeCount = [props.providerName, props.doctorName].filter(
-      Boolean,
-    ).length;
-    const footerMessageCount =
-      props.isBlocked || Boolean(props.interpreterName) ? 1 : 0;
-    const footerLinkCount = props.recurrenceFrequency ? 1 : 0;
-    const taskLine = arg.timeText
-      ? `${arg.timeText} / ${props.patientPid}`
-      : props.patientPid;
-
     return (
       <div
         className={cn(
@@ -3720,8 +3739,17 @@ function StaffAppointmentsPage() {
         ) : null}
         <div className="fc-apt-event-head">
           <span className="fc-apt-event-tag">
-            {appointmentTypeLabel(props.appointmentType)}
+            {props.isBlocked
+              ? appointmentText("Blockiert", "Заблокировано", "Blocked")
+              : props.appointmentStatus === "completed"
+                ? statusLabel("completed")
+                : props.appointmentStatus === "cancelled"
+                  ? statusLabel("cancelled")
+                  : appointmentTypeLabel(props.appointmentType, tr)}
           </span>
+          {arg.timeText ? (
+            <span className="fc-apt-event-time">{arg.timeText}</span>
+          ) : null}
         </div>
         <div className="fc-apt-event-title">{arg.event.title}</div>
         <div className="fc-apt-event-meta">{props.patientName}</div>
@@ -3735,38 +3763,6 @@ function StaffAppointmentsPage() {
             Interpreter: {props.interpreterName}
           </div>
         ) : null}
-        <div className="fc-apt-event-task">
-          <ListChecks className="size-3.5" />
-          <span>{taskLine}</span>
-        </div>
-        <div className="fc-apt-event-divider" />
-        <div className="fc-apt-event-footer">
-          <div className="fc-apt-event-avatars">
-            {footerPeople.length === 0 ? (
-              <span className="fc-apt-event-avatar">?</span>
-            ) : (
-              footerPeople.slice(0, 3).map((name) => (
-                <span key={name} className="fc-apt-event-avatar">
-                  {name.trim().charAt(0).toUpperCase()}
-                </span>
-              ))
-            )}
-          </div>
-          <div className="fc-apt-event-metrics">
-            <span className="fc-apt-event-metric">
-              <Eye className="size-3" />
-              {footerEyeCount}
-            </span>
-            <span className="fc-apt-event-metric">
-              <MessageCircle className="size-3" />
-              {footerMessageCount}
-            </span>
-            <span className="fc-apt-event-metric">
-              <Link2 className="size-3" />
-              {footerLinkCount}
-            </span>
-          </div>
-        </div>
         {canQuickManage ? (
           <div className="mt-2 flex flex-wrap gap-1">
             {props.appointmentStatus !== "confirmed" ? (
@@ -5232,100 +5228,43 @@ function StaffAppointmentsPage() {
 
   return (
     <>
-      <div className="space-y-6">
-        <section className="relative overflow-hidden rounded-[2rem] border border-slate-200/80 bg-[linear-gradient(135deg,#f8fbff_0%,#eef5ff_42%,#ffffff_100%)] px-6 py-6 shadow-[0_30px_80px_rgba(15,23,42,0.08)]">
-          <div className="absolute inset-y-0 right-0 w-80 bg-[radial-gradient(circle_at_top_right,rgba(14,165,233,0.18),transparent_58%)]" />
-          <div className="relative flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
-            <div className="max-w-3xl space-y-3">
-              <div className="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-white/85 px-3 py-1 text-xs font-medium tracking-[0.16em] text-sky-700 uppercase">
-                <CalendarClock className="size-3.5" />
-                Appointment Control
-              </div>
-              <div className="space-y-2">
-                <h1 className="text-3xl font-semibold tracking-tight text-slate-950">
-                  Calendar, scheduling and operational follow-up in one
-                  workspace.
-                </h1>
-                <p className="max-w-2xl text-sm leading-6 text-slate-600">
-                  Manage medical slots, concierge bookings, interpreter handoff,
-                  checklist execution and reporting without leaving the
-                  appointment flow.
-                </p>
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center gap-3">
+      <div className="space-y-4">
+        {/* Page header */}
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
+            <h1 className="text-[22px] font-semibold tracking-tight text-foreground leading-tight">
+              {tr.appointments_title ?? "Appointments"}
+            </h1>
+            {permissions.canCreate ? (
               <Button
-                variant="outline"
-                className="rounded-2xl bg-white/80"
-                onClick={refreshAppointments}
+                size="sm"
+                className="h-8 rounded-lg gap-1.5"
+                onClick={() => openCreateSheetFromDate()}
               >
-                <RefreshCw className="size-4" />
-                Refresh
+                <Plus className="size-3.5" />
+                {tr.appointments_new ?? "New appointment"}
               </Button>
-              {permissions.canCreate ? (
-                <Button
-                  className="h-9 rounded-lg px-3.5"
-                  onClick={() => openCreateSheetFromDate()}
-                >
-                  <Plus className="size-4" />
-                  New appointment
-                </Button>
-              ) : null}
-            </div>
-            <div className="appointments-hero-stats grid grid-cols-5 gap-1.5">
-              <StatsCard
-                icon={CalendarDays}
-                label={t.dash_patients_today}
-                value={String(todayAppointments)}
-                tone="sky"
-                compact
-                hideIcon
-                largeValue
-                valueRight
-              />
-              <StatsCard
-                icon={CheckCircle2}
-                label={t.common_active}
-                value={String(activeAppointments)}
-                tone="emerald"
-                compact
-                hideIcon
-                largeValue
-                valueRight
-              />
-              <StatsCard
-                icon={UsersRound}
-                label={tr.mfa_pending}
-                value={String(pendingInterpreterResponses)}
-                tone="amber"
-                compact
-                hideIcon
-                largeValue
-                valueRight
-              />
-              <StatsCard
-                icon={ShieldAlert}
-                label={tr.common_error}
-                value={String(attentionCount)}
-                tone="rose"
-                compact
-                hideIcon
-                largeValue
-                valueRight
-              />
-              <StatsCard
-                icon={UserRound}
-                label={tr.providers_all}
-                value={String(scopedAppointments.length)}
-                tone="slate"
-                compact
-                hideIcon
-                largeValue
-                valueRight
-              />
-            </div>
+            ) : null}
           </div>
-        </section>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 w-8 rounded-lg p-0 text-muted-foreground"
+            onClick={refreshAppointments}
+            title="Refresh"
+          >
+            <RefreshCw className="size-3.5" />
+          </Button>
+        </div>
+
+        {/* KPI row */}
+        <div className="grid grid-cols-2 xl:grid-cols-5 divide-x divide-border/60">
+          <AptKpi icon={CalendarDays} tone="sky" label={tr.dash_patients_today ?? "Today"} value={todayAppointments} />
+          <AptKpi icon={CheckCircle2} tone="emerald" label={tr.common_active ?? "Active"} value={activeAppointments} />
+          <AptKpi icon={Clock3} tone="amber" label={tr.mfa_pending ?? "Pending"} value={pendingInterpreterResponses} />
+          <AptKpi icon={AlertTriangle} tone="rose" label={tr.common_error ?? "Attention"} value={attentionCount} />
+          <AptKpi icon={UsersRound} tone="neutral" label={tr.providers_all ?? "All"} value={scopedAppointments.length} />
+        </div>
 
         {appointmentsError ? (
           <Banner tone="error">{appointmentsError}</Banner>
@@ -6101,12 +6040,8 @@ function StaffAppointmentsPage() {
                   </div>
                 </div>
               </div>
-            <section
-              className={sectionCardClass(
-                "overflow-hidden !rounded-[6px] !border-0 !bg-transparent !shadow-none p-0",
-              )}
-            >
-              <div className="appointments-calendar-shell">
+            <section className="overflow-hidden rounded-xl border border-border bg-card">
+              <div className="appointments-calendar-shell p-3">
                 <FullCalendar
                   ref={calendarRef}
                   plugins={[
@@ -6115,6 +6050,14 @@ function StaffAppointmentsPage() {
                     listPlugin,
                     interactionPlugin,
                   ]}
+                  locale={lang === "de" ? deLocale : ruLocale}
+                  eventTimeFormat={{
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    hour12: false,
+                    omitZeroMinute: false,
+                  }}
+                  displayEventEnd={false}
                   initialView={calendarView}
                   initialDate={calendarDate}
                   headerToolbar={{

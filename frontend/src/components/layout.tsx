@@ -1,5 +1,6 @@
 import { Navigate, Outlet, matchPath, useLocation } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
+import { useLang } from "@/lib/i18n";
 import { canAccessPatientPortalRoute, canAccessStaffRoute } from "@/lib/staff-route-access";
 import { NavStateProvider } from "@/lib/nav-state";
 import { NavPanel } from "./nav-panel";
@@ -9,12 +10,13 @@ import { cn } from "@/lib/utils";
 
 export function AppLayout() {
   const { user, loading } = useAuth();
+  const { t } = useLang();
   const location = useLocation();
 
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen text-muted-foreground">
-        Loading...
+        {t.common_loading}
       </div>
     );
   }

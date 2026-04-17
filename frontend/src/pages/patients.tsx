@@ -12,6 +12,7 @@ import { useSearchParams } from "react-router-dom";
 import {
   ArrowDown,
   ArrowUp,
+  BadgeCheck,
   CalendarClock,
   ChevronLeft,
   ChevronRight,
@@ -25,6 +26,10 @@ import {
   Phone,
   Plus,
   Search,
+  Shield,
+  type LucideIcon,
+  UsersRound,
+  Wallet,
   X,
 } from "lucide-react";
 
@@ -593,45 +598,39 @@ function Banner({ tone, children }: { tone: "error" | "warning"; children: React
   );
 }
 
-function KpiCard({
+function KpiInlineStat({
+  icon: Icon,
   label,
   value,
-  shareOf,
+  tone,
 }: {
+  icon: LucideIcon;
   label: string;
   value: string | number;
-  shareOf?: { value: number; total: number; label: string };
+  tone: "sky" | "emerald" | "amber" | "slate";
 }) {
-  const percent = shareOf && shareOf.total > 0
-    ? Math.round((shareOf.value / shareOf.total) * 100)
-    : null;
-  const share = shareOf && shareOf.total > 0 && shareOf.value !== shareOf.total;
+  const toneClass = {
+    sky: "bg-sky-100 text-sky-700",
+    emerald: "bg-emerald-100 text-emerald-700",
+    amber: "bg-amber-100 text-amber-700",
+    slate: "bg-slate-100 text-slate-700",
+  }[tone];
 
   return (
-    <div className="relative rounded-xl border border-border bg-card p-3 overflow-hidden">
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0"
-        style={{
-          background:
-            "radial-gradient(circle at top right, rgba(249,115,22,0.08), transparent 55%)",
-        }}
-      />
-      <div className="relative">
+    <div className="flex min-w-[170px] items-center gap-3">
+      <span
+        className={cn(
+          "flex size-10 shrink-0 items-center justify-center rounded-2xl",
+          toneClass
+        )}
+      >
+        <Icon className="size-4.5" />
+      </span>
+      <div className="min-w-0">
         <span className="text-[12px] text-muted-foreground">{label}</span>
-        <p className="mt-1.5 text-[22px] font-semibold tracking-tight text-foreground leading-none">
+        <p className="mt-1 text-[20px] font-semibold tracking-tight text-foreground leading-none">
           {value}
         </p>
-        {share ? (
-          <p className="mt-2 text-[11px] text-muted-foreground flex items-center gap-1.5">
-            <span className="inline-flex items-center gap-0.5 font-medium text-foreground">
-              {percent}%
-            </span>
-            <span>of {shareOf!.label.toLowerCase()}</span>
-          </p>
-        ) : (
-          <p className="mt-2 text-[11px] invisible">·</p>
-        )}
       </div>
     </div>
   );
@@ -1552,26 +1551,30 @@ export function PatientsPage() {
 
         {/* KPI row */}
         {showStats && (
-          <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
-            <KpiCard
+          <div className="flex flex-wrap gap-x-8 gap-y-4">
+            <KpiInlineStat
+              icon={UsersRound}
+              tone="sky"
               label={t.patients_title}
               value={metrics.total}
-              shareOf={{ value: metrics.active, total: metrics.total, label: t.common_active }}
             />
-            <KpiCard
+            <KpiInlineStat
+              icon={BadgeCheck}
+              tone="emerald"
               label={t.common_active}
               value={metrics.active}
-              shareOf={{ value: metrics.active, total: metrics.total, label: t.patients_title }}
             />
-            <KpiCard
+            <KpiInlineStat
+              icon={Shield}
+              tone="slate"
               label={t.insurance_private}
               value={metrics.privateCount}
-              shareOf={{ value: metrics.privateCount, total: metrics.total, label: t.patients_title }}
             />
-            <KpiCard
+            <KpiInlineStat
+              icon={Wallet}
+              tone="amber"
               label={t.insurance_self_pay}
               value={metrics.selfPay}
-              shareOf={{ value: metrics.selfPay, total: metrics.total, label: t.patients_title }}
             />
           </div>
         )}

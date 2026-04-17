@@ -1,5 +1,4 @@
 import {
-  startTransition,
   useDeferredValue,
   useCallback,
   useEffect,
@@ -1479,6 +1478,7 @@ export function PatientDetailPage() {
     if (!id) return;
     let cancelled = false;
     setLoading(true);
+    setError("");
 
     Promise.all([
       apiFetch<PatientDetail>(`/patients/${id}`),
@@ -1506,19 +1506,19 @@ export function PatientDetailPage() {
         : Promise.resolve({ items: [] as PatientRiskScore[] }),
     ]).then(([d, a, s, vitals, entries, medicalOrderItems, riskScoreItems]) => {
       if (cancelled) return;
-      startTransition(() => {
-        setDetail(d);
-        setAssignments(a);
-        setStaff(s);
-        setVitalsHistory(vitals.items ?? []);
-        setCardEntries(entries.items ?? []);
-        setMedicalOrders(medicalOrderItems.items ?? []);
-        setRiskScores(riskScoreItems.items ?? []);
-      });
+      setDetail(d);
+      setAssignments(a);
+      setStaff(s);
+      setVitalsHistory(vitals.items ?? []);
+      setCardEntries(entries.items ?? []);
+      setMedicalOrders(medicalOrderItems.items ?? []);
+      setRiskScores(riskScoreItems.items ?? []);
+      setLoading(false);
     }).catch((e) => {
-      if (!cancelled) setError(e instanceof Error ? e.message : String(e));
-    }).finally(() => {
-      if (!cancelled) setLoading(false);
+      if (cancelled) return;
+      setDetail(null);
+      setError(e instanceof Error ? e.message : String(e));
+      setLoading(false);
     });
 
     return () => { cancelled = true; };
@@ -2532,35 +2532,35 @@ export function PatientDetailPage() {
             </div>
           </FormSection>
 
-          <div className={card("p-6")}>
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <h2 className="text-sm font-semibold text-foreground">{t.patients_legal_status}</h2>
+          <FormSection
+            title={t.patients_legal_status}
+            accessory={
+              <div className="flex items-center gap-2">
                 <LegalStatusPill status={legalStatus} />
+                {canEditPatientProfile ? (
+                  <Button type="button" variant="outline" size="sm" className="h-9 rounded-lg gap-1.5" onClick={openProfileEditor}>
+                    <Pencil className="size-3.5" />
+                    {l("Status aktualisieren", "Обновить статус", "Update status")}
+                  </Button>
+                ) : null}
               </div>
-              {canEditPatientProfile ? (
-                <Button type="button" variant="outline" size="sm" className="h-9 rounded-lg gap-1.5" onClick={openProfileEditor}>
-                  <Pencil className="size-3.5" />
-                  {l("Status aktualisieren", "Обновить статус", "Update status")}
-                </Button>
-              ) : null}
-            </div>
-
+            }
+          >
             <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 xl:col-span-2">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+              <div className="rounded-xl border border-border/50 bg-muted/25 px-4 py-3 xl:col-span-2">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/80">
                   {l("Vertragsstatus", "Статус договора", "Contract status")}
                 </p>
-                <p className="mt-3 text-lg font-semibold text-slate-950">
+                <p className="mt-3 text-lg font-semibold text-foreground">
                   {patientDetailStatusLabel(legalStatus.contractStatus)}
                 </p>
-                <p className="mt-1 text-xs text-slate-500">
+                <p className="mt-1 text-xs text-muted-foreground">
                   {legalStatusCompletion.completed}/{legalStatusCompletion.total} {l("erledigt", "выполнено", "done")}
                 </p>
               </div>
               {legalStatusChecklist.map((item) => (
-                <div key={item.key} className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                <div key={item.key} className="rounded-xl border border-border/50 bg-card px-4 py-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/80">
                     {item.label}
                   </p>
                   <Badge
@@ -2572,27 +2572,27 @@ export function PatientDetailPage() {
                         : "border-amber-200 bg-amber-50 text-amber-700"
                     )}
                   >
-                    {item.done ? t.common_active : t.mfa_pending}
+                    {item.done ? t.common_completed : t.common_pending}
                   </Badge>
                 </div>
               ))}
             </div>
 
             {legalStatus.notes ? (
-              <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+              <div className="rounded-xl border border-border/50 bg-muted/25 px-4 py-3">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/80">
                   {l("Notizen", "Заметки", "Notes")}
                 </p>
-                <p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">{legalStatus.notes}</p>
+                <p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{legalStatus.notes}</p>
               </div>
             ) : null}
 
-            <div className="mt-4 grid gap-3 lg:grid-cols-[1.5fr_1fr]">
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+            <div className="grid gap-3 lg:grid-cols-[1.5fr_1fr]">
+              <div className="rounded-xl border border-border/50 bg-muted/25 px-4 py-4">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/80">
                   {l("Compliance-Handoff", "Передача compliance", "Compliance handoff")}
                 </p>
-                <p className="mt-2 text-sm text-slate-600">
+                <p className="mt-2 text-sm text-muted-foreground">
                   {l(
                     "Nutzen Sie das Patientenprofil als operative Quelle für die DSGVO-Bereitschaft und führen Sie Einwilligungen, Löschungen und Einschränkungen anschließend im dedizierten Compliance-Bereich weiter.",
                     "Используйте профиль пациента как операционный источник для готовности по DSGVO, а согласия, удаление и ограничения продолжайте в отдельном разделе compliance.",
@@ -2604,7 +2604,8 @@ export function PatientDetailPage() {
                     <Button
                       type="button"
                       variant="outline"
-                      className="rounded-xl"
+                      size="sm"
+                      className="h-9 rounded-lg"
                       disabled={complianceExportBusy}
                       onClick={() => void handleExportPatientCompliance()}
                     >
@@ -2618,7 +2619,8 @@ export function PatientDetailPage() {
                     <Button
                       type="button"
                       variant="outline"
-                      className="rounded-xl"
+                      size="sm"
+                      className="h-9 rounded-lg"
                       onClick={() => staffGo(`/admin/compliance?patient=${id}`)}
                     >
                       {l("DSGVO-Bereich öffnen", "Открыть раздел DSGVO", "Open DSGVO workspace")}
@@ -2628,7 +2630,8 @@ export function PatientDetailPage() {
                     <Button
                       type="button"
                       variant="outline"
-                      className="rounded-xl"
+                      size="sm"
+                      className="h-9 rounded-lg"
                       onClick={() => staffGo(`/documents?patient=${id}`)}
                     >
                       {l("Dokumente öffnen", "Открыть документы", "Open documents")}
@@ -2638,7 +2641,8 @@ export function PatientDetailPage() {
                     <Button
                       type="button"
                       variant="outline"
-                      className="rounded-xl"
+                      size="sm"
+                      className="h-9 rounded-lg"
                       onClick={() => staffGo(`/contracts?patient=${id}`)}
                     >
                       {l("Verträge öffnen", "Открыть договоры", "Open contracts")}
@@ -2647,130 +2651,131 @@ export function PatientDetailPage() {
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+              <div className="rounded-xl border border-border/50 bg-card px-4 py-4">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/80">
                   {l("Operative Grenze", "Операционная граница", "Operational boundary")}
                 </p>
-                <ul className="mt-3 space-y-2 text-sm text-slate-600">
+                <ul className="mt-3 space-y-2 text-sm text-muted-foreground">
                   <li>{l("Die rechtliche Freigabe ist hier patientengebunden.", "Юридическая готовность здесь привязана к пациенту.", "Legal readiness is patient-bound here.")}</li>
                   <li>{l("Das Einwilligungsregister bleibt im DSGVO-Adminbereich.", "Реестр согласий по-прежнему находится в админ-разделе DSGVO.", "Consent register still lives in the DSGVO admin workspace.")}</li>
                   <li>{l("Die Ausführung sollte erst nach abgeschlossener Compliance starten.", "Исполнение не должно начинаться до завершения compliance.", "Execution should not start before compliance is complete.")}</li>
                 </ul>
               </div>
             </div>
-          </div>
+          </FormSection>
 
           {(canManagePatientVitals || detail.clinical_warnings || vitalsHistory.length > 0) ? (
             <div className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
-              <div className={cn(card("p-6"), "border-rose-200 bg-rose-50/60")}>
-                <div className="mb-3 flex items-center justify-between gap-3">
-                  <div>
-                    <h2 className="text-sm font-semibold text-rose-950">{l("CAVE-Hinweise", "Заметки CAVE", "Cave notes")}</h2>
-                    <p className="mt-1 text-sm text-rose-700">
-                      {l(
-                        "Dauerhafte klinische Warnhinweise, die vor Beginn von Koordination oder Behandlung sichtbar bleiben sollen.",
-                        "Постоянные клинические предупреждения, которые должны оставаться видимыми до начала координации или лечения.",
-                        "Persistent clinical warnings that should stay visible before coordination or treatment starts.",
-                      )}
-                    </p>
-                  </div>
-                  {canEditPatientProfile ? (
+              <FormSection
+                title={l("CAVE-Hinweise", "Заметки CAVE", "Cave notes")}
+                accessory={
+                  canEditPatientProfile ? (
                     <Button
                       type="button"
                       variant="outline"
-                      className="rounded-xl border-rose-200 bg-white text-rose-700 hover:bg-rose-100"
+                      size="sm"
+                      className="h-9 rounded-lg border-rose-200 bg-white text-rose-700 hover:bg-rose-50"
                       onClick={openProfileEditor}
                     >
                       <Pencil className="mr-2 size-3.5" />
                       {l("Aktualisieren", "Обновить", "Update")}
                     </Button>
-                  ) : null}
+                  ) : null
+                }
+              >
+                <p className="text-sm text-muted-foreground">
+                  {l(
+                    "Dauerhafte klinische Warnhinweise, die vor Beginn von Koordination oder Behandlung sichtbar bleiben sollen.",
+                    "Постоянные клинические предупреждения, которые должны оставаться видимыми до начала координации или лечения.",
+                    "Persistent clinical warnings that should stay visible before coordination or treatment starts.",
+                  )}
+                </p>
+                <div className="rounded-xl border border-rose-200 bg-rose-50/70 px-4 py-4">
+                  {detail.clinical_warnings ? (
+                    <p className="whitespace-pre-wrap text-sm text-rose-900">{detail.clinical_warnings}</p>
+                  ) : (
+                    <p className="text-sm text-rose-700">{l("Keine aktiven CAVE-Hinweise dokumentiert.", "Активные заметки CAVE не задокументированы.", "No active cave notes documented.")}</p>
+                  )}
                 </div>
-                {detail.clinical_warnings ? (
-                  <p className="whitespace-pre-wrap text-sm text-rose-900">{detail.clinical_warnings}</p>
-                ) : (
-                  <p className="text-sm text-rose-700">{l("Keine aktiven CAVE-Hinweise dokumentiert.", "Активные заметки CAVE не задокументированы.", "No active cave notes documented.")}</p>
-                )}
-              </div>
+              </FormSection>
 
-              <div className={card("p-6")}>
-                <div className="mb-4 flex items-center justify-between gap-3">
-                  <div>
-                    <h2 className="text-sm font-semibold text-slate-950">{l("Vitalwerte-Verlauf", "История показателей", "Vitals history")}</h2>
-                    <p className="mt-1 text-sm text-slate-500">
-                      {l(
-                        "Blutdruck-, Herzfrequenz- und Gewichtsstände mit zeitgestempeltem klinischem Kontext.",
-                        "Снимки давления, пульса и веса с клиническим контекстом по времени.",
-                        "Blood pressure, heart rate and weight snapshots with timestamped clinical context.",
-                      )}
-                    </p>
-                  </div>
-                  <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
+              <FormSection
+                title={l("Vitalwerte-Verlauf", "История показателей", "Vitals history")}
+                accessory={
+                  <Badge variant="outline" className="rounded-full border-border/60 bg-muted/25 text-foreground">
                     {l(`${vitalsHistory.length} Einträge`, `${vitalsHistory.length} записей`, `${vitalsHistory.length} entries`)}
                   </Badge>
-                </div>
+                }
+              >
+                <p className="text-sm text-muted-foreground">
+                  {l(
+                    "Blutdruck-, Herzfrequenz- und Gewichtsstände mit zeitgestempeltem klinischem Kontext.",
+                    "Снимки давления, пульса и веса с клиническим контекстом по времени.",
+                    "Blood pressure, heart rate and weight snapshots with timestamped clinical context.",
+                  )}
+                </p>
 
                 {latestVitalMeasurement ? (
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <div className="rounded-xl border border-border/50 bg-muted/25 px-4 py-4">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/80">
                           {l("Letzte Messung", "Последнее измерение", "Latest measurement")}
                         </p>
-                        <p className="mt-2 text-sm font-medium text-slate-950">
+                        <p className="mt-2 text-sm font-medium text-foreground">
                           {fmtDateTime(latestVitalMeasurement.measured_at, t.common_not_set)}
                         </p>
                       </div>
-                      <div className="flex flex-wrap gap-2 text-xs text-slate-600">
+                      <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
                         {latestVitalMeasurement.bp_systolic != null && latestVitalMeasurement.bp_diastolic != null ? (
-                          <Badge variant="outline" className="rounded-full">
+                          <Badge variant="outline" className="rounded-full bg-card">
                             RR {formatVitalNumber(latestVitalMeasurement.bp_systolic, { maximumFractionDigits: 0 })}/
                             {formatVitalNumber(latestVitalMeasurement.bp_diastolic, { maximumFractionDigits: 0 })} mmHg
                           </Badge>
                         ) : null}
                         {latestVitalMeasurement.heart_rate != null ? (
-                          <Badge variant="outline" className="rounded-full">
+                          <Badge variant="outline" className="rounded-full bg-card">
                             HF {formatVitalNumber(latestVitalMeasurement.heart_rate, { maximumFractionDigits: 0 })} bpm
                           </Badge>
                         ) : null}
                         {latestVitalMeasurement.weight_kg != null ? (
-                          <Badge variant="outline" className="rounded-full">
+                          <Badge variant="outline" className="rounded-full bg-card">
                             {l("Gewicht", "Вес", "Weight")} {formatVitalNumber(latestVitalMeasurement.weight_kg)} kg
                           </Badge>
                         ) : null}
                         {latestVitalMeasurement.bmi != null ? (
-                          <Badge variant="outline" className="rounded-full">
+                          <Badge variant="outline" className="rounded-full bg-card">
                             BMI {formatVitalNumber(latestVitalMeasurement.bmi)}
                           </Badge>
                         ) : null}
                       </div>
                     </div>
                     {latestVitalMeasurement.notes ? (
-                      <p className="mt-3 whitespace-pre-wrap text-sm text-slate-600">
+                      <p className="mt-3 whitespace-pre-wrap text-sm text-muted-foreground">
                         {latestVitalMeasurement.notes}
                       </p>
                     ) : null}
                   </div>
                 ) : (
-                  <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
+                  <div className="rounded-xl border border-dashed border-border/60 bg-muted/25 px-4 py-6 text-sm text-muted-foreground">
                     {l("Noch keine Vitalwerte erfasst.", "Показатели пока не зафиксированы.", "No vital measurements recorded yet.")}
                   </div>
                 )}
 
                 {vitalsHistory.length > 0 ? (
-                  <div className="mt-4 space-y-3">
+                  <div className="space-y-3">
                     {vitalsHistory.slice(0, 6).map((item) => (
-                      <div key={item.id} className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                      <div key={item.id} className="rounded-xl border border-border/50 bg-card px-4 py-3">
                         <div className="flex flex-wrap items-center justify-between gap-3">
                           <div>
-                            <p className="text-sm font-medium text-slate-950">
+                            <p className="text-sm font-medium text-foreground">
                               {fmtDateTime(item.measured_at, t.common_not_set)}
                             </p>
-                            <p className="mt-1 text-xs text-slate-500">
+                            <p className="mt-1 text-xs text-muted-foreground">
                               {l("Erfasst von", "Записал", "Recorded by")} {item.recorded_by_name ?? t.common_unknown}
                             </p>
                           </div>
-                          <div className="flex flex-wrap gap-2 text-xs text-slate-600">
+                          <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
                             {item.bp_systolic != null && item.bp_diastolic != null ? (
                               <span>RR {formatVitalNumber(item.bp_systolic, { maximumFractionDigits: 0 })}/{formatVitalNumber(item.bp_diastolic, { maximumFractionDigits: 0 })}</span>
                             ) : null}
@@ -2783,41 +2788,42 @@ export function PatientDetailPage() {
                           </div>
                         </div>
                         {item.notes ? (
-                          <p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">{item.notes}</p>
+                          <p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{item.notes}</p>
                         ) : null}
                       </div>
                     ))}
                   </div>
                 ) : null}
-              </div>
+              </FormSection>
             </div>
           ) : null}
 
           {canManagePatientVitals ? (
-            <form className={card("p-6")} onSubmit={handleCreateVitalMeasurement}>
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-sm font-semibold text-slate-950">{l("Vitalwert hinzufügen", "Добавить показатель", "Add vital measurement")}</h2>
-                  <p className="mt-1 text-sm text-slate-500">
-                    {l(
-                      "Erfassen Sie Vitalwerte des Patienten mit einem konkreten Messzeitpunkt.",
-                      "Фиксируйте показатели пациента с точным временем измерения.",
-                      "Capture patient vitals with a concrete measurement timestamp.",
-                    )}
-                  </p>
-                </div>
-                {bmiPreview != null ? (
-                  <Badge variant="outline" className="rounded-full border-sky-200 bg-sky-50 text-sky-700">
-                    {l("BMI-Vorschau", "Предпросмотр BMI", "BMI preview")} {formatVitalNumber(bmiPreview)}
-                  </Badge>
-                ) : null}
-              </div>
-              <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <form onSubmit={handleCreateVitalMeasurement}>
+              <FormSection
+                title={l("Vitalwert hinzufügen", "Добавить показатель", "Add vital measurement")}
+                accessory={
+                  bmiPreview != null ? (
+                    <Badge variant="outline" className="rounded-full border-sky-200 bg-sky-50 text-sky-700">
+                      {l("BMI-Vorschau", "Предпросмотр BMI", "BMI preview")} {formatVitalNumber(bmiPreview)}
+                    </Badge>
+                  ) : null
+                }
+              >
+                <p className="text-sm text-muted-foreground">
+                  {l(
+                    "Erfassen Sie Vitalwerte des Patienten mit einem konkreten Messzeitpunkt.",
+                    "Фиксируйте показатели пациента с точным временем измерения.",
+                    "Capture patient vitals with a concrete measurement timestamp.",
+                  )}
+                </p>
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 <div className="space-y-2 xl:col-span-2">
                   <Label htmlFor="patient-vitals-measured-at">{l("Gemessen am", "Измерено", "Measured at")}</Label>
                   <Input
                     id="patient-vitals-measured-at"
                     type="datetime-local"
+                    className={formInputClassName}
                     value={vitalsForm.measuredAt}
                     onChange={(event) =>
                       setVitalsForm((current) => ({ ...current, measuredAt: event.target.value }))
@@ -2830,6 +2836,7 @@ export function PatientDetailPage() {
                   <Input
                     id="patient-vitals-bp-systolic"
                     inputMode="decimal"
+                    className={formInputClassName}
                     value={vitalsForm.bpSystolic}
                     onChange={(event) =>
                       setVitalsForm((current) => ({ ...current, bpSystolic: event.target.value }))
@@ -2842,6 +2849,7 @@ export function PatientDetailPage() {
                   <Input
                     id="patient-vitals-bp-diastolic"
                     inputMode="decimal"
+                    className={formInputClassName}
                     value={vitalsForm.bpDiastolic}
                     onChange={(event) =>
                       setVitalsForm((current) => ({ ...current, bpDiastolic: event.target.value }))
@@ -2854,6 +2862,7 @@ export function PatientDetailPage() {
                   <Input
                     id="patient-vitals-heart-rate"
                     inputMode="numeric"
+                    className={formInputClassName}
                     value={vitalsForm.heartRate}
                     onChange={(event) =>
                       setVitalsForm((current) => ({ ...current, heartRate: event.target.value }))
@@ -2866,6 +2875,7 @@ export function PatientDetailPage() {
                   <Input
                     id="patient-vitals-weight"
                     inputMode="decimal"
+                    className={formInputClassName}
                     value={vitalsForm.weightKg}
                     onChange={(event) =>
                       setVitalsForm((current) => ({ ...current, weightKg: event.target.value }))
@@ -2878,6 +2888,7 @@ export function PatientDetailPage() {
                   <Input
                     id="patient-vitals-height"
                     inputMode="decimal"
+                    className={formInputClassName}
                     value={vitalsForm.heightCm}
                     onChange={(event) =>
                       setVitalsForm((current) => ({ ...current, heightCm: event.target.value }))
@@ -2890,6 +2901,7 @@ export function PatientDetailPage() {
                   <Input
                     id="patient-vitals-bmi"
                     inputMode="decimal"
+                    className={formInputClassName}
                     value={vitalsForm.bmi}
                     onChange={(event) =>
                       setVitalsForm((current) => ({ ...current, bmi: event.target.value }))
@@ -2897,33 +2909,34 @@ export function PatientDetailPage() {
                     placeholder={bmiPreview != null ? `${bmiPreview}` : l("auto", "авто", "auto")}
                   />
                 </div>
-              </div>
-              <div className="mt-4 space-y-2">
-                <Label htmlFor="patient-vitals-notes">{l("Messnotizen", "Заметки к измерению", "Measurement notes")}</Label>
-                <textarea
-                  id="patient-vitals-notes"
-                  className={textareaClassName}
-                  value={vitalsForm.notes}
-                  onChange={(event) =>
-                    setVitalsForm((current) => ({ ...current, notes: event.target.value }))
-                  }
-                  placeholder={l(
-                    "Kontext, Symptome oder Messbedingungen",
-                    "Контекст, симптомы или условия измерения",
-                    "Context, symptoms or measurement conditions",
-                  )}
-                />
-              </div>
-              <div className="mt-4 flex justify-end">
-                <Button
-                  type="submit"
-                  className="rounded-xl bg-slate-950 text-white hover:bg-slate-800"
-                  disabled={vitalsBusy}
-                >
-                  {vitalsBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
-                  {l("Vitalwert speichern", "Сохранить показатель", "Save vital measurement")}
-                </Button>
-              </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="patient-vitals-notes">{l("Messnotizen", "Заметки к измерению", "Measurement notes")}</Label>
+                  <textarea
+                    id="patient-vitals-notes"
+                    className={textareaClassName}
+                    value={vitalsForm.notes}
+                    onChange={(event) =>
+                      setVitalsForm((current) => ({ ...current, notes: event.target.value }))
+                    }
+                    placeholder={l(
+                      "Kontext, Symptome oder Messbedingungen",
+                      "Контекст, симптомы или условия измерения",
+                      "Context, symptoms or measurement conditions",
+                    )}
+                  />
+                </div>
+                <div className="flex justify-end">
+                  <Button
+                    type="submit"
+                    className="h-9 rounded-lg bg-slate-950 text-white hover:bg-slate-800"
+                    disabled={vitalsBusy}
+                  >
+                    {vitalsBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
+                    {l("Vitalwert speichern", "Сохранить показатель", "Save vital measurement")}
+                  </Button>
+                </div>
+              </FormSection>
             </form>
           ) : null}
 
@@ -3494,18 +3507,21 @@ export function PatientDetailPage() {
 
           {/* Notes */}
           {detail.notes && (
-            <div className={card("p-6")}>
-              <div className="mb-2 flex items-center justify-between gap-3">
-                <h2 className="text-sm font-semibold text-slate-950">{t.patients_notes}</h2>
-                {canEditPatientProfile ? (
-                  <Button type="button" variant="ghost" className="rounded-xl px-3 text-slate-500 hover:text-slate-900" onClick={openProfileEditor}>
-                    <Pencil className="mr-2 size-3.5" />
+            <FormSection
+              title={t.patients_notes}
+              accessory={
+                canEditPatientProfile ? (
+                  <Button type="button" variant="outline" size="sm" className="h-9 rounded-lg gap-1.5" onClick={openProfileEditor}>
+                    <Pencil className="size-3.5" />
                     {l("Bearbeiten", "Редактировать", "Edit")}
                   </Button>
-                ) : null}
+                ) : null
+              }
+            >
+              <div className="rounded-xl border border-border/50 bg-muted/25 px-4 py-4">
+                <p className="text-sm text-muted-foreground whitespace-pre-wrap">{detail.notes}</p>
               </div>
-              <p className="text-sm text-slate-600 whitespace-pre-wrap">{detail.notes}</p>
-            </div>
+            </FormSection>
           )}
 
           {/* Assignments */}

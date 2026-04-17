@@ -161,24 +161,29 @@
 }
 
 .appointments-calendar-shell .fc {
-  --fc-border-color: transparent;
-  --fc-button-bg-color: oklch(0.205 0 0);
-  --fc-button-border-color: oklch(0.205 0 0);
-  --fc-button-hover-bg-color: oklch(0.27 0 0);
-  --fc-button-hover-border-color: oklch(0.27 0 0);
-  --fc-button-active-bg-color: oklch(0.145 0 0);
-  --fc-button-active-border-color: oklch(0.145 0 0);
+  --fc-border-color: var(--color-border);
+  --fc-button-bg-color: oklch(1 0 0);
+  --fc-button-border-color: var(--color-border);
+  --fc-button-text-color: oklch(0.25 0 0);
+  --fc-button-hover-bg-color: var(--color-muted);
+  --fc-button-hover-border-color: var(--color-border);
+  --fc-button-hover-text-color: oklch(0.17 0 0);
+  --fc-button-active-bg-color: var(--color-muted);
+  --fc-button-active-border-color: oklch(0.80 0 0);
+  --fc-button-active-text-color: oklch(0.17 0 0);
   --fc-page-bg-color: transparent;
   --fc-event-border-color: transparent;
   --fc-event-text-color: oklch(0.25 0.02 250);
   --fc-list-event-hover-bg-color: color-mix(in oklch, var(--color-muted) 70%, white);
 }
 
-.appointments-calendar-shell .fc .fc-scrollgrid,
-.appointments-calendar-shell .fc .fc-scrollgrid table,
+.appointments-calendar-shell .fc .fc-scrollgrid {
+  border-color: var(--fc-border-color);
+}
+
 .appointments-calendar-shell .fc td,
 .appointments-calendar-shell .fc th {
-  border: 0 !important;
+  border-color: var(--fc-border-color);
 }
 
 .appointments-calendar-shell .fc .fc-toolbar {
@@ -204,6 +209,29 @@
 .appointments-calendar-shell .fc .fc-timegrid-slot,
 .appointments-calendar-shell .fc .fc-scrollgrid-section-header > * {
   background: transparent;
+}
+
+.appointments-calendar-shell .fc .fc-timegrid-axis {
+  width: 4.5rem;
+  min-width: 4.5rem;
+  background: #ffffff;
+}
+
+.appointments-calendar-shell .fc .fc-timegrid-slot-label,
+.appointments-calendar-shell .fc .fc-timegrid-slot-label-frame,
+.appointments-calendar-shell .fc .fc-timegrid-slot-label-cushion {
+  display: table-cell;
+  vertical-align: middle;
+  text-align: right;
+  padding-right: 0.4rem;
+  color: oklch(0.45 0 0);
+  font-size: 0.72rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.appointments-calendar-shell .fc .fc-timegrid-slot {
+  height: 2.25rem;
 }
 
 .appointments-calendar-shell .fc .fc-daygrid-day {
@@ -236,6 +264,23 @@
   position: relative;
   z-index: 9;
   font-weight: 600;
+  color: var(--brand);
+  text-decoration: none;
+}
+.appointments-calendar-shell .fc .fc-daygrid-day-number:hover {
+  color: var(--brand);
+  text-decoration: none;
+}
+.appointments-calendar-shell .fc .fc-day-today .fc-daygrid-day-number {
+  background: var(--brand);
+  color: #ffffff;
+  border-radius: 999px;
+  width: 1.5rem;
+  height: 1.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.78rem;
 }
 
 .appointments-calendar-shell .fc .fc-daygrid-day-events {
@@ -281,13 +326,62 @@
   font-weight: 600;
 }
 
+/* soft gray background on weekday header row */
+.appointments-calendar-shell .fc .fc-scrollgrid-section-header > *,
+.appointments-calendar-shell .fc .fc-col-header,
+.appointments-calendar-shell .fc .fc-col-header-cell,
+.appointments-calendar-shell .fc .fc-col-header-cell .fc-scrollgrid-sync-inner {
+  background: color-mix(in oklch, var(--color-muted) 85%, white) !important;
+}
+.appointments-calendar-shell .fc .fc-col-header-cell-cushion {
+  padding-block: 0.5rem;
+}
+
 .appointments-calendar-shell .fc .fc-event {
-  border: 1px solid #d8dce2;
-  border-radius: 0.65rem;
+  border: 1px solid #e5e7eb;
+  border-left-width: 3px;
+  border-radius: 0.55rem;
   background: #ffffff;
   color: #0f172a;
   padding: 0;
   box-shadow: none;
+}
+
+/* tile stays neutral; only the left stripe carries the type/status color */
+.appointments-calendar-shell .fc .fc-event.fc-apt-event-medical    { border-left-color: #3b82f6; }
+.appointments-calendar-shell .fc .fc-event.fc-apt-event-concierge  { border-left-color: #14b8a6; }
+.appointments-calendar-shell .fc .fc-event.fc-apt-event-internal   { border-left-color: #64748b; }
+.appointments-calendar-shell .fc .fc-event.fc-apt-event-completed  { border-left-color: #10b981; }
+.appointments-calendar-shell .fc .fc-event.fc-apt-event-cancelled  { border-left-color: #ef4444; opacity: 0.7; }
+.appointments-calendar-shell .fc .fc-event.fc-apt-event-blocked    { border-left-color: #f97316; }
+
+/* colored pill badge per type/status — the only spot of color */
+.appointments-calendar-shell .fc-apt-event-medical   .fc-apt-event-tag { background: #dbeafe !important; color: #1e40af !important; }
+.appointments-calendar-shell .fc-apt-event-concierge .fc-apt-event-tag { background: #ccfbf1 !important; color: #115e59 !important; }
+.appointments-calendar-shell .fc-apt-event-internal  .fc-apt-event-tag { background: #e2e8f0 !important; color: #334155 !important; }
+.appointments-calendar-shell .fc-apt-event-completed .fc-apt-event-tag { background: #d1fae5 !important; color: #065f46 !important; }
+.appointments-calendar-shell .fc-apt-event-cancelled .fc-apt-event-tag { background: #fee2e2 !important; color: #991b1b !important; }
+.appointments-calendar-shell .fc-apt-event-blocked   .fc-apt-event-tag { background: #ffedd5 !important; color: #9a3412 !important; }
+
+/* vertical gap between stacked events */
+.appointments-calendar-shell .fc .fc-daygrid-event-harness {
+  margin-bottom: 11px;
+}
+.appointments-calendar-shell .fc .fc-daygrid-event-harness:last-child {
+  margin-bottom: 0;
+}
+.appointments-calendar-shell .fc .fc-timegrid-event-harness {
+  padding-bottom: 6px;
+}
+
+/* subtle hover on the event tile */
+.appointments-calendar-shell .fc .fc-event {
+  transition: background-color 140ms ease, box-shadow 140ms ease;
+  cursor: pointer;
+}
+.appointments-calendar-shell .fc .fc-event:hover {
+  background: #fafafa;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
 }
 
 .appointments-calendar-shell .fc .fc-event-main {

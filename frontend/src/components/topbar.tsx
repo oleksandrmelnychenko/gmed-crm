@@ -101,6 +101,9 @@ export function Topbar() {
   const requestAppointmentCreate = () => {
     window.dispatchEvent(new CustomEvent("appointments:create-request"));
   };
+  void showAppointmentsBadge;
+  void requestAppointmentsRefresh;
+  void requestAppointmentCreate;
 
   // Panels
   const [notifOpen, setNotifOpen] = useState(false);
