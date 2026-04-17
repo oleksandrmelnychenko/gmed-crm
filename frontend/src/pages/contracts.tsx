@@ -1262,7 +1262,7 @@ export function ContractsPage() {
               {permissions.canCreateQuote ? (
                 <Button
                   type="button"
-                  className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+                  className="h-9 rounded-lg px-3.5"
                   onClick={() => {
                     setCreateQuoteError(null);
                     setCreateQuoteForm(blankQuoteForm(quoteFilters.orderId));

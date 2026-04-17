@@ -2560,7 +2560,7 @@ export function OrdersPage() {
             {l("Aktualisieren", "Обновить")}
           </Button>
           {permissions.canCreate ? (
-            <Button onClick={() => setCreateOpen(true)}>
+            <Button className="h-9 rounded-lg px-3.5" onClick={() => setCreateOpen(true)}>
               <Plus className="mr-2 size-4" />
               {l("Neuen Auftrag", "Создать заказ")}
             </Button>

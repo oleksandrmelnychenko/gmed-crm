@@ -5185,7 +5185,7 @@ function StaffAppointmentsPage() {
               </Button>
               {permissions.canCreate ? (
                 <Button
-                  className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+                  className="h-9 rounded-lg px-3.5"
                   onClick={() => openCreateSheetFromDate()}
                 >
                   <Plus className="size-4" />

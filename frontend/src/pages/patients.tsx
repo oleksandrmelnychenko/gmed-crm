@@ -3,25 +3,29 @@ import {
   useDeferredValue,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type FormEvent,
   type ReactNode,
 } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
+  ArrowDown,
+  ArrowUp,
   CalendarClock,
   ChevronLeft,
   ChevronRight,
-  Globe2,
+  ChevronsLeft,
+  ChevronsRight,
+  FileSpreadsheet,
+  Filter,
   LoaderCircle,
   Mail,
+  MoreHorizontal,
   Phone,
   Plus,
-  RefreshCw,
-  RotateCcw,
-  ShieldCheck,
-  UserRound,
-  UsersRound,
+  Search,
+  X,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -162,7 +166,9 @@ const DEFAULT_FILTERS: PatientFilters = {
 };
 
 const textareaClassName =
-  "min-h-[104px] w-full rounded-xl border border-input bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100";
+  "min-h-[80px] w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
+
+const formInputClassName = "h-9 rounded-lg bg-card";
 
 function patientPermissions(role?: string): PatientPermissions {
   return {
@@ -298,7 +304,7 @@ function formatDate(value?: string | null, fallback = "Not set") {
   try {
     return new Intl.DateTimeFormat("en-GB", {
       day: "2-digit",
-      month: "short",
+      month: "2-digit",
       year: "numeric",
     }).format(new Date(`${value}T00:00:00`));
   } catch {
@@ -368,12 +374,284 @@ function cardClass(extra?: string) {
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <label className="block space-y-2">
-      <span className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">
+    <label className="flex flex-col gap-1.5">
+      <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
         {label}
       </span>
       {children}
     </label>
+  );
+}
+
+function useOutsideClose(ref: React.RefObject<HTMLDivElement | null>, onClose: () => void) {
+  useEffect(() => {
+    function handle(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        onClose();
+      }
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("mousedown", handle);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", handle);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [ref, onClose]);
+}
+
+function PopoverShell({ children, refEl }: { children: ReactNode; refEl: React.RefObject<HTMLDivElement | null> }) {
+  return (
+    <div
+      ref={refEl}
+      onClick={(e) => e.stopPropagation()}
+      className="absolute left-0 top-full z-30 mt-1 w-[240px] rounded-lg border border-border bg-popover p-2 shadow-md"
+    >
+      {children}
+    </div>
+  );
+}
+
+function PopoverFooter({
+  onClear,
+  onClose,
+  clearDisabled,
+  tr,
+}: {
+  onClear: () => void;
+  onClose: () => void;
+  clearDisabled: boolean;
+  tr: Record<string, string>;
+}) {
+  return (
+    <div className="mt-2 flex items-center justify-between">
+      <button
+        type="button"
+        onClick={onClear}
+        disabled={clearDisabled}
+        className="text-[12px] text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:pointer-events-none"
+      >
+        {tr.common_reset}
+      </button>
+      <button
+        type="button"
+        onClick={onClose}
+        className="text-[12px] text-foreground hover:text-[var(--brand)]"
+      >
+        {tr.common_confirm ?? "OK"}
+      </button>
+    </div>
+  );
+}
+
+function ColumnFilterSelectPopover({
+  value,
+  onChange,
+  onClear,
+  onClose,
+  options,
+  tr,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  onClear: () => void;
+  onClose: () => void;
+  options: { value: string; label: string }[];
+  tr: Record<string, string>;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useOutsideClose(ref, onClose);
+  return (
+    <PopoverShell refEl={ref}>
+      <div className="flex flex-col gap-0.5">
+        {options.map((opt) => {
+          const checked = value === opt.value;
+          return (
+            <button
+              key={opt.value || "__all__"}
+              type="button"
+              onClick={() => onChange(opt.value)}
+              className={cn(
+                "flex items-center justify-between rounded-md px-2 py-1.5 text-[13px] text-left transition-colors",
+                checked ? "bg-[var(--brand-soft)] text-[var(--brand)] font-medium" : "hover:bg-muted"
+              )}
+            >
+              <span>{opt.label}</span>
+              {checked ? <span className="text-[var(--brand)]">✓</span> : null}
+            </button>
+          );
+        })}
+      </div>
+      <PopoverFooter onClear={onClear} onClose={onClose} clearDisabled={value === ""} tr={tr} />
+    </PopoverShell>
+  );
+}
+
+function ColumnFilterDateRangePopover({
+  value,
+  onChange,
+  onClear,
+  onClose,
+  tr,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  onClear: () => void;
+  onClose: () => void;
+  tr: Record<string, string>;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useOutsideClose(ref, onClose);
+  const [from, to] = value.split("..");
+  const update = (nextFrom: string, nextTo: string) => {
+    if (!nextFrom && !nextTo) onChange("");
+    else onChange(`${nextFrom}..${nextTo}`);
+  };
+  return (
+    <PopoverShell refEl={ref}>
+      <div className="flex flex-col gap-2">
+        <Input
+          type="date"
+          value={from ?? ""}
+          onChange={(e) => update(e.target.value, to ?? "")}
+          className="h-9 text-[13px] rounded-md bg-card"
+        />
+        <Input
+          type="date"
+          value={to ?? ""}
+          onChange={(e) => update(from ?? "", e.target.value)}
+          className="h-9 text-[13px] rounded-md bg-card"
+        />
+      </div>
+      <PopoverFooter onClear={onClear} onClose={onClose} clearDisabled={value === ""} tr={tr} />
+    </PopoverShell>
+  );
+}
+
+function ColumnFilterPopover({
+  value,
+  onChange,
+  onClear,
+  onClose,
+  placeholder,
+  tr,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  onClear: () => void;
+  onClose: () => void;
+  placeholder: string;
+  tr: Record<string, string>;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    function handle(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        onClose();
+      }
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("mousedown", handle);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", handle);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+  return (
+    <div
+      ref={ref}
+      onClick={(e) => e.stopPropagation()}
+      className="absolute left-0 top-full z-30 mt-1 w-[220px] rounded-lg border border-border bg-popover p-2 shadow-md"
+    >
+      <Input
+        autoFocus
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="h-8 text-[13px] rounded-md bg-card normal-case tracking-normal"
+      />
+      <div className="mt-2 flex items-center justify-between">
+        <button
+          type="button"
+          onClick={onClear}
+          disabled={value.trim() === ""}
+          className="text-[12px] text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:pointer-events-none"
+        >
+          {tr.common_reset}
+        </button>
+        <button
+          type="button"
+          onClick={onClose}
+          className="text-[12px] text-foreground hover:text-[var(--brand)]"
+        >
+          {tr.common_confirm ?? "OK"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function FunctionalLabelChips({
+  value,
+  onChange,
+  l,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  l: (de: string, ru: string, en: string) => string;
+}) {
+  const options: { value: string; label: string }[] = [
+    { value: "vip", label: "VIP" },
+    { value: "high_risk", label: l("Hohes Risiko", "Высокий риск", "High risk") },
+    { value: "mobility_support", label: l("Mobilitätshilfe", "Помощь с мобильностью", "Mobility support") },
+    { value: "fall_risk", label: l("Sturzrisiko", "Риск падения", "Fall risk") },
+    { value: "complex_coordination", label: l("Komplexe Koordination", "Сложная координация", "Complex coordination") },
+  ];
+  const selected = parseFunctionalLabels(value);
+  const toggle = (v: string) => {
+    const next = selected.includes(v) ? selected.filter((s) => s !== v) : [...selected, v];
+    onChange(next.join(", "));
+  };
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {options.map((opt) => {
+        const checked = selected.includes(opt.value);
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            onClick={() => toggle(opt.value)}
+            className={cn(
+              "h-7 rounded-full border px-2.5 text-[12px] font-medium transition-colors",
+              checked
+                ? "bg-[var(--brand)] text-white border-[var(--brand)]"
+                : "bg-card text-muted-foreground border-border hover:text-foreground hover:border-foreground/30"
+            )}
+          >
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function FormSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
+      <div className="flex items-center gap-2">
+        <div className="h-2 w-2 rounded-full bg-[var(--brand)]" />
+        <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
+          {title}
+        </h3>
+      </div>
+      <div className="space-y-3">{children}</div>
+    </section>
   );
 }
 
@@ -392,39 +670,304 @@ function Banner({ tone, children }: { tone: "error" | "warning"; children: React
   );
 }
 
-function MetricCard({
-  icon: Icon,
+function KpiCard({
   label,
   value,
-  tone,
+  shareOf,
 }: {
-  icon: typeof UserRound;
   label: string;
-  value: string;
-  tone: "sky" | "emerald" | "amber" | "slate";
+  value: string | number;
+  shareOf?: { value: number; total: number; label: string };
 }) {
-  const toneClass =
-    tone === "sky"
-      ? "bg-sky-100 text-sky-700"
-      : tone === "emerald"
-        ? "bg-emerald-100 text-emerald-700"
-        : tone === "amber"
-          ? "bg-amber-100 text-amber-700"
-          : "bg-slate-100 text-slate-700";
+  const percent = shareOf && shareOf.total > 0
+    ? Math.round((shareOf.value / shareOf.total) * 100)
+    : null;
+  const share = shareOf && shareOf.total > 0 && shareOf.value !== shareOf.total;
 
   return (
-    <div className="rounded-[1.5rem] border border-white/90 bg-white/88 p-4 shadow-sm backdrop-blur">
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">
-          {label}
-        </span>
-        <span className={cn("rounded-2xl p-2", toneClass)}>
-          <Icon className="size-4" />
-        </span>
+    <div className="relative rounded-xl border border-border bg-card p-3 overflow-hidden">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background:
+            "radial-gradient(circle at top right, rgba(249,115,22,0.08), transparent 55%)",
+        }}
+      />
+      <div className="relative">
+        <span className="text-[12px] text-muted-foreground">{label}</span>
+        <p className="mt-1.5 text-[22px] font-semibold tracking-tight text-foreground leading-none">
+          {value}
+        </p>
+        {share ? (
+          <p className="mt-2 text-[11px] text-muted-foreground flex items-center gap-1.5">
+            <span className="inline-flex items-center gap-0.5 font-medium text-foreground">
+              {percent}%
+            </span>
+            <span>of {shareOf!.label.toLowerCase()}</span>
+          </p>
+        ) : (
+          <p className="mt-2 text-[11px] invisible">·</p>
+        )}
       </div>
-      <p className="mt-4 text-3xl font-semibold tracking-tight text-slate-950">{value}</p>
     </div>
   );
+}
+
+type ColumnFilterKind = "text" | "select" | "daterange" | "none";
+
+const COLUMN_META: Record<
+  "status" | "no" | "patient" | "birth" | "phone" | "email" | "insurance",
+  { labelKey: string; widthClass?: string; sortable?: boolean; filter: ColumnFilterKind }
+> = {
+  status: { labelKey: "patients_col_status", widthClass: "w-[120px]", sortable: true, filter: "select" },
+  no: { labelKey: "patients_col_no", widthClass: "w-[56px]", sortable: true, filter: "text" },
+  patient: { labelKey: "patients_col_patient", sortable: true, filter: "text" },
+  birth: { labelKey: "patients_birth_date", widthClass: "w-[120px]", sortable: true, filter: "daterange" },
+  phone: { labelKey: "patients_phone_primary", widthClass: "w-[140px]", sortable: true, filter: "text" },
+  email: { labelKey: "patients_email", sortable: true, filter: "text" },
+  insurance: { labelKey: "patients_insurance_type", widthClass: "w-[130px]", sortable: true, filter: "select" },
+};
+
+type ColumnMetaKey = keyof typeof COLUMN_META;
+
+function patientColumnText(p: PatientSummary, key: ColumnMetaKey, tr: Record<string, string>): string {
+  switch (key) {
+    case "status":
+      return p.is_active ? (tr.common_active ?? "active") : (tr.common_inactive ?? "inactive");
+    case "no":
+      return p.patient_id ?? "";
+    case "patient":
+      return [p.last_name, p.first_name, p.title, p.patient_id].filter(Boolean).join(" ");
+    case "birth":
+      return p.birth_date ?? "";
+    case "phone":
+      return p.phone_primary ?? "";
+    case "email":
+      return p.email ?? "";
+    case "insurance":
+      return [p.insurance_type, p.insurance_provider].filter(Boolean).join(" ");
+  }
+}
+
+function comparePatientsByColumn(a: PatientSummary, b: PatientSummary, key: ColumnMetaKey): number {
+  switch (key) {
+    case "status":
+      return Number(b.is_active) - Number(a.is_active);
+    case "no":
+      return (a.patient_id ?? "").localeCompare(b.patient_id ?? "", undefined, { numeric: true });
+    case "patient": {
+      const an = `${a.last_name ?? ""} ${a.first_name ?? ""}`.trim().toLowerCase();
+      const bn = `${b.last_name ?? ""} ${b.first_name ?? ""}`.trim().toLowerCase();
+      return an.localeCompare(bn);
+    }
+    case "birth":
+      return (a.birth_date ?? "").localeCompare(b.birth_date ?? "");
+    case "phone":
+      return (a.phone_primary ?? "").localeCompare(b.phone_primary ?? "");
+    case "email":
+      return (a.email ?? "").localeCompare(b.email ?? "");
+    case "insurance":
+      return (a.insurance_type ?? "").localeCompare(b.insurance_type ?? "");
+  }
+}
+
+function PatientCell({
+  colKey,
+  patient,
+  rowNumber,
+  tr,
+}: {
+  colKey: keyof typeof COLUMN_META;
+  patient: PatientSummary;
+  rowNumber: number;
+  tr: Record<string, string>;
+}) {
+  switch (colKey) {
+    case "status":
+      return (
+        <td className="px-3 py-2.5">
+          <StatusPill active={patient.is_active} tr={tr} />
+        </td>
+      );
+    case "no":
+      return (
+        <td className="px-3 py-2.5 text-muted-foreground font-mono text-[12px] tabular-nums">
+          {rowNumber}
+        </td>
+      );
+    case "patient":
+      return (
+        <td className="px-3 py-2.5">
+          <div className="flex items-center gap-2.5">
+            <div className="flex items-center justify-center size-7 rounded-full bg-muted text-[11px] font-medium text-foreground shrink-0">
+              {patientName(patient)
+                .split(/\s+/)
+                .slice(0, 2)
+                .map((w) => w[0]?.toUpperCase() ?? "")
+                .join("")}
+            </div>
+            <div className="min-w-0">
+              <div className="font-medium text-foreground truncate">
+                {patientName(patient)}
+              </div>
+              <div className="text-[11.5px] text-muted-foreground truncate">
+                {genderLabel(patient.gender, tr)}
+                {patient.functional_labels?.length
+                  ? ` · ${patient.functional_labels.map(humanizeFunctionalLabel).join(", ")}`
+                  : ""}
+              </div>
+            </div>
+          </div>
+        </td>
+      );
+    case "birth":
+      return (
+        <td className="px-3 py-2.5 text-muted-foreground">
+          {formatDate(patient.birth_date, "—")}
+        </td>
+      );
+    case "phone":
+      return (
+        <td className="px-3 py-2.5 text-muted-foreground">
+          {patient.phone_primary ?? "—"}
+        </td>
+      );
+    case "email":
+      return (
+        <td className="px-3 py-2.5 text-muted-foreground truncate max-w-[200px]">
+          {patient.email ?? "—"}
+        </td>
+      );
+    case "insurance":
+      return (
+        <td className="px-3 py-2.5 text-muted-foreground">
+          {insuranceLabel(patient.insurance_type, tr)}
+        </td>
+      );
+  }
+}
+
+function StatusPill({ active, tr }: { active: boolean; tr: Record<string, string> }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[11.5px] font-medium",
+        active
+          ? "bg-emerald-50 text-emerald-700"
+          : "bg-neutral-100 text-neutral-600"
+      )}
+    >
+      <span
+        className={cn(
+          "size-1.5 rounded-full",
+          active ? "bg-emerald-500" : "bg-neutral-400"
+        )}
+      />
+      {active ? tr.common_active : tr.common_inactive}
+    </span>
+  );
+}
+
+function PaginationControls({
+  page,
+  totalPages,
+  onPage,
+}: {
+  page: number;
+  totalPages: number;
+  onPage: (p: number) => void;
+}) {
+  const { t } = useLang();
+  if (totalPages <= 1) return <div />;
+
+  const pageBtnClass =
+    "size-7 inline-flex items-center justify-center rounded-md text-[12.5px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:pointer-events-none";
+
+  const pagesToShow = buildPageSequence(page, totalPages);
+
+  return (
+    <div className="flex items-center gap-0.5">
+      <button
+        type="button"
+        className={pageBtnClass}
+        disabled={page === 0}
+        onClick={() => onPage(0)}
+        title={t.pagination_first}
+      >
+        <ChevronsLeft className="size-3.5" />
+      </button>
+      <button
+        type="button"
+        className={pageBtnClass}
+        disabled={page === 0}
+        onClick={() => onPage(Math.max(0, page - 1))}
+        title={t.pagination_previous}
+      >
+        <ChevronLeft className="size-3.5" />
+      </button>
+      {pagesToShow.map((entry, idx) =>
+        entry === "…" ? (
+          <span key={`gap-${idx}`} className="px-1 text-muted-foreground">…</span>
+        ) : (
+          <button
+            key={entry}
+            type="button"
+            onClick={() => onPage(entry)}
+            className={cn(
+              "size-7 inline-flex items-center justify-center rounded-md text-[12.5px] transition-colors",
+              entry === page
+                ? "bg-[var(--brand)] text-white font-medium"
+                : "text-foreground hover:bg-muted"
+            )}
+          >
+            {entry + 1}
+          </button>
+        )
+      )}
+      <button
+        type="button"
+        className={pageBtnClass}
+        disabled={page >= totalPages - 1}
+        onClick={() => onPage(Math.min(totalPages - 1, page + 1))}
+        title={t.pagination_next}
+      >
+        <ChevronRight className="size-3.5" />
+      </button>
+      <button
+        type="button"
+        className={pageBtnClass}
+        disabled={page >= totalPages - 1}
+        onClick={() => onPage(totalPages - 1)}
+        title={t.pagination_last}
+      >
+        <ChevronsRight className="size-3.5" />
+      </button>
+    </div>
+  );
+}
+
+function buildPageSequence(current: number, total: number): (number | "…")[] {
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, i) => i);
+  }
+  const pages: (number | "…")[] = [];
+  const windowSize = 1;
+  const first = 0;
+  const last = total - 1;
+
+  pages.push(first);
+  if (current - windowSize > first + 1) pages.push("…");
+  for (
+    let i = Math.max(first + 1, current - windowSize);
+    i <= Math.min(last - 1, current + windowSize);
+    i++
+  ) {
+    pages.push(i);
+  }
+  if (current + windowSize < last - 1) pages.push("…");
+  pages.push(last);
+  return pages;
 }
 
 function EmptyPanel({ title, text }: { title: string; text: string }) {
@@ -474,7 +1017,78 @@ export function PatientsPage() {
   const [assignmentError, setAssignmentError] = useState("");
   const [selectedAssignee, setSelectedAssignee] = useState("");
   const [page, setPage] = useState(0);
-  const PAGE_SIZE = 20;
+  const [pageSize, setPageSize] = useState(10);
+  const [showStats, setShowStats] = useState(true);
+  const [goToInput, setGoToInput] = useState("");
+
+  type ColumnKey = "status" | "no" | "patient" | "birth" | "phone" | "email" | "insurance";
+  const DEFAULT_COLUMN_ORDER: ColumnKey[] = [
+    "no",
+    "status",
+    "patient",
+    "birth",
+    "phone",
+    "email",
+    "insurance",
+  ];
+  const [columnOrder, setColumnOrder] = useState<ColumnKey[]>(DEFAULT_COLUMN_ORDER);
+  const [draggingKey, setDraggingKey] = useState<ColumnKey | null>(null);
+  const [dropTargetKey, setDropTargetKey] = useState<ColumnKey | null>(null);
+
+  type SortDir = "asc" | "desc";
+  const [sortBy, setSortBy] = useState<{ key: ColumnKey; dir: SortDir } | null>(null);
+  const [columnFilters, setColumnFilters] = useState<Record<ColumnKey, string>>({
+    status: "",
+    no: "",
+    patient: "",
+    birth: "",
+    phone: "",
+    email: "",
+    insurance: "",
+  });
+  const [filterOpen, setFilterOpen] = useState<ColumnKey | null>(null);
+
+  function toggleSort(key: ColumnKey) {
+    setSortBy((current) => {
+      if (!current || current.key !== key) return { key, dir: "asc" };
+      if (current.dir === "asc") return { key, dir: "desc" };
+      return null;
+    });
+  }
+
+  function setColumnFilter(key: ColumnKey, value: string) {
+    setColumnFilters((current) => ({ ...current, [key]: value }));
+  }
+
+  function handleColumnDragStart(key: ColumnKey) {
+    setDraggingKey(key);
+  }
+
+  function handleColumnDragOver(event: React.DragEvent, key: ColumnKey) {
+    event.preventDefault();
+    if (draggingKey && key !== draggingKey) setDropTargetKey(key);
+  }
+
+  function handleColumnDrop(target: ColumnKey) {
+    if (!draggingKey || draggingKey === target) {
+      setDraggingKey(null);
+      setDropTargetKey(null);
+      return;
+    }
+    setColumnOrder((current) => {
+      const next = current.filter((k) => k !== draggingKey);
+      const insertAt = next.indexOf(target);
+      next.splice(insertAt, 0, draggingKey);
+      return next;
+    });
+    setDraggingKey(null);
+    setDropTargetKey(null);
+  }
+
+  function handleColumnDragEnd() {
+    setDraggingKey(null);
+    setDropTargetKey(null);
+  }
 
   const effectiveFilters = useMemo(
     () => ({ ...filters, search: deferredSearch || filters.search }),
@@ -499,14 +1113,48 @@ export function PatientsPage() {
     );
   }, [patients]);
 
-  const totalPages = Math.max(1, Math.ceil(patients.length / PAGE_SIZE));
+  const sortedAndFilteredPatients = useMemo(() => {
+    const hasFilter = Object.values(columnFilters).some((v) => v.trim() !== "");
+    const filtered = hasFilter
+      ? patients.filter((p) => {
+          for (const key of columnOrder) {
+            const raw = columnFilters[key].trim();
+            if (!raw) continue;
+            if (key === "status") {
+              if (raw === "active" && !p.is_active) return false;
+              if (raw === "inactive" && p.is_active) return false;
+            } else if (key === "insurance") {
+              if ((p.insurance_type ?? "") !== raw) return false;
+            } else if (key === "birth") {
+              const [from, to] = raw.split("..");
+              const bd = p.birth_date ?? "";
+              if (from && (bd === "" || bd < from)) return false;
+              if (to && (bd === "" || bd > to)) return false;
+            } else {
+              const haystack = patientColumnText(p, key, tr).toLowerCase();
+              if (!haystack.includes(raw.toLowerCase())) return false;
+            }
+          }
+          return true;
+        })
+      : patients;
+    if (!sortBy) return filtered;
+    const arr = [...filtered];
+    arr.sort((a, b) => {
+      const cmp = comparePatientsByColumn(a, b, sortBy.key);
+      return sortBy.dir === "asc" ? cmp : -cmp;
+    });
+    return arr;
+  }, [patients, columnFilters, columnOrder, sortBy, tr]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedAndFilteredPatients.length / pageSize));
   const paginatedPatients = useMemo(
-    () => patients.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE),
-    [patients, page]
+    () => sortedAndFilteredPatients.slice(page * pageSize, (page + 1) * pageSize),
+    [sortedAndFilteredPatients, page, pageSize]
   );
 
   // Reset page when data changes
-  useEffect(() => { setPage(0); }, [patients.length]);
+  useEffect(() => { setPage(0); }, [patients.length, pageSize]);
 
   function syncQuery(next: Record<string, string | null>) {
     const params = new URLSearchParams(searchParams);
@@ -817,324 +1465,447 @@ export function PatientsPage() {
     );
   }
 
+  const anyFilterActive =
+    filters.search.trim() !== "" ||
+    filters.activeOnly !== "true" ||
+    filters.providerId !== "" ||
+    filters.doctorId !== "";
+
   return (
     <>
-      <div className="space-y-6">
-        <section className="rounded-[2rem] border border-white/70 bg-[radial-gradient(circle_at_top_left,_rgba(125,211,252,0.28),_transparent_38%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(241,245,249,0.92))] p-6 shadow-[0_32px_80px_rgba(15,23,42,0.08)]">
-          <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
-            <div className="max-w-3xl">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge
-                  variant="outline"
-                  className="rounded-full border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-sky-700"
-                >
-                  {t.patients_title}
-                </Badge>
-                <Badge
-                  variant="outline"
-                  className="rounded-full border-slate-200 bg-white/80 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-600"
-                >
-                  {permissions.canCreateEdit ? t.patients_registry_control : t.patients_readonly_view}
-                </Badge>
-              </div>
-              <h1 className="mt-4 text-3xl font-semibold tracking-tight text-slate-950 md:text-4xl">
-                {t.patients_subtitle}
-              </h1>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-3">
-              <Button type="button" variant="outline" size="icon" className="rounded-2xl size-10" onClick={refreshList}>
-                <RefreshCw className="size-4" />
-              </Button>
-              {permissions.canCreateEdit ? (
-                <Button
-                  type="button"
-                  className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
-                  onClick={() => {
-                    setCreateError("");
-                    setCreateForm(blankPatientForm());
-                    setCreateOpen(true);
-                  }}
-                >
-                  <Plus className="size-4" />
-                  {t.patients_new}
-                </Button>
-              ) : null}
-            </div>
-          </div>
-
-          <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <MetricCard icon={UserRound} label={t.patients_title} value={metrics.total.toString()} tone="sky" />
-            <MetricCard icon={ShieldCheck} label={t.common_active} value={metrics.active.toString()} tone="emerald" />
-            <MetricCard icon={UsersRound} label={t.insurance_private} value={metrics.privateCount.toString()} tone="amber" />
-            <MetricCard icon={CalendarClock} label={t.insurance_self_pay} value={metrics.selfPay.toString()} tone="slate" />
-          </div>
-        </section>
-
-        <div className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
-          <section className={cardClass("p-5")}>
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-sm font-semibold text-slate-950">{t.common_search}</h2>
-                <p className="mt-1 text-sm text-slate-600">
-                  {t.patients_subtitle}
-                </p>
-              </div>
+      <div className="space-y-4">
+        {/* Page header */}
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <h1 className="text-[22px] font-semibold tracking-tight text-foreground leading-tight">
+              {t.patients_title}
+            </h1>
+            {permissions.canCreateEdit ? (
               <Button
                 type="button"
-                variant="ghost"
-                size="icon-sm"
-                className="rounded-xl"
+                size="sm"
+                className="h-9 rounded-lg gap-1.5 px-3.5"
                 onClick={() => {
-                  setFilters(DEFAULT_FILTERS);
-                  syncQuery({ provider: null, doctor: null, patient: null });
+                  setCreateError("");
+                  setCreateForm(blankPatientForm());
+                  setCreateOpen(true);
                 }}
-                title={t.access_reset}
               >
-                <RotateCcw className="size-3.5" />
+                <Plus className="size-3.5" />
+                {t.patients_new}
               </Button>
-            </div>
-
-            <div className="mt-5 space-y-4">
-              <Field label={t.common_search}>
-                <Input
-                  value={filters.search}
-                  onChange={(event) =>
-                    setFilters((current) => ({ ...current, search: event.target.value }))
-                  }
-                  placeholder={t.common_search}
-                  className="h-10 rounded-xl bg-slate-50"
-                />
-              </Field>
-
-              <Field label={t.common_activity}>
-                <ShadSelect value={filters.activeOnly} onValueChange={(v) => setFilters((current) => ({ ...current, activeOnly: v ?? "" }))}>
-                  <SelectTrigger className="w-full h-10 rounded-xl bg-slate-50">
-                    <SelectValue>
-                      {filters.activeOnly === "true" ? t.common_active
-                        : filters.activeOnly === "false" ? t.common_inactive
-                        : t.providers_all}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="">{t.providers_all}</SelectItem>
-                    <SelectItem value="true">{t.common_active}</SelectItem>
-                    <SelectItem value="false">{t.common_inactive}</SelectItem>
-                  </SelectContent>
-                </ShadSelect>
-              </Field>
-
-              <Field label={t.common_provider}>
-                <ShadSelect value={filters.providerId} onValueChange={(v) => {
-                  const providerId = v ?? "";
-                  setFilters((current) => ({ ...current, providerId, doctorId: "" }));
-                  syncQuery({ provider: providerId || null, doctor: null });
-                }}>
-                  <SelectTrigger className="w-full h-10 rounded-xl bg-slate-50">
-                    <SelectValue>
-                      {filters.providerId
-                        ? (providers.find((p) => p.id === filters.providerId)?.name ?? filters.providerId)
-                        : t.providers_all}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="">{t.providers_all}</SelectItem>
-                    {providers.map((provider) => (
-                      <SelectItem key={provider.id} value={provider.id}>
-                        {provider.name}{provider.address_city ? ` · ${provider.address_city}` : ""}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </ShadSelect>
-              </Field>
-
-              <Field label={t.common_doctor}>
-                <ShadSelect value={filters.doctorId} onValueChange={(v) => {
-                  const doctorId = v ?? "";
-                  setFilters((current) => ({ ...current, doctorId }));
-                  syncQuery({ doctor: doctorId || null });
-                }} disabled={!filters.providerId}>
-                  <SelectTrigger className="w-full h-10 rounded-xl bg-slate-50">
-                    <SelectValue>
-                      {filters.doctorId
-                        ? (doctors.find((d) => d.id === filters.doctorId)?.name ?? filters.doctorId)
-                        : t.providers_all}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="">{t.providers_all}</SelectItem>
-                    {doctors.map((doctor) => (
-                      <SelectItem key={doctor.id} value={doctor.id}>
-                        {doctor.title ? `${doctor.title} ` : ""}{doctor.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </ShadSelect>
-              </Field>
-            </div>
-          </section>
-
-          <section className={cardClass("p-5")}>
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-sm font-semibold text-slate-950">{t.patients_title}</h2>
-                <p className="mt-1 text-sm text-slate-600">
-                  {t.patients_subtitle}
-                </p>
-              </div>
-              <div className="text-xs uppercase tracking-[0.12em] text-slate-500">
-                {listBusy ? t.patients_syncing : `${patients.length} ${t.patients_records}`}
-              </div>
-            </div>
-
-            {listError ? (
-              <div className="mt-5">
-                <Banner tone="error">{listError}</Banner>
-              </div>
             ) : null}
+          </div>
+        </div>
 
-            {listBusy ? (
-              <div className="flex min-h-[320px] items-center justify-center text-sm text-slate-500">
-                <LoaderCircle className="mr-2 size-4 animate-spin" />
-                {t.common_loading}
-              </div>
-            ) : patients.length === 0 ? (
-              <div className="mt-5">
-                <EmptyPanel
-                  title={t.patients_no_match}
-                  text={t.patients_no_match}
-                />
-              </div>
-            ) : (
-              <>
-                <div className="mt-5 grid gap-4 xl:grid-cols-2 min-h-[320px] content-start">
-                {paginatedPatients.map((patient) => (
-                  <button
-                    key={patient.id}
-                    type="button"
-                    onClick={() => openPatient(patient.id)}
-                    className="rounded-[1.6rem] border border-slate-200 bg-white p-5 text-left transition hover:-translate-y-0.5 hover:shadow-[0_18px_48px_rgba(15,23,42,0.08)]"
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className={cn("rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em]", patient.is_active ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-slate-100 text-slate-600")}>
-                            {patient.is_active ? t.common_active : t.common_inactive}
-                          </span>
-                          <Badge variant="outline" className="rounded-full border-slate-200 bg-white text-slate-700">
-                            {genderLabel(patient.gender, tr)}
-                          </Badge>
-                          <Badge variant="outline" className="rounded-full border-slate-200 bg-white text-slate-700">
-                            {insuranceLabel(patient.insurance_type, tr)}
-                          </Badge>
-                          {patient.functional_labels?.map((label) => (
-                            <Badge
-                              key={`${patient.id}-${label}`}
-                              variant="outline"
-                              className="rounded-full border-amber-200 bg-amber-50 text-amber-700"
-                            >
-                              {humanizeFunctionalLabel(label)}
-                            </Badge>
-                          ))}
-                        </div>
-                        <h3 className="mt-3 text-lg font-semibold text-slate-950">
-                          {patientName(patient)}
-                        </h3>
-                        <p className="mt-1 text-sm text-slate-600">{patient.patient_id}</p>
-                      </div>
-                    </div>
+        {/* Top toolbar */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+            <Input
+              value={filters.search}
+              onChange={(event) =>
+                setFilters((current) => ({ ...current, search: event.target.value }))
+              }
+              placeholder={t.common_search}
+              className="h-8 pl-8 text-[13px] w-[220px] rounded-lg bg-card"
+            />
+          </div>
 
-                    <div className="mt-4 grid gap-2 text-sm text-slate-600">
-                      <div className="flex items-center gap-2">
-                        <CalendarClock className="size-4 text-slate-400" />
-                        <span>{formatDate(patient.birth_date)}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Phone className="size-4 text-slate-400" />
-                        <span>{fieldValue(patient.phone_primary)}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Mail className="size-4 text-slate-400" />
-                        <span>{fieldValue(patient.email)}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Globe2 className="size-4 text-slate-400" />
-                        <span>{fieldValue(patient.languages)}</span>
-                      </div>
-                    </div>
-                  </button>
-                ))}
-                </div>
+          <ShadSelect
+            value={filters.activeOnly}
+            onValueChange={(v) =>
+              setFilters((current) => ({ ...current, activeOnly: v ?? "" }))
+            }
+          >
+            <SelectTrigger size="sm" className="h-8 text-[13px] bg-card">
+              <Filter className="size-3.5 mr-1 text-muted-foreground" />
+              <SelectValue>
+                {filters.activeOnly === "true"
+                  ? t.common_active
+                  : filters.activeOnly === "false"
+                    ? t.common_inactive
+                    : t.providers_all}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">{t.providers_all}</SelectItem>
+              <SelectItem value="true">{t.common_active}</SelectItem>
+              <SelectItem value="false">{t.common_inactive}</SelectItem>
+            </SelectContent>
+          </ShadSelect>
 
-                {totalPages > 1 && (
-                  <div className="mt-5 flex items-center justify-between">
-                  <span className="text-xs text-slate-500">
-                    {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, patients.length)} / {patients.length}
-                  </span>
-                  <div className="flex items-center gap-1">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="xs"
-                      className="rounded-lg"
-                      disabled={page === 0}
-                      onClick={() => setPage((p) => Math.max(0, p - 1))}
-                    >
-                      <ChevronLeft className="size-3.5" />
-                    </Button>
-                    {Array.from({ length: totalPages }, (_, i) => (
-                      <Button
-                        key={i}
-                        type="button"
-                        variant={i === page ? "default" : "outline"}
-                        size="xs"
-                        className="rounded-lg min-w-[28px]"
-                        onClick={() => setPage(i)}
-                      >
-                        {i + 1}
-                      </Button>
-                    ))}
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="xs"
-                      className="rounded-lg"
-                      disabled={page >= totalPages - 1}
-                      onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-                    >
-                      <ChevronRight className="size-3.5" />
-                    </Button>
-                  </div>
-                  </div>
+          <ShadSelect
+            value={filters.providerId}
+            onValueChange={(v) => {
+              const providerId = v ?? "";
+              setFilters((current) => ({ ...current, providerId, doctorId: "" }));
+              syncQuery({ provider: providerId || null, doctor: null });
+            }}
+          >
+            <SelectTrigger size="sm" className="h-8 text-[13px] bg-card w-[260px]">
+              <SelectValue>
+                {filters.providerId
+                  ? (providers.find((p) => p.id === filters.providerId)?.name ?? filters.providerId)
+                  : t.common_provider}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">{t.providers_all}</SelectItem>
+              {providers.map((provider) => (
+                <SelectItem key={provider.id} value={provider.id}>
+                  {provider.name}{provider.address_city ? ` · ${provider.address_city}` : ""}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </ShadSelect>
+
+          <ShadSelect
+            value={filters.doctorId}
+            onValueChange={(v) => {
+              const doctorId = v ?? "";
+              setFilters((current) => ({ ...current, doctorId }));
+              syncQuery({ doctor: doctorId || null });
+            }}
+            disabled={!filters.providerId}
+          >
+            <SelectTrigger size="sm" className="h-8 text-[13px] bg-card w-[220px]">
+              <SelectValue>
+                {filters.doctorId
+                  ? (doctors.find((d) => d.id === filters.doctorId)?.name ?? filters.doctorId)
+                  : t.common_doctor}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">{t.providers_all}</SelectItem>
+              {doctors.map((doctor) => (
+                <SelectItem key={doctor.id} value={doctor.id}>
+                  {doctor.title ? `${doctor.title} ` : ""}{doctor.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </ShadSelect>
+
+          <label className="flex items-center gap-2 h-8 px-2.5 rounded-lg cursor-pointer text-[12.5px] text-muted-foreground select-none">
+            <span>{t.common_show_stats}</span>
+            <button
+              type="button"
+              onClick={() => setShowStats((v) => !v)}
+              className={cn(
+                "relative inline-flex h-[18px] w-[30px] rounded-full transition-colors",
+                showStats ? "bg-[var(--brand)]" : "bg-neutral-300"
+              )}
+              aria-pressed={showStats}
+            >
+              <span
+                className={cn(
+                  "absolute top-0.5 size-[14px] rounded-full bg-white shadow-sm transition-transform",
+                  showStats ? "translate-x-[14px]" : "translate-x-0.5"
                 )}
-              </>
-            )}
-          </section>
+              />
+            </button>
+          </label>
+
+          {anyFilterActive ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 rounded-lg gap-1 text-[12.5px] text-muted-foreground"
+              onClick={() => {
+                setFilters(DEFAULT_FILTERS);
+                syncQuery({ provider: null, doctor: null, patient: null });
+              }}
+            >
+              <X className="size-3.5" />
+              {t.common_reset}
+            </Button>
+          ) : null}
+
+          <div className="ml-auto flex items-center gap-1.5">
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-sm"
+              title={t.common_export}
+              aria-label={t.common_export}
+              className="rounded-lg bg-card text-emerald-700 hover:text-emerald-800"
+            >
+              <FileSpreadsheet className="size-4" />
+            </Button>
+          </div>
+        </div>
+
+        {/* KPI row */}
+        {showStats && (
+          <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+            <KpiCard
+              label={t.patients_title}
+              value={metrics.total}
+              shareOf={{ value: metrics.active, total: metrics.total, label: t.common_active }}
+            />
+            <KpiCard
+              label={t.common_active}
+              value={metrics.active}
+              shareOf={{ value: metrics.active, total: metrics.total, label: t.patients_title }}
+            />
+            <KpiCard
+              label={t.insurance_private}
+              value={metrics.privateCount}
+              shareOf={{ value: metrics.privateCount, total: metrics.total, label: t.patients_title }}
+            />
+            <KpiCard
+              label={t.insurance_self_pay}
+              value={metrics.selfPay}
+              shareOf={{ value: metrics.selfPay, total: metrics.total, label: t.patients_title }}
+            />
+          </div>
+        )}
+
+        {/* Error banner */}
+        {listError ? <Banner tone="error">{listError}</Banner> : null}
+
+        {/* Table card */}
+        <div className="rounded-xl border border-border bg-card overflow-hidden">
+          {/* Table */}
+          <div className="overflow-x-auto">
+            <table className="w-full text-[13px]">
+              <thead className="bg-muted/40">
+                <tr className="text-left text-[11px] uppercase tracking-wider text-muted-foreground">
+                  {columnOrder.map((key) => {
+                    const meta = COLUMN_META[key];
+                    const isDragging = draggingKey === key;
+                    const isDropTarget = dropTargetKey === key && draggingKey && dropTargetKey !== draggingKey;
+                    const isSorted = sortBy?.key === key;
+                    const SortIcon = isSorted ? (sortBy?.dir === "asc" ? ArrowUp : ArrowDown) : null;
+                    const filterValue = columnFilters[key];
+                    const filterActive = filterValue.trim() !== "";
+                    const isFilterOpen = filterOpen === key;
+                    return (
+                      <th
+                        key={key}
+                        draggable
+                        onDragStart={() => handleColumnDragStart(key)}
+                        onDragOver={(e) => handleColumnDragOver(e, key)}
+                        onDrop={() => handleColumnDrop(key)}
+                        onDragEnd={handleColumnDragEnd}
+                        className={cn(
+                          "px-3 py-2.5 font-medium select-none relative",
+                          meta.widthClass,
+                          isSorted && "text-foreground",
+                          isDragging && "opacity-50",
+                          isDropTarget && "before:absolute before:left-0 before:top-0 before:bottom-0 before:w-[2px] before:bg-[var(--brand)]"
+                        )}
+                      >
+                        <div className="flex items-center justify-between gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (meta.sortable && !draggingKey) toggleSort(key);
+                            }}
+                            disabled={!meta.sortable}
+                            className={cn(
+                              "flex items-center gap-1 min-w-0 text-left",
+                              meta.sortable && "cursor-pointer hover:text-foreground"
+                            )}
+                            title={meta.sortable ? (tr[meta.labelKey] ?? meta.labelKey) : ""}
+                          >
+                            <span className="truncate">{tr[meta.labelKey] ?? meta.labelKey}</span>
+                            {SortIcon ? <SortIcon className="size-3 text-[var(--brand)] shrink-0" /> : null}
+                          </button>
+                          {meta.filter !== "none" ? (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setFilterOpen(isFilterOpen ? null : key);
+                              }}
+                              title={t.common_search}
+                              className={cn(
+                                "inline-flex items-center justify-center size-5 rounded transition-colors shrink-0",
+                                filterActive
+                                  ? "text-[var(--brand)] hover:bg-[var(--brand-soft)]"
+                                  : "text-muted-foreground/60 hover:text-foreground hover:bg-muted"
+                              )}
+                            >
+                              <Filter className="size-3" />
+                            </button>
+                          ) : null}
+                        </div>
+                        {isFilterOpen && meta.filter === "text" ? (
+                          <ColumnFilterPopover
+                            value={filterValue}
+                            onChange={(v) => setColumnFilter(key, v)}
+                            onClear={() => setColumnFilter(key, "")}
+                            onClose={() => setFilterOpen(null)}
+                            placeholder={tr[meta.labelKey] ?? meta.labelKey}
+                            tr={tr}
+                          />
+                        ) : null}
+                        {isFilterOpen && meta.filter === "select" ? (
+                          <ColumnFilterSelectPopover
+                            value={filterValue}
+                            onChange={(v) => setColumnFilter(key, v)}
+                            onClear={() => setColumnFilter(key, "")}
+                            onClose={() => setFilterOpen(null)}
+                            options={
+                              key === "status"
+                                ? [
+                                    { value: "", label: t.providers_all },
+                                    { value: "active", label: t.common_active },
+                                    { value: "inactive", label: t.common_inactive },
+                                  ]
+                                : [
+                                    { value: "", label: t.providers_all },
+                                    { value: "private", label: t.insurance_private },
+                                    { value: "public", label: t.insurance_public },
+                                    { value: "self_pay", label: t.insurance_self_pay },
+                                    { value: "foreign", label: t.insurance_foreign },
+                                  ]
+                            }
+                            tr={tr}
+                          />
+                        ) : null}
+                        {isFilterOpen && meta.filter === "daterange" ? (
+                          <ColumnFilterDateRangePopover
+                            value={filterValue}
+                            onChange={(v) => setColumnFilter(key, v)}
+                            onClear={() => setColumnFilter(key, "")}
+                            onClose={() => setFilterOpen(null)}
+                            tr={tr}
+                          />
+                        ) : null}
+                      </th>
+                    );
+                  })}
+                  <th className="w-8 px-2 py-2.5"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {listBusy ? (
+                  <tr>
+                    <td colSpan={columnOrder.length + 1} className="py-16 text-center text-muted-foreground">
+                      <LoaderCircle className="inline-block mr-2 size-4 animate-spin align-text-bottom" />
+                      {t.common_loading}
+                    </td>
+                  </tr>
+                ) : paginatedPatients.length === 0 ? (
+                  <tr>
+                    <td colSpan={columnOrder.length + 1} className="py-16 text-center text-muted-foreground text-[13px]">
+                      {t.patients_no_match}
+                    </td>
+                  </tr>
+                ) : (
+                  paginatedPatients.map((patient, idx) => {
+                    const rowNumber = page * pageSize + idx + 1;
+                    return (
+                      <tr
+                        key={patient.id}
+                        className="group/row border-t border-border transition-colors hover:bg-muted/40 cursor-pointer relative"
+                        onClick={() => openPatient(patient.id)}
+                      >
+                        {columnOrder.map((key) => (
+                          <PatientCell
+                            key={key}
+                            colKey={key}
+                            patient={patient}
+                            rowNumber={rowNumber}
+                            tr={tr}
+                          />
+                        ))}
+                        <td className="w-8 px-2 py-2.5" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            className="size-7 rounded-md inline-flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors opacity-0 group-hover/row:opacity-100"
+                          >
+                            <MoreHorizontal className="size-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Pagination */}
+          <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-t border-border text-[12.5px] flex-wrap">
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <span>{t.pagination_per_page}</span>
+              <ShadSelect
+                value={String(pageSize)}
+                onValueChange={(v) => setPageSize(Number(v))}
+              >
+                <SelectTrigger size="sm" className="h-7 w-[70px] text-[12.5px]">
+                  <SelectValue>{pageSize}</SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="10">10</SelectItem>
+                  <SelectItem value="20">20</SelectItem>
+                  <SelectItem value="50">50</SelectItem>
+                  <SelectItem value="100">100</SelectItem>
+                </SelectContent>
+              </ShadSelect>
+            </div>
+
+            <PaginationControls
+              page={page}
+              totalPages={totalPages}
+              onPage={setPage}
+            />
+
+            <form
+              className="flex items-center gap-2 text-muted-foreground"
+              onSubmit={(e) => {
+                e.preventDefault();
+                const n = Number(goToInput);
+                if (!Number.isFinite(n) || n < 1) return;
+                setPage(Math.min(totalPages - 1, Math.max(0, n - 1)));
+                setGoToInput("");
+              }}
+            >
+              <span>{t.pagination_go_to_page}</span>
+              <Input
+                value={goToInput}
+                onChange={(e) => setGoToInput(e.target.value.replace(/[^0-9]/g, ""))}
+                placeholder=""
+                className="h-7 w-14 text-[12.5px] text-center"
+              />
+              <button
+                type="submit"
+                className="inline-flex items-center gap-1 h-7 px-2 rounded-md text-[12.5px] text-foreground hover:bg-muted transition-colors"
+              >
+                {t.pagination_go}
+                <ChevronRight className="size-3" />
+              </button>
+            </form>
+          </div>
         </div>
       </div>
 
       <Sheet open={createOpen} onOpenChange={setCreateOpen}>
-        <SheetContent side="right" className="w-full !sm:max-w-[50vw]">
-          <SheetHeader className="border-b border-border/70 pb-4">
-            <SheetTitle>{t.patients_create}</SheetTitle>
-            <SheetDescription>{t.patients_subtitle}</SheetDescription>
-          </SheetHeader>
+        <SheetContent side="right" className="w-full sm:max-w-[720px]">
+          <form onSubmit={handleCreatePatient} className="flex flex-col flex-1 min-h-0">
+            <SheetHeader className="shrink-0 px-4 pt-3 pb-1">
+              <SheetTitle>{t.patients_create}</SheetTitle>
+            </SheetHeader>
 
-          <div className="flex-1 overflow-y-auto px-4 pb-6">
-            <form onSubmit={handleCreatePatient} className="space-y-6 pt-5">
+            <div className="flex-1 overflow-y-auto px-4 py-2 space-y-4">
               {createError ? <Banner tone="error">{createError}</Banner> : null}
               <PatientFormFields form={createForm} onChange={(field, value) => setCreateForm((current) => ({ ...current, [field]: value }))} includeBirthAndGender />
-              <div className="flex justify-end gap-3 border-t border-border/70 pt-4">
-                <Button type="button" variant="outline" className="rounded-2xl" onClick={() => setCreateOpen(false)}>
-                  Cancel
-                </Button>
-                <Button type="submit" className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800" disabled={createBusy}>
-                  {createBusy ? <LoaderCircle className="size-4 animate-spin" /> : <Plus className="size-4" />}
-                  {createBusy ? t.patients_creating : t.patients_create}
-                </Button>
-              </div>
-            </form>
-          </div>
+            </div>
+
+            <div className="shrink-0 flex justify-end gap-2 px-4 py-3 bg-popover">
+              <Button type="button" variant="outline" className="h-9 rounded-lg" onClick={() => setCreateOpen(false)}>
+                {t.common_cancel}
+              </Button>
+              <Button type="submit" className="h-9 rounded-lg gap-1.5 px-3.5" disabled={createBusy}>
+                {createBusy ? <LoaderCircle className="size-4 animate-spin" /> : <Plus className="size-4" />}
+                {createBusy ? t.patients_creating : t.common_create}
+              </Button>
+            </div>
+          </form>
         </SheetContent>
       </Sheet>
 
@@ -1349,7 +2120,7 @@ function PatientProfileSection({
       ) : null}
 
       <form onSubmit={onSubmit} className="mt-5 space-y-5">
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-3 md:grid-cols-3">
           <Field label={t.patients_birth_date}>
             <Input value={detail.birth_date ?? ""} disabled className="h-10 rounded-xl bg-slate-50" />
           </Field>
@@ -1510,218 +2281,227 @@ function PatientFormFields({
   const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
 
   return (
-    <div className="space-y-4">
-      <div className="grid gap-4 md:grid-cols-3">
-        <Field label={t.patients_title_field}>
-          <Input
-            value={form.title}
-            onChange={(event) => onChange("title", event.target.value)}
-            className="h-10 rounded-xl bg-slate-50"
-          />
-        </Field>
-        <Field label={t.patients_first_name}>
-          <Input
-            value={form.firstName}
-            onChange={(event) => onChange("firstName", event.target.value)}
-            className="h-10 rounded-xl bg-slate-50"
-            required
-          />
-        </Field>
-        <Field label={t.patients_last_name}>
-          <Input
-            value={form.lastName}
-            onChange={(event) => onChange("lastName", event.target.value)}
-            className="h-10 rounded-xl bg-slate-50"
-            required
-          />
-        </Field>
-      </div>
-
-      {includeBirthAndGender ? (
-        <div className="grid gap-4 md:grid-cols-2">
-          <Field label={t.patients_birth_date}>
+    <div className="space-y-3">
+      <FormSection title={l("Persönliche Daten", "Личные данные", "Personal data")}>
+        <div className="grid gap-3 md:grid-cols-3">
+          <Field label={t.patients_title_field}>
             <Input
-              type="date"
-              value={form.birthDate}
-              onChange={(event) => onChange("birthDate", event.target.value)}
-              className="h-10 rounded-xl bg-slate-50"
+              value={form.title}
+              onChange={(event) => onChange("title", event.target.value)}
+              className={formInputClassName}
+            />
+          </Field>
+          <Field label={t.patients_first_name}>
+            <Input
+              value={form.firstName}
+              onChange={(event) => onChange("firstName", event.target.value)}
+              className={formInputClassName}
               required
             />
           </Field>
-          <Field label={t.patients_gender}>
-            <ShadSelect value={form.gender} onValueChange={(v) => onChange("gender", v ?? "male")}>
-              <SelectTrigger className="w-full h-10 rounded-xl bg-slate-50">
+          <Field label={t.patients_last_name}>
+            <Input
+              value={form.lastName}
+              onChange={(event) => onChange("lastName", event.target.value)}
+              className={formInputClassName}
+              required
+            />
+          </Field>
+        </div>
+
+        {includeBirthAndGender ? (
+          <div className="grid gap-3 md:grid-cols-2">
+            <Field label={t.patients_birth_date}>
+              <Input
+                type="date"
+                value={form.birthDate}
+                onChange={(event) => onChange("birthDate", event.target.value)}
+                className={formInputClassName}
+                required
+              />
+            </Field>
+            <Field label={t.patients_gender}>
+              <ShadSelect value={form.gender} onValueChange={(v) => onChange("gender", v ?? "male")}>
+                <SelectTrigger className={cn("w-full", formInputClassName)}>
+                  <SelectValue>
+                    {genderLabel(form.gender, tr)}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="male">{t.gender_male}</SelectItem>
+                  <SelectItem value="female">{t.gender_female}</SelectItem>
+                  <SelectItem value="diverse">{t.gender_diverse}</SelectItem>
+                </SelectContent>
+              </ShadSelect>
+            </Field>
+          </div>
+        ) : null}
+
+        <div className="grid gap-3 md:grid-cols-2">
+          <Field label={t.patients_nationality}>
+            <Input
+              value={form.nationality}
+              onChange={(event) => onChange("nationality", event.target.value)}
+              className={formInputClassName}
+            />
+          </Field>
+          <Field label={t.patients_residence_country}>
+            <Input
+              value={form.residenceCountry}
+              onChange={(event) => onChange("residenceCountry", event.target.value)}
+              className={formInputClassName}
+            />
+          </Field>
+        </div>
+
+        <Field label={t.patients_languages}>
+          <Input
+            value={form.languages}
+            onChange={(event) => onChange("languages", event.target.value)}
+            className={formInputClassName}
+            placeholder={t.patients_languages}
+          />
+        </Field>
+
+        <Field label={l("Funktionslabels", "Функциональные метки", "Functional labels")}>
+          <FunctionalLabelChips
+            value={form.functionalLabels}
+            onChange={(next) => onChange("functionalLabels", next)}
+            l={l}
+          />
+        </Field>
+      </FormSection>
+
+      <FormSection title={l("Kontakt", "Контакты", "Contact")}>
+        <div className="grid gap-3 md:grid-cols-3">
+          <Field label={t.patients_phone_primary}>
+            <Input
+              value={form.phonePrimary}
+              onChange={(event) => onChange("phonePrimary", event.target.value)}
+              className={formInputClassName}
+            />
+          </Field>
+          <Field label={t.patients_phone_secondary}>
+            <Input
+              value={form.phoneSecondary}
+              onChange={(event) => onChange("phoneSecondary", event.target.value)}
+              className={formInputClassName}
+            />
+          </Field>
+          <Field label={t.patients_email}>
+            <Input
+              type="email"
+              value={form.email}
+              onChange={(event) => onChange("email", event.target.value)}
+              className={formInputClassName}
+            />
+          </Field>
+        </div>
+      </FormSection>
+
+      <FormSection title={l("Adresse", "Адрес", "Address")}>
+        <Field label={t.patients_address_street}>
+          <Input
+            value={form.addressStreet}
+            onChange={(event) => onChange("addressStreet", event.target.value)}
+            className={formInputClassName}
+          />
+        </Field>
+
+        <div className="grid gap-3 md:grid-cols-3">
+          <Field label={t.patients_address_city}>
+            <Input
+              value={form.addressCity}
+              onChange={(event) => onChange("addressCity", event.target.value)}
+              className={formInputClassName}
+            />
+          </Field>
+          <Field label={t.patients_address_zip}>
+            <Input
+              value={form.addressZip}
+              onChange={(event) => onChange("addressZip", event.target.value)}
+              className={formInputClassName}
+            />
+          </Field>
+          <Field label={t.patients_address_country}>
+            <Input
+              value={form.addressCountry}
+              onChange={(event) => onChange("addressCountry", event.target.value)}
+              className={formInputClassName}
+            />
+          </Field>
+        </div>
+      </FormSection>
+
+      <FormSection title={l("Versicherung", "Страхование", "Insurance")}>
+        <div className="grid gap-3 md:grid-cols-3">
+          <Field label={t.patients_insurance_provider}>
+            <Input
+              value={form.insuranceProvider}
+              onChange={(event) => onChange("insuranceProvider", event.target.value)}
+              className={formInputClassName}
+            />
+          </Field>
+          <Field label={t.patients_insurance_number}>
+            <Input
+              value={form.insuranceNumber}
+              onChange={(event) => onChange("insuranceNumber", event.target.value)}
+              className={formInputClassName}
+            />
+          </Field>
+          <Field label={t.patients_insurance_type}>
+            <ShadSelect value={form.insuranceType} onValueChange={(v) => onChange("insuranceType", v ?? "")}>
+              <SelectTrigger className={cn("w-full", formInputClassName)}>
                 <SelectValue>
-                  {genderLabel(form.gender, tr)}
+                  {insuranceLabel(form.insuranceType, tr)}
                 </SelectValue>
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="male">{t.gender_male}</SelectItem>
-                <SelectItem value="female">{t.gender_female}</SelectItem>
-                <SelectItem value="diverse">{t.gender_diverse}</SelectItem>
+                <SelectItem value="">{t.common_not_set}</SelectItem>
+                <SelectItem value="private">{t.insurance_private}</SelectItem>
+                <SelectItem value="public">{t.insurance_public}</SelectItem>
+                <SelectItem value="self_pay">{t.insurance_self_pay}</SelectItem>
+                <SelectItem value="foreign">{t.insurance_foreign}</SelectItem>
               </SelectContent>
             </ShadSelect>
           </Field>
         </div>
-      ) : null}
+      </FormSection>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <Field label={t.patients_nationality}>
-          <Input
-            value={form.nationality}
-            onChange={(event) => onChange("nationality", event.target.value)}
-            className="h-10 rounded-xl bg-slate-50"
-          />
-        </Field>
-        <Field label={t.patients_residence_country}>
-          <Input
-            value={form.residenceCountry}
-            onChange={(event) => onChange("residenceCountry", event.target.value)}
-            className="h-10 rounded-xl bg-slate-50"
-          />
-        </Field>
-      </div>
+      <FormSection title={l("Notfallkontakt", "Экстренный контакт", "Emergency contact")}>
+        <div className="grid gap-3 md:grid-cols-3">
+          <Field label={t.patients_emergency_name}>
+            <Input
+              value={form.emergencyContactName}
+              onChange={(event) => onChange("emergencyContactName", event.target.value)}
+              className={formInputClassName}
+            />
+          </Field>
+          <Field label={t.patients_emergency_phone}>
+            <Input
+              value={form.emergencyContactPhone}
+              onChange={(event) => onChange("emergencyContactPhone", event.target.value)}
+              className={formInputClassName}
+            />
+          </Field>
+          <Field label={t.patients_emergency_relation}>
+            <Input
+              value={form.emergencyContactRelation}
+              onChange={(event) => onChange("emergencyContactRelation", event.target.value)}
+              className={formInputClassName}
+            />
+          </Field>
+        </div>
+      </FormSection>
 
-      <Field label={t.patients_languages}>
-        <Input
-          value={form.languages}
-          onChange={(event) => onChange("languages", event.target.value)}
-          className="h-10 rounded-xl bg-slate-50"
-          placeholder={t.patients_languages}
-        />
-      </Field>
-
-      <Field label={l("Funktionslabels", "Функциональные метки", "Functional labels")}>
-        <Input
-          value={form.functionalLabels}
-          onChange={(event) => onChange("functionalLabels", event.target.value)}
-          className="h-10 rounded-xl bg-slate-50"
-          placeholder={l("vip, high_risk", "vip, high_risk", "vip, high_risk")}
-        />
-      </Field>
-
-      <div className="grid gap-4 md:grid-cols-3">
-        <Field label={t.patients_phone_primary}>
-          <Input
-            value={form.phonePrimary}
-            onChange={(event) => onChange("phonePrimary", event.target.value)}
-            className="h-10 rounded-xl bg-slate-50"
-          />
-        </Field>
-        <Field label={t.patients_phone_secondary}>
-          <Input
-            value={form.phoneSecondary}
-            onChange={(event) => onChange("phoneSecondary", event.target.value)}
-            className="h-10 rounded-xl bg-slate-50"
-          />
-        </Field>
-        <Field label={t.patients_email}>
-          <Input
-            type="email"
-            value={form.email}
-            onChange={(event) => onChange("email", event.target.value)}
-            className="h-10 rounded-xl bg-slate-50"
-          />
-        </Field>
-      </div>
-
-      <Field label={t.patients_address_street}>
-        <Input
-          value={form.addressStreet}
-          onChange={(event) => onChange("addressStreet", event.target.value)}
-          className="h-10 rounded-xl bg-slate-50"
-        />
-      </Field>
-
-      <div className="grid gap-4 md:grid-cols-3">
-        <Field label={t.patients_address_city}>
-          <Input
-            value={form.addressCity}
-            onChange={(event) => onChange("addressCity", event.target.value)}
-            className="h-10 rounded-xl bg-slate-50"
-          />
-        </Field>
-        <Field label={t.patients_address_zip}>
-          <Input
-            value={form.addressZip}
-            onChange={(event) => onChange("addressZip", event.target.value)}
-            className="h-10 rounded-xl bg-slate-50"
-          />
-        </Field>
-        <Field label={t.patients_address_country}>
-          <Input
-            value={form.addressCountry}
-            onChange={(event) => onChange("addressCountry", event.target.value)}
-            className="h-10 rounded-xl bg-slate-50"
-          />
-        </Field>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-3">
-        <Field label={t.patients_insurance_provider}>
-          <Input
-            value={form.insuranceProvider}
-            onChange={(event) => onChange("insuranceProvider", event.target.value)}
-            className="h-10 rounded-xl bg-slate-50"
-          />
-        </Field>
-        <Field label={t.patients_insurance_number}>
-          <Input
-            value={form.insuranceNumber}
-            onChange={(event) => onChange("insuranceNumber", event.target.value)}
-            className="h-10 rounded-xl bg-slate-50"
-          />
-        </Field>
-        <Field label={t.patients_insurance_type}>
-          <ShadSelect value={form.insuranceType} onValueChange={(v) => onChange("insuranceType", v ?? "")}>
-            <SelectTrigger className="w-full h-10 rounded-xl bg-slate-50">
-              <SelectValue>
-                {insuranceLabel(form.insuranceType, tr)}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="">{t.common_not_set}</SelectItem>
-              <SelectItem value="private">{t.insurance_private}</SelectItem>
-              <SelectItem value="public">{t.insurance_public}</SelectItem>
-              <SelectItem value="self_pay">{t.insurance_self_pay}</SelectItem>
-              <SelectItem value="foreign">{t.insurance_foreign}</SelectItem>
-            </SelectContent>
-          </ShadSelect>
-        </Field>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-3">
-        <Field label={t.patients_emergency_name}>
-          <Input
-            value={form.emergencyContactName}
-            onChange={(event) => onChange("emergencyContactName", event.target.value)}
-            className="h-10 rounded-xl bg-slate-50"
-          />
-        </Field>
-        <Field label={t.patients_emergency_phone}>
-          <Input
-            value={form.emergencyContactPhone}
-            onChange={(event) => onChange("emergencyContactPhone", event.target.value)}
-            className="h-10 rounded-xl bg-slate-50"
-          />
-        </Field>
-        <Field label={t.patients_emergency_relation}>
-          <Input
-            value={form.emergencyContactRelation}
-            onChange={(event) => onChange("emergencyContactRelation", event.target.value)}
-            className="h-10 rounded-xl bg-slate-50"
-          />
-        </Field>
-      </div>
-
-      <Field label={t.patients_notes}>
+      <FormSection title={t.patients_notes}>
         <textarea
           value={form.notes}
           onChange={(event) => onChange("notes", event.target.value)}
           className={textareaClassName}
           rows={4}
         />
-      </Field>
+      </FormSection>
     </div>
   );
 }

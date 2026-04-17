@@ -2,14 +2,17 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Bell,
-  Search,
+  CornerUpLeft,
+  CornerUpRight,
   Globe,
+  PanelLeft,
   X,
   Send,
   MessageSquare,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { apiFetch } from "@/lib/api";
+import { useNavState } from "@/lib/nav-state";
 import { staffHrefIfAllowed } from "@/lib/staff-route-access";
 import { useLang } from "@/lib/i18n";
 
@@ -82,6 +85,8 @@ function notificationHref(item: Notification) {
 export function Topbar() {
   const { user } = useAuth();
   const { lang, setLang, t } = useLang();
+  const navigate = useNavigate();
+  const { toggle: toggleNav } = useNavState();
   const [unread, setUnread] = useState(0);
   const [onlineUsers, setOnlineUsers] = useState<ActiveSession[]>([]);
   const isPatientPortal = user?.role === "patient";
@@ -124,10 +129,25 @@ export function Topbar() {
 
   return (
     <>
-      <header className="flex items-center justify-between h-14 px-6">
-        <div />
+      <header className="relative z-30 flex items-center justify-between h-12 px-3 bg-card border-b border-border shrink-0">
+        <div className="flex items-center gap-1">
+          <TopbarIconButton onClick={toggleNav} title={t.topbar_search}>
+            <PanelLeft className="size-[17px]" />
+          </TopbarIconButton>
+          <div className="h-4 w-px bg-border mx-1" />
+          <TopbarIconButton onClick={() => navigate(-1)} title="Back">
+            <CornerUpLeft className="size-[17px]" />
+          </TopbarIconButton>
+          <TopbarIconButton onClick={() => navigate(1)} title="Forward">
+            <CornerUpRight className="size-[17px]" />
+          </TopbarIconButton>
+          <div className="h-4 w-px bg-border mx-1" />
+          <span className="px-2 text-[13px] font-semibold tracking-tight text-foreground">
+            {t.app_name}
+          </span>
+        </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           {/* Online users avatars */}
           {!isPatientPortal && onlineUsers.length > 0 && (
             <OnlineAvatars
@@ -139,50 +159,29 @@ export function Topbar() {
             />
           )}
 
-          {/* Current user */}
-          {user && (
-            <div className="flex items-center gap-2 text-sm">
-              <span className="font-medium text-foreground">{user.name}</span>
-              <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                {roleDisplay(user.role)}
-              </span>
-            </div>
-          )}
-
           {/* Notifications */}
-          <button
+          <TopbarIconButton
             onClick={() => {
               setNotifOpen(!notifOpen);
               setUsersOpen(false);
             }}
-            className="relative flex items-center justify-center size-9 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            title={t.topbar_notifications}
           >
-            <Bell className="size-[18px]" />
+            <Bell className="size-[17px]" />
             {unread > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 flex items-center justify-center min-w-[18px] h-[18px] rounded-full bg-destructive text-[10px] font-semibold text-white px-1">
+              <span className="absolute top-0.5 right-0.5 flex items-center justify-center min-w-[16px] h-[16px] rounded-full bg-[var(--brand)] text-[10px] font-semibold text-white px-1">
                 {unread}
               </span>
             )}
-          </button>
-
-          {/* Search */}
-          {!isPatientPortal ? (
-            <div className="flex items-center gap-2 h-8 px-3 rounded-lg border border-border bg-muted/50 text-muted-foreground text-sm cursor-pointer hover:bg-muted transition-colors">
-              <Search className="size-3.5" />
-              <span>{t.topbar_search}</span>
-              <kbd className="ml-2 text-[10px] font-mono bg-background border border-border rounded px-1.5 py-0.5">
-                /
-              </kbd>
-            </div>
-          ) : null}
+          </TopbarIconButton>
 
           {/* Lang */}
           <button
             onClick={toggleLang}
-            className="flex items-center gap-1.5 h-8 px-3 rounded-lg text-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            className="flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-[12px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
           >
             <Globe className="size-3.5" />
-            {lang === "de" ? "🇩🇪 DE" : "🇷🇺 RU"}
+            {lang === "de" ? "DE" : "RU"}
           </button>
         </div>
       </header>
@@ -205,6 +204,28 @@ export function Topbar() {
         />
       )}
     </>
+  );
+}
+
+/* ── Shared icon button ── */
+
+function TopbarIconButton({
+  onClick,
+  title,
+  children,
+}: {
+  onClick: () => void;
+  title?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      className="relative flex items-center justify-center size-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+    >
+      {children}
+    </button>
   );
 }
 
@@ -297,7 +318,7 @@ function NotificationPanel({
   return (
     <>
       <div className="fixed inset-0 z-40" onClick={onClose} />
-      <div className="fixed right-20 top-14 z-50 w-96 rounded-2xl border border-border bg-background shadow-xl animate-in fade-in slide-in-from-top-2 duration-200">
+      <div className="fixed right-4 top-16 z-50 w-96 rounded-2xl border border-border bg-background shadow-xl animate-in fade-in slide-in-from-top-2 duration-200">
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
           <h3 className="text-sm font-semibold">{t.topbar_notifications}</h3>
           <button
@@ -418,7 +439,7 @@ function UsersPanel({
     return (
       <>
         <div className="fixed inset-0 z-40" onClick={onClose} />
-        <div className="fixed right-20 top-14 z-50 w-96 rounded-2xl border border-border bg-background shadow-xl flex flex-col max-h-[480px] animate-in fade-in slide-in-from-top-2 duration-200">
+        <div className="fixed right-4 top-16 z-50 w-96 rounded-2xl border border-border bg-background shadow-xl flex flex-col max-h-[480px] animate-in fade-in slide-in-from-top-2 duration-200">
           {/* Chat header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-border">
             <div className="flex items-center gap-2">
@@ -496,7 +517,7 @@ function UsersPanel({
   return (
     <>
       <div className="fixed inset-0 z-40" onClick={onClose} />
-      <div className="fixed right-20 top-14 z-50 w-80 rounded-2xl border border-border bg-background shadow-xl animate-in fade-in slide-in-from-top-2 duration-200">
+      <div className="fixed right-4 top-16 z-50 w-80 rounded-2xl border border-border bg-background shadow-xl animate-in fade-in slide-in-from-top-2 duration-200">
         <div className="px-4 py-3 border-b border-border">
           <h3 className="text-sm font-semibold">
             {t.topbar_online} ({users.length})
