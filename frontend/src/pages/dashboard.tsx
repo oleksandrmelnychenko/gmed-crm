@@ -20,6 +20,7 @@ import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { PatientDashboardPage } from "@/pages/patient-dashboard";
+import { StaffDashboardPageNew } from "@/pages/staff-dashboard-new";
 import { npsBandLabel, type PortalFeedbackSummary } from "@/pages/patient-portal.shared";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
@@ -299,7 +300,7 @@ export function DashboardPage() {
     return <PatientDashboardPage />;
   }
 
-  return <StaffDashboardPage />;
+  return <StaffDashboardPageNew />;
 }
 
 function StaffDashboardPage() {
@@ -1549,3 +1550,6 @@ function StaffDashboardPage() {
     </div>
   );
 }
+
+// Legacy — kept for potential rollback.
+void StaffDashboardPage;

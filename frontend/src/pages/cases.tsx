@@ -1943,7 +1943,7 @@ export function CasesPage() {
               {permissions.canCreate ? (
                 <Button
                   type="button"
-                  className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+                  className="h-9 rounded-lg px-3.5"
                   onClick={() => {
                     setCreateError("");
                     setCreateForm(DEFAULT_CREATE_FORM);

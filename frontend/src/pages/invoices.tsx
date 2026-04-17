@@ -888,7 +888,7 @@ function StaffInvoicesPage() {
                 {text.refresh}
               </Button>
               {access.canCreate ? (
-                <Button type="button" className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800" onClick={() => { setCreateForm(blankCreateForm(filters.quoteId)); setCreateError(null); setCreateOpen(true); }}>
+                <Button type="button" className="h-9 rounded-lg px-3.5" onClick={() => { setCreateForm(blankCreateForm(filters.quoteId)); setCreateError(null); setCreateOpen(true); }}>
                   <Plus className="mr-2 size-4" />
                   {text.newInvoice}
                 </Button>

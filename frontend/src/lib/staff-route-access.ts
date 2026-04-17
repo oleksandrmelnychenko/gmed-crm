@@ -273,7 +273,7 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     match: "prefix",
     path: "/documents",
     roles: ROLES_DOCUMENTS,
-    nav: { section: "crm", labelKey: "Documents" },
+    nav: { section: "crm", labelKey: "nav_documents" },
   },
   {
     id: "chat",
@@ -301,14 +301,14 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     match: "exact",
     path: "/contracts",
     roles: ROLES_CONTRACTS_INVOICES,
-    nav: { section: "crm", labelKey: "Contracts" },
+    nav: { section: "crm", labelKey: "nav_contracts" },
   },
   {
     id: "invoices",
     match: "exact",
     path: "/invoices",
     roles: ROLES_CONTRACTS_INVOICES,
-    nav: { section: "crm", labelKey: "Invoices" },
+    nav: { section: "crm", labelKey: "nav_invoices" },
   },
   {
     id: "orders",

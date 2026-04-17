@@ -31,6 +31,9 @@ pub fn router() -> Router<AppState> {
         .route("/stats/leads/by-status", get(leads_by_status))
         .route("/stats/orders/by-phase", get(orders_by_phase))
         .route("/stats/appointments/upcoming", get(upcoming_appointments))
+        .route("/stats/dashboard/demographics", get(dashboard_demographics))
+        .route("/stats/dashboard/clinical", get(dashboard_clinical))
+        .route("/stats/dashboard/operations", get(dashboard_operations))
 }
 
 #[derive(Deserialize)]
@@ -4672,4 +4675,418 @@ async fn load_billing_risks(state: &AppState) -> Result<BillingRiskPayload, sqlx
 
 fn err(status: StatusCode, message: &str) -> axum::response::Response {
     (status, Json(serde_json::json!({ "error": status.canonical_reason().unwrap_or("error"), "message": message }))).into_response()
+}
+
+/* ───────────────────────── Dashboard (deep analytics) ─────────────────────────
+   Three consolidated endpoints, each with `?period=7d|30d|90d|12m|all`.
+   Period is applied to the "created_at"-ish column per table.
+*/
+
+fn dashboard_period_clause(period: &Option<String>, col: &str) -> String {
+    match period.as_deref().unwrap_or("30d") {
+        "7d" => format!(" AND {col} >= NOW() - INTERVAL '7 days'"),
+        "30d" => format!(" AND {col} >= NOW() - INTERVAL '30 days'"),
+        "90d" => format!(" AND {col} >= NOW() - INTERVAL '90 days'"),
+        "12m" => format!(" AND {col} >= NOW() - INTERVAL '12 months'"),
+        _ => String::new(), // "all" or unknown → no time filter
+    }
+}
+
+fn dashboard_roles() -> [Role; 6] {
+    [
+        Role::Ceo,
+        Role::CeoAssistant,
+        Role::PatientManager,
+        Role::TeamleadInterpreter,
+        Role::Billing,
+        Role::Sales,
+    ]
+}
+
+async fn dashboard_demographics(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Query(q): Query<PeriodQuery>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&dashboard_roles()) {
+        return e;
+    }
+
+    let clause = dashboard_period_clause(&q.period, "created_at");
+
+    let by_country = load_patients_by_country(&state, &clause).await.unwrap_or_default();
+    let by_age_group = load_patients_by_age(&state, &clause).await.unwrap_or_default();
+    let by_gender = load_patients_by_gender(&state, &clause).await.unwrap_or_else(|_| json!({}));
+    let by_insurance = load_patients_by_insurance(&state, &clause).await.unwrap_or_else(|_| json!({}));
+    let top_languages = load_top_languages(&state, &clause).await.unwrap_or_default();
+    let total = load_patients_count(&state, &clause).await.unwrap_or(0);
+
+    Json(json!({
+        "period": q.period.as_deref().unwrap_or("30d"),
+        "total": total,
+        "by_country": by_country,
+        "by_age_group": by_age_group,
+        "by_gender": by_gender,
+        "by_insurance": by_insurance,
+        "top_languages": top_languages,
+    }))
+    .into_response()
+}
+
+async fn dashboard_clinical(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Query(q): Query<PeriodQuery>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&dashboard_roles()) {
+        return e;
+    }
+
+    let clause = dashboard_period_clause(&q.period, "created_at");
+
+    let top_case_reasons = load_top_case_reasons(&state, &clause).await.unwrap_or_default();
+    let cases_by_status = load_cases_by_status(&state, &clause).await.unwrap_or_else(|_| json!({}));
+    let service_mix = load_ceo_service_mix(&state).await.unwrap_or_default();
+    let avg_case_duration_days = load_avg_case_duration(&state, &clause).await.unwrap_or(0.0);
+
+    Json(json!({
+        "period": q.period.as_deref().unwrap_or("30d"),
+        "top_case_reasons": top_case_reasons,
+        "cases_by_status": cases_by_status,
+        "service_mix": service_mix,
+        "avg_case_duration_days": avg_case_duration_days,
+    }))
+    .into_response()
+}
+
+async fn dashboard_operations(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Query(q): Query<PeriodQuery>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&dashboard_roles()) {
+        return e;
+    }
+
+    // Appointments use `date` (DATE); orders use `created_at`.
+    let apt_clause = dashboard_period_clause(&q.period, "date");
+    let order_clause = dashboard_period_clause(&q.period, "created_at");
+
+    let appointments_by_status = load_appointments_by_status(&state, &apt_clause).await.unwrap_or_else(|_| json!({}));
+    let appointments_heatmap = load_appointments_heatmap(&state, &apt_clause).await.unwrap_or_default();
+    let orders_by_phase_valued = load_orders_by_phase_valued(&state, &order_clause).await.unwrap_or_default();
+    let top_providers = load_top_providers(&state, &apt_clause).await.unwrap_or_default();
+
+    Json(json!({
+        "period": q.period.as_deref().unwrap_or("30d"),
+        "appointments_by_status": appointments_by_status,
+        "appointments_heatmap": appointments_heatmap,
+        "orders_by_phase_valued": orders_by_phase_valued,
+        "top_providers": top_providers,
+    }))
+    .into_response()
+}
+
+/* ── Demographics loaders ── */
+
+async fn load_patients_by_country(state: &AppState, clause: &str) -> Result<Vec<Value>, sqlx::Error> {
+    let sql = format!(
+        r#"SELECT
+                COALESCE(
+                    NULLIF(TRIM(residence_country), ''),
+                    NULLIF(TRIM(nationality), ''),
+                    'Unknown'
+                ) AS country,
+                COUNT(*)::bigint AS c
+           FROM patients
+           WHERE is_active = true {clause}
+           GROUP BY 1
+           ORDER BY 2 DESC, 1
+           LIMIT 10"#,
+    );
+    let rows = sqlx::query(&sql).fetch_all(&state.db).await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| {
+            json!({
+                "country": r.try_get::<String, _>("country").unwrap_or_else(|_| "Unknown".to_string()),
+                "count": r.try_get::<i64, _>("c").unwrap_or(0),
+            })
+        })
+        .collect())
+}
+
+async fn load_patients_by_age(state: &AppState, clause: &str) -> Result<Vec<Value>, sqlx::Error> {
+    let sql = format!(
+        r#"WITH bucketed AS (
+                SELECT
+                    CASE
+                        WHEN EXTRACT(YEAR FROM AGE(birth_date))::int < 18 THEN '<18'
+                        WHEN EXTRACT(YEAR FROM AGE(birth_date))::int < 35 THEN '18-34'
+                        WHEN EXTRACT(YEAR FROM AGE(birth_date))::int < 50 THEN '35-49'
+                        WHEN EXTRACT(YEAR FROM AGE(birth_date))::int < 65 THEN '50-64'
+                        ELSE '65+'
+                    END AS grp
+                FROM patients
+                WHERE is_active = true {clause}
+            )
+            SELECT grp, COUNT(*)::bigint AS c
+            FROM bucketed
+            GROUP BY grp
+            ORDER BY
+                CASE grp
+                    WHEN '<18' THEN 0
+                    WHEN '18-34' THEN 1
+                    WHEN '35-49' THEN 2
+                    WHEN '50-64' THEN 3
+                    ELSE 4
+                END"#
+    );
+    let rows = sqlx::query(&sql).fetch_all(&state.db).await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| {
+            json!({
+                "group": r.try_get::<String, _>("grp").unwrap_or_default(),
+                "count": r.try_get::<i64, _>("c").unwrap_or(0),
+            })
+        })
+        .collect())
+}
+
+async fn load_patients_by_gender(state: &AppState, clause: &str) -> Result<Value, sqlx::Error> {
+    let sql = format!(
+        r#"SELECT gender, COUNT(*)::bigint AS c
+           FROM patients
+           WHERE is_active = true {clause}
+           GROUP BY 1"#
+    );
+    let rows = sqlx::query(&sql).fetch_all(&state.db).await?;
+    let mut result = json!({ "male": 0, "female": 0, "diverse": 0 });
+    for r in rows {
+        let g: String = r.try_get::<String, _>("gender").unwrap_or_default();
+        let c: i64 = r.try_get::<i64, _>("c").unwrap_or(0);
+        if !g.is_empty() {
+            result[g] = json!(c);
+        }
+    }
+    Ok(result)
+}
+
+async fn load_patients_by_insurance(state: &AppState, clause: &str) -> Result<Value, sqlx::Error> {
+    let sql = format!(
+        r#"SELECT COALESCE(insurance_type, 'unknown') AS t, COUNT(*)::bigint AS c
+           FROM patients
+           WHERE is_active = true {clause}
+           GROUP BY 1"#
+    );
+    let rows = sqlx::query(&sql).fetch_all(&state.db).await?;
+    let mut result = json!({ "private": 0, "public": 0, "self_pay": 0, "foreign": 0, "unknown": 0 });
+    for r in rows {
+        let t: String = r.try_get::<String, _>("t").unwrap_or_else(|_| "unknown".to_string());
+        let c: i64 = r.try_get::<i64, _>("c").unwrap_or(0);
+        result[t] = json!(c);
+    }
+    Ok(result)
+}
+
+async fn load_top_languages(state: &AppState, clause: &str) -> Result<Vec<Value>, sqlx::Error> {
+    let sql = format!(
+        r#"SELECT lang, COUNT(*)::bigint AS c FROM (
+                SELECT UNNEST(languages) AS lang
+                FROM patients
+                WHERE is_active = true {clause}
+            ) x
+            WHERE TRIM(COALESCE(lang, '')) <> ''
+            GROUP BY 1
+            ORDER BY 2 DESC, 1
+            LIMIT 8"#
+    );
+    let rows = sqlx::query(&sql).fetch_all(&state.db).await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| {
+            json!({
+                "language": r.try_get::<String, _>("lang").unwrap_or_default(),
+                "count": r.try_get::<i64, _>("c").unwrap_or(0),
+            })
+        })
+        .collect())
+}
+
+async fn load_patients_count(state: &AppState, clause: &str) -> Result<i64, sqlx::Error> {
+    let sql = format!(
+        r#"SELECT COUNT(*)::bigint AS c FROM patients WHERE is_active = true {clause}"#
+    );
+    let row = sqlx::query(&sql).fetch_one(&state.db).await?;
+    Ok(row.try_get::<i64, _>("c").unwrap_or(0))
+}
+
+/* ── Clinical loaders ── */
+
+async fn load_top_case_reasons(state: &AppState, clause: &str) -> Result<Vec<Value>, sqlx::Error> {
+    let sql = format!(
+        r#"SELECT NULLIF(TRIM(hauptanfragegrund), '') AS reason, COUNT(*)::bigint AS c
+           FROM cases
+           WHERE hauptanfragegrund IS NOT NULL
+             AND TRIM(hauptanfragegrund) <> '' {clause}
+           GROUP BY 1
+           ORDER BY 2 DESC
+           LIMIT 10"#
+    );
+    let rows = sqlx::query(&sql).fetch_all(&state.db).await?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|r| {
+            let reason = r.try_get::<Option<String>, _>("reason").ok().flatten()?;
+            let c = r.try_get::<i64, _>("c").unwrap_or(0);
+            Some(json!({ "reason": reason, "count": c }))
+        })
+        .collect())
+}
+
+async fn load_cases_by_status(state: &AppState, clause: &str) -> Result<Value, sqlx::Error> {
+    let sql = format!(
+        r#"SELECT status, COUNT(*)::bigint AS c
+           FROM cases
+           WHERE 1=1 {clause}
+           GROUP BY 1"#
+    );
+    let rows = sqlx::query(&sql).fetch_all(&state.db).await?;
+    let mut result = json!({ "open": 0, "in_progress": 0, "closed": 0 });
+    for r in rows {
+        let s: String = r.try_get::<String, _>("status").unwrap_or_default();
+        let c: i64 = r.try_get::<i64, _>("c").unwrap_or(0);
+        if !s.is_empty() {
+            result[s] = json!(c);
+        }
+    }
+    Ok(result)
+}
+
+async fn load_avg_case_duration(state: &AppState, clause: &str) -> Result<f64, sqlx::Error> {
+    let sql = format!(
+        r#"SELECT COALESCE(
+                AVG(EXTRACT(EPOCH FROM (updated_at - created_at)) / 86400.0),
+                0.0
+           )::float8 AS d
+           FROM cases
+           WHERE status = 'closed' {clause}"#
+    );
+    let row = sqlx::query(&sql).fetch_one(&state.db).await?;
+    Ok(row.try_get::<f64, _>("d").unwrap_or(0.0))
+}
+
+/* ── Operations loaders ── */
+
+async fn load_appointments_by_status(state: &AppState, clause: &str) -> Result<Value, sqlx::Error> {
+    let sql = format!(
+        r#"SELECT status, COUNT(*)::bigint AS c
+           FROM appointments
+           WHERE 1=1 {clause}
+           GROUP BY 1"#
+    );
+    let rows = sqlx::query(&sql).fetch_all(&state.db).await?;
+    let mut result = json!({
+        "planned": 0,
+        "confirmed": 0,
+        "in_progress": 0,
+        "completed": 0,
+        "cancelled": 0,
+    });
+    for r in rows {
+        let s: String = r.try_get::<String, _>("status").unwrap_or_default();
+        let c: i64 = r.try_get::<i64, _>("c").unwrap_or(0);
+        if !s.is_empty() {
+            result[s] = json!(c);
+        }
+    }
+    Ok(result)
+}
+
+async fn load_appointments_heatmap(state: &AppState, clause: &str) -> Result<Vec<Value>, sqlx::Error> {
+    // Buckets: dow (0=Sun..6=Sat), hour (0..23) based on time_start
+    let sql = format!(
+        r#"SELECT
+                EXTRACT(DOW FROM date)::int AS dow,
+                COALESCE(EXTRACT(HOUR FROM time_start)::int, 9) AS hour,
+                COUNT(*)::bigint AS c
+           FROM appointments
+           WHERE 1=1 {clause}
+           GROUP BY 1, 2
+           ORDER BY 1, 2"#
+    );
+    let rows = sqlx::query(&sql).fetch_all(&state.db).await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| {
+            json!({
+                "dow": r.try_get::<i32, _>("dow").unwrap_or(0),
+                "hour": r.try_get::<i32, _>("hour").unwrap_or(0),
+                "count": r.try_get::<i64, _>("c").unwrap_or(0),
+            })
+        })
+        .collect())
+}
+
+async fn load_orders_by_phase_valued(state: &AppState, clause: &str) -> Result<Vec<Value>, sqlx::Error> {
+    let sql = format!(
+        r#"SELECT
+                phase,
+                COUNT(*)::bigint AS c,
+                COALESCE(SUM(COALESCE(total_actual, total_estimated, 0)), 0) AS value_sum
+           FROM orders
+           WHERE 1=1 {clause}
+           GROUP BY 1
+           ORDER BY
+                CASE phase
+                    WHEN 'discovery' THEN 0
+                    WHEN 'intake' THEN 1
+                    WHEN 'execution' THEN 2
+                    WHEN 'closure' THEN 3
+                    WHEN 'followup' THEN 4
+                    ELSE 5
+                END"#
+    );
+    let rows = sqlx::query(&sql).fetch_all(&state.db).await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| {
+            json!({
+                "phase": r.try_get::<String, _>("phase").unwrap_or_default(),
+                "count": r.try_get::<i64, _>("c").unwrap_or(0),
+                "value_eur": decimal_to_string(
+                    r.try_get::<Decimal, _>("value_sum").unwrap_or(Decimal::ZERO)
+                ),
+            })
+        })
+        .collect())
+}
+
+async fn load_top_providers(state: &AppState, clause: &str) -> Result<Vec<Value>, sqlx::Error> {
+    let sql = format!(
+        r#"SELECT
+                p.id::text AS id,
+                p.name AS name,
+                COUNT(DISTINCT a.patient_id)::bigint AS patient_count,
+                COUNT(a.id)::bigint AS appointment_count
+           FROM providers p
+           JOIN appointments a ON a.provider_id = p.id
+           WHERE 1=1 {clause}
+           GROUP BY p.id, p.name
+           ORDER BY appointment_count DESC, patient_count DESC
+           LIMIT 10"#
+    );
+    let rows = sqlx::query(&sql).fetch_all(&state.db).await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| {
+            json!({
+                "id": r.try_get::<String, _>("id").unwrap_or_default(),
+                "name": r.try_get::<String, _>("name").unwrap_or_default(),
+                "patient_count": r.try_get::<i64, _>("patient_count").unwrap_or(0),
+                "appointment_count": r.try_get::<i64, _>("appointment_count").unwrap_or(0),
+            })
+        })
+        .collect())
 }

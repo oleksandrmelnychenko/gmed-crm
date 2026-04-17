@@ -1,7 +1,7 @@
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { canAccessPatientPortalRoute, canAccessStaffRoute } from "@/lib/staff-route-access";
-import { NavStateProvider, useNavState } from "@/lib/nav-state";
+import { NavStateProvider } from "@/lib/nav-state";
 import { NavPanel } from "./nav-panel";
 import { Topbar } from "./topbar";
 import { cn } from "@/lib/utils";
@@ -42,7 +42,6 @@ export function AppLayout() {
 function AppLayoutInner() {
   const { user } = useAuth();
   const location = useLocation();
-  const { collapsed } = useNavState();
 
   if (
     user &&
@@ -53,24 +52,16 @@ function AppLayoutInner() {
   }
 
   return (
-    <div className="min-h-screen bg-white">
-      <div
-        className={cn(
-          "fixed left-0 top-0 bottom-0 z-40 border-r border-border/70 transition-[width] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]",
-          collapsed ? "w-[5.5rem]" : "w-[17rem]",
-        )}
-      >
-        <NavPanel />
-      </div>
-      <div
-        className={cn(
-          "flex h-screen flex-col overflow-hidden transition-[padding-left] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]",
-          collapsed ? "pl-[5.5rem]" : "pl-[17rem]"
-        )}
-      >
+    <div className="h-screen bg-background p-2 overflow-hidden">
+      <div className="h-full rounded-2xl border border-border bg-card overflow-hidden shadow-[0_1px_3px_rgba(0,0,0,0.04)] flex flex-col">
         <Topbar />
-        <div className="flex-1 overflow-y-auto bg-neutral-100 bg-none">
-          <main className="min-h-full bg-[#f2f2f2] px-6 py-6">
+        <div className="flex-1 flex overflow-hidden gap-[6px] p-[6px] bg-muted/50">
+          <NavPanel />
+          <main
+            className={cn(
+              "flex-1 overflow-auto rounded-xl bg-card px-7 py-6 transition-[padding] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]"
+            )}
+          >
             <Outlet />
           </main>
         </div>

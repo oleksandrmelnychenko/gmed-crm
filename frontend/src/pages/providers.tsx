@@ -1078,7 +1078,7 @@ function ProvidersPage() {
               {permissions.canManageRegistry ? (
                 <Button
                   type="button"
-                  className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+                  className="h-9 rounded-lg px-3.5"
                   onClick={openCreateSheet}
                 >
                   <Plus className="size-4" />

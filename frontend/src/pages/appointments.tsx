@@ -5232,21 +5232,44 @@ function StaffAppointmentsPage() {
   return (
     <>
       <div className="space-y-6">
-        <section className="appointments-hero mb-[10px]">
-          <div className="appointments-hero-header flex flex-col gap-2 xl:grid xl:grid-cols-[minmax(0,1fr)_minmax(520px,620px)] xl:items-start xl:gap-2">
-            <div className="appointments-hero-heading w-full space-y-2">
-              <div className="appointments-hero-intro appointments-hero-copy flex items-stretch gap-3">
-                <div className="space-y-1.5">
-                  <h1 className="text-[34px] font-[200] leading-tight tracking-tight text-slate-950">
-                    Calendar, scheduling and operational follow-up in one workspace.
-                  </h1>
-                  <p className="hidden max-w-2xl text-[13px] leading-5 text-slate-600">
-                    Manage medical slots, concierge bookings, interpreter
-                    handoff, checklist execution and reporting without leaving
-                    the appointment flow.
-                  </p>
-                </div>
+        <section className="relative overflow-hidden rounded-[2rem] border border-slate-200/80 bg-[linear-gradient(135deg,#f8fbff_0%,#eef5ff_42%,#ffffff_100%)] px-6 py-6 shadow-[0_30px_80px_rgba(15,23,42,0.08)]">
+          <div className="absolute inset-y-0 right-0 w-80 bg-[radial-gradient(circle_at_top_right,rgba(14,165,233,0.18),transparent_58%)]" />
+          <div className="relative flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
+            <div className="max-w-3xl space-y-3">
+              <div className="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-white/85 px-3 py-1 text-xs font-medium tracking-[0.16em] text-sky-700 uppercase">
+                <CalendarClock className="size-3.5" />
+                Appointment Control
               </div>
+              <div className="space-y-2">
+                <h1 className="text-3xl font-semibold tracking-tight text-slate-950">
+                  Calendar, scheduling and operational follow-up in one
+                  workspace.
+                </h1>
+                <p className="max-w-2xl text-sm leading-6 text-slate-600">
+                  Manage medical slots, concierge bookings, interpreter handoff,
+                  checklist execution and reporting without leaving the
+                  appointment flow.
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <Button
+                variant="outline"
+                className="rounded-2xl bg-white/80"
+                onClick={refreshAppointments}
+              >
+                <RefreshCw className="size-4" />
+                Refresh
+              </Button>
+              {permissions.canCreate ? (
+                <Button
+                  className="h-9 rounded-lg px-3.5"
+                  onClick={() => openCreateSheetFromDate()}
+                >
+                  <Plus className="size-4" />
+                  New appointment
+                </Button>
+              ) : null}
             </div>
             <div className="appointments-hero-stats grid grid-cols-5 gap-1.5">
               <StatsCard
