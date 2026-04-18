@@ -657,9 +657,9 @@ function card(extra?: string) {
 }
 
 const selectClassName =
-  "h-10 w-full rounded-xl border border-input bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100";
+  "h-10 w-full rounded-xl border border-input bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
 const textareaClassName =
-  "min-h-[104px] w-full rounded-xl border border-input bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100";
+  "min-h-[104px] w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
 
 const RELATION_TYPE_OPTIONS = [
   "spouse",
@@ -1162,11 +1162,14 @@ export function PatientDetailPage() {
   const [vitalsForm, setVitalsForm] = useState<PatientVitalFormState>(blankPatientVitalForm);
   const [cardEntriesBusy, setCardEntriesBusy] = useState(false);
   const [cardEntryForm, setCardEntryForm] = useState<PatientCardEntryFormState>(blankPatientCardEntryForm);
+  const [cardEntrySheetOpen, setCardEntrySheetOpen] = useState(false);
   const [medicalOrdersBusy, setMedicalOrdersBusy] = useState(false);
   const [medicalOrderActionId, setMedicalOrderActionId] = useState("");
   const [medicalOrderForm, setMedicalOrderForm] = useState<PatientMedicalOrderFormState>(blankPatientMedicalOrderForm);
+  const [medicalOrderSheetOpen, setMedicalOrderSheetOpen] = useState(false);
   const [riskScoresBusy, setRiskScoresBusy] = useState(false);
   const [riskScoreForm, setRiskScoreForm] = useState<PatientRiskScoreFormState>(blankPatientRiskScoreForm);
+  const [riskScoreSheetOpen, setRiskScoreSheetOpen] = useState(false);
 
   const [relationEditorOpen, setRelationEditorOpen] = useState(false);
   const [editingRelation, setEditingRelation] = useState<RelationItem | null>(null);
@@ -1293,6 +1296,12 @@ export function PatientDetailPage() {
       : null,
     canViewOperationalSurface
       ? {
+          key: "curators",
+          label: t.patients_assign_owner,
+        }
+      : null,
+    canViewOperationalSurface
+      ? {
           key: "timeline",
           label: t.patients_timeline,
         }
@@ -1414,6 +1423,7 @@ export function PatientDetailPage() {
 
   const reload = useCallback(() => setVersion((v) => v + 1), []);
   const reloadTab = useCallback(() => setTabVersion((v) => v + 1), []);
+  void reloadTab;
 
   const handleTabChange = useCallback(
     (nextTab: string) => {
@@ -1758,7 +1768,7 @@ export function PatientDetailPage() {
         ...blankWorkflowChecklistForm(),
         ownerUserId: current.ownerUserId,
       }));
-      reloadTab();
+      reload();
     } catch (error) {
       setTabActionError(error instanceof Error ? error.message : t.common_failed_create);
     } finally {
@@ -1775,7 +1785,7 @@ export function PatientDetailPage() {
         method: "POST",
       });
       setNotice(t.common_active);
-      reloadTab();
+      reload();
     } catch (error) {
       setTabActionError(error instanceof Error ? error.message : t.common_failed_update);
     } finally {
@@ -1841,7 +1851,7 @@ export function PatientDetailPage() {
       setEditingRelation(null);
       setRelationForm(blankRelationForm());
       setRelationPatientSearch("");
-      reloadTab();
+      reload();
     } catch (error) {
       setTabActionError(error instanceof Error ? error.message : t.common_failed_update);
     } finally {
@@ -1857,7 +1867,7 @@ export function PatientDetailPage() {
         method: "POST",
       });
       setNotice(t.common_active);
-      reloadTab();
+      reload();
     } catch (error) {
       setTabActionError(error instanceof Error ? error.message : t.common_failed_update);
     }
@@ -1891,7 +1901,7 @@ export function PatientDetailPage() {
       setNotice(t.common_active);
       setDocumentUploadOpen(false);
       setDocumentUploadForm(blankDocumentUploadForm());
-      reloadTab();
+      reload();
     } catch (error) {
       setTabActionError(error instanceof Error ? error.message : t.common_failed_create);
     } finally {
@@ -1920,7 +1930,7 @@ export function PatientDetailPage() {
       setNotice(t.common_active);
       setContractCreateOpen(false);
       setContractCreateForm(blankContractForm());
-      reloadTab();
+      reload();
     } catch (error) {
       setTabActionError(error instanceof Error ? error.message : t.common_failed_create);
     } finally {
@@ -1953,7 +1963,7 @@ export function PatientDetailPage() {
       setNotice(t.common_active);
       setContractStatusId("");
       setContractStatusForm(blankContractForm());
-      reloadTab();
+      reload();
     } catch (error) {
       setTabActionError(error instanceof Error ? error.message : t.common_failed_update);
     } finally {
@@ -1985,7 +1995,7 @@ export function PatientDetailPage() {
         }),
       });
       setNotice(t.common_active);
-      reloadTab();
+      reload();
     } catch (error) {
       setTabActionError(error instanceof Error ? error.message : t.common_failed_update);
     } finally {
@@ -2009,7 +2019,7 @@ export function PatientDetailPage() {
       setDunningEvents((current) => [...current, created]);
       setDunningNote("");
       setNotice(t.common_active);
-      reloadTab();
+      reload();
     } catch (error) {
       setTabActionError(error instanceof Error ? error.message : t.common_failed_create);
     } finally {
@@ -2211,7 +2221,7 @@ export function PatientDetailPage() {
       setCardEntries(result.items ?? []);
       setCardEntryForm(blankPatientCardEntryForm());
       setNotice("Clinical card entry saved.");
-      reloadTab();
+      reload();
     } catch (error) {
       setTabActionError(error instanceof Error ? error.message : t.common_failed_create);
     } finally {
@@ -2260,7 +2270,7 @@ export function PatientDetailPage() {
       setMedicalOrders(result.items ?? []);
       setMedicalOrderForm(blankPatientMedicalOrderForm());
       setNotice("Medical order saved.");
-      reloadTab();
+      reload();
     } catch (error) {
       setTabActionError(error instanceof Error ? error.message : t.common_failed_create);
     } finally {
@@ -2284,7 +2294,7 @@ export function PatientDetailPage() {
       const result = await apiFetch<{ items: PatientMedicalOrder[] }>(`/patients/${id}/medical-orders`);
       setMedicalOrders(result.items ?? []);
       setNotice(status === "completed" ? "Medical order completed." : "Medical order cancelled.");
-      reloadTab();
+      reload();
     } catch (error) {
       setTabActionError(error instanceof Error ? error.message : t.common_failed_update);
     } finally {
@@ -2347,7 +2357,7 @@ export function PatientDetailPage() {
       setRiskScores(result.items ?? []);
       setRiskScoreForm(blankPatientRiskScoreForm());
       setNotice("Risk score saved.");
-      reloadTab();
+      reload();
     } catch (error) {
       setTabActionError(error instanceof Error ? error.message : t.common_failed_create);
     } finally {
@@ -2810,16 +2820,9 @@ export function PatientDetailPage() {
                   ) : null
                 }
               >
-                <p className="text-sm text-muted-foreground">
-                  {l(
-                    "Erfassen Sie Vitalwerte des Patienten mit einem konkreten Messzeitpunkt.",
-                    "Фиксируйте показатели пациента с точным временем измерения.",
-                    "Capture patient vitals with a concrete measurement timestamp.",
-                  )}
-                </p>
                 <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 <div className="space-y-2 xl:col-span-2">
-                  <Label htmlFor="patient-vitals-measured-at">{l("Gemessen am", "Измерено", "Measured at")}</Label>
+                  <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-vitals-measured-at">{l("Gemessen am", "Измерено", "Measured at")}</Label>
                   <Input
                     id="patient-vitals-measured-at"
                     type="datetime-local"
@@ -2832,7 +2835,7 @@ export function PatientDetailPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="patient-vitals-bp-systolic">{l("RR systolisch", "Систолическое АД", "BP systolic")}</Label>
+                  <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-vitals-bp-systolic">{l("RR systolisch", "Систолическое АД", "BP systolic")}</Label>
                   <Input
                     id="patient-vitals-bp-systolic"
                     inputMode="decimal"
@@ -2845,7 +2848,7 @@ export function PatientDetailPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="patient-vitals-bp-diastolic">{l("RR diastolisch", "Диастолическое АД", "BP diastolic")}</Label>
+                  <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-vitals-bp-diastolic">{l("RR diastolisch", "Диастолическое АД", "BP diastolic")}</Label>
                   <Input
                     id="patient-vitals-bp-diastolic"
                     inputMode="decimal"
@@ -2858,7 +2861,7 @@ export function PatientDetailPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="patient-vitals-heart-rate">{l("Herzfrequenz", "Пульс", "Heart rate")}</Label>
+                  <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-vitals-heart-rate">{l("Herzfrequenz", "Пульс", "Heart rate")}</Label>
                   <Input
                     id="patient-vitals-heart-rate"
                     inputMode="numeric"
@@ -2871,7 +2874,7 @@ export function PatientDetailPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="patient-vitals-weight">{l("Gewicht (kg)", "Вес (кг)", "Weight (kg)")}</Label>
+                  <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-vitals-weight">{l("Gewicht (kg)", "Вес (кг)", "Weight (kg)")}</Label>
                   <Input
                     id="patient-vitals-weight"
                     inputMode="decimal"
@@ -2884,7 +2887,7 @@ export function PatientDetailPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="patient-vitals-height">{l("Größe (cm)", "Рост (см)", "Height (cm)")}</Label>
+                  <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-vitals-height">{l("Größe (cm)", "Рост (см)", "Height (cm)")}</Label>
                   <Input
                     id="patient-vitals-height"
                     inputMode="decimal"
@@ -2897,7 +2900,7 @@ export function PatientDetailPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="patient-vitals-bmi">BMI</Label>
+                  <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-vitals-bmi">BMI</Label>
                   <Input
                     id="patient-vitals-bmi"
                     inputMode="decimal"
@@ -2911,7 +2914,7 @@ export function PatientDetailPage() {
                 </div>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="patient-vitals-notes">{l("Messnotizen", "Заметки к измерению", "Measurement notes")}</Label>
+                  <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-vitals-notes">{l("Messnotizen", "Заметки к измерению", "Measurement notes")}</Label>
                   <textarea
                     id="patient-vitals-notes"
                     className={textareaClassName}
@@ -2941,22 +2944,22 @@ export function PatientDetailPage() {
           ) : null}
 
           {(canManagePatientCardEntries || cardEntries.length > 0) ? (
-            <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
               <div className={card("p-6")}>
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <div>
-                    <h2 className="text-sm font-semibold text-slate-950">{l("Klinisches Kartenprotokoll", "Журнал клинической карты", "Clinical card log")}</h2>
-                    <p className="mt-1 text-sm text-slate-500">
-                      {l(
-                        "Kategorisierte Längsverlaufseinträge außerhalb strukturierter Anamneseblöcke.",
-                        "Категоризированные продольные записи вне структурированных разделов анамнеза.",
-                        "Categorized longitudinal entries outside structured anamnesis sections.",
-                      )}
-                    </p>
+                    <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground before:content-[''] before:h-2 before:w-2 before:shrink-0 before:rounded-full before:bg-[var(--brand)]">{l("Klinisches Kartenprotokoll", "Журнал клинической карты", "Clinical card log")}</h2>
                   </div>
-                  <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
-                    {l(`${cardEntries.length} Einträge`, `${cardEntries.length} записей`, `${cardEntries.length} entries`)}
-                  </Badge>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
+                      {l(`${cardEntries.length} Einträge`, `${cardEntries.length} записей`, `${cardEntries.length} entries`)}
+                    </Badge>
+                    {canManagePatientCardEntries ? (
+                      <Button size="sm" className="h-8 rounded-lg gap-1.5" onClick={() => setCardEntrySheetOpen(true)}>
+                        <Plus className="size-3.5" />
+                        {l("Hinzufügen", "Добавить", "Add")}
+                      </Button>
+                    ) : null}
+                  </div>
                 </div>
 
                 {cardEntries.length === 0 ? (
@@ -2987,28 +2990,19 @@ export function PatientDetailPage() {
                   </div>
                 )}
               </div>
+          ) : null}
 
-              {canManagePatientCardEntries ? (
-                <form className={card("p-6")} onSubmit={handleCreatePatientCardEntry}>
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <h2 className="text-sm font-semibold text-slate-950">{l("Karteneintrag hinzufügen", "Добавить запись в карту", "Add card entry")}</h2>
-                      <p className="mt-1 text-sm text-slate-500">
-                        {l(
-                          "Dokumentieren Sie medizinische Updates, Patientenmeldungen und Nachverfolgung der Klinik außerhalb des strukturierten Fallschemas.",
-                          "Фиксируйте медицинские обновления, сообщения пациента и follow-up от провайдера вне структурированной схемы кейса.",
-                          "Log medical updates, patient reports and provider follow-up outside the structured case schema.",
-                        )}
-                      </p>
-                    </div>
-                    <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
-                      {l("Längsverlauf", "Продольная запись", "Longitudinal record")}
-                    </Badge>
-                  </div>
-
+          {canManagePatientCardEntries ? (
+            <Sheet open={cardEntrySheetOpen} onOpenChange={setCardEntrySheetOpen}>
+              <SheetContent side="right" className="w-full sm:max-w-[540px] gap-0">
+                <SheetHeader className="px-4 py-3">
+                  <SheetTitle>{l("Karteneintrag hinzufügen", "Добавить запись в карту", "Add card entry")}</SheetTitle>
+                </SheetHeader>
+                <form className="flex flex-col flex-1 min-h-0" onSubmit={async (event) => { await handleCreatePatientCardEntry(event); setCardEntrySheetOpen(false); }}>
+                  <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
                   <div className="mt-4 grid gap-4 md:grid-cols-2">
                     <div className="space-y-2">
-                      <Label htmlFor="patient-card-entry-date">{l("Eintragsdatum", "Дата записи", "Entry date")}</Label>
+                      <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-card-entry-date">{l("Eintragsdatum", "Дата записи", "Entry date")}</Label>
                       <Input
                         id="patient-card-entry-date"
                         type="datetime-local"
@@ -3020,7 +3014,7 @@ export function PatientDetailPage() {
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="patient-card-entry-category">{l("Kategorie", "Категория", "Category")}</Label>
+                      <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-card-entry-category">{l("Kategorie", "Категория", "Category")}</Label>
                       <ShadSelect
                         value={cardEntryForm.category}
                         onValueChange={(value) =>
@@ -3031,7 +3025,11 @@ export function PatientDetailPage() {
                         }
                       >
                         <SelectTrigger id="patient-card-entry-category" className="w-full">
-                          <SelectValue placeholder={l("Kategorie wählen", "Выберите категорию", "Select category")} />
+                          <SelectValue placeholder={l("Kategorie wählen", "Выберите категорию", "Select category")}>
+                            {cardEntryForm.category
+                              ? patientCardEntryCategoryLabel(cardEntryForm.category)
+                              : null}
+                          </SelectValue>
                         </SelectTrigger>
                         <SelectContent>
                           {PATIENT_CARD_ENTRY_CATEGORY_OPTIONS.map((option) => (
@@ -3045,7 +3043,7 @@ export function PatientDetailPage() {
                   </div>
 
                   <div className="mt-4 space-y-2">
-                    <Label htmlFor="patient-card-entry-source">{l("Quelle", "Источник", "Source")}</Label>
+                    <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-card-entry-source">{l("Quelle", "Источник", "Source")}</Label>
                     <Input
                       id="patient-card-entry-source"
                       value={cardEntryForm.source}
@@ -3061,7 +3059,7 @@ export function PatientDetailPage() {
                   </div>
 
                   <div className="mt-4 space-y-2">
-                    <Label htmlFor="patient-card-entry-content">{l("Inhalt", "Содержание", "Entry content")}</Label>
+                    <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-card-entry-content">{l("Inhalt", "Содержание", "Entry content")}</Label>
                     <textarea
                       id="patient-card-entry-content"
                       className={textareaClassName}
@@ -3078,38 +3076,38 @@ export function PatientDetailPage() {
                     />
                   </div>
 
-                  <div className="mt-4 flex justify-end">
-                    <Button
-                      type="submit"
-                      className="rounded-xl bg-slate-950 text-white hover:bg-slate-800"
-                      disabled={cardEntriesBusy}
-                    >
-                      {cardEntriesBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
-                      {l("Eintrag speichern", "Сохранить запись", "Save card entry")}
+                  </div>
+                  <div className="flex justify-end gap-2 px-4 py-3">
+                    <Button type="button" variant="outline" size="sm" className="h-8 rounded-lg" onClick={() => setCardEntrySheetOpen(false)}>
+                      {t.common_cancel}
+                    </Button>
+                    <Button type="submit" size="sm" className="h-8 rounded-lg gap-1.5" disabled={cardEntriesBusy}>
+                      {cardEntriesBusy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
+                      {t.common_save}
                     </Button>
                   </div>
                 </form>
-              ) : null}
-            </div>
+              </SheetContent>
+            </Sheet>
           ) : null}
 
           {(canManagePatientMedicalOrders || medicalOrders.length > 0) ? (
-            <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
               <div className={card("p-6")}>
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <div>
-                    <h2 className="text-sm font-semibold text-slate-950">{l("Medizinische Anordnungen", "Медицинские назначения", "Medical orders")}</h2>
-                    <p className="mt-1 text-sm text-slate-500">
-                      {l(
-                        "Strukturierte ärztliche oder therapeutische Anordnungen, die über das Fallformular hinaus sichtbar bleiben sollen.",
-                        "Структурированные врачебные или терапевтические назначения, которые должны оставаться видимыми вне формы кейса.",
-                        "Structured physician or therapeutic orders that should stay visible beyond the case form.",
-                      )}
-                    </p>
+                    <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground before:content-[''] before:h-2 before:w-2 before:shrink-0 before:rounded-full before:bg-[var(--brand)]">{l("Medizinische Anordnungen", "Медицинские назначения", "Medical orders")}</h2>
                   </div>
-                  <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
-                    {l(`${medicalOrders.length} назначений`, `${medicalOrders.length} назначений`, `${medicalOrders.length} orders`)}
-                  </Badge>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
+                      {l(`${medicalOrders.length} назначений`, `${medicalOrders.length} назначений`, `${medicalOrders.length} orders`)}
+                    </Badge>
+                    {canManagePatientMedicalOrders ? (
+                      <Button size="sm" className="h-8 rounded-lg gap-1.5" onClick={() => setMedicalOrderSheetOpen(true)}>
+                        <Plus className="size-3.5" />
+                        {l("Hinzufügen", "Добавить", "Add")}
+                      </Button>
+                    ) : null}
+                  </div>
                 </div>
 
                 {medicalOrders.length === 0 ? (
@@ -3176,12 +3174,19 @@ export function PatientDetailPage() {
                   </div>
                 )}
               </div>
+          ) : null}
 
-              {canManagePatientMedicalOrders ? (
-                <form className={card("p-6")} onSubmit={handleCreatePatientMedicalOrder}>
-                  <div className="flex items-center justify-between gap-3">
+          {canManagePatientMedicalOrders ? (
+            <Sheet open={medicalOrderSheetOpen} onOpenChange={setMedicalOrderSheetOpen}>
+              <SheetContent side="right" className="w-full sm:max-w-[540px] gap-0">
+                <SheetHeader className="px-4 py-3">
+                  <SheetTitle>{l("Medizinische Anordnung hinzufügen", "Добавить медицинское назначение", "Add medical order")}</SheetTitle>
+                </SheetHeader>
+                <form className="flex flex-col flex-1 min-h-0" onSubmit={async (event) => { await handleCreatePatientMedicalOrder(event); setMedicalOrderSheetOpen(false); }}>
+                  <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+                  <div className="hidden">
                     <div>
-                      <h2 className="text-sm font-semibold text-slate-950">{l("Medizinische Anordnung hinzufügen", "Добавить медицинское назначение", "Add medical order")}</h2>
+                      <h2 className="sr-only">{l("Medizinische Anordnung hinzufügen", "Добавить медицинское назначение", "Add medical order")}</h2>
                       <p className="mt-1 text-sm text-slate-500">
                         {l(
                           "Therapiepläne, Nachkontrollen und Behandlungsanweisungen strukturiert erfassen.",
@@ -3197,7 +3202,7 @@ export function PatientDetailPage() {
 
                   <div className="mt-4 grid gap-4 md:grid-cols-2">
                     <div className="space-y-2">
-                      <Label htmlFor="patient-medical-order-date">{l("Anordnungsdatum", "Дата назначения", "Order date")}</Label>
+                      <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-medical-order-date">{l("Anordnungsdatum", "Дата назначения", "Order date")}</Label>
                       <Input
                         id="patient-medical-order-date"
                         type="datetime-local"
@@ -3209,7 +3214,7 @@ export function PatientDetailPage() {
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="patient-medical-order-type">{l("Anordnungstyp", "Тип назначения", "Order type")}</Label>
+                      <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-medical-order-type">{l("Anordnungstyp", "Тип назначения", "Order type")}</Label>
                       <ShadSelect
                         value={medicalOrderForm.orderType}
                         onValueChange={(value) =>
@@ -3220,7 +3225,11 @@ export function PatientDetailPage() {
                         }
                       >
                         <SelectTrigger id="patient-medical-order-type" className="w-full">
-                          <SelectValue placeholder={l("Typ wählen", "Выберите тип", "Select order type")} />
+                          <SelectValue placeholder={l("Typ wählen", "Выберите тип", "Select order type")}>
+                            {medicalOrderForm.orderType
+                              ? patientMedicalOrderTypeLabel(medicalOrderForm.orderType)
+                              : null}
+                          </SelectValue>
                         </SelectTrigger>
                         <SelectContent>
                           {PATIENT_MEDICAL_ORDER_TYPE_OPTIONS.map((option) => (
@@ -3232,7 +3241,7 @@ export function PatientDetailPage() {
                       </ShadSelect>
                     </div>
                     <div className="space-y-2 md:col-span-2">
-                      <Label htmlFor="patient-medical-order-title">{l("Titel", "Название", "Title")}</Label>
+                      <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-medical-order-title">{l("Titel", "Название", "Title")}</Label>
                       <Input
                         id="patient-medical-order-title"
                         value={medicalOrderForm.title}
@@ -3244,7 +3253,7 @@ export function PatientDetailPage() {
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="patient-medical-order-due-date">{l("Fälligkeitsdatum", "Срок", "Due date")}</Label>
+                      <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-medical-order-due-date">{l("Fälligkeitsdatum", "Срок", "Due date")}</Label>
                       <Input
                         id="patient-medical-order-due-date"
                         type="date"
@@ -3255,7 +3264,7 @@ export function PatientDetailPage() {
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="patient-medical-order-source">{l("Quelle", "Источник", "Source")}</Label>
+                      <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-medical-order-source">{l("Quelle", "Источник", "Source")}</Label>
                       <Input
                         id="patient-medical-order-source"
                         value={medicalOrderForm.source}
@@ -3268,7 +3277,7 @@ export function PatientDetailPage() {
                   </div>
 
                   <div className="mt-4 space-y-2">
-                    <Label htmlFor="patient-medical-order-instructions">{l("Anweisungen", "Инструкции", "Instructions")}</Label>
+                    <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-medical-order-instructions">{l("Anweisungen", "Инструкции", "Instructions")}</Label>
                     <textarea
                       id="patient-medical-order-instructions"
                       className={textareaClassName}
@@ -3285,38 +3294,38 @@ export function PatientDetailPage() {
                     />
                   </div>
 
-                  <div className="mt-4 flex justify-end">
-                    <Button
-                      type="submit"
-                      className="rounded-xl bg-slate-950 text-white hover:bg-slate-800"
-                      disabled={medicalOrdersBusy}
-                    >
-                      {medicalOrdersBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
-                      {l("Anordnung speichern", "Сохранить назначение", "Save medical order")}
+                  </div>
+                  <div className="flex justify-end gap-2 px-4 py-3">
+                    <Button type="button" variant="outline" size="sm" className="h-8 rounded-lg" onClick={() => setMedicalOrderSheetOpen(false)}>
+                      {t.common_cancel}
+                    </Button>
+                    <Button type="submit" size="sm" className="h-8 rounded-lg gap-1.5" disabled={medicalOrdersBusy}>
+                      {medicalOrdersBusy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
+                      {t.common_save}
                     </Button>
                   </div>
                 </form>
-              ) : null}
-            </div>
+              </SheetContent>
+            </Sheet>
           ) : null}
 
           {(canManagePatientRiskScores || riskScores.length > 0) ? (
-            <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
               <div className={card("p-6")}>
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <div>
-                    <h2 className="text-sm font-semibold text-slate-950">{l("Risikoscores", "Риск-скоры", "Risk scores")}</h2>
-                    <p className="mt-1 text-sm text-slate-500">
-                      {l(
-                        "Strukturierter Verlauf patientenbezogener Risikoscores jenseits fachbereichsspezifischer Warnzeichen.",
-                        "Структурированная история риск-скоров на уровне пациента вне узкоспециальных красных флагов.",
-                        "Patient-level structured risk score history beyond specialty-specific red flags.",
-                      )}
-                    </p>
+                    <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground before:content-[''] before:h-2 before:w-2 before:shrink-0 before:rounded-full before:bg-[var(--brand)]">{l("Risikoscores", "Риск-скоры", "Risk scores")}</h2>
                   </div>
-                  <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
-                    {l(`${riskScores.length} Scores`, `${riskScores.length} скоров`, `${riskScores.length} scores`)}
-                  </Badge>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
+                      {l(`${riskScores.length} Scores`, `${riskScores.length} скоров`, `${riskScores.length} scores`)}
+                    </Badge>
+                    {canManagePatientRiskScores ? (
+                      <Button size="sm" className="h-8 rounded-lg gap-1.5" onClick={() => setRiskScoreSheetOpen(true)}>
+                        <Plus className="size-3.5" />
+                        {l("Hinzufügen", "Добавить", "Add")}
+                      </Button>
+                    ) : null}
+                  </div>
                 </div>
 
                 {riskScores.length === 0 ? (
@@ -3363,12 +3372,19 @@ export function PatientDetailPage() {
                   </div>
                 )}
               </div>
+          ) : null}
 
-              {canManagePatientRiskScores ? (
-                <form className={card("p-6")} onSubmit={handleCreatePatientRiskScore}>
-                  <div className="flex items-center justify-between gap-3">
+          {canManagePatientRiskScores ? (
+            <Sheet open={riskScoreSheetOpen} onOpenChange={setRiskScoreSheetOpen}>
+              <SheetContent side="right" className="w-full sm:max-w-[540px] gap-0">
+                <SheetHeader className="px-4 py-3">
+                  <SheetTitle>{l("Risikoscore hinzufügen", "Добавить риск-скор", "Add risk score")}</SheetTitle>
+                </SheetHeader>
+                <form className="flex flex-col flex-1 min-h-0" onSubmit={async (event) => { await handleCreatePatientRiskScore(event); setRiskScoreSheetOpen(false); }}>
+                  <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+                  <div className="hidden">
                     <div>
-                      <h2 className="text-sm font-semibold text-slate-950">{l("Risikoscore hinzufügen", "Добавить риск-скор", "Add risk score")}</h2>
+                      <h2 className="sr-only">{l("Risikoscore hinzufügen", "Добавить риск-скор", "Add risk score")}</h2>
                       <p className="mt-1 text-sm text-slate-500">
                         {l(
                           "Strukturiertes Risikoscoring auf Patientenebene mit optionalen JSON-Eingaben erfassen.",
@@ -3384,7 +3400,7 @@ export function PatientDetailPage() {
 
                   <div className="mt-4 grid gap-4 md:grid-cols-2">
                     <div className="space-y-2">
-                      <Label htmlFor="patient-risk-score-computed-at">{l("Berechnet am", "Рассчитано", "Computed at")}</Label>
+                      <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-risk-score-computed-at">{l("Berechnet am", "Рассчитано", "Computed at")}</Label>
                       <Input
                         id="patient-risk-score-computed-at"
                         type="datetime-local"
@@ -3396,7 +3412,7 @@ export function PatientDetailPage() {
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="patient-risk-score-type">{l("Score-Typ", "Тип скора", "Score type")}</Label>
+                      <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-risk-score-type">{l("Score-Typ", "Тип скора", "Score type")}</Label>
                       <ShadSelect
                         value={riskScoreForm.scoreType}
                         onValueChange={(value) =>
@@ -3407,7 +3423,11 @@ export function PatientDetailPage() {
                         }
                       >
                         <SelectTrigger id="patient-risk-score-type" className="w-full">
-                          <SelectValue placeholder={l("Тип wählen", "Выберите тип", "Select score type")} />
+                          <SelectValue placeholder={l("Typ wählen", "Выберите тип", "Select score type")}>
+                            {riskScoreForm.scoreType
+                              ? patientRiskScoreTypeLabel(riskScoreForm.scoreType)
+                              : null}
+                          </SelectValue>
                         </SelectTrigger>
                         <SelectContent>
                           {PATIENT_RISK_SCORE_TYPE_OPTIONS.map((option) => (
@@ -3419,7 +3439,7 @@ export function PatientDetailPage() {
                       </ShadSelect>
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="patient-risk-score-value">{l("Wert", "Значение", "Score value")}</Label>
+                      <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-risk-score-value">{l("Wert", "Значение", "Score value")}</Label>
                       <Input
                         id="patient-risk-score-value"
                         inputMode="decimal"
@@ -3432,7 +3452,7 @@ export function PatientDetailPage() {
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="patient-risk-score-scale">{l("Skalenmaximum", "Максимум шкалы", "Scale max")}</Label>
+                      <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-risk-score-scale">{l("Skalenmaximum", "Максимум шкалы", "Scale max")}</Label>
                       <Input
                         id="patient-risk-score-scale"
                         inputMode="decimal"
@@ -3444,7 +3464,7 @@ export function PatientDetailPage() {
                       />
                     </div>
                     <div className="space-y-2 md:col-span-2">
-                      <Label htmlFor="patient-risk-score-source">{l("Quelle", "Источник", "Source")}</Label>
+                      <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-risk-score-source">{l("Quelle", "Источник", "Source")}</Label>
                       <Input
                         id="patient-risk-score-source"
                         value={riskScoreForm.source}
@@ -3461,7 +3481,7 @@ export function PatientDetailPage() {
                   </div>
 
                   <div className="mt-4 space-y-2">
-                    <Label htmlFor="patient-risk-score-interpretation">{l("Interpretation", "Интерпретация", "Interpretation")}</Label>
+                    <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-risk-score-interpretation">{l("Interpretation", "Интерпретация", "Interpretation")}</Label>
                     <textarea
                       id="patient-risk-score-interpretation"
                       className={textareaClassName}
@@ -3478,7 +3498,7 @@ export function PatientDetailPage() {
                   </div>
 
                   <div className="mt-4 space-y-2">
-                    <Label htmlFor="patient-risk-score-inputs">{l("Strukturierte Eingaben (JSON-Objekt)", "Структурированные входные данные (JSON-объект)", "Structured inputs (JSON object)")}</Label>
+                    <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-risk-score-inputs">{l("Strukturierte Eingaben (JSON-Objekt)", "Структурированные входные данные (JSON-объект)", "Structured inputs (JSON object)")}</Label>
                     <textarea
                       id="patient-risk-score-inputs"
                       className={textareaClassName}
@@ -3490,19 +3510,19 @@ export function PatientDetailPage() {
                     />
                   </div>
 
-                  <div className="mt-4 flex justify-end">
-                    <Button
-                      type="submit"
-                      className="rounded-xl bg-slate-950 text-white hover:bg-slate-800"
-                      disabled={riskScoresBusy}
-                    >
-                      {riskScoresBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
-                      {l("Risikoscore speichern", "Сохранить риск-скор", "Save risk score")}
+                  </div>
+                  <div className="flex justify-end gap-2 px-4 py-3">
+                    <Button type="button" variant="outline" size="sm" className="h-8 rounded-lg" onClick={() => setRiskScoreSheetOpen(false)}>
+                      {t.common_cancel}
+                    </Button>
+                    <Button type="submit" size="sm" className="h-8 rounded-lg gap-1.5" disabled={riskScoresBusy}>
+                      {riskScoresBusy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
+                      {t.common_save}
                     </Button>
                   </div>
                 </form>
-              ) : null}
-            </div>
+              </SheetContent>
+            </Sheet>
           ) : null}
 
           {/* Notes */}
@@ -3524,10 +3544,12 @@ export function PatientDetailPage() {
             </FormSection>
           )}
 
-          {/* Assignments */}
+        </TabsContent>
+
+        <TabsContent value="curators" className="mt-4 min-h-[400px]">
           <div className={card("p-6")}>
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-sm font-semibold text-slate-950">{t.patients_assign_owner}</h2>
+              <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground before:content-[''] before:h-2 before:w-2 before:shrink-0 before:rounded-full before:bg-[var(--brand)]">{t.patients_assign_owner}</h2>
               <span className="text-xs text-slate-400">{assignments.length} {t.patients_records}</span>
             </div>
 
@@ -4135,7 +4157,7 @@ export function PatientDetailPage() {
               </div>
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2 md:col-span-2">
-                  <Label htmlFor="patient-workflow-item-text">{l("Checklistenpunkt", "Пункт чеклиста", "Checklist item")}</Label>
+                  <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-workflow-item-text">{l("Checklistenpunkt", "Пункт чеклиста", "Checklist item")}</Label>
                   <Input
                     id="patient-workflow-item-text"
                     value={workflowForm.itemText}
@@ -4154,7 +4176,7 @@ export function PatientDetailPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="patient-workflow-owner">{l("Verantwortlich", "Ответственный", "Owner")}</Label>
+                  <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-workflow-owner">{l("Verantwortlich", "Ответственный", "Owner")}</Label>
                   <select
                     id="patient-workflow-owner"
                     className={selectClassName}
@@ -4175,7 +4197,7 @@ export function PatientDetailPage() {
                   </select>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="patient-workflow-priority">{l("Priorität", "Приоритет", "Priority")}</Label>
+                  <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-workflow-priority">{l("Priorität", "Приоритет", "Priority")}</Label>
                   <select
                     id="patient-workflow-priority"
                     className={selectClassName}
@@ -4195,7 +4217,7 @@ export function PatientDetailPage() {
                   </select>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="patient-workflow-due">{l("Fällig am", "Срок до", "Due at")}</Label>
+                  <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-workflow-due">{l("Fällig am", "Срок до", "Due at")}</Label>
                   <Input
                     id="patient-workflow-due"
                     type="datetime-local"

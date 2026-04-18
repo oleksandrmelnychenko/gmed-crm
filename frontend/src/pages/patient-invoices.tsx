@@ -440,7 +440,7 @@ export function PatientInvoicesPage() {
               <input
                 id="invoice-payment-proof"
                 type="file"
-                className="block w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900"
+                className="block w-full rounded-xl border border-slate-200 bg-card px-3 py-2 text-sm text-foreground"
                 onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)}
               />
             </div>
@@ -448,7 +448,7 @@ export function PatientInvoicesPage() {
               <Label htmlFor="invoice-payment-proof-note">{l("Notiz", "Заметка", "Note")}</Label>
               <textarea
                 id="invoice-payment-proof-note"
-                className="min-h-[110px] w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                className="min-h-[110px] w-full rounded-xl border border-slate-200 bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
                 placeholder={l("Optionale Überweisungsreferenz, Zahlungsdatum oder Erläuterung.", "Необязательная ссылка на перевод, дата оплаты или пояснение.", "Optional transfer reference, payment date or clarification.")}
                 value={uploadNote}
                 onChange={(event) => setUploadNote(event.target.value)}

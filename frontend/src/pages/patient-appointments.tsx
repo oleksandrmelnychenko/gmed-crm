@@ -425,7 +425,7 @@ export function PatientAppointmentsPage() {
                       event.target.value === "medical" ? current.carePathKind : "regular",
                   }))
                 }
-                className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                className="h-11 w-full rounded-2xl border border-slate-200 bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
               >
                 <option value="medical">{l("Medizinisch", "Медицинский", "Medical")}</option>
                 <option value="non_medical">{l("Nicht medizinisch", "Немедицинский", "Non-medical")}</option>
@@ -441,7 +441,7 @@ export function PatientAppointmentsPage() {
                   }))
                 }
                 disabled={requestForm.appointmentType !== "medical"}
-                className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                className="h-11 w-full rounded-2xl border border-slate-200 bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
               >
                 <option value="regular">{l("Regulär", "Обычный", "Regular")}</option>
                 <option value="preventive">{l("Präventiv", "Профилактический", "Preventive")}</option>
@@ -455,7 +455,7 @@ export function PatientAppointmentsPage() {
                   type="date"
                   value={requestForm.preferredDateFrom}
                   onChange={(event) => setRequestForm((current) => ({ ...current, preferredDateFrom: event.target.value }))}
-                  className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                  className="h-11 w-full rounded-2xl border border-slate-200 bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
                 />
               </Field>
               <Field label={l("Bevorzugt bis", "Предпочтительно до", "Preferred to")}>
@@ -463,7 +463,7 @@ export function PatientAppointmentsPage() {
                   type="date"
                   value={requestForm.preferredDateTo}
                   onChange={(event) => setRequestForm((current) => ({ ...current, preferredDateTo: event.target.value }))}
-                  className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                  className="h-11 w-full rounded-2xl border border-slate-200 bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
                 />
               </Field>
             </div>
@@ -471,7 +471,7 @@ export function PatientAppointmentsPage() {
               <select
                 value={requestForm.preferredTimeOfDay}
                 onChange={(event) => setRequestForm((current) => ({ ...current, preferredTimeOfDay: event.target.value }))}
-                className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                className="h-11 w-full rounded-2xl border border-slate-200 bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
               >
                 <option value="flexible">{l("Flexibel", "Гибко", "Flexible")}</option>
                 <option value="morning">{l("Morgens", "Утром", "Morning")}</option>
@@ -485,7 +485,7 @@ export function PatientAppointmentsPage() {
                 value={requestForm.specialty}
                 onChange={(event) => setRequestForm((current) => ({ ...current, specialty: event.target.value }))}
                 placeholder={l("Kardiologie, Diagnostik, Transfer, Hotel usw.", "Кардиология, диагностика, трансфер, отель и т. д.", "Cardiology, diagnostics, transfer, hotel, etc.")}
-                className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                className="h-11 w-full rounded-2xl border border-slate-200 bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
               />
             </Field>
             <Field label={l("Ortpräferenz", "Предпочтительное место", "Location preference")}>
@@ -493,7 +493,7 @@ export function PatientAppointmentsPage() {
                 value={requestForm.location}
                 onChange={(event) => setRequestForm((current) => ({ ...current, location: event.target.value }))}
                 placeholder={l("Klinik, Stadt oder Remote-Anfrage", "Клиника, город или удаленный формат", "Clinic, city or remote request")}
-                className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                className="h-11 w-full rounded-2xl border border-slate-200 bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
               />
             </Field>
             <Field label={l("Anlass", "Причина", "Reason")}>
@@ -501,7 +501,7 @@ export function PatientAppointmentsPage() {
                 value={requestForm.reason}
                 onChange={(event) => setRequestForm((current) => ({ ...current, reason: event.target.value }))}
                 placeholder={l("Was benötigen Sie und was sollte das Team berücksichtigen?", "Что вам нужно и что команде следует учесть?", "What do you need and what should the team consider?")}
-                className="min-h-[120px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                className="min-h-[120px] w-full rounded-2xl border border-slate-200 bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
               />
             </Field>
             <Field label={l("Zusätzliche Notiz", "Дополнительная заметка", "Additional note")}>
@@ -509,7 +509,7 @@ export function PatientAppointmentsPage() {
                 value={requestForm.notes}
                 onChange={(event) => setRequestForm((current) => ({ ...current, notes: event.target.value }))}
                 placeholder={l("Optionaler logistischer oder klinischer Kontext.", "Необязательный логистический или клинический контекст.", "Optional logistical or clinical context.")}
-                className="min-h-[100px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                className="min-h-[100px] w-full rounded-2xl border border-slate-200 bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
               />
             </Field>
             {requestError ? (
@@ -575,8 +575,10 @@ function MilestoneDetail({
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <label className="block space-y-2">
-      <span className="text-sm font-medium text-slate-700">{label}</span>
+    <label className="flex flex-col gap-1.5">
+      <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
+        {label}
+      </span>
       {children}
     </label>
   );

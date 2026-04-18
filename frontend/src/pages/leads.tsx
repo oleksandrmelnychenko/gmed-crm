@@ -796,7 +796,7 @@ export function LeadsPage() {
                 <select
                   value={filters.status}
                   onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value }))}
-                  className="h-10 w-full rounded-xl border border-input bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                  className="h-10 w-full rounded-xl border border-input bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
                 >
                   <option value="">{t.providers_all}</option>
                   {STATUS_OPTIONS.map((status) => (
@@ -819,7 +819,7 @@ export function LeadsPage() {
                 <select
                   value={filters.includeArchived}
                   onChange={(event) => setFilters((current) => ({ ...current, includeArchived: event.target.value }))}
-                  className="h-10 w-full rounded-xl border border-input bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                  className="h-10 w-full rounded-xl border border-input bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
                 >
                   <option value="false">Hide archived</option>
                   <option value="true">Include archived</option>
@@ -1045,7 +1045,7 @@ export function LeadsPage() {
             </div>
 
             <LeadField label={t.patients_notes}>
-              <textarea value={createForm.notes} onChange={(event) => setCreateForm((current) => ({ ...current, notes: event.target.value }))} className="min-h-[104px] w-full rounded-xl border border-input bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100" rows={4} />
+              <textarea value={createForm.notes} onChange={(event) => setCreateForm((current) => ({ ...current, notes: event.target.value }))} className="min-h-[104px] w-full rounded-xl border border-input bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30" rows={4} />
             </LeadField>
 
             <div className="flex justify-end gap-3 pt-2">
@@ -1355,7 +1355,7 @@ export function LeadsPage() {
                                   : current
                               )
                             }
-                            className="h-10 w-full rounded-xl border border-input bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                            className="h-10 w-full rounded-xl border border-input bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
                           >
                             <option value="">{t.common_not_set}</option>
                             {LEGAL_SEX_OPTIONS.map((option) => (
@@ -1379,7 +1379,7 @@ export function LeadsPage() {
                                   : current
                               )
                             }
-                            className="h-10 w-full rounded-xl border border-input bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                            className="h-10 w-full rounded-xl border border-input bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
                           >
                             {COMPLIANCE_OPTIONS.map((option) => (
                               <option key={option} value={option}>
@@ -1514,7 +1514,7 @@ export function LeadsPage() {
                                   resolution: event.target.value as "archive" | "delete",
                                 }))
                               }
-                              className="h-10 w-full rounded-xl border border-input bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                              className="h-10 w-full rounded-xl border border-input bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
                             >
                               <option value="archive">Archive</option>
                               {user?.role === "patient_manager" || user?.role === "ceo" ? (
@@ -1547,7 +1547,7 @@ export function LeadsPage() {
                                 note: event.target.value,
                               }))
                             }
-                            className="min-h-[96px] w-full rounded-xl border border-input bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                            className="min-h-[96px] w-full rounded-xl border border-input bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
                             rows={4}
                           />
                         </LeadField>

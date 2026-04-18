@@ -164,7 +164,7 @@ export function PatientPrivacyPage() {
                 id="privacy-type"
                 value={requestType}
                 onChange={(event) => setRequestType(event.target.value as RequestType)}
-                className="h-10 w-full rounded-xl border border-input bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                className="h-10 w-full rounded-xl border border-input bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
               >
                 <option value="restriction">{l("Verarbeitung einschränken", "Ограничить обработку", "Restrict processing")}</option>
                 <option value="erasure">{l("Daten löschen", "Удалить данные", "Erase data")}</option>
@@ -178,7 +178,7 @@ export function PatientPrivacyPage() {
                 value={reason}
                 onChange={(event) => setReason(event.target.value)}
                 placeholder={l("Optionaler Kontext für das Betreuungsteam", "Необязательный контекст для команды сопровождения", "Optional context for the care team")}
-                className="min-h-[120px] w-full rounded-xl border border-input bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                className="min-h-[120px] w-full rounded-xl border border-input bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
               />
             </div>
             <Button

@@ -2,6 +2,7 @@ import {
   startTransition,
   useDeferredValue,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type FormEvent,
@@ -44,6 +45,12 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
   Sheet,
@@ -756,11 +763,41 @@ const DEFAULT_FILTERS: FiltersState = {
   dateFrom: "",
   dateTo: "",
 };
+const TASK_ASSIGNABLE_ROLES = new Set([
+  "patient_manager",
+  "teamlead_interpreter",
+  "interpreter",
+  "concierge",
+]);
+const providerDoctorsCache = new Map<string, DoctorOption[]>();
+const providerDoctorsInFlight = new Map<string, Promise<DoctorOption[]>>();
+
+async function getProviderDoctors(providerId: string) {
+  const cached = providerDoctorsCache.get(providerId);
+  if (cached) return cached;
+
+  const inFlight = providerDoctorsInFlight.get(providerId);
+  if (inFlight) return inFlight;
+
+  const request = apiFetch<DoctorOption[]>(`/providers/${providerId}/doctors`)
+    .then((rows) => {
+      providerDoctorsCache.set(providerId, rows);
+      providerDoctorsInFlight.delete(providerId);
+      return rows;
+    })
+    .catch((error) => {
+      providerDoctorsInFlight.delete(providerId);
+      throw error;
+    });
+
+  providerDoctorsInFlight.set(providerId, request);
+  return request;
+}
 
 const selectClassName =
-  "h-10 w-full rounded-xl border border-input bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100";
+  "h-10 w-full rounded-xl border border-input bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
 const textareaClassName =
-  "min-h-[96px] w-full rounded-xl border border-input bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100";
+  "min-h-[96px] w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
 const createSheetInputClassName = "h-9 rounded-lg bg-card";
 const createSheetTextareaClassName =
   "min-h-[80px] w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
@@ -1171,6 +1208,7 @@ function runtimeLocale() {
 }
 
 function appointmentText(de: string, ru: string, _en: string) {
+  void _en;
   return getLang() === "ru" ? ru : de;
 }
 
@@ -2332,21 +2370,14 @@ function timelineToneClass(tone: AppointmentTimelineEvent["tone"]) {
 function Field({
   label,
   children,
-  compact = false,
 }: {
   label: string;
   children: ReactNode;
   compact?: boolean;
 }) {
   return (
-    <label className={compact ? "flex flex-col gap-1.5" : "block space-y-2"}>
-      <span
-        className={
-          compact
-            ? "text-[11.5px] font-medium text-muted-foreground leading-tight"
-            : "text-xs font-medium uppercase tracking-[0.12em] text-slate-500"
-        }
-      >
+    <label className="flex flex-col gap-1.5">
+      <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
         {label}
       </span>
       {children}
@@ -2536,8 +2567,65 @@ function StaffAppointmentsPage() {
   const todayDate = currentDateInput();
   const weekStart = startOfWeekInput(todayDate);
   const weekEnd = endOfWeekInput(todayDate);
-  const attentionIndex = new Map(attentionItems.map((item) => [item.id, item]));
-  const attentionIds = new Set(attentionItems.map((item) => item.id));
+  const appointmentsQuery = useMemo(
+    () =>
+      buildAppointmentsQuery({
+        search: deferredSearch,
+        appointmentType: filters.appointmentType,
+        carePathKind: filters.carePathKind,
+        status: filters.status,
+        patientId: filters.patientId,
+        providerId: filters.providerId,
+        doctorId: filters.doctorId,
+        ownerUserId: filters.ownerUserId,
+        interpreterId: filters.interpreterId,
+        dateFrom: filters.dateFrom,
+        dateTo: filters.dateTo,
+      }),
+    [
+      deferredSearch,
+      filters.appointmentType,
+      filters.carePathKind,
+      filters.status,
+      filters.patientId,
+      filters.providerId,
+      filters.doctorId,
+      filters.ownerUserId,
+      filters.interpreterId,
+      filters.dateFrom,
+      filters.dateTo,
+    ],
+  );
+  const attentionQuery = useMemo(
+    () =>
+      appointmentsQuery.includes("?")
+        ? appointmentsQuery.replace(
+            "/appointments?",
+            "/appointments/meta/attention?",
+          )
+        : `${appointmentsQuery}/meta/attention`,
+    [appointmentsQuery],
+  );
+  const attentionIndex = useMemo(
+    () => new Map(attentionItems.map((item) => [item.id, item])),
+    [attentionItems],
+  );
+  const attentionIds = useMemo(
+    () => new Set(attentionItems.map((item) => item.id)),
+    [attentionItems],
+  );
+  const appointmentsIndex = useMemo(
+    () => new Map(appointments.map((item) => [item.id, item])),
+    [appointments],
+  );
+  const scheduleWarningLabels = useMemo(
+    () => ({
+      patients_assign_owner: tr.patients_assign_owner,
+      common_doctor: tr.common_doctor,
+      common_provider: tr.common_provider,
+    }),
+    [tr.common_doctor, tr.common_provider, tr.patients_assign_owner],
+  );
   const mineFilterActive = user
     ? user.role === "interpreter"
       ? filters.interpreterId === user.id
@@ -2557,61 +2645,143 @@ function StaffAppointmentsPage() {
               : filters.appointmentType === "internal"
                 ? "internal"
                 : "all";
-  const createLocalWarnings = buildLocalScheduleWarnings(
-    appointments,
-    {
-      date: createForm.date,
-      timeStart: createForm.timeStart,
-      timeEnd: createForm.timeEnd,
-      ownerUserId: createForm.ownerUserId || user?.id || null,
-      providerId: createForm.providerId || null,
-      doctorId: createForm.doctorId || null,
-    },
-    tr,
-  );
-  const editLocalWarnings =
-    detail && editForm
-      ? buildLocalScheduleWarnings(
-          appointments,
-          {
-            appointmentId: detail.id,
-            date: editForm.date,
-            timeStart: editForm.timeStart,
-            timeEnd: editForm.timeEnd,
-            ownerUserId: editForm.ownerUserId || detail.owner_user_id,
-            providerId: editForm.providerId || null,
-            doctorId: editForm.doctorId || null,
-          },
-          tr,
-        )
-      : [];
-  const followUpVisitLocalWarnings =
-    detail && followUpVisitForm
-      ? buildLocalScheduleWarnings(
-          appointments,
-          {
-            date: followUpVisitForm.date,
-            timeStart: followUpVisitForm.timeStart,
-            timeEnd: followUpVisitForm.timeEnd,
-            ownerUserId: followUpVisitForm.ownerUserId || detail.owner_user_id,
-            providerId: followUpVisitForm.providerId || null,
-            doctorId: followUpVisitForm.doctorId || null,
-          },
-          tr,
-        )
-      : [];
-  const taskAssignableStaff = staff.filter((member) =>
+  const createLocalWarnings = useMemo(
+    () =>
+      buildLocalScheduleWarnings(
+        appointments,
+        {
+          date: createForm.date,
+          timeStart: createForm.timeStart,
+          timeEnd: createForm.timeEnd,
+          ownerUserId: createForm.ownerUserId || user?.id || null,
+          providerId: createForm.providerId || null,
+          doctorId: createForm.doctorId || null,
+        },
+        scheduleWarningLabels,
+      ),
     [
-      "patient_manager",
-      "teamlead_interpreter",
-      "interpreter",
-      "concierge",
-    ].includes(member.role),
+      appointments,
+      createForm.date,
+      createForm.timeStart,
+      createForm.timeEnd,
+      createForm.ownerUserId,
+      createForm.providerId,
+      createForm.doctorId,
+      scheduleWarningLabels,
+      user?.id,
+    ],
   );
-  const billingStaff = staff.filter((member) => member.role === "billing");
-  const conciergeStaff = staff.filter((member) => member.role === "concierge");
-  const nonMedicalProviders = providers.filter(
-    (provider) => provider.provider_type === "non_medical",
+  const detailPatientId = detail?.patient_id ?? "";
+  const detailAppointmentId = detail?.id ?? "";
+  const detailOwnerUserId = detail?.owner_user_id ?? null;
+  const editFormDate = editForm?.date ?? "";
+  const editFormTimeStart = editForm?.timeStart ?? "";
+  const editFormTimeEnd = editForm?.timeEnd ?? "";
+  const editFormInterpreterId = editForm?.interpreterId ?? "";
+  const editFormOwnerUserId = editForm?.ownerUserId || detailOwnerUserId;
+  const editFormProviderId = editForm?.providerId ?? "";
+  const editFormDoctorId = editForm?.doctorId ?? "";
+  const editLocalWarnings = useMemo(() => {
+    if (!detailAppointmentId || !editFormDate) return [];
+    return buildLocalScheduleWarnings(
+      appointments,
+      {
+        appointmentId: detailAppointmentId,
+        date: editFormDate,
+        timeStart: editFormTimeStart,
+        timeEnd: editFormTimeEnd,
+        ownerUserId: editFormOwnerUserId,
+        providerId: editFormProviderId || null,
+        doctorId: editFormDoctorId || null,
+      },
+      scheduleWarningLabels,
+    );
+  }, [
+    appointments,
+    detailAppointmentId,
+    editFormDate,
+    editFormTimeStart,
+    editFormTimeEnd,
+    editFormOwnerUserId,
+    editFormProviderId,
+    editFormDoctorId,
+    scheduleWarningLabels,
+  ]);
+  const followUpVisitDate = followUpVisitForm?.date ?? "";
+  const followUpVisitTimeStart = followUpVisitForm?.timeStart ?? "";
+  const followUpVisitTimeEnd = followUpVisitForm?.timeEnd ?? "";
+  const followUpVisitInterpreterId = followUpVisitForm?.interpreterId ?? "";
+  const followUpVisitOwnerUserId =
+    followUpVisitForm?.ownerUserId || detailOwnerUserId;
+  const followUpVisitProviderId = followUpVisitForm?.providerId ?? "";
+  const followUpVisitDoctorId = followUpVisitForm?.doctorId ?? "";
+  const followUpVisitLocalWarnings = useMemo(() => {
+    if (!detailAppointmentId || !followUpVisitDate) return [];
+    return buildLocalScheduleWarnings(
+      appointments,
+      {
+        date: followUpVisitDate,
+        timeStart: followUpVisitTimeStart,
+        timeEnd: followUpVisitTimeEnd,
+        ownerUserId: followUpVisitOwnerUserId,
+        providerId: followUpVisitProviderId || null,
+        doctorId: followUpVisitDoctorId || null,
+      },
+      scheduleWarningLabels,
+    );
+  }, [
+    appointments,
+    detailAppointmentId,
+    followUpVisitDate,
+    followUpVisitTimeStart,
+    followUpVisitTimeEnd,
+    followUpVisitOwnerUserId,
+    followUpVisitProviderId,
+    followUpVisitDoctorId,
+    scheduleWarningLabels,
+  ]);
+  const taskAssignableStaff = useMemo(
+    () =>
+      staff.filter((member) => TASK_ASSIGNABLE_ROLES.has(member.role)),
+    [staff],
+  );
+  const billingStaff = useMemo(
+    () => staff.filter((member) => member.role === "billing"),
+    [staff],
+  );
+  const conciergeStaff = useMemo(
+    () => staff.filter((member) => member.role === "concierge"),
+    [staff],
+  );
+  const nonMedicalProviders = useMemo(
+    () => providers.filter((provider) => provider.provider_type === "non_medical"),
+    [providers],
+  );
+  const patientLabelIndex = useMemo(
+    () =>
+      new Map(
+        patients.map((item) => [
+          item.id,
+          `${item.patient_id} · ${patientName(item)}`,
+        ]),
+      ),
+    [patients],
+  );
+  const providerLabelIndex = useMemo(
+    () => new Map(providers.map((item) => [item.id, providerLabel(item)])),
+    [providers],
+  );
+  const createDoctorLabelIndex = useMemo(
+    () => new Map(createDoctors.map((item) => [item.id, doctorLabel(item)])),
+    [createDoctors],
+  );
+  const staffLabelIndex = useMemo(
+    () => new Map(staff.map((item) => [item.id, staffLabel(item)])),
+    [staff],
+  );
+  const interpreterLabelIndex = useMemo(
+    () => new Map(interpreters.map((item) => [item.id, staffLabel(item)])),
+    [interpreters],
   );
   const canShowConciergeSection =
     permissions.canViewConciergeServices && detail?.type === "non_medical";
@@ -2664,38 +2834,26 @@ function StaffAppointmentsPage() {
     schedulerQuickScopeOptions.find(
       (option) => option.id === schedulerQuickScopeValue,
     )?.label ?? t.providers_all;
-  const selectedCreatePatientLabel = createForm.patientId
-    ? (() => {
-        const patient = patients.find((item) => item.id === createForm.patientId);
-        return patient ? `${patient.patient_id} · ${patientName(patient)}` : t.orders_patient;
-      })()
-    : t.orders_patient;
-  const selectedCreateProviderLabel = createForm.providerId
-    ? (() => {
-        const provider = providers.find((item) => item.id === createForm.providerId);
-        return provider ? providerLabel(provider) : t.common_not_set;
-      })()
-    : t.common_not_set;
-  const selectedCreateDoctorLabel = createForm.doctorId
-    ? (() => {
-        const doctor = createDoctors.find((item) => item.id === createForm.doctorId);
-        return doctor ? doctorLabel(doctor) : t.common_not_set;
-      })()
-    : t.common_not_set;
-  const selectedCreateOwnerLabel = createForm.ownerUserId
-    ? (() => {
-        const owner = staff.find((item) => item.id === createForm.ownerUserId);
-        return owner ? staffLabel(owner) : t.common_not_set;
-      })()
-    : t.common_not_set;
-  const selectedCreateInterpreterLabel = createForm.interpreterId
-    ? (() => {
-        const interpreter = interpreters.find(
-          (item) => item.id === createForm.interpreterId,
-        );
-        return interpreter ? staffLabel(interpreter) : t.common_not_set;
-      })()
-    : t.common_not_set;
+  const selectedCreatePatientLabel =
+    (createForm.patientId
+      ? patientLabelIndex.get(createForm.patientId)
+      : undefined) ?? t.orders_patient;
+  const selectedCreateProviderLabel =
+    (createForm.providerId
+      ? providerLabelIndex.get(createForm.providerId)
+      : undefined) ?? t.common_not_set;
+  const selectedCreateDoctorLabel =
+    (createForm.doctorId
+      ? createDoctorLabelIndex.get(createForm.doctorId)
+      : undefined) ?? t.common_not_set;
+  const selectedCreateOwnerLabel =
+    (createForm.ownerUserId
+      ? staffLabelIndex.get(createForm.ownerUserId)
+      : undefined) ?? t.common_not_set;
+  const selectedCreateInterpreterLabel =
+    (createForm.interpreterId
+      ? interpreterLabelIndex.get(createForm.interpreterId)
+      : undefined) ?? t.common_not_set;
   const handoffStakeholders =
     detail && !detail.is_blocked
       ? buildHandoffStakeholders(detail, detailAssignments, tr)
@@ -2846,15 +3004,8 @@ function StaffAppointmentsPage() {
       ? `${serviceInFlightCount} concierge service(s) are still in progress.`
       : "",
   ].filter(Boolean);
-  const timelineEvents = buildAppointmentTimelineEvents({
-    detail,
-    checklist: detailChecklist,
-    reminders: detailReminders,
-    tasks: detailTasks,
-    services: detailServices,
-    report: detailReport,
-    communications: detailCommunications,
-    labels: {
+  const timelineLabels = useMemo(
+    () => ({
       appointments_timeline_appointment_created:
         t.appointments_timeline_appointment_created,
       appointments_timeline_scheduled_slot:
@@ -2885,19 +3036,60 @@ function StaffAppointmentsPage() {
         t.appointments_timeline_interpreter_report_approved,
       appointments_timeline_interpreter_report_rejected:
         t.appointments_timeline_interpreter_report_rejected,
-    },
-  });
-  const visibleTimelineEvents =
-    timelineFilter === "all"
-      ? timelineEvents
-      : timelineEvents.filter((item) => item.kind === timelineFilter);
+    }),
+    [
+      t.appointments_timeline_appointment_created,
+      t.appointments_timeline_scheduled_slot,
+      t.appointments_timeline_interpreter_pending,
+      t.appointments_timeline_interpreter_assigned,
+      t.appointments_timeline_interpreter_accepted,
+      t.appointments_timeline_interpreter_declined,
+      t.appointments_timeline_interpreter_discussion,
+      t.appointments_timeline_checklist_completed,
+      t.appointments_timeline_checklist_pending,
+      t.appointments_timeline_external_response_logged,
+      t.appointments_timeline_external_communication_cancelled,
+      t.appointments_timeline_external_communication_closed,
+      t.appointments_timeline_interpreter_report_submitted,
+      t.appointments_timeline_interpreter_report_approved,
+      t.appointments_timeline_interpreter_report_rejected,
+    ],
+  );
+  const timelineEvents = useMemo(
+    () =>
+      buildAppointmentTimelineEvents({
+        detail,
+        checklist: detailChecklist,
+        reminders: detailReminders,
+        tasks: detailTasks,
+        services: detailServices,
+        report: detailReport,
+        communications: detailCommunications,
+        labels: timelineLabels,
+      }),
+    [
+      detail,
+      detailChecklist,
+      detailReminders,
+      detailTasks,
+      detailServices,
+      detailReport,
+      detailCommunications,
+      timelineLabels,
+    ],
+  );
+  const visibleTimelineEvents = useMemo(
+    () =>
+      timelineFilter === "all"
+        ? timelineEvents
+        : timelineEvents.filter((item) => item.kind === timelineFilter),
+    [timelineEvents, timelineFilter],
+  );
   const detailAttention = detail
     ? (attentionIndex.get(detail.id) ?? null)
     : null;
   const activeCalendarQuickActionItem = calendarQuickActionMenu
-    ? (appointments.find(
-        (item) => item.id === calendarQuickActionMenu.appointmentId,
-      ) ?? null)
+    ? (appointmentsIndex.get(calendarQuickActionMenu.appointmentId) ?? null)
     : null;
   const detailLineageText = detail ? recurrenceLineageText(detail, t) : "";
   const detailLineageBadge = detail ? recurrenceLineageBadge(detail, t) : "";
@@ -3081,15 +3273,8 @@ function StaffAppointmentsPage() {
       setAppointmentsLoading(true);
       setAppointmentsError("");
       try {
-        const query = buildAppointmentsQuery({
-          ...filters,
-          search: deferredSearch,
-        });
-        const attentionQuery = query.includes("?")
-          ? query.replace("/appointments?", "/appointments/meta/attention?")
-          : `${query}/meta/attention`;
         const [rows, attention] = await Promise.all([
-          apiFetch<AppointmentListItem[]>(query),
+          apiFetch<AppointmentListItem[]>(appointmentsQuery),
           apiFetch<AppointmentAttentionItem[]>(attentionQuery),
         ]);
         if (!active) return;
@@ -3110,7 +3295,12 @@ function StaffAppointmentsPage() {
     return () => {
       active = false;
     };
-  }, [deferredSearch, filters, appointmentsVersion, tr.common_failed_load]);
+  }, [
+    appointmentsQuery,
+    attentionQuery,
+    appointmentsVersion,
+    tr.common_failed_load,
+  ]);
 
   useEffect(() => {
     if (!createForm.providerId) {
@@ -3119,7 +3309,7 @@ function StaffAppointmentsPage() {
       return;
     }
     let active = true;
-    apiFetch<DoctorOption[]>(`/providers/${createForm.providerId}/doctors`)
+    getProviderDoctors(createForm.providerId)
       .then((rows) => {
         if (active) setCreateDoctors(rows);
       })
@@ -3140,7 +3330,7 @@ function StaffAppointmentsPage() {
       return;
     }
     let active = true;
-    apiFetch<DoctorOption[]>(`/providers/${filters.providerId}/doctors`)
+    getProviderDoctors(filters.providerId)
       .then((rows) => {
         if (active) setFilterDoctors(rows);
       })
@@ -3158,7 +3348,7 @@ function StaffAppointmentsPage() {
       return;
     }
     let active = true;
-    apiFetch<DoctorOption[]>(`/providers/${editForm.providerId}/doctors`)
+    getProviderDoctors(editForm.providerId)
       .then((rows) => {
         if (active) setEditDoctors(rows);
       })
@@ -3176,9 +3366,7 @@ function StaffAppointmentsPage() {
       return;
     }
     let active = true;
-    apiFetch<DoctorOption[]>(
-      `/providers/${followUpVisitForm.providerId}/doctors`,
-    )
+    getProviderDoctors(followUpVisitForm.providerId)
       .then((rows) => {
         if (active) setFollowUpVisitDoctors(rows);
       })
@@ -3234,9 +3422,9 @@ function StaffAppointmentsPage() {
     if (
       !detailOpen ||
       !permissions.canEditSchedule ||
-      !detail ||
-      !editForm ||
-      !editForm.date
+      !detailPatientId ||
+      !detailAppointmentId ||
+      !editFormDate
     ) {
       setEditConflicts(null);
       return;
@@ -3244,12 +3432,12 @@ function StaffAppointmentsPage() {
     let active = true;
     apiFetch<ConflictSummary>(
       buildConflictQuery(
-        detail.patient_id,
-        detail.id,
-        editForm.date,
-        editForm.timeStart,
-        editForm.timeEnd,
-        editForm.interpreterId,
+        detailPatientId,
+        detailAppointmentId,
+        editFormDate,
+        editFormTimeStart,
+        editFormTimeEnd,
+        editFormInterpreterId,
       ),
     )
       .then((value) => {
@@ -3261,15 +3449,23 @@ function StaffAppointmentsPage() {
     return () => {
       active = false;
     };
-  }, [detailOpen, permissions.canEditSchedule, detail, editForm]);
+  }, [
+    detailOpen,
+    permissions.canEditSchedule,
+    detailPatientId,
+    detailAppointmentId,
+    editFormDate,
+    editFormTimeStart,
+    editFormTimeEnd,
+    editFormInterpreterId,
+  ]);
 
   useEffect(() => {
     if (
       !detailOpen ||
       !permissions.canCreate ||
-      !detail ||
-      !followUpVisitForm ||
-      !followUpVisitForm.date
+      !detailPatientId ||
+      !followUpVisitDate
     ) {
       setFollowUpVisitConflicts(null);
       return;
@@ -3277,12 +3473,12 @@ function StaffAppointmentsPage() {
     let active = true;
     apiFetch<ConflictSummary>(
       buildConflictQuery(
-        detail.patient_id,
+        detailPatientId,
         "",
-        followUpVisitForm.date,
-        followUpVisitForm.timeStart,
-        followUpVisitForm.timeEnd,
-        followUpVisitForm.interpreterId,
+        followUpVisitDate,
+        followUpVisitTimeStart,
+        followUpVisitTimeEnd,
+        followUpVisitInterpreterId,
       ),
     )
       .then((value) => {
@@ -3294,7 +3490,15 @@ function StaffAppointmentsPage() {
     return () => {
       active = false;
     };
-  }, [detailOpen, permissions.canCreate, detail, followUpVisitForm]);
+  }, [
+    detailOpen,
+    permissions.canCreate,
+    detailPatientId,
+    followUpVisitDate,
+    followUpVisitTimeStart,
+    followUpVisitTimeEnd,
+    followUpVisitInterpreterId,
+  ]);
 
   useEffect(() => {
     if (!selectedId || !detailOpen) return;
@@ -3347,23 +3551,6 @@ function StaffAppointmentsPage() {
                 `/patients/${appointmentDetail.patient_id}/assignments`,
               ).catch(() => []);
         if (!active) return;
-        const assignableStaff = staff.filter((member) =>
-          [
-            "patient_manager",
-            "teamlead_interpreter",
-            "interpreter",
-            "concierge",
-          ].includes(member.role),
-        );
-        const billingOptions = staff.filter(
-          (member) => member.role === "billing",
-        );
-        const conciergeOptions = staff.filter(
-          (member) => member.role === "concierge",
-        );
-        const nonMedicalOptions = providers.filter(
-          (provider) => provider.provider_type === "non_medical",
-        );
         setDetail(appointmentDetail);
         setDetailAssignments(assignments);
         setDetailChecklist(checklist);
@@ -3390,7 +3577,7 @@ function StaffAppointmentsPage() {
           blankTaskForm(
             appointmentDetail.interpreter_id ??
               appointmentDetail.owner_user_id ??
-              assignableStaff[0]?.id ??
+              taskAssignableStaff[0]?.id ??
               "",
             buildTaskDefaultDueDate(appointmentDetail),
           ),
@@ -3444,7 +3631,7 @@ function StaffAppointmentsPage() {
         );
         setBillingHandoffForm(
           blankBillingHandoffForm(
-            billingOptions[0]?.id ?? "",
+            billingStaff[0]?.id ?? "",
             shiftLocalDateTime(appointmentAnchorDateTime(appointmentDetail), {
               days: 1,
             }),
@@ -3478,7 +3665,7 @@ function StaffAppointmentsPage() {
           blankConciergeServiceForm({
             providerId:
               appointmentDetail.provider_id &&
-              nonMedicalOptions.some(
+              nonMedicalProviders.some(
                 (provider) => provider.id === appointmentDetail.provider_id,
               )
                 ? appointmentDetail.provider_id
@@ -3486,7 +3673,7 @@ function StaffAppointmentsPage() {
             assignedConciergeId:
               appointmentDetail.owner_role === "concierge"
                 ? (appointmentDetail.owner_user_id ?? "")
-                : (conciergeOptions[0]?.id ?? ""),
+                : (conciergeStaff[0]?.id ?? ""),
             serviceKind: appointmentDetail.category
               ?.toLowerCase()
               .includes("transfer")
@@ -3584,63 +3771,101 @@ function StaffAppointmentsPage() {
     permissions.canViewTasks,
     permissions.canViewConciergeServices,
     permissions.canViewCommunications,
-    staff,
-    providers,
+    taskAssignableStaff,
+    billingStaff,
+    conciergeStaff,
+    nonMedicalProviders,
     tr.appointments_new,
     tr.phase_followup,
   ]);
 
-  const scopedAppointments = appointments.filter((item) =>
-    matchesOperationalScope(
-      item,
-      operationalScope,
-      user?.id,
-      user?.role,
-      attentionIds,
-    ),
+  const scopedAppointments = useMemo(
+    () =>
+      appointments.filter((item) =>
+        matchesOperationalScope(
+          item,
+          operationalScope,
+          user?.id,
+          user?.role,
+          attentionIds,
+        ),
+      ),
+    [appointments, operationalScope, user?.id, user?.role, attentionIds],
   );
   const attentionCount = attentionItems.length;
-  const todayAppointments = scopedAppointments.filter(
-    (item) => item.date === todayDate,
-  ).length;
-  const activeAppointments = scopedAppointments.filter((item) =>
-    ["planned", "confirmed", "in_progress"].includes(item.status),
-  ).length;
-  const pendingInterpreterResponses = scopedAppointments.filter(
-    (item) => item.interpreter_response === "pending",
-  ).length;
-  const queueAppointments = scopedAppointments
-    .filter((item) =>
-      operationalScope === "all" ? item.status !== "cancelled" : true,
-    )
-    .slice()
-    .sort((left, right) =>
-      `${left.date}${left.time_start ?? ""}`.localeCompare(
-        `${right.date}${right.time_start ?? ""}`,
-      ),
-    )
-    .slice(0, 10);
+  const {
+    todayAppointments,
+    activeAppointments,
+    pendingInterpreterResponses,
+    queueAppointments,
+    mobileAgendaPendingCount,
+    mobileAgendaWeekCount,
+  } = useMemo(() => {
+    const queueCandidates: AppointmentListItem[] = [];
+    let todayCount = 0;
+    let activeCount = 0;
+    let pendingCount = 0;
+    let mobilePendingCount = 0;
+    let mobileWeekCount = 0;
+
+    for (const item of scopedAppointments) {
+      if (item.date === todayDate) todayCount += 1;
+      if (["planned", "confirmed", "in_progress"].includes(item.status)) {
+        activeCount += 1;
+      }
+      if (item.interpreter_response === "pending") pendingCount += 1;
+      if (operationalScope === "all" ? item.status !== "cancelled" : true) {
+        queueCandidates.push(item);
+      }
+      if (item.status !== "cancelled" && item.interpreter_response === "pending") {
+        mobilePendingCount += 1;
+      }
+      if (
+        item.status !== "cancelled" &&
+        item.date >= weekStart &&
+        item.date <= weekEnd
+      ) {
+        mobileWeekCount += 1;
+      }
+    }
+
+    return {
+      todayAppointments: todayCount,
+      activeAppointments: activeCount,
+      pendingInterpreterResponses: pendingCount,
+      queueAppointments: queueCandidates
+        .toSorted((left, right) =>
+          `${left.date}${left.time_start ?? ""}`.localeCompare(
+            `${right.date}${right.time_start ?? ""}`,
+          ),
+        )
+        .slice(0, 10),
+      mobileAgendaPendingCount: mobilePendingCount,
+      mobileAgendaWeekCount: mobileWeekCount,
+    };
+  }, [operationalScope, scopedAppointments, todayDate, weekEnd, weekStart]);
   const useInterpreterMobileAgenda = shouldUseInterpreterMobileAgenda(
     user?.role,
     isMobile,
   );
-  const mobileAgendaSections = useInterpreterMobileAgenda
-    ? buildInterpreterMobileAgendaSections(
-        scopedAppointments,
-        todayDate,
-        t.appointments_today,
-      ).slice(0, 8)
-    : [];
-  const mobileAgendaPendingCount = scopedAppointments.filter(
-    (item) =>
-      item.status !== "cancelled" && item.interpreter_response === "pending",
-  ).length;
-  const mobileAgendaWeekCount = scopedAppointments.filter(
-    (item) =>
-      item.status !== "cancelled" &&
-      item.date >= weekStart &&
-      item.date <= weekEnd,
-  ).length;
+  const mobileAgendaSections = useMemo(
+    () =>
+      useInterpreterMobileAgenda
+        ? buildInterpreterMobileAgendaSections(
+            scopedAppointments,
+            todayDate,
+            t.appointments_today,
+          ).slice(0, 8)
+        : [],
+    [scopedAppointments, t.appointments_today, todayDate, useInterpreterMobileAgenda],
+  );
+  const calendarEvents = useMemo(
+    () =>
+      scopedAppointments.map((item) =>
+        toCalendarEvent(item, permissions.canEditSchedule),
+      ),
+    [permissions.canEditSchedule, scopedAppointments],
+  );
 
   function refreshAppointments() {
     startTransition(() => setAppointmentsVersion((current) => current + 1));
@@ -3831,7 +4056,11 @@ function StaffAppointmentsPage() {
       refreshAppointments();
     };
     const handleCreateRequest = () => {
-      openCreateSheetFromDate();
+      if (!permissions.canCreate) return;
+      setCreateError("");
+      setCreateConflicts(null);
+      setCreateForm(blankAppointmentForm());
+      setCreateOpen(true);
     };
 
     window.addEventListener(
@@ -4097,7 +4326,7 @@ function StaffAppointmentsPage() {
   async function handleInlineReschedule(
     info: EventDropArg | EventResizeDoneArg,
   ) {
-    const source = appointments.find((item) => item.id === info.event.id);
+    const source = appointmentsIndex.get(info.event.id);
     if (
       !source ||
       !permissions.canEditSchedule ||
@@ -5615,95 +5844,69 @@ function StaffAppointmentsPage() {
         ) : (
           <div className="grid gap-1">
 
-              <Sheet open={filtersModalOpen} onOpenChange={setFiltersModalOpen}>
-                <SheetContent side="right" className="w-full sm:max-w-[420px]">
-                  <section
-                    className={sectionCardClass(
-                      "h-full overflow-y-auto border-0 p-5 shadow-none",
-                    )}
-                  >
-                    <div className="mb-4 flex items-center justify-between">
-                      <div>
-                        <h2 className="text-sm font-semibold text-slate-950">
-                          {appointmentText("Filter", "Фильтры", "Filters")}
-                        </h2>
-                        <p className="text-xs text-muted-foreground">
-                          {appointmentText(
-                            "Steuerung des Scheduler-Bereichs.",
-                            "Управление областью планировщика.",
-                            "Scope controls for the scheduler.",
-                          )}
-                        </p>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={resetQuickScopes}
+              <Dialog open={filtersModalOpen} onOpenChange={setFiltersModalOpen}>
+                <DialogContent className="sm:max-w-[420px]">
+                  <DialogHeader className="space-y-0">
+                    <DialogTitle className="text-sm font-semibold text-slate-950">
+                      {appointmentText("Filter", "Фильтры", "Filters")}
+                    </DialogTitle>
+                  </DialogHeader>
+                  <div className="grid gap-3 pt-1">
+                    <Field
+                      compact
+                      label={appointmentText(
+                        "Operativer Bereich",
+                        "Операционная область",
+                        "Operational scope",
+                      )}
+                    >
+                      <ShadSelect
+                        value={operationalScope}
+                        onValueChange={(value) =>
+                          applyOperationalScope((value as OperationalScope) ?? "all")
+                        }
                       >
-                        {appointmentText(
-                          "Bereich zurücksetzen",
-                          "Сбросить область",
-                          "Reset scope",
-                        )}
-                      </Button>
-                    </div>
-                    <div className="grid gap-3">
-                      <Field
-                        compact
-                        label={appointmentText(
-                          "Operativer Bereich",
-                          "Операционная область",
-                          "Operational scope",
-                        )}
+                        <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
+                          <SelectValue>{selectedOperationalScopeLabel}</SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {scopeOptions.map((option) => (
+                            <SelectItem key={`scheduler-sheet-${option.id}`} value={option.id}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </ShadSelect>
+                    </Field>
+                    <Field
+                      compact
+                      label={appointmentText(
+                        "Schnellbereich",
+                        "Быстрая область",
+                        "Quick scope",
+                      )}
+                    >
+                      <ShadSelect
+                        value={schedulerQuickScopeValue}
+                        onValueChange={(value) =>
+                          applySchedulerQuickScope((value as SchedulerQuickScope) ?? "all")
+                        }
                       >
-                        <ShadSelect
-                          value={operationalScope}
-                          onValueChange={(value) =>
-                            applyOperationalScope((value as OperationalScope) ?? "all")
-                          }
-                        >
-                          <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
-                            <SelectValue>{selectedOperationalScopeLabel}</SelectValue>
-                          </SelectTrigger>
-                          <SelectContent>
-                            {scopeOptions.map((option) => (
-                              <SelectItem key={`scheduler-sheet-${option.id}`} value={option.id}>
-                                {option.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </ShadSelect>
-                      </Field>
-                      <Field
-                        compact
-                        label={appointmentText(
-                          "Schnellbereich",
-                          "Быстрая область",
-                          "Quick scope",
-                        )}
-                      >
-                        <ShadSelect
-                          value={schedulerQuickScopeValue}
-                          onValueChange={(value) =>
-                            applySchedulerQuickScope((value as SchedulerQuickScope) ?? "all")
-                          }
-                        >
-                          <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
-                            <SelectValue>{selectedSchedulerQuickScopeLabel}</SelectValue>
-                          </SelectTrigger>
-                          <SelectContent>
-                            {schedulerQuickScopeOptions.map((option) => (
-                              <SelectItem key={`scheduler-quick-${option.id}`} value={option.id}>
-                                {option.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </ShadSelect>
-                      </Field>
-                    </div>
-                  </section>
-                </SheetContent>
-              </Sheet>
+                        <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
+                          <SelectValue>{selectedSchedulerQuickScopeLabel}</SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {schedulerQuickScopeOptions.map((option) => (
+                            <SelectItem key={`scheduler-quick-${option.id}`} value={option.id}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </ShadSelect>
+                    </Field>
+                  </div>
+                </DialogContent>
+              </Dialog>
 
               <Sheet open={searchModalOpen} onOpenChange={setSearchModalOpen}>
                 <SheetContent side="right" className="w-full sm:max-w-[420px]">
@@ -6225,9 +6428,7 @@ function StaffAppointmentsPage() {
                   eventResize={handleInlineReschedule}
                   eventContent={renderCalendarEventContent}
                   datesSet={handleDatesSet}
-                  events={scopedAppointments.map((item) =>
-                    toCalendarEvent(item, permissions.canEditSchedule),
-                  )}
+                  events={calendarEvents}
                 />
               </div>
               {calendarQuickActionMenu && activeCalendarQuickActionItem ? (
@@ -6269,7 +6470,7 @@ function StaffAppointmentsPage() {
                                 .value as AppointmentRecurringActionScope,
                             )
                           }
-                          className="mt-2 h-9 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900"
+                          className="mt-2 h-9 w-full rounded-xl border border-slate-200 bg-card px-3 text-sm text-foreground"
                         >
                           <option value="single">
                             {t.appointments_scope_single}

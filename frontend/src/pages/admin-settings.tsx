@@ -252,7 +252,7 @@ export function AdminSettingsPage() {
             value={editValues[field.key] ?? ""}
             rows={field.rows ?? 3}
             onChange={(event) => updateEditValue(field.key, event.target.value)}
-            className="min-h-[88px] w-full rounded-xl border border-input bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+            className="min-h-[88px] w-full rounded-xl border border-input bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
           />
         ) : (
           <Input

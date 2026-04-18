@@ -29,7 +29,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Select as ShadSelect,
   SelectContent,
@@ -446,9 +445,9 @@ const DEFAULT_CASE_TEXT_SNIPPET_FORM: CaseTextSnippetFormState = {
 };
 
 const textareaClassName =
-  "min-h-[104px] w-full rounded-xl border border-input bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100";
+  "min-h-[104px] w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
 const nativeSelectClassName =
-  "h-10 w-full rounded-xl border border-input bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100";
+  "h-10 w-full rounded-xl border border-input bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
 
 function casePermissions(role?: string): CasePermissions {
   return {
@@ -2709,7 +2708,7 @@ export function CasesPage() {
                         <Field label={t.cases_preconditions}><Input value={item.erstdiagnose ?? ""} onChange={(event) => setVorerkrankungen((current) => updateItemAtIndex(current, index, { erstdiagnose: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                       </div>
                       <Field label={t.cases_note}>
-                        <textarea value={item.notiz ?? ""} onChange={(event) => setVorerkrankungen((current) => updateItemAtIndex(current, index, { notiz: event.target.value }))} className="mt-2 min-h-[90px] w-full rounded-xl border border-input bg-white px-3 py-2 text-sm outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100" />
+                        <textarea value={item.notiz ?? ""} onChange={(event) => setVorerkrankungen((current) => updateItemAtIndex(current, index, { notiz: event.target.value }))} className="mt-2 min-h-[90px] w-full rounded-xl border border-input bg-white px-3 py-2 text-sm outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30" />
                       </Field>
                       <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-2xl" onClick={() => setVorerkrankungen((current) => removeItemAtIndex(current, index))}>{caseText("Entfernen", "Удалить", "Remove")}</Button></div>
                     </div>
@@ -3874,10 +3873,12 @@ function Panel({ title, description, action, children, className }: PanelProps) 
 
 function Field({ label, children }: FieldProps) {
   return (
-    <div className="space-y-2">
-      <Label>{label}</Label>
+    <label className="flex flex-col gap-1.5">
+      <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
+        {label}
+      </span>
       {children}
-    </div>
+    </label>
   );
 }
 

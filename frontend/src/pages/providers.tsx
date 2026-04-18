@@ -242,7 +242,7 @@ const DEFAULT_FILTERS: ProviderFilters = {
 };
 
 const textareaClassName =
-  "min-h-[104px] w-full rounded-xl border border-input bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100";
+  "min-h-[104px] w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
 
 function providerPermissions(role?: string): ProviderPermissions {
   switch (role) {
@@ -511,8 +511,8 @@ function cardClass(extra?: string) {
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <label className="block space-y-2">
-      <span className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">
+    <label className="flex flex-col gap-1.5">
+      <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
         {label}
       </span>
       {children}

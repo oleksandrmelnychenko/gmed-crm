@@ -314,9 +314,9 @@ const VISIBILITY_OPTIONS: DocumentVisibility[] = [
   "patient_visible",
 ];
 const selectClassName =
-  "h-10 w-full rounded-xl border border-input bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100";
+  "h-10 w-full rounded-xl border border-input bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
 const textareaClassName =
-  "min-h-[104px] w-full rounded-xl border border-input bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100";
+  "min-h-[104px] w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
 
 function canManageDocuments(role?: string) {
   return role === "ceo" || role === "patient_manager";
@@ -4071,7 +4071,7 @@ function StaffDocumentsPage() {
                                 : current,
                             )
                           }
-                          className="min-h-[120px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-sky-300 focus:bg-white"
+                          className="min-h-[120px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
                           placeholder={t.documents_review_notes}
                         />
                       </Field>
@@ -4818,8 +4818,8 @@ function Field({
     content = cloneElement(element, { id: nextId });
   }
   return (
-    <div className="space-y-2">
-      <Label htmlFor={htmlFor} className="text-sm font-medium text-slate-800">
+    <div className="flex flex-col gap-1.5">
+      <Label htmlFor={htmlFor} className="text-[11.5px] font-medium text-muted-foreground leading-tight">
         {label}
         {required ? <span className="ml-1 text-rose-600">*</span> : null}
       </Label>

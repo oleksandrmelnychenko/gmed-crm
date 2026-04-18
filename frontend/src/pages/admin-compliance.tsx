@@ -702,7 +702,7 @@ export function AdminCompliancePage() {
                   id="consent-type"
                   value={consentType}
                   onChange={(event) => setConsentType(event.target.value)}
-                  className="h-10 w-full rounded-xl border border-input bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                  className="h-10 w-full rounded-xl border border-input bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
                 >
                   {CONSENT_TYPE_VALUES.map((value) => (
                     <option key={value} value={value}>
@@ -721,7 +721,7 @@ export function AdminCompliancePage() {
                   onChange={(event) => setConsentNote(event.target.value)}
                   placeholder={t.compliance_consent_note_placeholder}
                   rows={3}
-                  className="min-h-[92px] w-full rounded-xl border border-input bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                  className="min-h-[92px] w-full rounded-xl border border-input bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
                 />
               </div>
               <div className="space-y-1">
@@ -869,7 +869,7 @@ export function AdminCompliancePage() {
                   onChange={(event) =>
                     setPrivacyRequestType(event.target.value as PrivacyRequestType)
                   }
-                  className="h-10 w-full rounded-xl border border-input bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                  className="h-10 w-full rounded-xl border border-input bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
                 >
                   {PRIVACY_REQUEST_TYPE_VALUES.map((value) => (
                     <option key={value} value={value}>
@@ -888,7 +888,7 @@ export function AdminCompliancePage() {
                   onChange={(event) => setPrivacyReason(event.target.value)}
                   placeholder={t.compliance_request_reason_placeholder}
                   rows={3}
-                  className="min-h-[92px] w-full rounded-xl border border-input bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                  className="min-h-[92px] w-full rounded-xl border border-input bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
                 />
               </div>
               <div className="flex flex-col justify-end gap-2">

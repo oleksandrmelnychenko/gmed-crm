@@ -379,7 +379,7 @@ export function PatientDocumentsPage() {
                 <select
                   value={uploadKind}
                   onChange={(event) => setUploadKind(event.target.value)}
-                  className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                  className="h-11 w-full rounded-2xl border border-slate-200 bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
                 >
                   <option value="general">{l("Allgemein", "Общий", "General")}</option>
                   <option value="medical_record">{l("Medizinischer Befund", "Медицинский документ", "Medical record")}</option>
@@ -391,14 +391,14 @@ export function PatientDocumentsPage() {
                   value={uploadName}
                   onChange={(event) => setUploadName(event.target.value)}
                   placeholder={l("Optionaler Titel", "Необязательное название", "Optional title")}
-                  className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                  className="h-11 w-full rounded-2xl border border-slate-200 bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
                 />
               </Field>
               <Field label={l("Datei", "Файл", "File")}>
                 <input
                   type="file"
                   onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)}
-                  className="block w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900"
+                  className="block w-full rounded-2xl border border-slate-200 bg-card px-3 py-2 text-sm text-foreground"
                 />
               </Field>
               <Field label={l("Notiz", "Заметка", "Note")}>
@@ -406,7 +406,7 @@ export function PatientDocumentsPage() {
                   value={uploadNotes}
                   onChange={(event) => setUploadNotes(event.target.value)}
                   placeholder={l("Optionaler Kontext für das Betreuungsteam", "Необязательный контекст для команды сопровождения", "Optional context for the care team")}
-                  className="min-h-[110px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                  className="min-h-[110px] w-full rounded-2xl border border-slate-200 bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
                 />
               </Field>
               {uploadError ? (
@@ -496,8 +496,10 @@ function Detail({ label, value }: { label: string; value: string }) {
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <label className="block space-y-2">
-      <span className="text-sm font-medium text-slate-700">{label}</span>
+    <label className="flex flex-col gap-1.5">
+      <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
+        {label}
+      </span>
       {children}
     </label>
   );

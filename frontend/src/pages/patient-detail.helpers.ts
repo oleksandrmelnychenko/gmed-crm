@@ -125,6 +125,7 @@ const PATIENT_OPERATIONAL_TAB_KEYS = new Set([
   "orders",
   "appointments",
   "workflow",
+  "curators",
   "timeline",
 ]);
 

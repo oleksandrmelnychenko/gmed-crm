@@ -146,7 +146,7 @@ export function LoginPage() {
                   className={`h-12 w-full rounded-xl border bg-white px-4 text-sm text-slate-950 outline-none transition-all duration-200 ${
                     fieldErrors.email
                       ? "border-red-400 ring-4 ring-red-100"
-                      : "border-slate-300 focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                      : "border-slate-300 focus:border-ring focus:ring-2 focus:ring-ring/30"
                   }`}
                 />
                 <FieldError message={fieldErrors.email} />
@@ -166,7 +166,7 @@ export function LoginPage() {
                   className={`h-12 w-full rounded-xl border bg-white px-4 text-sm text-slate-950 outline-none transition-all duration-200 ${
                     fieldErrors.password
                       ? "border-red-400 ring-4 ring-red-100"
-                      : "border-slate-300 focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                      : "border-slate-300 focus:border-ring focus:ring-2 focus:ring-ring/30"
                   }`}
                 />
                 <FieldError message={fieldErrors.password} />

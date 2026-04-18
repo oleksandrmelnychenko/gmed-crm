@@ -160,7 +160,7 @@ function scoreField(
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+        className="h-11 w-full rounded-2xl border border-slate-200 bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
       >
         {options.map((option) => (
           <option key={option} value={option}>
@@ -507,7 +507,7 @@ function PatientFeedbackWorkspace() {
               <select
                 value={form.appointmentId}
                 onChange={(event) => setForm((current) => ({ ...current, appointmentId: event.target.value }))}
-                className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                className="h-11 w-full rounded-2xl border border-slate-200 bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
               >
                 <option value="">{l("Allgemeines Feedback", "Общий отзыв", "General feedback")}</option>
                 {availableAppointments.map((item) => (
@@ -580,7 +580,7 @@ function PatientFeedbackWorkspace() {
                 <select
                   value={form.treatmentSuccess}
                   onChange={(event) => setForm((current) => ({ ...current, treatmentSuccess: event.target.value }))}
-                  className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                  className="h-11 w-full rounded-2xl border border-slate-200 bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
                 >
                   <option value="yes">{l("Ja", "Да", "Yes")}</option>
                   <option value="partial">{l("Teilweise", "Частично", "Partial")}</option>
@@ -608,7 +608,7 @@ function PatientFeedbackWorkspace() {
                 value={form.comments}
                 onChange={(event) => setForm((current) => ({ ...current, comments: event.target.value }))}
                 placeholder={l("Was ist gut gelaufen?", "Что прошло хорошо?", "What worked well?")}
-                className="min-h-[120px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                className="min-h-[120px] w-full rounded-2xl border border-slate-200 bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
               />
             </div>
             <div className="space-y-2">
@@ -621,7 +621,7 @@ function PatientFeedbackWorkspace() {
                   "Что команде стоит улучшить?",
                   "What should the team improve?",
                 )}
-                className="min-h-[120px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                className="min-h-[120px] w-full rounded-2xl border border-slate-200 bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
               />
             </div>
             <Button type="submit" className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800" disabled={submitting}>
@@ -1021,7 +1021,7 @@ function StaffFeedbackWorkspace() {
                 <select
                   value={statusFilter}
                   onChange={(event) => setStatusFilter(event.target.value)}
-                  className="h-10 rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                  className="h-10 rounded-2xl border border-slate-200 bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
                 >
                   <option value="">{l("Alle Status", "Все статусы", "All statuses")}</option>
                   <option value="submitted">{l("Eingereicht", "Отправлено", "Submitted")}</option>
@@ -1031,7 +1031,7 @@ function StaffFeedbackWorkspace() {
                 <select
                   value={sourceFilter}
                   onChange={(event) => setSourceFilter(event.target.value)}
-                  className="h-10 rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                  className="h-10 rounded-2xl border border-slate-200 bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
                 >
                   <option value="">{l("Alle Quellen", "Все источники", "All sources")}</option>
                   <option value="patient_portal">{l("Patientenportal", "Портал пациента", "Patient portal")}</option>
@@ -1256,7 +1256,7 @@ function StaffFeedbackWorkspace() {
                   <select
                     value={selectedPatientId}
                     onChange={(event) => setSelectedPatientId(event.target.value)}
-                    className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                    className="h-11 w-full rounded-2xl border border-slate-200 bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
                   >
                     <option value="">{l("Patient auswählen", "Выберите пациента", "Select patient")}</option>
                     {patients.map((item) => (
@@ -1271,7 +1271,7 @@ function StaffFeedbackWorkspace() {
                   <select
                     value={form.appointmentId}
                     onChange={(event) => setForm((current) => ({ ...current, appointmentId: event.target.value }))}
-                    className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                    className="h-11 w-full rounded-2xl border border-slate-200 bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
                     disabled={!selectedPatientId}
                   >
                     <option value="">{l("Allgemeines Feedback", "Общий отзыв", "General feedback")}</option>
@@ -1345,7 +1345,7 @@ function StaffFeedbackWorkspace() {
                     <select
                       value={form.treatmentSuccess}
                       onChange={(event) => setForm((current) => ({ ...current, treatmentSuccess: event.target.value }))}
-                      className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                      className="h-11 w-full rounded-2xl border border-slate-200 bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
                     >
                       <option value="yes">{l("Ja", "Да", "Yes")}</option>
                       <option value="partial">{l("Teilweise", "Частично", "Partial")}</option>
@@ -1372,7 +1372,7 @@ function StaffFeedbackWorkspace() {
                   <textarea
                     value={form.comments}
                     onChange={(event) => setForm((current) => ({ ...current, comments: event.target.value }))}
-                    className="min-h-[110px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                    className="min-h-[110px] w-full rounded-2xl border border-slate-200 bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
                     placeholder={l(
                       "Aussage des Patienten oder Kernaussage",
                       "Фраза пациента или ключевая цитата",
@@ -1385,7 +1385,7 @@ function StaffFeedbackWorkspace() {
                   <textarea
                     value={form.improvementNotes}
                     onChange={(event) => setForm((current) => ({ ...current, improvementNotes: event.target.value }))}
-                    className="min-h-[110px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                    className="min-h-[110px] w-full rounded-2xl border border-slate-200 bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
                     placeholder={l(
                       "Was sollte verbessert werden?",
                       "Что следует улучшить?",
@@ -1398,7 +1398,7 @@ function StaffFeedbackWorkspace() {
                   <textarea
                     value={form.internalNote}
                     onChange={(event) => setForm((current) => ({ ...current, internalNote: event.target.value }))}
-                    className="min-h-[90px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                    className="min-h-[90px] w-full rounded-2xl border border-slate-200 bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
                     placeholder={l(
                       "Wie dieses Feedback erfasst wurde",
                       "Как был собран этот отзыв",
@@ -1445,7 +1445,7 @@ function StaffFeedbackWorkspace() {
                 <select
                   value={reviewStatus}
                   onChange={(event) => setReviewStatus(event.target.value)}
-                  className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                  className="h-11 w-full rounded-2xl border border-slate-200 bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
                 >
                   <option value="reviewed">{l("Geprüft", "Проверено", "Reviewed")}</option>
                   <option value="archived">{l("Archiviert", "В архиве", "Archived")}</option>
@@ -1456,7 +1456,7 @@ function StaffFeedbackWorkspace() {
                 <textarea
                   value={reviewNote}
                   onChange={(event) => setReviewNote(event.target.value)}
-                  className="min-h-[140px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                  className="min-h-[140px] w-full rounded-2xl border border-slate-200 bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
                   placeholder={l(
                     "Operative Nachverfolgung oder Prüfnotiz",
                     "Операционное действие или заметка проверки",

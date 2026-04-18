@@ -613,7 +613,7 @@ export function SopsPage() {
                 <select
                   value={form.category}
                   onChange={(event) => setForm((current) => ({ ...current, category: event.target.value }))}
-                  className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                  className="h-11 w-full rounded-2xl border border-slate-200 bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
                 >
                   <option value="sop">SOP</option>
                   <option value="handbook">Handbook</option>
@@ -632,7 +632,7 @@ export function SopsPage() {
               <textarea
                 value={form.bodyMarkdown}
                 onChange={(event) => setForm((current) => ({ ...current, bodyMarkdown: event.target.value }))}
-                className="min-h-[220px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                className="min-h-[220px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-900 outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
               />
             </div>
 
@@ -727,7 +727,7 @@ export function SopsPage() {
               <select
                 value={reviewDecision}
                 onChange={(event) => setReviewDecision(event.target.value)}
-                className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                className="h-11 w-full rounded-2xl border border-slate-200 bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
               >
                 <option value="approve">Approve</option>
                 <option value="reject">Reject / changes requested</option>
@@ -739,7 +739,7 @@ export function SopsPage() {
               <textarea
                 value={reviewNote}
                 onChange={(event) => setReviewNote(event.target.value)}
-                className="min-h-[160px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                className="min-h-[160px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-900 outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
               />
             </div>
 

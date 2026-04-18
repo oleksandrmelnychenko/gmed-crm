@@ -4,7 +4,6 @@ import { Building2, LoaderCircle, RefreshCw, Send } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import {
@@ -316,7 +315,7 @@ export function PatientServicesPage() {
                     serviceKind: event.target.value,
                   }))
                 }
-                className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                className="h-11 w-full rounded-2xl border border-slate-200 bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
               >
                 <option value="hotel">{l("Hotel", "Отель", "Hotel")}</option>
                 <option value="transfer">{l("Transfer", "Трансфер", "Transfer")}</option>
@@ -387,7 +386,7 @@ export function PatientServicesPage() {
                 value={form.serviceNotes}
                 onChange={(event) => setForm((current) => ({ ...current, serviceNotes: event.target.value }))}
                 placeholder={l("Ankunftsdetails, Gepäck, Hotelwünsche, VIP-Kontext...", "Детали прибытия, багаж, предпочтения по отелю, контекст VIP...", "Arrival details, luggage, hotel preferences, VIP support context...")}
-                className="min-h-[132px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                className="min-h-[132px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-900 outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
               />
             </Field>
 
@@ -423,8 +422,10 @@ function MetricCard({ label, value }: { label: string; value: string }) {
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <label className="block space-y-2">
-      <Label className="text-sm font-medium text-slate-700">{label}</Label>
+    <label className="flex flex-col gap-1.5">
+      <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
+        {label}
+      </span>
       {children}
     </label>
   );

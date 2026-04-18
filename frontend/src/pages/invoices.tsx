@@ -14,7 +14,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { apiFetch, buildApiUrl, getAccessToken } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -153,8 +152,8 @@ const EMPTY_ACCOUNTING_SUMMARY: AccountingLedgerPayload["summary"] = {
   cost_passthrough_revenue_gross: "0.00",
   provider_expense_gross: "0.00",
 };
-const selectClassName = "h-10 w-full rounded-xl border border-input bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100";
-const textareaClassName = "min-h-[104px] w-full rounded-xl border border-input bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100";
+const selectClassName = "h-10 w-full rounded-xl border border-input bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
+const textareaClassName = "min-h-[104px] w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
 
 function permissions(role?: string) {
   return {
@@ -1506,10 +1505,12 @@ function MiniMetric({ label, value }: { label: string; value: ReactNode }) {
 
 function Field({ label, className, children }: { label: string; className?: string; children: ReactNode }) {
   return (
-    <div className={className}>
-      <Label className="mb-2 block text-sm font-medium text-slate-700">{label}</Label>
+    <label className={cn("flex flex-col gap-1.5", className)}>
+      <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
+        {label}
+      </span>
       {children}
-    </div>
+    </label>
   );
 }
 
