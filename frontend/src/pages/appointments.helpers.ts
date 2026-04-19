@@ -1,5 +1,34 @@
 import type { Translations } from "@/lib/i18n";
 
+export type AppointmentWorkspaceTab =
+  | "overview"
+  | "timeline"
+  | "coordination"
+  | "clinical"
+  | "workflow"
+  | "services"
+  | "notes";
+
+const APPOINTMENT_WORKSPACE_TABS: AppointmentWorkspaceTab[] = [
+  "overview",
+  "timeline",
+  "coordination",
+  "clinical",
+  "workflow",
+  "services",
+  "notes",
+];
+
+export function normalizeAppointmentWorkspaceTab(
+  value: string | null | undefined,
+): AppointmentWorkspaceTab {
+  return APPOINTMENT_WORKSPACE_TABS.includes(
+    value as AppointmentWorkspaceTab,
+  )
+    ? (value as AppointmentWorkspaceTab)
+    : "overview";
+}
+
 export type AppointmentTimelineKind =
   | "workflow"
   | "interpreter"

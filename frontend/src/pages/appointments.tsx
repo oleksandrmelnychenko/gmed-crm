@@ -1,13 +1,17 @@
 import {
+  memo,
   startTransition,
+  useCallback,
   useDeferredValue,
   useEffect,
   useMemo,
   useRef,
   useState,
+  type Dispatch,
   type FormEvent,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
+  type SetStateAction,
 } from "react";
 import { useSearchParams } from "react-router-dom";
 import FullCalendar from "@fullcalendar/react";
@@ -81,6 +85,7 @@ import {
   buildInterpreterMobileAgendaSections,
   buildAppointmentTimelineEvents,
   canResubmitInterpreterReport,
+  normalizeAppointmentWorkspaceTab,
   shouldUseInterpreterMobileAgenda,
   type AppointmentTimelineEvent,
   type AppointmentTimelineKind,
@@ -653,6 +658,28 @@ type HandoffStakeholder = {
   badges: string[];
 };
 
+type CreateAppointmentSheetProps = {
+  open: boolean;
+  seed: AppointmentFormState;
+  appointments: AppointmentListItem[];
+  patients: PatientSummary[];
+  providers: ProviderSummary[];
+  interpreters: InterpreterOption[];
+  staff: StaffOption[];
+  userId?: string;
+  onOpenChange: (open: boolean) => void;
+  onCreated: (result: { id: string; notice: string }) => void;
+};
+
+type EditAppointmentSectionProps = {
+  detail: AppointmentDetail;
+  appointments: AppointmentListItem[];
+  providers: ProviderSummary[];
+  staff: StaffOption[];
+  interpreters: InterpreterOption[];
+  onSaved: (notice: string) => void;
+};
+
 const STATUS_OPTIONS: AppointmentStatus[] = [
   "planned",
   "confirmed",
@@ -769,19 +796,34 @@ const TASK_ASSIGNABLE_ROLES = new Set([
   "interpreter",
   "concierge",
 ]);
+const MAX_PROVIDER_DOCTORS_CACHE = 24;
 const providerDoctorsCache = new Map<string, DoctorOption[]>();
 const providerDoctorsInFlight = new Map<string, Promise<DoctorOption[]>>();
 
+function rememberProviderDoctors(providerId: string, rows: DoctorOption[]) {
+  if (providerDoctorsCache.has(providerId)) {
+    providerDoctorsCache.delete(providerId);
+  }
+  providerDoctorsCache.set(providerId, rows);
+  if (providerDoctorsCache.size > MAX_PROVIDER_DOCTORS_CACHE) {
+    const oldestKey = providerDoctorsCache.keys().next().value;
+    if (oldestKey) providerDoctorsCache.delete(oldestKey);
+  }
+}
+
 async function getProviderDoctors(providerId: string) {
   const cached = providerDoctorsCache.get(providerId);
-  if (cached) return cached;
+  if (cached) {
+    rememberProviderDoctors(providerId, cached);
+    return cached;
+  }
 
   const inFlight = providerDoctorsInFlight.get(providerId);
   if (inFlight) return inFlight;
 
   const request = apiFetch<DoctorOption[]>(`/providers/${providerId}/doctors`)
     .then((rows) => {
-      providerDoctorsCache.set(providerId, rows);
+      rememberProviderDoctors(providerId, rows);
       providerDoctorsInFlight.delete(providerId);
       return rows;
     })
@@ -792,6 +834,21 @@ async function getProviderDoctors(providerId: string) {
 
   providerDoctorsInFlight.set(providerId, request);
   return request;
+}
+
+function useDebouncedValue<T>(value: T, delayMs = 180) {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setDebouncedValue(value);
+    }, delayMs);
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [delayMs, value]);
+
+  return debouncedValue;
 }
 
 const selectClassName =
@@ -953,6 +1010,30 @@ function blankAppointmentForm(): AppointmentFormState {
   };
 }
 
+function buildEditAppointmentForm(detail: AppointmentDetail): AppointmentFormState {
+  return {
+    patientId: detail.patient_id,
+    providerId: detail.provider_id ?? "",
+    doctorId: detail.doctor_id ?? "",
+    ownerUserId: detail.owner_user_id ?? "",
+    interpreterId: detail.interpreter_id ?? "",
+    appointmentType: detail.type,
+    carePathKind: detail.care_path_kind ?? "regular",
+    title: detail.title,
+    date: detail.date,
+    timeStart: detail.time_start ?? "",
+    timeEnd: detail.time_end ?? "",
+    location: detail.location ?? "",
+    category: detail.category ?? "",
+    notes: detail.notes ?? "",
+    repeatEnabled: Boolean(detail.recurrence_frequency),
+    repeatFrequency: detail.recurrence_frequency ?? "weekly",
+    repeatInterval: String(detail.recurrence_interval ?? 1),
+    repeatCount: detail.recurrence_count ? String(detail.recurrence_count) : "",
+    repeatUntil: detail.recurrence_until ?? "",
+  };
+}
+
 function buildFollowUpVisitForm(
   detail: AppointmentDetail,
   defaultReminderUserId = "",
@@ -1091,6 +1172,23 @@ function blankExternalHandoffForm(
   };
 }
 
+function resolveFollowUpDefaultAssignee(
+  detail: AppointmentDetail,
+  assignments: PatientAssignment[],
+) {
+  return (
+    assignments.find(
+      (item) =>
+        !item.revoked_at &&
+        item.user_active &&
+        item.user_role === "patient_manager",
+    )?.user_id ??
+    detail.owner_user_id ??
+    assignments.find((item) => !item.revoked_at && item.user_active)?.user_id ??
+    ""
+  );
+}
+
 function blankBillingHandoffForm(
   defaultAssignee = "",
   defaultDueAt = "",
@@ -1154,6 +1252,16 @@ function defaultCompletionPlan() {
   return Object.fromEntries(
     FOLLOW_UP_PRESETS.map((preset) => [preset.id, true]),
   ) as Record<string, boolean>;
+}
+
+function statusActionKey(
+  appointmentId: string,
+  status: AppointmentStatus,
+  recurrenceScope: AppointmentRecurringActionScope = "single",
+) {
+  return recurrenceScope === "single"
+    ? `status:${appointmentId}:${status}`
+    : `status:${appointmentId}:${status}:${recurrenceScope}`;
 }
 
 function blankTaskForm(
@@ -2421,12 +2529,7346 @@ function Banner({
   );
 }
 
+function CreateAppointmentSheet({
+  open,
+  seed,
+  appointments,
+  patients,
+  providers,
+  interpreters,
+  staff,
+  userId,
+  onOpenChange,
+  onCreated,
+}: CreateAppointmentSheetProps) {
+  const { t } = useLang();
+  const tr = t as unknown as Record<string, string>;
+  const [form, setForm] = useState<AppointmentFormState>(seed);
+  const [doctors, setDoctors] = useState<DoctorOption[]>([]);
+  const [conflicts, setConflicts] = useState<ConflictSummary | null>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setForm(seed);
+    setDoctors([]);
+    setConflicts(null);
+    setError("");
+    setBusy(false);
+  }, [open, seed]);
+
+  const scheduleWarningLabels = useMemo(
+    () => ({
+      patients_assign_owner: tr.patients_assign_owner,
+      common_doctor: tr.common_doctor,
+      common_provider: tr.common_provider,
+    }),
+    [tr.common_doctor, tr.common_provider, tr.patients_assign_owner],
+  );
+  const patientLabelIndex = useMemo(
+    () =>
+      new Map(
+        patients.map((item) => [
+          item.id,
+          `${item.patient_id} · ${patientName(item)}`,
+        ]),
+      ),
+    [patients],
+  );
+  const providerLabelIndex = useMemo(
+    () => new Map(providers.map((item) => [item.id, providerLabel(item)])),
+    [providers],
+  );
+  const doctorLabelIndex = useMemo(
+    () => new Map(doctors.map((item) => [item.id, doctorLabel(item)])),
+    [doctors],
+  );
+  const staffLabelIndex = useMemo(
+    () => new Map(staff.map((item) => [item.id, staffLabel(item)])),
+    [staff],
+  );
+  const interpreterLabelIndex = useMemo(
+    () => new Map(interpreters.map((item) => [item.id, staffLabel(item)])),
+    [interpreters],
+  );
+  const localWarnings = useMemo(
+    () =>
+      buildLocalScheduleWarnings(
+        appointments,
+        {
+          date: form.date,
+          timeStart: form.timeStart,
+          timeEnd: form.timeEnd,
+          ownerUserId: form.ownerUserId || userId || null,
+          providerId: form.providerId || null,
+          doctorId: form.doctorId || null,
+        },
+        scheduleWarningLabels,
+      ),
+    [
+      appointments,
+      form.date,
+      form.timeStart,
+      form.timeEnd,
+      form.ownerUserId,
+      form.providerId,
+      form.doctorId,
+      scheduleWarningLabels,
+      userId,
+    ],
+  );
+  const conflictQuery = useMemo(() => {
+    if (!open || !form.patientId || !form.date) return "";
+    return buildConflictQuery(
+      form.patientId,
+      "",
+      form.date,
+      form.timeStart,
+      form.timeEnd,
+      form.interpreterId,
+    );
+  }, [
+    open,
+    form.patientId,
+    form.date,
+    form.timeStart,
+    form.timeEnd,
+    form.interpreterId,
+  ]);
+  const debouncedConflictQuery = useDebouncedValue(conflictQuery);
+  const selectedPatientLabel =
+    (form.patientId ? patientLabelIndex.get(form.patientId) : undefined) ??
+    t.orders_patient;
+  const selectedProviderLabel =
+    (form.providerId ? providerLabelIndex.get(form.providerId) : undefined) ??
+    t.common_not_set;
+  const selectedDoctorLabel =
+    (form.doctorId ? doctorLabelIndex.get(form.doctorId) : undefined) ??
+    t.common_not_set;
+  const selectedOwnerLabel =
+    (form.ownerUserId ? staffLabelIndex.get(form.ownerUserId) : undefined) ??
+    t.common_not_set;
+  const selectedInterpreterLabel =
+    (form.interpreterId
+      ? interpreterLabelIndex.get(form.interpreterId)
+      : undefined) ?? t.common_not_set;
+
+  useEffect(() => {
+    if (!form.providerId) {
+      setDoctors([]);
+      setForm((current) =>
+        current.doctorId ? { ...current, doctorId: "" } : current,
+      );
+      return;
+    }
+    let active = true;
+    getProviderDoctors(form.providerId)
+      .then((rows) => {
+        if (active) setDoctors(rows);
+      })
+      .catch(() => {
+        if (active) setDoctors([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [form.providerId]);
+
+  useEffect(() => {
+    if (!debouncedConflictQuery) {
+      setConflicts(null);
+      return;
+    }
+    let active = true;
+    apiFetch<ConflictSummary>(debouncedConflictQuery)
+      .then((value) => {
+        if (active) setConflicts(value);
+      })
+      .catch(() => {
+        if (active) setConflicts(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [debouncedConflictQuery]);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      if (!form.patientId) {
+        setError(`${t.orders_patient}: ${t.cf_required}`);
+        return;
+      }
+      const repeatInterval = parsePositiveIntegerInput(form.repeatInterval);
+      const repeatCount = parsePositiveIntegerInput(form.repeatCount);
+      if (form.repeatEnabled) {
+        if (!repeatInterval) {
+          setError(t.appointments_repeat_interval_error);
+          return;
+        }
+        if (!repeatCount && !form.repeatUntil) {
+          setError(t.appointments_repeat_require_end_error);
+          return;
+        }
+      }
+      const result = await apiFetch<{
+        id: string;
+        conflicts?: ConflictSummary;
+        series_created_count?: number;
+      }>("/appointments", {
+        method: "POST",
+        body: JSON.stringify({
+          patient_id: form.patientId,
+          provider_id: form.providerId || null,
+          doctor_id: form.doctorId || null,
+          owner_user_id: form.ownerUserId || null,
+          interpreter_id: form.interpreterId || null,
+          appointment_type: form.appointmentType,
+          care_path_kind: normalizeCarePathKindForAppointmentType(
+            form.appointmentType,
+            form.carePathKind,
+          ),
+          title: form.title.trim(),
+          date: form.date,
+          time_start: form.timeStart || null,
+          time_end: form.timeEnd || null,
+          location: form.location.trim() || null,
+          category: form.category.trim() || null,
+          notes: form.notes.trim() || null,
+          recurrence_frequency: form.repeatEnabled
+            ? form.repeatFrequency
+            : null,
+          recurrence_interval: form.repeatEnabled ? repeatInterval : null,
+          recurrence_count: form.repeatEnabled ? repeatCount : null,
+          recurrence_until:
+            form.repeatEnabled && form.repeatUntil ? form.repeatUntil : null,
+        }),
+      });
+      const notice = buildScheduleNotice(result.conflicts, localWarnings);
+      onOpenChange(false);
+      onCreated({ id: result.id, notice });
+    } catch (submitError) {
+      setError(
+        submitError instanceof Error
+          ? submitError.message
+          : "Failed to create appointment",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      {open ? (
+        <SheetContent side="right" className="w-full sm:max-w-[760px]">
+          <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
+            <SheetHeader className="shrink-0 px-4 pt-3 pb-1">
+              <SheetTitle>{tr.appointments_new}</SheetTitle>
+            </SheetHeader>
+            <div className="flex-1 overflow-y-auto px-4 py-2">
+              <div className="space-y-4">
+                {error ? <Banner tone="error">{error}</Banner> : null}
+                <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
+                  <div className="grid gap-4 md:grid-cols-3">
+                    <Field compact label={t.orders_patient}>
+                      <ShadSelect
+                        value={form.patientId}
+                        onValueChange={(value) =>
+                          setForm((current) => ({
+                            ...current,
+                            patientId: value ?? "",
+                          }))
+                        }
+                      >
+                        <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
+                          <SelectValue>{selectedPatientLabel}</SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="">{t.orders_patient}</SelectItem>
+                          {patients.map((patient) => (
+                            <SelectItem key={patient.id} value={patient.id}>
+                              {patient.patient_id} · {patientName(patient)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </ShadSelect>
+                    </Field>
+                    <Field compact label={t.appointments_type}>
+                      <ShadSelect
+                        value={form.appointmentType}
+                        onValueChange={(value) =>
+                          setForm((current) => ({
+                            ...current,
+                            appointmentType:
+                              (value as AppointmentKind) ?? current.appointmentType,
+                            carePathKind:
+                              value === "medical" ? current.carePathKind : "regular",
+                            providerId: value === "internal" ? "" : current.providerId,
+                            doctorId: value === "internal" ? "" : current.doctorId,
+                          }))
+                        }
+                      >
+                        <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
+                          <SelectValue>
+                            {appointmentTypeLabel(form.appointmentType, tr)}
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {TYPE_OPTIONS.map((value) => (
+                            <SelectItem key={value} value={value}>
+                              {appointmentTypeLabel(value, tr)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </ShadSelect>
+                    </Field>
+                    <Field compact label={appointmentText("Versorgungspfad", "Траектория лечения", "Care path")}>
+                      <ShadSelect
+                        value={form.carePathKind}
+                        onValueChange={(value) =>
+                          setForm((current) => ({
+                            ...current,
+                            carePathKind:
+                              (value as AppointmentCarePathKind) ?? current.carePathKind,
+                          }))
+                        }
+                        disabled={form.appointmentType !== "medical"}
+                      >
+                        <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
+                          <SelectValue>{carePathKindLabel(form.carePathKind)}</SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {CARE_PATH_KIND_OPTIONS.map((value) => (
+                            <SelectItem key={value} value={value}>
+                              {carePathKindLabel(value)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </ShadSelect>
+                    </Field>
+                  </div>
+                  <Field compact label={t.appointments_title_col}>
+                    <Input
+                      value={form.title}
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          title: event.target.value,
+                        }))
+                      }
+                      required
+                      className={createSheetInputClassName}
+                    />
+                  </Field>
+                  <div className="grid gap-4 md:grid-cols-3">
+                    <Field compact label={t.appointments_date}>
+                      <Input
+                        type="date"
+                        value={form.date}
+                        onChange={(event) =>
+                          setForm((current) => ({
+                            ...current,
+                            date: event.target.value,
+                          }))
+                        }
+                        required
+                        className={createSheetInputClassName}
+                      />
+                    </Field>
+                    <Field compact label={t.appointments_time}>
+                      <Input
+                        type="time"
+                        value={form.timeStart}
+                        onChange={(event) =>
+                          setForm((current) => ({
+                            ...current,
+                            timeStart: event.target.value,
+                          }))
+                        }
+                        className={createSheetInputClassName}
+                      />
+                    </Field>
+                    <Field compact label={t.appointments_time}>
+                      <Input
+                        type="time"
+                        value={form.timeEnd}
+                        onChange={(event) =>
+                          setForm((current) => ({
+                            ...current,
+                            timeEnd: event.target.value,
+                          }))
+                        }
+                        className={createSheetInputClassName}
+                      />
+                    </Field>
+                  </div>
+                  <div className="space-y-3 rounded-lg border border-border/60 bg-card p-3">
+                    <label className="flex items-start gap-3 text-sm text-foreground">
+                      <input
+                        type="checkbox"
+                        checked={form.repeatEnabled}
+                        onChange={(event) =>
+                          setForm((current) => ({
+                            ...current,
+                            repeatEnabled: event.target.checked,
+                            repeatInterval: current.repeatInterval || "1",
+                            repeatCount:
+                              event.target.checked && !current.repeatCount
+                                ? "4"
+                                : current.repeatCount,
+                          }))
+                        }
+                        className="mt-0.5 size-4 rounded border-input bg-card text-[var(--brand)]"
+                      />
+                      <span>
+                        <span className="block font-medium text-foreground">
+                          {t.appointments_repeat_this}
+                        </span>
+                        <span className="block text-xs text-muted-foreground">
+                          {t.appointments_repeat_hint}
+                        </span>
+                      </span>
+                    </label>
+                    {form.repeatEnabled ? (
+                      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                        <Field compact label="Frequency">
+                          <ShadSelect
+                            value={form.repeatFrequency}
+                            onValueChange={(value) =>
+                              setForm((current) => ({
+                                ...current,
+                                repeatFrequency:
+                                  (value as AppointmentRecurrenceFrequency) ??
+                                  current.repeatFrequency,
+                              }))
+                            }
+                          >
+                            <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
+                              <SelectValue>
+                                {recurrenceFrequencyLabel(form.repeatFrequency)}
+                              </SelectValue>
+                            </SelectTrigger>
+                            <SelectContent>
+                              {RECURRENCE_FREQUENCY_OPTIONS.map((value) => (
+                                <SelectItem key={value} value={value}>
+                                  {recurrenceFrequencyLabel(value)}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </ShadSelect>
+                        </Field>
+                        <Field compact label="Every">
+                          <Input
+                            type="number"
+                            min="1"
+                            step="1"
+                            value={form.repeatInterval}
+                            onChange={(event) =>
+                              setForm((current) => ({
+                                ...current,
+                                repeatInterval: event.target.value,
+                              }))
+                            }
+                            className={createSheetInputClassName}
+                          />
+                        </Field>
+                        <Field compact label={appointmentText("Anzahl Termine", "Всего повторов", "Total occurrences")}>
+                          <Input
+                            type="number"
+                            min="2"
+                            step="1"
+                            value={form.repeatCount}
+                            onChange={(event) =>
+                              setForm((current) => ({
+                                ...current,
+                                repeatCount: event.target.value,
+                              }))
+                            }
+                            className={createSheetInputClassName}
+                          />
+                        </Field>
+                        <Field compact label={appointmentText("Wiederholen bis", "Повторять до", "Repeat until")}>
+                          <Input
+                            type="date"
+                            value={form.repeatUntil}
+                            onChange={(event) =>
+                              setForm((current) => ({
+                                ...current,
+                                repeatUntil: event.target.value,
+                              }))
+                            }
+                            className={createSheetInputClassName}
+                          />
+                        </Field>
+                      </div>
+                    ) : null}
+                  </div>
+                </section>
+                <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <Field compact label={t.common_provider}>
+                      <ShadSelect
+                        value={form.providerId}
+                        onValueChange={(value) =>
+                          setForm((current) => ({
+                            ...current,
+                            providerId: value ?? "",
+                            doctorId: "",
+                          }))
+                        }
+                        disabled={form.appointmentType === "internal"}
+                      >
+                        <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
+                          <SelectValue>{selectedProviderLabel}</SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="">{t.common_not_set}</SelectItem>
+                          {providers.map((provider) => (
+                            <SelectItem key={provider.id} value={provider.id}>
+                              {providerLabel(provider)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </ShadSelect>
+                    </Field>
+                    <Field compact label={t.common_doctor}>
+                      <ShadSelect
+                        value={form.doctorId}
+                        onValueChange={(value) =>
+                          setForm((current) => ({
+                            ...current,
+                            doctorId: value ?? "",
+                          }))
+                        }
+                        disabled={!form.providerId}
+                      >
+                        <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
+                          <SelectValue>{selectedDoctorLabel}</SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="">{t.common_not_set}</SelectItem>
+                          {doctors.map((doctor) => (
+                            <SelectItem key={doctor.id} value={doctor.id}>
+                              {doctorLabel(doctor)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </ShadSelect>
+                    </Field>
+                  </div>
+                </section>
+                <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <Field compact label={t.patients_assign_owner}>
+                      <ShadSelect
+                        value={form.ownerUserId}
+                        onValueChange={(value) =>
+                          setForm((current) => ({
+                            ...current,
+                            ownerUserId: value ?? "",
+                          }))
+                        }
+                      >
+                        <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
+                          <SelectValue>{selectedOwnerLabel}</SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="">{t.common_not_set}</SelectItem>
+                          {staff.map((member) => (
+                            <SelectItem key={member.id} value={member.id}>
+                              {staffLabel(member)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </ShadSelect>
+                    </Field>
+                    <Field compact label={t.common_doctor}>
+                      <ShadSelect
+                        value={form.interpreterId}
+                        onValueChange={(value) =>
+                          setForm((current) => ({
+                            ...current,
+                            interpreterId: value ?? "",
+                          }))
+                        }
+                      >
+                        <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
+                          <SelectValue>{selectedInterpreterLabel}</SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="">{tr.common_not_set}</SelectItem>
+                          {interpreters.map((member) => (
+                            <SelectItem key={member.id} value={member.id}>
+                              {staffLabel(member)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </ShadSelect>
+                    </Field>
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <Field compact label={t.appointments_location}>
+                      <Input
+                        value={form.location}
+                        onChange={(event) =>
+                          setForm((current) => ({
+                            ...current,
+                            location: event.target.value,
+                          }))
+                        }
+                        className={createSheetInputClassName}
+                      />
+                    </Field>
+                    <Field compact label={tr.documents_category}>
+                      <Input
+                        value={form.category}
+                        onChange={(event) =>
+                          setForm((current) => ({
+                            ...current,
+                            category: event.target.value,
+                          }))
+                        }
+                        className={createSheetInputClassName}
+                      />
+                    </Field>
+                  </div>
+                  <Field compact label={t.patients_notes}>
+                    <textarea
+                      value={form.notes}
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          notes: event.target.value,
+                        }))
+                      }
+                      className={createSheetTextareaClassName}
+                      rows={4}
+                    />
+                  </Field>
+                </section>
+                <ConflictPanel conflicts={conflicts} />
+                <ScheduleWarningsPanel warnings={localWarnings} />
+              </div>
+            </div>
+            <div className="shrink-0 flex justify-end gap-2 px-4 py-3 bg-popover">
+              <Button
+                type="button"
+                variant="outline"
+                className="h-9 rounded-lg"
+                onClick={() => onOpenChange(false)}
+              >
+                {tr.common_cancel}
+              </Button>
+              <Button
+                type="submit"
+                className="h-9 rounded-lg gap-1.5 px-3.5"
+                disabled={busy}
+              >
+                {busy ? (
+                  <LoaderCircle className="size-4 animate-spin" />
+                ) : (
+                  <Plus className="size-4" />
+                )}
+                {busy ? t.patients_creating : t.appointments_new}
+              </Button>
+            </div>
+          </form>
+        </SheetContent>
+      ) : null}
+    </Sheet>
+  );
+}
+
+const MemoizedCreateAppointmentSheet = memo(
+  CreateAppointmentSheet,
+  (prev, next) =>
+    prev.open === next.open &&
+    prev.seed === next.seed &&
+    prev.appointments === next.appointments &&
+    prev.patients === next.patients &&
+    prev.providers === next.providers &&
+    prev.interpreters === next.interpreters &&
+    prev.staff === next.staff &&
+    prev.userId === next.userId,
+);
+
+function EditAppointmentSection({
+  detail,
+  appointments,
+  providers,
+  staff,
+  interpreters,
+  onSaved,
+}: EditAppointmentSectionProps) {
+  const { t } = useLang();
+  const tr = t as unknown as Record<string, string>;
+  const [form, setForm] = useState<AppointmentFormState>(() =>
+    buildEditAppointmentForm(detail),
+  );
+  const [recurrenceScope, setRecurrenceScope] =
+    useState<AppointmentRecurringActionScope>("single");
+  const [doctors, setDoctors] = useState<DoctorOption[]>([]);
+  const [conflicts, setConflicts] = useState<ConflictSummary | null>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setForm(buildEditAppointmentForm(detail));
+    setRecurrenceScope("single");
+    setDoctors([]);
+    setConflicts(null);
+    setError("");
+    setBusy(false);
+  }, [detail]);
+
+  const scheduleWarningLabels = useMemo(
+    () => ({
+      patients_assign_owner: tr.patients_assign_owner,
+      common_doctor: tr.common_doctor,
+      common_provider: tr.common_provider,
+    }),
+    [tr.common_doctor, tr.common_provider, tr.patients_assign_owner],
+  );
+  const localWarnings = useMemo(
+    () =>
+      buildLocalScheduleWarnings(
+        appointments,
+        {
+          appointmentId: detail.id,
+          date: form.date,
+          timeStart: form.timeStart,
+          timeEnd: form.timeEnd,
+          ownerUserId: form.ownerUserId || detail.owner_user_id || null,
+          providerId: form.providerId || null,
+          doctorId: form.doctorId || null,
+        },
+        scheduleWarningLabels,
+      ),
+    [
+      appointments,
+      detail.id,
+      detail.owner_user_id,
+      form.date,
+      form.timeStart,
+      form.timeEnd,
+      form.ownerUserId,
+      form.providerId,
+      form.doctorId,
+      scheduleWarningLabels,
+    ],
+  );
+  const conflictQuery = useMemo(() => {
+    if (!detail.patient_id || !form.date) return "";
+    return buildConflictQuery(
+      detail.patient_id,
+      detail.id,
+      form.date,
+      form.timeStart,
+      form.timeEnd,
+      form.interpreterId,
+    );
+  }, [
+    detail.id,
+    detail.patient_id,
+    form.date,
+    form.timeStart,
+    form.timeEnd,
+    form.interpreterId,
+  ]);
+  const debouncedConflictQuery = useDebouncedValue(conflictQuery);
+
+  useEffect(() => {
+    if (!form.providerId) {
+      setDoctors([]);
+      setForm((current) =>
+        current.doctorId ? { ...current, doctorId: "" } : current,
+      );
+      return;
+    }
+    let active = true;
+    getProviderDoctors(form.providerId)
+      .then((rows) => {
+        if (active) setDoctors(rows);
+      })
+      .catch(() => {
+        if (active) setDoctors([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [form.providerId]);
+
+  useEffect(() => {
+    if (!debouncedConflictQuery) {
+      setConflicts(null);
+      return;
+    }
+    let active = true;
+    apiFetch<ConflictSummary>(debouncedConflictQuery)
+      .then((value) => {
+        if (active) setConflicts(value);
+      })
+      .catch(() => {
+        if (active) setConflicts(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [debouncedConflictQuery]);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const applyRecurrenceRule =
+        Boolean(detail.recurrence_frequency) && recurrenceScope !== "single";
+      const repeatInterval = parsePositiveIntegerInput(form.repeatInterval);
+      const repeatCount = parsePositiveIntegerInput(form.repeatCount);
+      if (applyRecurrenceRule) {
+        if (!repeatInterval) {
+          setError(t.appointments_repeat_interval_error);
+          return;
+        }
+        if (!repeatCount && !form.repeatUntil) {
+          setError(t.appointments_repeat_require_end_error);
+          return;
+        }
+      }
+      const result = await apiFetch<{
+        ok: boolean;
+        conflicts?: ConflictSummary;
+      }>(`/appointments/${detail.id}/update`, {
+        method: "POST",
+        body: JSON.stringify({
+          provider_id: form.providerId || null,
+          doctor_id: form.doctorId || null,
+          owner_user_id: form.ownerUserId || null,
+          interpreter_id: form.interpreterId || null,
+          care_path_kind: normalizeCarePathKindForAppointmentType(
+            detail.type,
+            form.carePathKind,
+          ),
+          title: form.title.trim(),
+          date: form.date,
+          time_start: form.timeStart || null,
+          time_end: form.timeEnd || null,
+          location: form.location.trim() || null,
+          recurrence_frequency: applyRecurrenceRule ? form.repeatFrequency : null,
+          recurrence_interval: applyRecurrenceRule ? repeatInterval : null,
+          recurrence_count: applyRecurrenceRule ? repeatCount : null,
+          recurrence_until:
+            applyRecurrenceRule && form.repeatUntil ? form.repeatUntil : null,
+          recurrence_scope: detail.recurrence_frequency
+            ? recurrenceScope
+            : "single",
+        }),
+      });
+      onSaved(buildScheduleNotice(result.conflicts, localWarnings));
+    } catch (submitError) {
+      setError(
+        submitError instanceof Error
+          ? submitError.message
+          : "Failed to save schedule",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className={sectionCardClass("p-5")}>
+      <h3 className="text-sm font-semibold text-slate-950">
+        {t.appointments_title}
+      </h3>
+      {error ? (
+        <div className="mt-4">
+          <Banner tone="error">{error}</Banner>
+        </div>
+      ) : null}
+      <form onSubmit={handleSubmit} className="mt-4 space-y-4">
+        <Field label={t.appointments_title_col}>
+          <Input
+            value={form.title}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                title: event.target.value,
+              }))
+            }
+            className="h-10 rounded-xl bg-slate-50"
+          />
+        </Field>
+        <Field
+          label={appointmentText(
+            "Versorgungspfad",
+            "Траектория лечения",
+            "Care path",
+          )}
+        >
+          <select
+            value={form.carePathKind}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                carePathKind: event.target.value as AppointmentCarePathKind,
+              }))
+            }
+            className={selectClassName}
+            disabled={detail.type !== "medical"}
+          >
+            {CARE_PATH_KIND_OPTIONS.map((value) => (
+              <option key={value} value={value}>
+                {carePathKindLabel(value)}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <div className="grid gap-4 md:grid-cols-3">
+          <Field label={t.appointments_date}>
+            <Input
+              type="date"
+              value={form.date}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  date: event.target.value,
+                }))
+              }
+              className="h-10 rounded-xl bg-slate-50"
+            />
+          </Field>
+          <Field label={t.appointments_time}>
+            <Input
+              type="time"
+              value={form.timeStart}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  timeStart: event.target.value,
+                }))
+              }
+              className="h-10 rounded-xl bg-slate-50"
+            />
+          </Field>
+          <Field label={t.appointments_time}>
+            <Input
+              type="time"
+              value={form.timeEnd}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  timeEnd: event.target.value,
+                }))
+              }
+              className="h-10 rounded-xl bg-slate-50"
+            />
+          </Field>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field label={t.common_provider}>
+            <select
+              value={form.providerId}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  providerId: event.target.value,
+                  doctorId: "",
+                }))
+              }
+              className={selectClassName}
+              disabled={detail.type === "internal"}
+            >
+              <option value="">{t.common_not_set}</option>
+              {providers.map((provider) => (
+                <option key={provider.id} value={provider.id}>
+                  {provider.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label={t.common_doctor}>
+            <select
+              value={form.doctorId}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  doctorId: event.target.value,
+                }))
+              }
+              className={selectClassName}
+              disabled={!form.providerId}
+            >
+              <option value="">{t.common_not_set}</option>
+              {doctors.map((doctor) => (
+                <option key={doctor.id} value={doctor.id}>
+                  {doctorLabel(doctor)}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field label={t.patients_assign_owner}>
+            <select
+              value={form.ownerUserId}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  ownerUserId: event.target.value,
+                }))
+              }
+              className={selectClassName}
+            >
+              <option value="">{t.common_not_set}</option>
+              {staff.map((member) => (
+                <option key={member.id} value={member.id}>
+                  {member.name} · {roleLabel(member.role)}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label={t.common_doctor}>
+            <select
+              value={form.interpreterId}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  interpreterId: event.target.value,
+                }))
+              }
+              className={selectClassName}
+            >
+              <option value="">{t.common_not_set}</option>
+              {interpreters.map((member) => (
+                <option key={member.id} value={member.id}>
+                  {member.name} · {roleLabel(member.role)}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+        <Field label={t.appointments_location}>
+          <Input
+            value={form.location}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                location: event.target.value,
+              }))
+            }
+            className="h-10 rounded-xl bg-slate-50"
+          />
+        </Field>
+        {detail.recurrence_frequency ? (
+          <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3">
+            <Field label={t.appointments_scope_apply_schedule}>
+              <select
+                value={recurrenceScope}
+                onChange={(event) =>
+                  setRecurrenceScope(
+                    event.target.value as AppointmentRecurringActionScope,
+                  )
+                }
+                className={selectClassName}
+              >
+                <option value="single">{t.appointments_scope_single}</option>
+                <option value="following">
+                  {t.appointments_scope_following}
+                </option>
+                <option value="series">{t.appointments_scope_series}</option>
+              </select>
+            </Field>
+            <p className="mt-2 text-xs text-sky-800">
+              {t.appointments_scope_following_hint}
+            </p>
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
+              <Field
+                label={appointmentText(
+                  "Wiederholungsrhythmus",
+                  "Частота повторения",
+                  "Repeat frequency",
+                )}
+              >
+                <select
+                  value={form.repeatFrequency}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      repeatFrequency:
+                        event.target.value as AppointmentRecurrenceFrequency,
+                    }))
+                  }
+                  className={selectClassName}
+                  disabled={recurrenceScope === "single"}
+                >
+                  <option value="daily">{recurrenceFrequencyLabel("daily")}</option>
+                  <option value="weekly">
+                    {recurrenceFrequencyLabel("weekly")}
+                  </option>
+                  <option value="monthly">
+                    {recurrenceFrequencyLabel("monthly")}
+                  </option>
+                </select>
+              </Field>
+              <Field
+                label={appointmentText(
+                  "Wiederholen alle",
+                  "Повторять каждые",
+                  "Repeat every",
+                )}
+              >
+                <Input
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  value={form.repeatInterval}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      repeatInterval: event.target.value,
+                    }))
+                  }
+                  className="h-10 rounded-xl bg-white/80"
+                  disabled={recurrenceScope === "single"}
+                />
+              </Field>
+              <Field
+                label={appointmentText(
+                  "Anzahl Termine",
+                  "Всего повторов",
+                  "Total occurrences",
+                )}
+              >
+                <Input
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  value={form.repeatCount}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      repeatCount: event.target.value,
+                    }))
+                  }
+                  className="h-10 rounded-xl bg-white/80"
+                  placeholder={appointmentText(
+                    "Optional, wenn ein Enddatum gesetzt ist",
+                    "Необязательно, если указана дата окончания",
+                    "Optional when repeat-until is set",
+                  )}
+                  disabled={recurrenceScope === "single"}
+                />
+              </Field>
+              <Field
+                label={appointmentText(
+                  "Wiederholen bis",
+                  "Повторять до",
+                  "Repeat until",
+                )}
+              >
+                <Input
+                  type="date"
+                  value={form.repeatUntil}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      repeatUntil: event.target.value,
+                    }))
+                  }
+                  className="h-10 rounded-xl bg-white/80"
+                  disabled={recurrenceScope === "single"}
+                />
+              </Field>
+            </div>
+            <p className="mt-3 text-xs text-sky-800">
+              Recurrence rule edits only apply when you target
+              <span className="font-semibold"> this and following</span> or the{" "}
+              <span className="font-semibold">whole series</span>. Single-
+              occurrence updates keep the current slot detached from rule
+              changes.
+            </p>
+          </div>
+        ) : null}
+        <ConflictPanel conflicts={conflicts} />
+        <ScheduleWarningsPanel warnings={localWarnings} />
+        <div className="flex justify-end">
+          <Button
+            type="submit"
+            className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+            disabled={busy}
+          >
+            {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+            {busy ? t.patients_saving : t.common_save}
+          </Button>
+        </div>
+      </form>
+    </section>
+  );
+}
+
+const MemoizedEditAppointmentSection = memo(EditAppointmentSection);
+
+function AppointmentOverviewSection({
+  detail,
+  onOpenDetail,
+}: {
+  detail: AppointmentDetail;
+  onOpenDetail: (id: string) => void;
+}) {
+  const { t } = useLang();
+  const tr = t as unknown as Record<string, string>;
+  const detailLineageText = recurrenceLineageText(detail, t);
+  const detailLineageBadge = recurrenceLineageBadge(detail, t);
+  const detailCurrentLineageHistory = currentRecurringLineageHistory(detail);
+  const detailRelatedLineageCount = Math.max(
+    0,
+    detail.recurring_lineage_history.length - 1,
+  );
+
+  return (
+    <section className={sectionCardClass("p-5")}>
+      <div className="flex flex-wrap items-center gap-2">
+        <span
+          className={cn(
+            "rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em]",
+            typeBadgeClass(detail.type),
+          )}
+        >
+          {appointmentTypeLabel(detail.type, tr)}
+        </span>
+        {detail.care_path_kind ? (
+          <span className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-violet-700">
+            {carePathKindLabel(detail.care_path_kind)}
+          </span>
+        ) : null}
+        <span
+          className={cn(
+            "rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em]",
+            statusBadgeClass(detail.status),
+          )}
+        >
+          {statusLabel(detail.status)}
+        </span>
+        {detail.recurrence_frequency ? (
+          <span className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-sky-700">
+            {recurrenceFrequencyLabel(detail.recurrence_frequency)} series
+          </span>
+        ) : null}
+        {detailLineageBadge ? (
+          <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-700">
+            {detailLineageBadge}
+          </span>
+        ) : null}
+        {detail.interpreter_response ? (
+          <span className="rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+            Interpreter {responseLabel(detail.interpreter_response)}
+          </span>
+        ) : null}
+      </div>
+      <div className="mt-4 flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+        <div>
+          <h2 className="text-2xl font-semibold text-slate-950">
+            {detail.title}
+          </h2>
+          <p className="mt-2 text-sm text-slate-600">
+            {detail.patient_pid} · {detail.patient_name}
+          </p>
+        </div>
+        <div className="grid gap-2 text-sm text-slate-600">
+          <InfoLine icon={Clock3} label={slotLabel(detail)} />
+          <InfoLine
+            icon={MapPin}
+            label={detail.location || tr.common_not_set}
+          />
+          <InfoLine
+            icon={Stethoscope}
+            label={detail.provider_name || tr.common_not_set}
+          />
+        </div>
+      </div>
+      {detail.is_blocked ? (
+        <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+          Concierge view is intentionally limited for medical slots. Clinical
+          notes and provider specifics stay hidden here.
+        </div>
+      ) : null}
+      {!detail.is_blocked && detail.recurrence_frequency ? (
+        <div className="mt-4 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
+          {t.appointments_recurring_series}:{" "}
+          {t.appointments_occurrence.toLowerCase()} {detail.recurrence_index + 1}/
+          {detail.recurrence_series_size}. {recurrenceCadenceLabel(detail)}
+          {detail.recurrence_until
+            ? ` ${t.appointments_until} ${detail.recurrence_until}.`
+            : detail.recurrence_count
+              ? ` ${t.appointments_total_planned_occurrences}: ${detail.recurrence_count}.`
+              : "."}{" "}
+          {t.appointments_scope_bulk_status_hint}{" "}
+          {t.appointments_scope_following_hint}
+          {detailLineageText ? (
+            <span className="mt-2 block rounded-xl border border-sky-300/70 bg-white/70 px-3 py-2 text-xs font-medium text-sky-900">
+              {detailLineageText}
+            </span>
+          ) : null}
+          {detailCurrentLineageHistory ? (
+            <div className="mt-3 grid gap-2 md:grid-cols-4">
+              <div className="rounded-xl border border-sky-300/70 bg-white/70 px-3 py-2">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-sky-700">
+                  {t.appointments_lineage_current_branch}
+                </p>
+                <p className="mt-1 text-lg font-semibold text-sky-950">
+                  {detailCurrentLineageHistory.total_occurrences}
+                </p>
+                <p className="text-[11px] text-sky-800">
+                  {t.appointments_lineage_total_occurrences}
+                </p>
+              </div>
+              <div className="rounded-xl border border-sky-300/70 bg-white/70 px-3 py-2">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-sky-700">
+                  {t.common_active}
+                </p>
+                <p className="mt-1 text-lg font-semibold text-sky-950">
+                  {detailCurrentLineageHistory.active_occurrences}
+                </p>
+                <p className="text-[11px] text-sky-800">
+                  {t.appointments_lineage_still_operational}
+                </p>
+              </div>
+              <div className="rounded-xl border border-sky-300/70 bg-white/70 px-3 py-2">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-sky-700">
+                  {t.dash_completed}
+                </p>
+                <p className="mt-1 text-lg font-semibold text-sky-950">
+                  {detailCurrentLineageHistory.completed_occurrences}
+                </p>
+                <p className="text-[11px] text-sky-800">
+                  {t.appointments_lineage_completed_occurrences}
+                </p>
+              </div>
+              <div className="rounded-xl border border-sky-300/70 bg-white/70 px-3 py-2">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-sky-700">
+                  {t.appointments_lineage_related_branches}
+                </p>
+                <p className="mt-1 text-lg font-semibold text-sky-950">
+                  {detailRelatedLineageCount}
+                </p>
+                <p className="text-[11px] text-sky-800">
+                  {t.appointments_lineage_related_branches_meta}
+                </p>
+              </div>
+            </div>
+          ) : null}
+          {detail.recurring_scope_preview.length > 0 ? (
+            <div className="mt-3 rounded-xl border border-sky-300/70 bg-white/70 p-3">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-sky-900">
+                {t.appointments_active_series_path}
+              </p>
+              <div className="mt-2 space-y-1.5">
+                {detail.recurring_scope_preview.map((item) => (
+                  <div
+                    key={item.id}
+                    className={cn(
+                      "flex flex-wrap items-center gap-2 rounded-lg px-2 py-1.5 text-xs",
+                      item.id === detail.id
+                        ? "bg-sky-100 text-sky-950"
+                        : "bg-sky-50 text-sky-900",
+                    )}
+                  >
+                    <span className="font-semibold">
+                      #{item.recurrence_index + 1}
+                    </span>
+                    <span>{item.date}</span>
+                    {item.id === detail.id ? (
+                      <span className="rounded-full border border-sky-300 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em]">
+                        {t.appointments_current_occurrence}
+                      </span>
+                    ) : null}
+                    {item.open_checklist_count > 0 ? (
+                      <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-amber-800">
+                        {item.open_checklist_count}{" "}
+                        {item.open_checklist_count === 1
+                          ? t.appointments_open_checklist
+                          : t.appointments_open_checklists}
+                      </span>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          {detail.recurring_lineage_history.length > 0 ? (
+            <div className="mt-3 rounded-xl border border-sky-300/70 bg-white/70 p-3">
+              <div className="flex flex-col gap-1 md:flex-row md:items-end md:justify-between">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-sky-900">
+                    {t.appointments_lineage_history}
+                  </p>
+                  <p className="text-xs text-sky-800">
+                    {t.appointments_lineage_history_hint}
+                  </p>
+                </div>
+                <span className="text-[11px] font-medium text-sky-800">
+                  {detail.recurring_lineage_history.length}{" "}
+                  {t.appointments_lineage_related_series}
+                </span>
+              </div>
+              <div className="mt-3 grid gap-2">
+                {detail.recurring_lineage_history.map((item) => (
+                  <div
+                    key={item.series_id}
+                    className={cn(
+                      "rounded-xl border px-3 py-2",
+                      item.relation === "current"
+                        ? "border-sky-400 bg-sky-100/80 text-sky-950"
+                        : "border-sky-200 bg-sky-50 text-sky-900",
+                    )}
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-full border border-sky-300 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em]">
+                        {recurringLineageRelationLabel(item, t)}
+                      </span>
+                      <span className="text-xs font-medium">
+                        {recurringLineageSplitLabel(item, t)}
+                      </span>
+                      <span className="text-xs text-sky-700">
+                        {item.first_date} to {item.last_date}
+                      </span>
+                      {item.series_id !== detail.id ? (
+                        <button
+                          type="button"
+                          className="rounded-full border border-sky-300 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-sky-900 transition hover:bg-sky-100"
+                          onClick={() => onOpenDetail(item.series_id)}
+                        >
+                          {t.appointments_open_branch_root}
+                        </button>
+                      ) : null}
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-sky-900">
+                      <span className="rounded-full border border-sky-200 bg-white px-2 py-0.5">
+                        {item.total_occurrences}{" "}
+                        {t.appointments_lineage_total_short}
+                      </span>
+                      <span className="rounded-full border border-sky-200 bg-white px-2 py-0.5">
+                        {item.active_occurrences}{" "}
+                        {t.appointments_lineage_active_short}
+                      </span>
+                      <span className="rounded-full border border-sky-200 bg-white px-2 py-0.5">
+                        {item.completed_occurrences}{" "}
+                        {t.appointments_lineage_completed_short}
+                      </span>
+                      <span className="rounded-full border border-sky-200 bg-white px-2 py-0.5">
+                        {item.cancelled_occurrences}{" "}
+                        {t.appointments_lineage_cancelled_short}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+const MemoizedAppointmentOverviewSection = memo(AppointmentOverviewSection);
+
+function AppointmentSnapshotSection({ detail }: { detail: AppointmentDetail }) {
+  const { t } = useLang();
+  const tr = t as unknown as Record<string, string>;
+
+  return (
+    <section className={sectionCardClass("p-5")}>
+      <h3 className="text-sm font-semibold text-slate-950">
+        {t.appointments_title}
+      </h3>
+      <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <ContextCard
+          label={t.orders_phase}
+          value={detail.checklist_phase || tr.phase_discovery}
+          meta={appointmentTypeLabel(detail.type, tr)}
+        />
+        <ContextCard
+          label={t.patients_assign_owner}
+          value={detail.owner_name || tr.common_not_set}
+          meta={detail.owner_role ? roleLabel(detail.owner_role) : tr.common_not_set}
+        />
+        <ContextCard
+          label={t.common_doctor}
+          value={detail.interpreter_name || tr.common_not_set}
+          meta={
+            detail.interpreter_response
+              ? responseLabel(detail.interpreter_response)
+              : tr.mfa_pending
+          }
+        />
+        <ContextCard
+          label={tr.providers_linked_patients}
+          value={detail.order_id || tr.common_not_set}
+          meta={detail.category || formatDateTimeLabel(detail.created_at)}
+        />
+      </div>
+    </section>
+  );
+}
+
+const MemoizedAppointmentSnapshotSection = memo(AppointmentSnapshotSection);
+
+function AppointmentAttentionSection({
+  attention,
+}: {
+  attention: AppointmentAttentionItem;
+}) {
+  const { t } = useLang();
+
+  return (
+    <section className={sectionCardClass("p-5")}>
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-950">
+            {t.common_error}
+          </h3>
+          <p className="text-xs text-slate-500">
+            This appointment still has unresolved operational follow-up.
+          </p>
+        </div>
+        <span className="rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-rose-700">
+          {attention.attention_score} issue
+          {attention.attention_score === 1 ? "" : "s"}
+        </span>
+      </div>
+      <div className="mt-4 space-y-3">
+        {attention.reasons.map((reason) => (
+          <div
+            key={reason}
+            className="rounded-2xl border border-rose-200/80 bg-rose-50/80 px-4 py-3 text-sm text-rose-800"
+          >
+            {reason}
+          </div>
+        ))}
+      </div>
+      {attention.next_due_at ? (
+        <p className="mt-4 text-xs text-slate-500">
+          Next due checkpoint: {formatDateTimeLabel(attention.next_due_at)}
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+const MemoizedAppointmentAttentionSection = memo(AppointmentAttentionSection);
+
+function AppointmentLinksSection({
+  detail,
+  staffGo,
+}: {
+  detail: AppointmentDetail;
+  staffGo: (href: string) => void;
+}) {
+  const { t } = useLang();
+
+  return (
+    <section className={sectionCardClass("p-5")}>
+      <h3 className="text-sm font-semibold text-slate-950">
+        {t.providers_linked_patients}
+      </h3>
+      <div className="mt-4 flex flex-wrap gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          className="rounded-2xl"
+          onClick={() => staffGo(`/patients?patient=${detail.patient_id}`)}
+        >
+          Patient
+        </Button>
+        {detail.order_id ? (
+          <Button
+            type="button"
+            variant="outline"
+            className="rounded-2xl"
+            onClick={() => staffGo(`/orders?order=${detail.order_id}`)}
+          >
+            Order
+          </Button>
+        ) : null}
+        {detail.provider_id ? (
+          <Button
+            type="button"
+            variant="outline"
+            className="rounded-2xl"
+            onClick={() => staffGo(`/providers?provider=${detail.provider_id}`)}
+          >
+            Clinic
+          </Button>
+        ) : null}
+        <Button
+          type="button"
+          variant="outline"
+          className="rounded-2xl"
+          onClick={() =>
+            staffGo(
+              `/documents?appointment=${detail.id}&patient=${detail.patient_id}`,
+            )
+          }
+        >
+          Documents
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          className="rounded-2xl"
+          onClick={() => staffGo(`/cases?patient=${detail.patient_id}`)}
+        >
+          Cases
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+const MemoizedAppointmentLinksSection = memo(AppointmentLinksSection);
+
+function AppointmentTimelineSection({
+  timelineEvents,
+}: {
+  timelineEvents: AppointmentTimelineEvent[];
+}) {
+  const { t } = useLang();
+  const [timelineFilter, setTimelineFilter] = useState<
+    "all" | AppointmentTimelineKind
+  >("all");
+
+  const visibleTimelineEvents = useMemo(
+    () =>
+      timelineFilter === "all"
+        ? timelineEvents
+        : timelineEvents.filter((item) => item.kind === timelineFilter),
+    [timelineEvents, timelineFilter],
+  );
+
+  return (
+    <section className={sectionCardClass("p-5")}>
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-950">
+            {t.appointments_title}
+          </h3>
+          <p className="text-xs text-slate-500">
+            Unified event trail across scheduling, interpreter handling,
+            follow-up, concierge work and operational execution.
+          </p>
+        </div>
+        <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+          {visibleTimelineEvents.length} event
+          {visibleTimelineEvents.length === 1 ? "" : "s"}
+        </span>
+      </div>
+      <div className="mt-4 flex flex-wrap gap-2">
+        {(
+          [
+            "all",
+            "workflow",
+            "communication",
+            "interpreter",
+            "clinical",
+            "followup",
+            "concierge",
+          ] as const
+        ).map((filter) => (
+          <Button
+            key={filter}
+            type="button"
+            variant={timelineFilter === filter ? "default" : "outline"}
+            size="sm"
+            className={cn(
+              "rounded-2xl",
+              timelineFilter === filter ? "bg-slate-950 text-white hover:bg-slate-800" : "",
+            )}
+            onClick={() => setTimelineFilter(filter)}
+          >
+            {filter === "all"
+              ? "All"
+              : filter === "followup"
+                ? t.phase_followup
+                : filter === "communication"
+                  ? "Communication"
+                  : filter.charAt(0).toUpperCase() + filter.slice(1)}
+          </Button>
+        ))}
+      </div>
+      <div className="mt-4 space-y-3">
+        {visibleTimelineEvents.length === 0 ? (
+          <EmptyState text={t.common_not_set} />
+        ) : (
+          visibleTimelineEvents.map((item) => (
+            <div
+              key={item.id}
+              className="flex flex-col gap-3 rounded-2xl border border-slate-200/80 bg-slate-50/80 px-4 py-3 md:flex-row md:items-start md:justify-between"
+            >
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-semibold text-slate-950">
+                    {item.title}
+                  </p>
+                  <span
+                    className={cn(
+                      "rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em]",
+                      timelineToneClass(item.tone),
+                    )}
+                  >
+                    {item.kind}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-slate-500">
+                  {formatDateTimeLabel(item.occurredAt)}
+                </p>
+                {item.detail ? (
+                  <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
+                    {item.detail}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </section>
+  );
+}
+
+const MemoizedAppointmentTimelineSection = memo(AppointmentTimelineSection);
+
+function AppointmentInterpreterSection({
+  detail,
+  interpreters,
+  currentUserId,
+  canAssign,
+  canRespond,
+  onRefresh,
+  onError,
+}: {
+  detail: AppointmentDetail;
+  interpreters: InterpreterOption[];
+  currentUserId?: string;
+  canAssign: boolean;
+  canRespond: boolean;
+  onRefresh: () => void;
+  onError: (message: string) => void;
+}) {
+  const { t } = useLang();
+  const [assignInterpreterId, setAssignInterpreterId] = useState(
+    detail.interpreter_id ?? "",
+  );
+  const [busyAction, setBusyAction] = useState<string>("");
+
+  useEffect(() => {
+    setAssignInterpreterId(detail.interpreter_id ?? "");
+    setBusyAction("");
+  }, [detail.id, detail.interpreter_id]);
+
+  async function handleAssignInterpreter(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!assignInterpreterId) return;
+    setBusyAction("assign");
+    try {
+      await apiFetch<{ ok: boolean }>(
+        `/appointments/${detail.id}/assign-interpreter`,
+        {
+          method: "POST",
+          body: JSON.stringify({ interpreter_id: assignInterpreterId }),
+        },
+      );
+      onRefresh();
+    } catch (error) {
+      onError(
+        error instanceof Error ? error.message : "Failed to assign interpreter",
+      );
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function handleInterpreterResponse(response: InterpreterResponse) {
+    setBusyAction(`response:${response}`);
+    try {
+      await apiFetch<{ ok: boolean }>(
+        `/appointments/${detail.id}/interpreter-response`,
+        {
+          method: "POST",
+          body: JSON.stringify({ response }),
+        },
+      );
+      onRefresh();
+    } catch (error) {
+      onError(
+        error instanceof Error ? error.message : "Failed to submit response",
+      );
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  return (
+    <>
+      {canAssign && !detail.is_blocked ? (
+        <section className={sectionCardClass("p-5")}>
+          <h3 className="text-sm font-semibold text-slate-950">
+            {t.role_interpreter}
+          </h3>
+          <form
+            onSubmit={handleAssignInterpreter}
+            className="mt-4 grid gap-4 md:grid-cols-[minmax(0,1fr)_auto]"
+          >
+            <Field label={t.common_doctor}>
+              <select
+                value={assignInterpreterId}
+                onChange={(event) => setAssignInterpreterId(event.target.value)}
+                className={selectClassName}
+              >
+                <option value="">{t.common_not_set}</option>
+                {interpreters.map((member) => (
+                  <option key={member.id} value={member.id}>
+                    {member.name} · {roleLabel(member.role)}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <div className="flex items-end">
+              <Button
+                type="submit"
+                className="rounded-2xl"
+                disabled={!assignInterpreterId || busyAction === "assign"}
+              >
+                {busyAction === "assign" ? (
+                  <LoaderCircle className="size-4 animate-spin" />
+                ) : null}
+                Assign interpreter
+              </Button>
+            </div>
+          </form>
+        </section>
+      ) : null}
+      {canRespond && detail.interpreter_id === currentUserId ? (
+        <section className={sectionCardClass("p-5")}>
+          <h3 className="text-sm font-semibold text-slate-950">
+            {t.role_interpreter}
+          </h3>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {INTERPRETER_RESPONSE_OPTIONS.map((value) => (
+              <Button
+                key={value}
+                variant={
+                  detail.interpreter_response === value ? "default" : "outline"
+                }
+                className="rounded-2xl"
+                disabled={Boolean(busyAction)}
+                onClick={() => void handleInterpreterResponse(value)}
+              >
+                {busyAction === `response:${value}` ? (
+                  <LoaderCircle className="size-4 animate-spin" />
+                ) : null}
+                {responseLabel(value)}
+              </Button>
+            ))}
+          </div>
+        </section>
+      ) : null}
+    </>
+  );
+}
+
+const MemoizedAppointmentInterpreterSection = memo(
+  AppointmentInterpreterSection,
+);
+
+function AppointmentChecklistSection({
+  detail,
+  items,
+  onRefresh,
+  onError,
+}: {
+  detail: AppointmentDetail;
+  items: ChecklistItem[];
+  onRefresh: () => void;
+  onError: (message: string) => void;
+}) {
+  const { t } = useLang();
+  const tr = t as unknown as Record<string, string>;
+  const [form, setForm] = useState<ChecklistFormState>(blankChecklistForm());
+  const [submitBusy, setSubmitBusy] = useState(false);
+  const [completingId, setCompletingId] = useState("");
+
+  useEffect(() => {
+    setForm(blankChecklistForm());
+    setSubmitBusy(false);
+    setCompletingId("");
+  }, [detail.id]);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSubmitBusy(true);
+    try {
+      await apiFetch<{ id: string }>(`/appointments/${detail.id}/checklist`, {
+        method: "POST",
+        body: JSON.stringify({
+          phase: form.phase,
+          item_text: form.itemText.trim(),
+        }),
+      });
+      setForm(blankChecklistForm());
+      onRefresh();
+    } catch (error) {
+      onError(
+        error instanceof Error ? error.message : "Failed to add checklist item",
+      );
+    } finally {
+      setSubmitBusy(false);
+    }
+  }
+
+  async function handleComplete(itemId: string) {
+    setCompletingId(itemId);
+    try {
+      await apiFetch<{ ok: boolean }>(
+        `/appointments/${detail.id}/checklist/${itemId}/complete`,
+        { method: "POST" },
+      );
+      onRefresh();
+    } catch (error) {
+      onError(
+        error instanceof Error ? error.message : "Failed to complete item",
+      );
+    } finally {
+      setCompletingId("");
+    }
+  }
+
+  return (
+    <section className={sectionCardClass("p-5")}>
+      <h3 className="text-sm font-semibold text-slate-950">{t.orders_phase}</h3>
+      <div className="mt-4 space-y-3">
+        {items.length === 0 ? (
+          <EmptyState text={t.common_not_set} />
+        ) : (
+          items.map((item) => (
+            <div
+              key={item.id}
+              className="flex flex-col gap-3 rounded-2xl border border-slate-200/80 bg-slate-50/80 px-4 py-3 md:flex-row md:items-center md:justify-between"
+            >
+              <div>
+                <p className="text-sm font-medium text-slate-900">
+                  {item.item_text}
+                </p>
+                <p className="mt-1 text-xs uppercase tracking-[0.12em] text-slate-500">
+                  {item.phase}
+                </p>
+              </div>
+              {item.is_completed ? (
+                <span className="text-xs font-medium text-emerald-700">
+                  {t.common_completed} {formatDateTimeLabel(item.completed_at)}
+                </span>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="rounded-2xl"
+                  disabled={Boolean(completingId)}
+                  onClick={() => void handleComplete(item.id)}
+                >
+                  {completingId === item.id ? (
+                    <LoaderCircle className="size-4 animate-spin" />
+                  ) : null}
+                  {t.common_active}
+                </Button>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+      <form
+        onSubmit={handleSubmit}
+        className="mt-5 grid gap-4 md:grid-cols-[180px_minmax(0,1fr)_auto]"
+      >
+        <Field label={t.orders_phase}>
+          <select
+            value={form.phase}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                phase: event.target.value,
+              }))
+            }
+            className={selectClassName}
+          >
+            {CHECKLIST_PHASES.map((phase) => (
+              <option key={phase} value={phase}>
+                {phase}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label={t.orders_phase}>
+          <Input
+            value={form.itemText}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                itemText: event.target.value,
+              }))
+            }
+            placeholder={tr.appointments_title_col}
+            className="h-10 rounded-xl bg-slate-50"
+            required
+          />
+        </Field>
+        <div className="flex items-end">
+          <Button
+            type="submit"
+            className="rounded-2xl"
+            disabled={submitBusy || !form.itemText.trim()}
+          >
+            {submitBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+            Add checklist item
+          </Button>
+        </div>
+      </form>
+    </section>
+  );
+}
+
+const MemoizedAppointmentChecklistSection = memo(AppointmentChecklistSection);
+
+function AppointmentRemindersSection({
+  detail,
+  reminders,
+  staff,
+  canManageReminders,
+  onRefresh,
+  onError,
+}: {
+  detail: AppointmentDetail;
+  reminders: ReminderEntry[];
+  staff: StaffOption[];
+  canManageReminders: boolean;
+  onRefresh: () => void;
+  onError: (message: string) => void;
+}) {
+  const { t } = useLang();
+  const [form, setForm] = useState<ReminderFormState>(blankReminderForm());
+  const [submitBusy, setSubmitBusy] = useState(false);
+  const [completingId, setCompletingId] = useState("");
+
+  useEffect(() => {
+    setForm(blankReminderForm());
+    setSubmitBusy(false);
+    setCompletingId("");
+  }, [detail.id]);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSubmitBusy(true);
+    try {
+      await apiFetch<{ id: string }>(`/appointments/${detail.id}/reminders`, {
+        method: "POST",
+        body: JSON.stringify({
+          user_id: form.userId,
+          remind_at: toRfc3339(form.remindAt),
+          title: form.title.trim(),
+          description: form.description.trim() || null,
+        }),
+      });
+      setForm(blankReminderForm());
+      onRefresh();
+    } catch (error) {
+      onError(
+        error instanceof Error ? error.message : "Failed to add reminder",
+      );
+    } finally {
+      setSubmitBusy(false);
+    }
+  }
+
+  async function handleComplete(reminderId: string) {
+    setCompletingId(reminderId);
+    try {
+      await apiFetch<{ ok: boolean }>(
+        `/appointments/${detail.id}/reminders/${reminderId}/complete`,
+        { method: "POST" },
+      );
+      onRefresh();
+    } catch (error) {
+      onError(
+        error instanceof Error ? error.message : "Failed to complete reminder",
+      );
+    } finally {
+      setCompletingId("");
+    }
+  }
+
+  return (
+    <section className={sectionCardClass("p-5")}>
+      <h3 className="text-sm font-semibold text-slate-950">
+        {t.patients_notes}
+      </h3>
+      <div className="mt-4 space-y-3">
+        {reminders.length === 0 ? (
+          <EmptyState text={t.common_not_set} />
+        ) : (
+          reminders.map((item) => (
+            <div
+              key={item.id}
+              className="flex flex-col gap-3 rounded-2xl border border-slate-200/80 bg-slate-50/80 px-4 py-3 md:flex-row md:items-center md:justify-between"
+            >
+              <div>
+                <p className="text-sm font-medium text-slate-900">
+                  {item.title}
+                </p>
+                <p className="mt-1 text-xs text-slate-500">
+                  {item.user_name} · {formatDateTimeLabel(item.remind_at)}
+                </p>
+                {item.description ? (
+                  <p className="mt-2 text-sm text-slate-600">
+                    {item.description}
+                  </p>
+                ) : null}
+              </div>
+              {item.is_completed ? (
+                <span className="text-xs font-medium text-emerald-700">
+                  Completed {formatDateTimeLabel(item.completed_at)}
+                </span>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="rounded-2xl"
+                  disabled={Boolean(completingId)}
+                  onClick={() => void handleComplete(item.id)}
+                >
+                  {completingId === item.id ? (
+                    <LoaderCircle className="size-4 animate-spin" />
+                  ) : null}
+                  {t.common_active}
+                </Button>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+      {canManageReminders ? (
+        <form onSubmit={handleSubmit} className="mt-5 grid gap-4 md:grid-cols-2">
+          <Field label={t.patients_assign_owner}>
+            <select
+              value={form.userId}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  userId: event.target.value,
+                }))
+              }
+              className={selectClassName}
+              required
+            >
+              <option value="">{t.common_not_set}</option>
+              {staff.map((member) => (
+                <option key={member.id} value={member.id}>
+                  {member.name} · {roleLabel(member.role)}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label={t.appointments_date}>
+            <Input
+              type="datetime-local"
+              value={form.remindAt}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  remindAt: event.target.value,
+                }))
+              }
+              className="h-10 rounded-xl bg-slate-50"
+              required
+            />
+          </Field>
+          <Field label={t.appointments_title_col}>
+            <Input
+              value={form.title}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  title: event.target.value,
+                }))
+              }
+              className="h-10 rounded-xl bg-slate-50"
+              required
+            />
+          </Field>
+          <Field label={t.providers_service_desc}>
+            <textarea
+              value={form.description}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  description: event.target.value,
+                }))
+              }
+              className={textareaClassName}
+              rows={3}
+            />
+          </Field>
+          <div className="md:col-span-2 flex justify-end">
+            <Button
+              type="submit"
+              className="rounded-2xl"
+              disabled={
+                submitBusy ||
+                !form.userId ||
+                !form.remindAt ||
+                !form.title.trim()
+              }
+            >
+              {submitBusy ? (
+                <LoaderCircle className="size-4 animate-spin" />
+              ) : null}
+              {t.appointments_add_reminder}
+            </Button>
+          </div>
+        </form>
+      ) : null}
+    </section>
+  );
+}
+
+const MemoizedAppointmentRemindersSection = memo(AppointmentRemindersSection);
+
+function AppointmentCompletionSection({
+  detail,
+  detailReport,
+  handoffStakeholders,
+  openChecklistCount,
+  openTaskCount,
+  pendingReminderCount,
+  interpreterReportReady,
+  completionWarnings,
+  followUpAssigneeId,
+  setFollowUpAssigneeId,
+  onRefresh,
+  onError,
+  onNotice,
+}: {
+  detail: AppointmentDetail;
+  detailReport: ReportSummary | null;
+  handoffStakeholders: HandoffStakeholder[];
+  openChecklistCount: number;
+  openTaskCount: number;
+  pendingReminderCount: number;
+  interpreterReportReady: boolean;
+  completionWarnings: string[];
+  followUpAssigneeId: string;
+  setFollowUpAssigneeId: (value: string) => void;
+  onRefresh: () => void;
+  onError: (message: string) => void;
+  onNotice: (notice: string) => void;
+}) {
+  const { t } = useLang();
+  const tr = t as unknown as Record<string, string>;
+  const [completionPlan, setCompletionPlan] = useState<Record<string, boolean>>(
+    () => defaultCompletionPlan(),
+  );
+  const [busyAction, setBusyAction] = useState<"" | "complete" | "follow-up">("");
+  const selectedCompletionPresetCount = useMemo(() => {
+    let count = 0;
+    for (const preset of FOLLOW_UP_PRESETS) {
+      if (completionPlan[preset.id]) {
+        count += 1;
+      }
+    }
+    return count;
+  }, [completionPlan]);
+
+  useEffect(() => {
+    setCompletionPlan(defaultCompletionPlan());
+    setBusyAction("");
+  }, [detail.id, detail.status]);
+
+  async function handleCompleteOnly() {
+    setBusyAction("complete");
+    try {
+      await apiFetch<{ ok: boolean }>(`/appointments/${detail.id}/status`, {
+        method: "POST",
+        body: JSON.stringify({ status: "completed" }),
+      });
+      onRefresh();
+    } catch (error) {
+      onError(error instanceof Error ? error.message : tr.common_failed_update);
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function handleCompleteWithFollowUp() {
+    const selectedPresets = FOLLOW_UP_PRESETS.filter(
+      (preset) => completionPlan[preset.id],
+    );
+    if (selectedPresets.length > 0 && !followUpAssigneeId) return;
+
+    setBusyAction("follow-up");
+    let completed = false;
+    try {
+      await apiFetch<{ ok: boolean }>(`/appointments/${detail.id}/status`, {
+        method: "POST",
+        body: JSON.stringify({ status: "completed" }),
+      });
+      completed = true;
+
+      if (selectedPresets.length > 0) {
+        const anchor = appointmentAnchorDateTime(detail);
+        await Promise.all(
+          selectedPresets.map((preset) => {
+            const remindAt = shiftLocalDateTime(anchor, {
+              days: "offsetDays" in preset ? preset.offsetDays : undefined,
+              months:
+                "offsetMonths" in preset ? preset.offsetMonths : undefined,
+            });
+            return apiFetch<{ id: string }>(`/appointments/${detail.id}/reminders`, {
+              method: "POST",
+              body: JSON.stringify({
+                user_id: followUpAssigneeId,
+                remind_at: toRfc3339(remindAt),
+                title: preset.title,
+                description: `Auto-planned during appointment completion for ${detail.patient_pid} · ${detail.title}.`,
+              }),
+            });
+          }),
+        );
+      }
+
+      onNotice(
+        selectedPresets.length > 0
+          ? `Appointment completed. ${selectedPresets.length} follow-up reminder(s) scheduled.`
+          : t.common_active,
+      );
+      onRefresh();
+    } catch (error) {
+      if (completed) {
+        onError(
+          error instanceof Error
+            ? `Appointment completed, but follow-up scheduling failed: ${error.message}`
+            : tr.common_error,
+        );
+        onRefresh();
+      } else {
+        onError(error instanceof Error ? error.message : tr.common_failed_update);
+      }
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  return (
+    <section className={sectionCardClass("p-5")}>
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-950">
+            Completion readiness
+          </h3>
+          <p className="text-xs text-slate-500">
+            Review operational blockers before closing the appointment and
+            launching standard post-care follow-up.
+          </p>
+        </div>
+        <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+          {detail.status === "completed" ? "Completed" : statusLabel(detail.status)}
+        </span>
+      </div>
+      <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <ContextCard
+          label={t.cases_status}
+          value={
+            openChecklistCount === 0 ? "Ready" : `${openChecklistCount} open`
+          }
+          meta={
+            openChecklistCount === 0
+              ? "No pending checklist items."
+              : "Finish outstanding preparation or follow-up steps."
+          }
+        />
+        <ContextCard
+          label={t.cases_title}
+          value={openTaskCount === 0 ? "Ready" : `${openTaskCount} open`}
+          meta={
+            openTaskCount === 0
+              ? "No open operational tasks."
+              : "Resolve active PM, interpreter or concierge tasks."
+          }
+        />
+        <ContextCard
+          label={t.common_search}
+          value={appointmentText(
+            `${pendingReminderCount} ausstehend`,
+            `${pendingReminderCount} ожидает`,
+            `${pendingReminderCount} pending`,
+          )}
+          meta={
+            pendingReminderCount === 0
+              ? appointmentText(
+                  "Keine offenen Erinnerungen.",
+                  "Нет активных напоминаний.",
+                  "No outstanding reminders.",
+                )
+              : appointmentText(
+                  "Offene Erinnerungen bleiben auch nach dem Abschluss aktiv.",
+                  "Ожидающие напоминания остаются активными и после закрытия.",
+                  "Pending reminders stay active after closure.",
+                )
+          }
+        />
+        <ContextCard
+          label={tr.role_interpreter}
+          value={
+            !detail.interpreter_id
+              ? appointmentText("Nicht erforderlich", "Не требуется", "Not required")
+              : interpreterReportReady
+                ? appointmentText("Freigegeben", "Согласовано", "Approved")
+                : appointmentText("Ausstehend", "Ожидается", "Pending")
+          }
+          meta={
+            !detail.interpreter_id
+              ? appointmentText(
+                  "Kein Dolmetscher verknupft.",
+                  "Переводчик не привязан.",
+                  "No interpreter linked.",
+                )
+              : detailReport
+                ? detailReport.approval_status
+                : appointmentText(
+                    "Noch kein Bericht eingereicht.",
+                    "Отчёт ещё не отправлен.",
+                    "No report submitted yet.",
+                  )
+          }
+        />
+      </div>
+      {completionWarnings.length > 0 ? (
+        <div className="mt-4">
+          <Banner tone="warning">
+            <div className="space-y-1">
+              {completionWarnings.map((warning) => (
+                <p key={warning}>{warning}</p>
+              ))}
+            </div>
+          </Banner>
+        </div>
+      ) : null}
+      {detail.status !== "completed" && detail.status !== "cancelled" ? (
+        <div className="mt-5 space-y-4">
+          <Field label={tr.patients_assign_owner}>
+            <select
+              value={followUpAssigneeId}
+              onChange={(event) => setFollowUpAssigneeId(event.target.value)}
+              className={selectClassName}
+            >
+              <option value="">{tr.common_not_set}</option>
+              {handoffStakeholders.map((peer) => (
+                <option key={peer.id} value={peer.id}>
+                  {peer.name} · {roleLabel(peer.role)}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <div className="flex flex-wrap gap-2">
+            {FOLLOW_UP_PRESETS.map((preset) => (
+              <Button
+                key={preset.id}
+                type="button"
+                variant={completionPlan[preset.id] ? "default" : "outline"}
+                size="sm"
+                className={cn(
+                  "rounded-2xl",
+                  completionPlan[preset.id]
+                    ? "bg-slate-950 text-white hover:bg-slate-800"
+                    : "",
+                )}
+                onClick={() =>
+                  setCompletionPlan((current) => ({
+                    ...current,
+                    [preset.id]: !current[preset.id],
+                  }))
+                }
+              >
+                {preset.label}
+              </Button>
+            ))}
+          </div>
+          <div className="flex flex-wrap justify-end gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              className="rounded-2xl"
+              disabled={Boolean(busyAction)}
+              onClick={handleCompleteOnly}
+            >
+              {t.appointments_complete_only}
+            </Button>
+            <Button
+              type="button"
+              className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+              disabled={
+                Boolean(busyAction) ||
+                (selectedCompletionPresetCount > 0 && !followUpAssigneeId)
+              }
+              onClick={handleCompleteWithFollowUp}
+            >
+              {busyAction === "follow-up" ? (
+                <LoaderCircle className="size-4 animate-spin" />
+              ) : null}
+              {t.appointments_complete_and_schedule}
+            </Button>
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+const MemoizedAppointmentCompletionSection = memo(
+  AppointmentCompletionSection,
+);
+
+function AppointmentStatusSection({
+  detail,
+  openChecklistCount,
+  onRefresh,
+  onError,
+}: {
+  detail: AppointmentDetail;
+  openChecklistCount: number;
+  onRefresh: () => void;
+  onError: (message: string) => void;
+}) {
+  const { t } = useLang();
+  const [statusRecurrenceScope, setStatusRecurrenceScope] =
+    useState<AppointmentRecurringActionScope>("single");
+  const [busyAction, setBusyAction] = useState("");
+  const selectedRecurringStatusTargets = useMemo(
+    () =>
+      detail.recurrence_frequency
+        ? recurringStatusTargetsForScope(detail, statusRecurrenceScope)
+        : [
+            {
+              id: detail.id,
+              date: detail.date,
+              status: detail.status,
+              recurrence_index: detail.recurrence_index,
+              open_checklist_count: openChecklistCount,
+            },
+          ],
+    [detail, openChecklistCount, statusRecurrenceScope],
+  );
+  const completionScopeBlockers = useMemo(
+    () =>
+      selectedRecurringStatusTargets.filter(
+        (item) =>
+          !["completed", "cancelled"].includes(item.status) &&
+          item.open_checklist_count > 0,
+      ),
+    [selectedRecurringStatusTargets],
+  );
+
+  useEffect(() => {
+    setStatusRecurrenceScope("single");
+    setBusyAction("");
+  }, [detail.id, detail.recurrence_frequency]);
+
+  async function handleStatusChange(
+    status: AppointmentStatus,
+    recurrenceScope: AppointmentRecurringActionScope = "single",
+  ) {
+    const nextBusyAction = statusActionKey(detail.id, status, recurrenceScope);
+    setBusyAction(nextBusyAction);
+    try {
+      await apiFetch<{ ok: boolean }>(`/appointments/${detail.id}/status`, {
+        method: "POST",
+        body: JSON.stringify({
+          status,
+          recurrence_scope: recurrenceScope,
+        }),
+      });
+      onRefresh();
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Failed to change status");
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  return (
+    <section className={sectionCardClass("p-5")}>
+      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-950">
+            {t.users_status}
+          </h3>
+          {detail.recurrence_frequency ? (
+            <p className="mt-1 text-xs text-slate-500">
+              {t.appointments_scope_bulk_status_hint}
+            </p>
+          ) : null}
+        </div>
+        {detail.recurrence_frequency ? (
+          <div className="w-full md:w-[240px]">
+            <Field label={t.appointments_scope_apply_status}>
+              <select
+                value={statusRecurrenceScope}
+                onChange={(event) =>
+                  setStatusRecurrenceScope(
+                    event.target.value as AppointmentRecurringActionScope,
+                  )
+                }
+                className={selectClassName}
+              >
+                <option value="single">{t.appointments_scope_single}</option>
+                <option value="following">{t.appointments_scope_following}</option>
+                <option value="series">{t.appointments_scope_series}</option>
+              </select>
+            </Field>
+          </div>
+        ) : null}
+      </div>
+      <div className="mt-4 flex flex-wrap gap-2">
+        {STATUS_OPTIONS.map((status) => {
+          const recurrenceScope = detail.recurrence_frequency
+            ? statusRecurrenceScope
+            : "single";
+          const nextBusyAction = statusActionKey(detail.id, status, recurrenceScope);
+          return (
+            <Button
+              key={status}
+              variant={detail.status === status ? "default" : "outline"}
+              className={cn(
+                "rounded-2xl",
+                detail.status === status
+                  ? "bg-slate-950 text-white hover:bg-slate-800"
+                  : "",
+              )}
+              disabled={Boolean(busyAction)}
+              onClick={() => handleStatusChange(status, recurrenceScope)}
+            >
+              {busyAction === nextBusyAction ? (
+                <LoaderCircle className="size-4 animate-spin" />
+              ) : null}
+              {detail.recurrence_frequency && status === "cancelled"
+                ? statusRecurrenceScope === "following"
+                  ? t.appointments_cancel_this_and_following
+                  : statusRecurrenceScope === "series"
+                    ? t.appointments_cancel_whole_series
+                    : "Cancel this occurrence"
+                : statusLabel(status)}
+            </Button>
+          );
+        })}
+      </div>
+      {detail.recurrence_frequency ? (
+        <div className="mt-4 space-y-3">
+          <p className="text-xs text-slate-500">
+            {t.appointments_scope_targets}{" "}
+            <span className="font-semibold text-slate-700">
+              {selectedRecurringStatusTargets.length}
+            </span>{" "}
+            {selectedRecurringStatusTargets.length === 1
+              ? t.appointments_active_occurrence
+              : t.appointments_active_occurrences}
+            .
+          </p>
+          {completionScopeBlockers.length > 0 ? (
+            <Banner tone="warning">
+              Completing this scope is currently blocked by{" "}
+              {completionScopeBlockers.length} occurrence
+              {completionScopeBlockers.length === 1 ? "" : "s"}:{" "}
+              {completionScopeBlockers
+                .map((item) => recurringOccurrenceLabel(item, t))
+                .join("; ")}
+            </Banner>
+          ) : null}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+const MemoizedAppointmentStatusSection = memo(AppointmentStatusSection);
+
+function AppointmentReportSection({
+  detail,
+  detailReport,
+  reportReviewMeta,
+  canSubmitInterpreterReport,
+  canResubmitRejectedReport,
+  showReportReviewActions,
+  canApproveReport,
+  canRejectReport,
+  onRefresh,
+  onError,
+}: {
+  detail: AppointmentDetail;
+  detailReport: ReportSummary | null;
+  reportReviewMeta: string;
+  canSubmitInterpreterReport: boolean;
+  canResubmitRejectedReport: boolean;
+  showReportReviewActions: boolean;
+  canApproveReport: boolean;
+  canRejectReport: boolean;
+  onRefresh: () => void;
+  onError: (message: string) => void;
+}) {
+  const { t } = useLang();
+  const tr = t as unknown as Record<string, string>;
+  const [form, setForm] = useState<ReportFormState>(() => blankReportForm());
+  const [rejectReason, setRejectReason] = useState("");
+  const [busyAction, setBusyAction] = useState("");
+
+  useEffect(() => {
+    setForm(
+      detailReport && detailReport.approval_status === "rejected"
+        ? {
+            hours: detailReport.hours,
+            reportText: detailReport.report_text ?? "",
+          }
+        : blankReportForm(),
+    );
+    setRejectReason("");
+    setBusyAction("");
+  }, [detail.id, detailReport]);
+
+  async function handleReportSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusyAction("report-submit");
+    try {
+      await apiFetch<{ id: string }>(`/appointments/${detail.id}/report`, {
+        method: "POST",
+        body: JSON.stringify({
+          hours: Number(form.hours),
+          report_text: form.reportText.trim() || null,
+        }),
+      });
+      setForm(blankReportForm());
+      onRefresh();
+    } catch (error) {
+      onError(
+        error instanceof Error ? error.message : "Failed to submit report",
+      );
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function handleApproveReport() {
+    setBusyAction("report-approve");
+    try {
+      await apiFetch<{ ok: boolean }>(`/appointments/${detail.id}/report/approve`, {
+        method: "POST",
+      });
+      onRefresh();
+    } catch (error) {
+      onError(
+        error instanceof Error ? error.message : "Failed to approve report",
+      );
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function handleRejectReport() {
+    setBusyAction("report-reject");
+    try {
+      await apiFetch<{ ok: boolean }>(`/appointments/${detail.id}/report/reject`, {
+        method: "POST",
+        body: JSON.stringify({ notes: rejectReason.trim() || null }),
+      });
+      setRejectReason("");
+      onRefresh();
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Failed to reject report");
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  return (
+    <section className={sectionCardClass("p-5")}>
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-950">
+            {t.appointments_interpreter_report_title}
+          </h3>
+          <p className="text-xs text-slate-500">
+            {t.appointments_interpreter_report_subtitle}
+          </p>
+        </div>
+        {detailReport ? (
+          <span
+            className={cn(
+              "rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em]",
+              reportApprovalBadgeClass(detailReport.approval_status),
+            )}
+          >
+            {reportApprovalLabel(detailReport.approval_status)}
+          </span>
+        ) : null}
+      </div>
+
+      {detailReport ? (
+        <div className="mt-4 space-y-4">
+          <div className="grid gap-3 xl:grid-cols-3">
+            <ContextCard
+              label={t.common_doctor}
+              value={detailReport.interpreter_name}
+              meta={`${t.appointments_report_submitted_prefix} ${formatDateTimeLabel(detailReport.created_at)}`}
+            />
+            <ContextCard
+              label={t.appointments_time}
+              value={`${detailReport.hours} h`}
+              meta={
+                detailReport.approval_status === "approved"
+                  ? interpreterReportBillingSyncLabel(
+                      detailReport.billing_sync_status,
+                      t,
+                    )
+                  : detailReport.approval_status === "rejected"
+                    ? t.appointments_report_needs_interpreter_revision
+                    : t.appointments_report_waiting_teamlead_review
+              }
+            />
+            <ContextCard
+              label={tr.patients_notes}
+              value={
+                detailReport.approved_by_name ??
+                (detailReport.approval_status === "pending"
+                  ? t.common_pending
+                  : t.appointments_report_no_reviewer_recorded)
+              }
+              meta={reportReviewMeta}
+            />
+          </div>
+
+          {detailReport.notes ? (
+            <Banner
+              tone={detailReport.approval_status === "rejected" ? "error" : "warning"}
+            >
+              <span className="font-medium">
+                {t.appointments_report_reviewer_notes}:
+              </span>{" "}
+              {detailReport.notes}
+            </Banner>
+          ) : null}
+
+          {detailReport.approval_status === "approved" ? (
+            <div
+              className={cn(
+                "rounded-2xl border px-4 py-3 text-sm",
+                interpreterReportBillingSyncClass(detailReport.billing_sync_status),
+              )}
+            >
+              <div className="font-medium">{t.appointments_report_billing_sync}</div>
+              <div className="mt-1">
+                {interpreterReportBillingSyncLabel(
+                  detailReport.billing_sync_status,
+                  t,
+                )}
+              </div>
+              <div className="mt-1 text-xs opacity-80">
+                {detailReport.billing_service_key ? (
+                  <span>Catalog key: {detailReport.billing_service_key}</span>
+                ) : null}
+                {detailReport.billing_service_key && detailReport.billing_leistung_id
+                  ? " · "
+                  : null}
+                {detailReport.billing_leistung_id ? (
+                  <span>Order line: {detailReport.billing_leistung_id}</span>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
+          <div className="rounded-2xl border border-slate-200/80 bg-white px-4 py-3">
+            {detailReport.report_text ? (
+              <p className="text-sm leading-6 text-slate-700">
+                {detailReport.report_text}
+              </p>
+            ) : (
+              <p className="text-sm text-slate-500">
+                No free-text report submitted.
+              </p>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="mt-4">
+          <EmptyState text={tr.common_not_set} />
+        </div>
+      )}
+
+      {canSubmitInterpreterReport ? (
+        <form
+          onSubmit={handleReportSubmit}
+          className="mt-5 grid gap-4 md:grid-cols-[180px_minmax(0,1fr)]"
+        >
+          {canResubmitRejectedReport ? (
+            <div className="md:col-span-2">
+              <Banner tone="warning">
+                The latest report was returned. Update the hours or report text
+                and resubmit it for teamlead approval.
+              </Banner>
+            </div>
+          ) : null}
+          <Field label={t.appointments_time}>
+            <Input
+              type="number"
+              min="0"
+              step="0.25"
+              value={form.hours}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  hours: event.target.value,
+                }))
+              }
+              className="h-10 rounded-xl bg-slate-50"
+              required
+            />
+          </Field>
+          <Field label={tr.patients_notes}>
+            <textarea
+              value={form.reportText}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  reportText: event.target.value,
+                }))
+              }
+              className={textareaClassName}
+              rows={4}
+              placeholder={tr.patients_notes}
+            />
+          </Field>
+          <div className="md:col-span-2 flex justify-end">
+            <Button
+              type="submit"
+              className="rounded-2xl"
+              disabled={busyAction === "report-submit" || !form.hours}
+            >
+              {busyAction === "report-submit" ? (
+                <LoaderCircle className="size-4 animate-spin" />
+              ) : null}
+              {canResubmitRejectedReport ? "Resubmit report" : t.common_save}
+            </Button>
+          </div>
+        </form>
+      ) : null}
+
+      {showReportReviewActions ? (
+        <div className="mt-5 grid gap-4 md:grid-cols-[minmax(0,1fr)_auto]">
+          <Field label={tr.patients_notes}>
+            <textarea
+              value={rejectReason}
+              onChange={(event) => setRejectReason(event.target.value)}
+              className={textareaClassName}
+              rows={3}
+              placeholder={tr.patients_notes}
+            />
+          </Field>
+          <div className="flex items-end gap-3">
+            {canRejectReport ? (
+              <Button
+                variant="outline"
+                className="rounded-2xl border-rose-200 text-rose-700 hover:bg-rose-50"
+                disabled={busyAction === "report-reject"}
+                onClick={handleRejectReport}
+              >
+                {busyAction === "report-reject" ? (
+                  <LoaderCircle className="size-4 animate-spin" />
+                ) : null}
+                Return for revision
+              </Button>
+            ) : null}
+            {canApproveReport ? (
+              <Button
+                className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+                disabled={busyAction === "report-approve"}
+                onClick={handleApproveReport}
+              >
+                {busyAction === "report-approve" ? (
+                  <LoaderCircle className="size-4 animate-spin" />
+                ) : null}
+                Approve hours and report
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+const MemoizedAppointmentReportSection = memo(AppointmentReportSection);
+
+function AppointmentTasksSection({
+  detail,
+  tasks,
+  assignableStaff,
+  canCreateTasks,
+  onRefresh,
+  onError,
+}: {
+  detail: AppointmentDetail;
+  tasks: TaskEntry[];
+  assignableStaff: StaffOption[];
+  canCreateTasks: boolean;
+  onRefresh: () => void;
+  onError: (message: string) => void;
+}) {
+  const { t } = useLang();
+  const tr = t as unknown as Record<string, string>;
+  const [form, setForm] = useState<TaskFormState>(() =>
+    blankTaskForm(
+      detail.interpreter_id ?? detail.owner_user_id ?? assignableStaff[0]?.id ?? "",
+      buildTaskDefaultDueDate(detail),
+    ),
+  );
+  const [submitBusy, setSubmitBusy] = useState(false);
+  const [actionBusy, setActionBusy] = useState("");
+
+  useEffect(() => {
+    setForm(
+      blankTaskForm(
+        detail.interpreter_id ??
+          detail.owner_user_id ??
+          assignableStaff[0]?.id ??
+          "",
+        buildTaskDefaultDueDate(detail),
+      ),
+    );
+    setSubmitBusy(false);
+    setActionBusy("");
+  }, [assignableStaff, detail]);
+
+  async function handleTaskSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSubmitBusy(true);
+    try {
+      await apiFetch<{ id: string }>("/tasks", {
+        method: "POST",
+        body: JSON.stringify({
+          title: form.title.trim(),
+          description: form.description.trim() || null,
+          assigned_to: form.assignedTo,
+          patient_id: detail.patient_id,
+          order_id: detail.order_id,
+          appointment_id: detail.id,
+          due_date: form.dueDate ? toRfc3339(form.dueDate) : null,
+          priority: form.priority,
+        }),
+      });
+      setForm(
+        blankTaskForm(
+          detail.interpreter_id ??
+            detail.owner_user_id ??
+            assignableStaff[0]?.id ??
+            "",
+          buildTaskDefaultDueDate(detail),
+        ),
+      );
+      onRefresh();
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Failed to create task");
+    } finally {
+      setSubmitBusy(false);
+    }
+  }
+
+  async function handleTaskStatus(taskId: string, status: string) {
+    setActionBusy(`task:${taskId}:${status}`);
+    try {
+      await apiFetch<{ ok: boolean }>(`/tasks/${taskId}/status`, {
+        method: "POST",
+        body: JSON.stringify({ status }),
+      });
+      onRefresh();
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Failed to update task");
+    } finally {
+      setActionBusy("");
+    }
+  }
+
+  return (
+    <section className={sectionCardClass("p-5")}>
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-950">
+            Operational tasks
+          </h3>
+          <p className="text-xs text-slate-500">
+            Appointment-linked follow-up for PM, teamlead, interpreter and
+            concierge.
+          </p>
+        </div>
+        <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+          {tasks.length} linked
+        </span>
+      </div>
+      <div className="mt-4 space-y-3">
+        {tasks.length === 0 ? (
+          <EmptyState text={tr.common_not_set} />
+        ) : (
+          tasks.map((task) => (
+            <div
+              key={task.id}
+              className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4"
+            >
+              <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-sm font-semibold text-slate-950">
+                      {task.title}
+                    </p>
+                    <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                      {taskStatusLabel(task.status)}
+                    </span>
+                    <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                      {taskPriorityLabel(task.priority)}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {task.assigned_to_name} · {roleLabel(task.assigned_to_role)}
+                    {task.due_date
+                      ? appointmentText(
+                          ` · Fallig ${formatDateTimeLabel(task.due_date)}`,
+                          ` · Срок ${formatDateTimeLabel(task.due_date)}`,
+                          ` · Due ${formatDateTimeLabel(task.due_date)}`,
+                        )
+                      : ""}
+                  </p>
+                  {task.description ? (
+                    <p className="mt-3 text-sm leading-6 text-slate-600">
+                      {task.description}
+                    </p>
+                  ) : null}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {TASK_STATUS_OPTIONS.map((status) => (
+                    <Button
+                      key={status}
+                      type="button"
+                      variant={task.status === status ? "default" : "outline"}
+                      size="sm"
+                      className={cn(
+                        "rounded-2xl",
+                        task.status === status
+                          ? "bg-slate-950 text-white hover:bg-slate-800"
+                          : "",
+                      )}
+                      disabled={Boolean(actionBusy) || task.status === status}
+                      onClick={() => handleTaskStatus(task.id, status)}
+                    >
+                      {actionBusy === `task:${task.id}:${status}` ? (
+                        <LoaderCircle className="size-4 animate-spin" />
+                      ) : null}
+                      {taskStatusLabel(status)}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+      {canCreateTasks ? (
+        <form onSubmit={handleTaskSubmit} className="mt-5 grid gap-4 md:grid-cols-2">
+          <Field label={tr.appointments_title_col}>
+            <Input
+              value={form.title}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  title: event.target.value,
+                }))
+              }
+              placeholder={tr.appointments_title_col}
+              className="h-10 rounded-xl bg-slate-50"
+              required
+            />
+          </Field>
+          <Field label={tr.patients_assign_owner}>
+            <select
+              value={form.assignedTo}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  assignedTo: event.target.value,
+                }))
+              }
+              className={selectClassName}
+              required
+            >
+              <option value="">{tr.common_not_set}</option>
+              {assignableStaff.map((member) => (
+                <option key={member.id} value={member.id}>
+                  {member.name} · {roleLabel(member.role)}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label={tr.invoices_due_at}>
+            <Input
+              type="datetime-local"
+              value={form.dueDate}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  dueDate: event.target.value,
+                }))
+              }
+              className="h-10 rounded-xl bg-slate-50"
+            />
+          </Field>
+          <Field label={t.users_status}>
+            <select
+              value={form.priority}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  priority: event.target.value,
+                }))
+              }
+              className={selectClassName}
+            >
+              {TASK_PRIORITY_OPTIONS.map((priority) => (
+                <option key={priority} value={priority}>
+                  {taskPriorityLabel(priority)}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label={t.providers_service_desc}>
+            <textarea
+              value={form.description}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  description: event.target.value,
+                }))
+              }
+              className={textareaClassName}
+              rows={3}
+              placeholder={tr.patients_notes}
+            />
+          </Field>
+          <div className="flex items-end justify-end md:col-span-2">
+            <Button
+              type="submit"
+              className="rounded-2xl"
+              disabled={submitBusy || !form.title.trim() || !form.assignedTo}
+            >
+              {submitBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+              Add task
+            </Button>
+          </div>
+        </form>
+      ) : null}
+    </section>
+  );
+}
+
+const MemoizedAppointmentTasksSection = memo(AppointmentTasksSection);
+
+function AppointmentConciergeSection({
+  detail,
+  services,
+  nonMedicalProviders,
+  conciergeStaff,
+  canManageConciergeServices,
+  canManageConciergeBilling,
+  onRefresh,
+  onError,
+}: {
+  detail: AppointmentDetail;
+  services: ConciergeServiceEntry[];
+  nonMedicalProviders: ProviderSummary[];
+  conciergeStaff: StaffOption[];
+  canManageConciergeServices: boolean;
+  canManageConciergeBilling: boolean;
+  onRefresh: () => void;
+  onError: (message: string) => void;
+}) {
+  const { t } = useLang();
+  const tr = t as unknown as Record<string, string>;
+
+  const buildCreateForm = useCallback(
+    () =>
+      blankConciergeServiceForm({
+        providerId:
+          detail.provider_id &&
+          nonMedicalProviders.some((provider) => provider.id === detail.provider_id)
+            ? detail.provider_id
+            : "",
+        assignedConciergeId:
+          detail.owner_role === "concierge"
+            ? (detail.owner_user_id ?? "")
+            : (conciergeStaff[0]?.id ?? ""),
+        serviceKind: detail.category?.toLowerCase().includes("transfer")
+          ? "transfer"
+          : "other",
+        title: detail.title,
+        startsAt: detail.time_start
+          ? `${detail.date}T${detail.time_start.slice(0, 5)}`
+          : "",
+        endsAt: detail.time_end ? `${detail.date}T${detail.time_end.slice(0, 5)}` : "",
+        currency: "EUR",
+      }),
+    [conciergeStaff, detail, nonMedicalProviders],
+  );
+
+  const [form, setForm] = useState<ConciergeServiceFormState>(() =>
+    buildCreateForm(),
+  );
+  const [drafts, setDrafts] = useState<Record<string, ConciergeServiceDraftState>>(
+    () => Object.fromEntries(services.map((service) => [service.id, buildServiceDraft(service)])),
+  );
+  const [submitBusy, setSubmitBusy] = useState(false);
+  const [actionBusy, setActionBusy] = useState("");
+
+  useEffect(() => {
+    setForm(buildCreateForm());
+    setDrafts(
+      Object.fromEntries(
+        services.map((service) => [service.id, buildServiceDraft(service)]),
+      ),
+    );
+    setSubmitBusy(false);
+    setActionBusy("");
+  }, [buildCreateForm, services]);
+
+  function updateDraft(
+    serviceId: string,
+    patch: Partial<ConciergeServiceDraftState>,
+  ) {
+    setDrafts((current) => {
+      const existingDraft = current[serviceId];
+      if (existingDraft) {
+        return {
+          ...current,
+          [serviceId]: { ...existingDraft, ...patch },
+        };
+      }
+      const service = services.find((item) => item.id === serviceId);
+      if (!service) return current;
+      return {
+        ...current,
+        [serviceId]: { ...buildServiceDraft(service), ...patch },
+      };
+    });
+  }
+
+  async function handleServiceSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSubmitBusy(true);
+    try {
+      await apiFetch<ConciergeServiceEntry>("/concierge-services", {
+        method: "POST",
+        body: JSON.stringify({
+          patient_id: detail.patient_id,
+          appointment_id: detail.id,
+          provider_id: form.providerId || null,
+          assigned_concierge_id: form.assignedConciergeId || null,
+          service_kind: form.serviceKind,
+          title: form.title.trim(),
+          vendor_name: form.vendorName.trim() || null,
+          vendor_contact: form.vendorContact.trim() || null,
+          starts_at: form.startsAt ? toRfc3339(form.startsAt) : null,
+          ends_at: form.endsAt ? toRfc3339(form.endsAt) : null,
+          cost_estimate: form.costEstimate ? Number(form.costEstimate) : null,
+          currency: form.currency.trim().toUpperCase() || "EUR",
+          service_notes: form.serviceNotes.trim() || null,
+        }),
+      });
+      setForm(buildCreateForm());
+      onRefresh();
+    } catch (error) {
+      onError(
+        error instanceof Error ? error.message : tr.common_failed_create,
+      );
+    } finally {
+      setSubmitBusy(false);
+    }
+  }
+
+  async function handleServiceSave(serviceId: string) {
+    const draft = drafts[serviceId];
+    if (!draft) return;
+    setActionBusy(`service:${serviceId}`);
+    try {
+      const payload = canManageConciergeBilling
+        ? {
+            provider_id: draft.providerId || null,
+            assigned_concierge_id: draft.assignedConciergeId || null,
+            title: draft.title.trim(),
+            status: draft.status,
+            billing_status: draft.billingStatus,
+            booking_reference: draft.bookingReference.trim() || null,
+            vendor_name: draft.vendorName.trim() || null,
+            vendor_contact: draft.vendorContact.trim() || null,
+            starts_at: draft.startsAt ? toRfc3339(draft.startsAt) : null,
+            ends_at: draft.endsAt ? toRfc3339(draft.endsAt) : null,
+            actual_cost: draft.actualCost ? Number(draft.actualCost) : null,
+            currency: draft.currency.trim().toUpperCase() || "EUR",
+            service_notes: draft.serviceNotes.trim() || null,
+            billing_notes: draft.billingNotes.trim() || null,
+          }
+        : {
+            status: draft.status,
+            booking_reference: draft.bookingReference.trim() || null,
+            vendor_name: draft.vendorName.trim() || null,
+            vendor_contact: draft.vendorContact.trim() || null,
+            starts_at: draft.startsAt ? toRfc3339(draft.startsAt) : null,
+            ends_at: draft.endsAt ? toRfc3339(draft.endsAt) : null,
+            actual_cost: draft.actualCost ? Number(draft.actualCost) : null,
+            service_notes: draft.serviceNotes.trim() || null,
+          };
+      await apiFetch<ConciergeServiceEntry>(`/concierge-services/${serviceId}/update`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      onRefresh();
+    } catch (error) {
+      onError(
+        error instanceof Error ? error.message : tr.common_failed_update,
+      );
+    } finally {
+      setActionBusy("");
+    }
+  }
+
+  return (
+    <section className={sectionCardClass("p-5")}>
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-950">
+            Concierge and VIP services
+          </h3>
+          <p className="text-xs text-slate-500">
+            Travel, transfer and VIP execution linked to this appointment.
+          </p>
+        </div>
+        <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+          {services.length} service{services.length === 1 ? "" : "s"}
+        </span>
+      </div>
+      <div className="mt-4 space-y-4">
+        {services.length === 0 ? (
+          <EmptyState text={tr.common_not_set} />
+        ) : (
+          services.map((service) => {
+            const draft = drafts[service.id] ?? buildServiceDraft(service);
+            return (
+              <div
+                key={service.id}
+                className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4"
+              >
+                <div className="flex flex-col gap-4">
+                  <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-sm font-semibold text-slate-950">
+                          {service.title}
+                        </p>
+                        <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                          {serviceKindLabel(service.service_kind)}
+                        </span>
+                        <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                          {taskStatusLabel(service.status)}
+                        </span>
+                        <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                          {billingStatusLabel(service.billing_status)}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {service.assigned_concierge_name || tr.common_not_set}
+                        {service.provider_name ? ` · ${service.provider_name}` : ""}
+                        {service.starts_at
+                          ? ` · ${formatDateTimeLabel(service.starts_at)}`
+                          : ""}
+                      </p>
+                    </div>
+                    <div className="text-xs text-slate-500 xl:text-right">
+                      <div>
+                        Estimate{" "}
+                        {formatMoneyLabel(
+                          service.cost_estimate,
+                          draft.currency || service.currency,
+                        )}
+                      </div>
+                      <div>
+                        Actual{" "}
+                        {formatMoneyLabel(
+                          draft.actualCost || service.actual_cost,
+                          draft.currency || service.currency,
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                    {canManageConciergeBilling ? (
+                      <>
+                        <Field label={t.appointments_title_col}>
+                          <Input
+                            value={draft.title}
+                            onChange={(event) =>
+                              updateDraft(service.id, { title: event.target.value })
+                            }
+                            className="h-10 rounded-xl bg-white"
+                          />
+                        </Field>
+                        <Field label={t.common_provider}>
+                          <select
+                            value={draft.providerId}
+                            onChange={(event) =>
+                              updateDraft(service.id, {
+                                providerId: event.target.value,
+                              })
+                            }
+                            className={selectClassName}
+                          >
+                            <option value="">No provider</option>
+                            {nonMedicalProviders.map((provider) => (
+                              <option key={provider.id} value={provider.id}>
+                                {provider.name}
+                              </option>
+                            ))}
+                          </select>
+                        </Field>
+                        <Field label={tr.role_concierge}>
+                          <select
+                            value={draft.assignedConciergeId}
+                            onChange={(event) =>
+                              updateDraft(service.id, {
+                                assignedConciergeId: event.target.value,
+                              })
+                            }
+                            className={selectClassName}
+                          >
+                            <option value="">No concierge</option>
+                            {conciergeStaff.map((member) => (
+                              <option key={member.id} value={member.id}>
+                                {member.name}
+                              </option>
+                            ))}
+                          </select>
+                        </Field>
+                      </>
+                    ) : null}
+                    <Field label={tr.users_status}>
+                      <select
+                        value={draft.status}
+                        onChange={(event) =>
+                          updateDraft(service.id, { status: event.target.value })
+                        }
+                        className={selectClassName}
+                      >
+                        {CONCIERGE_SERVICE_STATUS_OPTIONS.map((status) => (
+                          <option key={status} value={status}>
+                            {taskStatusLabel(status)}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                    <Field label={tr.appointments_title_col}>
+                      <Input
+                        value={draft.bookingReference}
+                        onChange={(event) =>
+                          updateDraft(service.id, {
+                            bookingReference: event.target.value,
+                          })
+                        }
+                        className="h-10 rounded-xl bg-white"
+                      />
+                    </Field>
+                    <Field label={tr.contracts_total}>
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={draft.actualCost}
+                        onChange={(event) =>
+                          updateDraft(service.id, { actualCost: event.target.value })
+                        }
+                        className="h-10 rounded-xl bg-white"
+                      />
+                    </Field>
+                    <Field label={tr.common_provider}>
+                      <Input
+                        value={draft.vendorName}
+                        onChange={(event) =>
+                          updateDraft(service.id, { vendorName: event.target.value })
+                        }
+                        className="h-10 rounded-xl bg-white"
+                      />
+                    </Field>
+                    <Field label={tr.field_phone}>
+                      <Input
+                        value={draft.vendorContact}
+                        onChange={(event) =>
+                          updateDraft(service.id, {
+                            vendorContact: event.target.value,
+                          })
+                        }
+                        className="h-10 rounded-xl bg-white"
+                      />
+                    </Field>
+                    <Field label={tr.providers_service_valid_from}>
+                      <Input
+                        type="datetime-local"
+                        value={draft.startsAt}
+                        onChange={(event) =>
+                          updateDraft(service.id, { startsAt: event.target.value })
+                        }
+                        className="h-10 rounded-xl bg-white"
+                      />
+                    </Field>
+                    <Field label={tr.providers_service_valid_to}>
+                      <Input
+                        type="datetime-local"
+                        value={draft.endsAt}
+                        onChange={(event) =>
+                          updateDraft(service.id, { endsAt: event.target.value })
+                        }
+                        className="h-10 rounded-xl bg-white"
+                      />
+                    </Field>
+                    {canManageConciergeBilling ? (
+                      <>
+                        <Field label={tr.users_status}>
+                          <select
+                            value={draft.billingStatus}
+                            onChange={(event) =>
+                              updateDraft(service.id, {
+                                billingStatus: event.target.value,
+                              })
+                            }
+                            className={selectClassName}
+                          >
+                            {CONCIERGE_BILLING_STATUS_OPTIONS.map((status) => (
+                              <option key={status} value={status}>
+                                {billingStatusLabel(status)}
+                              </option>
+                            ))}
+                          </select>
+                        </Field>
+                        <Field label={tr.contracts_total}>
+                          <Input
+                            value={draft.currency}
+                            onChange={(event) =>
+                              updateDraft(service.id, { currency: event.target.value })
+                            }
+                            className="h-10 rounded-xl bg-white"
+                            maxLength={3}
+                          />
+                        </Field>
+                      </>
+                    ) : null}
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <Field label={tr.patients_notes}>
+                      <textarea
+                        value={draft.serviceNotes}
+                        onChange={(event) =>
+                          updateDraft(service.id, {
+                            serviceNotes: event.target.value,
+                          })
+                        }
+                        className={textareaClassName}
+                        rows={3}
+                      />
+                    </Field>
+                    {canManageConciergeBilling ? (
+                      <Field label={tr.patients_notes}>
+                        <textarea
+                          value={draft.billingNotes}
+                          onChange={(event) =>
+                            updateDraft(service.id, {
+                              billingNotes: event.target.value,
+                            })
+                          }
+                          className={textareaClassName}
+                          rows={3}
+                        />
+                      </Field>
+                    ) : null}
+                  </div>
+                  <div className="flex justify-end">
+                    <Button
+                      type="button"
+                      className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+                      disabled={actionBusy === `service:${service.id}`}
+                      onClick={() => handleServiceSave(service.id)}
+                    >
+                      {actionBusy === `service:${service.id}` ? (
+                        <LoaderCircle className="size-4 animate-spin" />
+                      ) : null}
+                      Save service
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+      {canManageConciergeServices ? (
+        <form onSubmit={handleServiceSubmit} className="mt-5 grid gap-4 md:grid-cols-2">
+          <Field label={tr.documents_category}>
+            <select
+              value={form.serviceKind}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  serviceKind: event.target.value,
+                }))
+              }
+              className={selectClassName}
+            >
+              {CONCIERGE_SERVICE_KIND_OPTIONS.map((kind) => (
+                <option key={kind} value={kind}>
+                  {serviceKindLabel(kind)}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label={tr.appointments_title_col}>
+            <Input
+              value={form.title}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  title: event.target.value,
+                }))
+              }
+              className="h-10 rounded-xl bg-slate-50"
+              required
+            />
+          </Field>
+          <Field label={t.common_provider}>
+            <select
+              value={form.providerId}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  providerId: event.target.value,
+                }))
+              }
+              className={selectClassName}
+            >
+              <option value="">No provider</option>
+              {nonMedicalProviders.map((provider) => (
+                <option key={provider.id} value={provider.id}>
+                  {provider.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label={tr.role_concierge}>
+            <select
+              value={form.assignedConciergeId}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  assignedConciergeId: event.target.value,
+                }))
+              }
+              className={selectClassName}
+            >
+              <option value="">No concierge</option>
+              {conciergeStaff.map((member) => (
+                <option key={member.id} value={member.id}>
+                  {member.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label={tr.providers_service_valid_from}>
+            <Input
+              type="datetime-local"
+              value={form.startsAt}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  startsAt: event.target.value,
+                }))
+              }
+              className="h-10 rounded-xl bg-slate-50"
+            />
+          </Field>
+          <Field label={tr.providers_service_valid_to}>
+            <Input
+              type="datetime-local"
+              value={form.endsAt}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  endsAt: event.target.value,
+                }))
+              }
+              className="h-10 rounded-xl bg-slate-50"
+            />
+          </Field>
+          <Field label={tr.common_provider}>
+            <Input
+              value={form.vendorName}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  vendorName: event.target.value,
+                }))
+              }
+              className="h-10 rounded-xl bg-slate-50"
+            />
+          </Field>
+          <Field label={tr.field_phone}>
+            <Input
+              value={form.vendorContact}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  vendorContact: event.target.value,
+                }))
+              }
+              className="h-10 rounded-xl bg-slate-50"
+            />
+          </Field>
+          <Field label={tr.contracts_total}>
+            <Input
+              type="number"
+              min="0"
+              step="0.01"
+              value={form.costEstimate}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  costEstimate: event.target.value,
+                }))
+              }
+              className="h-10 rounded-xl bg-slate-50"
+            />
+          </Field>
+          <Field label={tr.contracts_total}>
+            <Input
+              value={form.currency}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  currency: event.target.value,
+                }))
+              }
+              className="h-10 rounded-xl bg-slate-50"
+              maxLength={3}
+            />
+          </Field>
+          <Field label={tr.patients_notes}>
+            <textarea
+              value={form.serviceNotes}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  serviceNotes: event.target.value,
+                }))
+              }
+              className={textareaClassName}
+              rows={3}
+            />
+          </Field>
+          <div className="flex items-end justify-end md:col-span-2">
+            <Button
+              type="submit"
+              className="rounded-2xl"
+              disabled={submitBusy || !form.title.trim()}
+            >
+              {submitBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+              Add service
+            </Button>
+          </div>
+        </form>
+      ) : null}
+    </section>
+  );
+}
+
+const MemoizedAppointmentConciergeSection = memo(AppointmentConciergeSection);
+
+function AppointmentBillingHandoffSection({
+  detail,
+  detailReport,
+  reportReviewMeta,
+  interpreterReportReady,
+  serviceCount,
+  billingStaff,
+  reminders,
+  tasks,
+  openTasks,
+  readyServices,
+  settledServices,
+  warnings,
+  canManageConciergeBilling,
+  canCreateTasks,
+  onRefresh,
+  onError,
+}: {
+  detail: AppointmentDetail;
+  detailReport: ReportSummary | null;
+  reportReviewMeta: string;
+  interpreterReportReady: boolean;
+  serviceCount: number;
+  billingStaff: StaffOption[];
+  reminders: ReminderEntry[];
+  tasks: TaskEntry[];
+  openTasks: TaskEntry[];
+  readyServices: ConciergeServiceEntry[];
+  settledServices: ConciergeServiceEntry[];
+  warnings: string[];
+  canManageConciergeBilling: boolean;
+  canCreateTasks: boolean;
+  onRefresh: () => void;
+  onError: (message: string) => void;
+}) {
+  const { t } = useLang();
+  const tr = t as unknown as Record<string, string>;
+  const { staffGo } = useStaffNavigate();
+
+  const buildDefaultForm = useCallback(
+    (
+      defaultAssignee = billingStaff[0]?.id ?? "",
+      defaultDueAt = shiftLocalDateTime(appointmentAnchorDateTime(detail), {
+        days: 1,
+      }),
+      defaultKind: BillingHandoffKind =
+        detail.type === "non_medical"
+          ? "concierge_settlement"
+          : detail.interpreter_id
+            ? "interpreter_hours"
+            : "patient_invoice",
+    ) => blankBillingHandoffForm(defaultAssignee, defaultDueAt, defaultKind),
+    [billingStaff, detail],
+  );
+
+  const [form, setForm] = useState<BillingHandoffFormState>(() =>
+    buildDefaultForm(),
+  );
+  const [submitBusy, setSubmitBusy] = useState(false);
+
+  useEffect(() => {
+    setForm(buildDefaultForm());
+    setSubmitBusy(false);
+  }, [buildDefaultForm]);
+
+  function openBillingChatDraft() {
+    if (!form.assigneeId) return;
+    const assignee = billingStaff.find((item) => item.id === form.assigneeId);
+    if (!assignee) return;
+
+    const draftParts = [
+      `Billing handoff: ${detail.patient_pid} · ${detail.title}`,
+      `Track: ${billingHandoffKindLabel(form.kind)}`,
+      `Slot: ${slotLabel(detail)}`,
+      form.kind === "interpreter_hours" && detailReport
+        ? `Interpreter hours: ${detailReport.hours}h · ${reportApprovalLabel(detailReport.approval_status)}`
+        : "",
+      form.kind === "concierge_settlement"
+        ? `Concierge services: ${readyServices.length} ready · ${settledServices.length} billed/settled`
+        : "",
+      form.notes.trim() || "",
+    ].filter(Boolean);
+
+    const params = new URLSearchParams({
+      peer: assignee.id,
+      name: assignee.name,
+      role: assignee.role,
+      draft: draftParts.join("\n"),
+    });
+    staffGo(`/chat?${params.toString()}`);
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!form.assigneeId || !form.dueAt) return;
+
+    const titleSuffix = form.title.trim() || billingHandoffKindLabel(form.kind);
+    const handoffTitle = `${BILLING_HANDOFF_PREFIX} ${titleSuffix}`;
+    const descriptionParts = [
+      `Track: ${billingHandoffKindLabel(form.kind)}`,
+      `Appointment: ${detail.patient_pid} · ${detail.title} · ${slotLabel(detail)}`,
+      detail.provider_name ? `Clinic: ${detail.provider_name}` : "",
+      detail.doctor_name ? `Doctor: ${detail.doctor_name}` : "",
+      form.kind === "interpreter_hours" && detailReport
+        ? `Interpreter hours: ${detailReport.hours}h · ${reportApprovalLabel(detailReport.approval_status)}`
+        : "",
+      form.kind === "concierge_settlement"
+        ? `Concierge services ready: ${readyServices.length}; billed or settled: ${settledServices.length}`
+        : "",
+      form.notes.trim() || "",
+    ].filter(Boolean);
+
+    setSubmitBusy(true);
+    try {
+      const requests: Array<Promise<unknown>> = [
+        apiFetch<{ id: string }>(`/appointments/${detail.id}/reminders`, {
+          method: "POST",
+          body: JSON.stringify({
+            user_id: form.assigneeId,
+            remind_at: toRfc3339(form.dueAt),
+            title: handoffTitle,
+            description: descriptionParts.join("\n"),
+          }),
+        }),
+      ];
+
+      if (form.createTask && canCreateTasks) {
+        requests.push(
+          apiFetch<{ id: string }>("/tasks", {
+            method: "POST",
+            body: JSON.stringify({
+              title: handoffTitle,
+              description: descriptionParts.join("\n"),
+              assigned_to: form.assigneeId,
+              patient_id: detail.patient_id,
+              order_id: detail.order_id,
+              appointment_id: detail.id,
+              due_date: toRfc3339(form.dueAt),
+              priority: form.taskPriority,
+            }),
+          }),
+        );
+      }
+
+      await Promise.all(requests);
+      setForm(
+        buildDefaultForm(
+          form.assigneeId,
+          shiftLocalDateTime(form.dueAt, { days: 1 }),
+          form.kind,
+        ),
+      );
+      onRefresh();
+    } catch (error) {
+      onError(error instanceof Error ? error.message : tr.common_failed_create);
+    } finally {
+      setSubmitBusy(false);
+    }
+  }
+
+  return (
+    <section className={sectionCardClass("p-5")}>
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-950">
+            {appointmentText(
+              "Ubergabe an Abrechnung und Settlement",
+              "Передача в биллинг и расчёты",
+              "Billing and settlement handoff",
+            )}
+          </h3>
+          <p className="text-xs text-slate-500">
+            {appointmentText(
+              "Strukturierte Ubergabe an die Abrechnung, bevor die Dokumentenschicht nachzieht.",
+              "Структурированная передача в биллинг до того, как подключится документный слой.",
+              "Structured transfer to billing before the document layer lands.",
+            )}
+          </p>
+        </div>
+        <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+          {tasks.length + reminders.length}{" "}
+          {appointmentText("verknupft", "связано", "linked")}
+        </span>
+      </div>
+
+      <div className="mt-4 grid gap-3 xl:grid-cols-3">
+        <ContextCard
+          label={tr.role_interpreter}
+          value={
+            detail.interpreter_id
+              ? interpreterReportReady && detailReport
+                ? appointmentText(
+                    `${detailReport.hours} Std. freigegeben`,
+                    `${detailReport.hours} ч согласовано`,
+                    `${detailReport.hours} h approved`,
+                  )
+                : appointmentText(
+                    "Freigabe ausstehend",
+                    "Ожидает согласования",
+                    "Pending approval",
+                  )
+              : appointmentText("Nicht erforderlich", "Не требуется", "Not required")
+          }
+          meta={
+            detail.interpreter_id
+              ? detailReport
+                ? reportReviewMeta || reportApprovalLabel(detailReport.approval_status)
+                : appointmentText(
+                    "Kein Bericht eingereicht",
+                    "Отчёт не отправлен",
+                    "No report submitted",
+                  )
+              : appointmentText(
+                  "Kein Dolmetscher fur diesen Termin",
+                  "Для этого приёма нет переводчика",
+                  "No interpreter on this appointment",
+                )
+          }
+        />
+        <ContextCard
+          label={tr.role_concierge}
+          value={
+            detail.type === "non_medical"
+              ? appointmentText(
+                  `${readyServices.length} bereit / ${settledServices.length} abgerechnet`,
+                  `${readyServices.length} готово / ${settledServices.length} выставлено`,
+                  `${readyServices.length} ready / ${settledServices.length} billed`,
+                )
+              : appointmentText("Nicht anwendbar", "Не применимо", "Not applicable")
+          }
+          meta={
+            detail.type === "non_medical"
+              ? appointmentText(
+                  `${serviceCount} Leistung(en) verknupft`,
+                  `${serviceCount} услуг(а) связано`,
+                  `${serviceCount} service(s) linked`,
+                )
+              : appointmentText(
+                  "Medizinischer Termin",
+                  "Медицинский приём",
+                  "Medical appointment",
+                )
+          }
+        />
+        <ContextCard
+          label={tr.role_billing}
+          value={appointmentText(
+            `${openTasks.length} offene Aufgabe(n)`,
+            `${openTasks.length} открытых задач`,
+            `${openTasks.length} open task(s)`,
+          )}
+          meta={appointmentText(
+            `${reminders.length} Erinnerung(en) verknupft`,
+            `${reminders.length} напоминаний связано`,
+            `${reminders.length} reminder(s) linked`,
+          )}
+        />
+      </div>
+
+      {warnings.length > 0 ? (
+        <div className="mt-4 space-y-2">
+          {warnings.map((warning) => (
+            <Banner key={warning} tone="warning">
+              {warning}
+            </Banner>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="mt-5 grid gap-4 xl:grid-cols-2">
+        <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <h4 className="text-sm font-semibold text-slate-950">
+              {appointmentText(
+                "Billing-Erinnerungen",
+                "Напоминания для биллинга",
+                "Billing reminders",
+              )}
+            </h4>
+            <span className="text-xs text-slate-500">
+              {reminders.length} {appointmentText("verknupft", "связано", "linked")}
+            </span>
+          </div>
+          <div className="mt-3 space-y-3">
+            {reminders.length === 0 ? (
+              <EmptyState text={tr.common_not_set} />
+            ) : (
+              reminders.map((item) => (
+                <div
+                  key={item.id}
+                  className="rounded-2xl border border-slate-200 bg-white px-4 py-3"
+                >
+                  <p className="text-sm font-medium text-slate-900">{item.title}</p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {item.user_name} · {formatDateTimeLabel(item.remind_at)}
+                  </p>
+                  {item.description ? (
+                    <p className="mt-2 text-sm text-slate-600">
+                      {item.description}
+                    </p>
+                  ) : null}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <h4 className="text-sm font-semibold text-slate-950">
+              {appointmentText(
+                "Billing-Aufgaben",
+                "Задачи биллинга",
+                "Billing tasks",
+              )}
+            </h4>
+            <span className="text-xs text-slate-500">
+              {tasks.length} {appointmentText("verknupft", "связано", "linked")}
+            </span>
+          </div>
+          <div className="mt-3 space-y-3">
+            {tasks.length === 0 ? (
+              <EmptyState text={tr.common_not_set} />
+            ) : (
+              tasks.map((task) => (
+                <div
+                  key={task.id}
+                  className="rounded-2xl border border-slate-200 bg-white px-4 py-3"
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-sm font-medium text-slate-900">{task.title}</p>
+                    <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                      {taskStatusLabel(task.status)}
+                    </span>
+                    <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                      {taskPriorityLabel(task.priority)}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {task.assigned_to_name} · {roleLabel(task.assigned_to_role)}
+                    {task.due_date
+                      ? appointmentText(
+                          ` · Fallig ${formatDateTimeLabel(task.due_date)}`,
+                          ` · Срок ${formatDateTimeLabel(task.due_date)}`,
+                          ` · Due ${formatDateTimeLabel(task.due_date)}`,
+                        )
+                      : ""}
+                  </p>
+                  {task.description ? (
+                    <p className="mt-2 text-sm text-slate-600">{task.description}</p>
+                  ) : null}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+
+      {canManageConciergeBilling ? (
+        <form onSubmit={handleSubmit} className="mt-5 grid gap-4 md:grid-cols-2">
+          <Field label={tr.role_billing}>
+            <select
+              value={form.kind}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  kind: event.target.value as BillingHandoffKind,
+                }))
+              }
+              className={selectClassName}
+            >
+              {(
+                [
+                  "interpreter_hours",
+                  "concierge_settlement",
+                  "patient_invoice",
+                  "provider_invoice",
+                  "payment_confirmation",
+                  "other",
+                ] as BillingHandoffKind[]
+              ).map((kind) => (
+                <option key={kind} value={kind}>
+                  {billingHandoffKindLabel(kind)}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label={tr.role_billing}>
+            <select
+              value={form.assigneeId}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  assigneeId: event.target.value,
+                }))
+              }
+              className={selectClassName}
+              required
+            >
+              <option value="">
+                {appointmentText(
+                  "Billing-Zustandigen auswahlen",
+                  "Выберите ответственного из биллинга",
+                  "Select billing assignee",
+                )}
+              </option>
+              {billingStaff.map((member) => (
+                <option key={member.id} value={member.id}>
+                  {member.name} · {roleLabel(member.role)}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label={tr.invoices_due_at}>
+            <Input
+              type="datetime-local"
+              value={form.dueAt}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  dueAt: event.target.value,
+                }))
+              }
+              className="h-10 rounded-xl bg-slate-50"
+              required
+            />
+          </Field>
+          <Field label={tr.appointments_title_col}>
+            <select
+              value={form.taskPriority}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  taskPriority: event.target.value,
+                }))
+              }
+              className={selectClassName}
+            >
+              {TASK_PRIORITY_OPTIONS.map((priority) => (
+                <option key={priority} value={priority}>
+                  {taskPriorityLabel(priority)}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label={tr.appointments_title_col}>
+            <Input
+              value={form.title}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  title: event.target.value,
+                }))
+              }
+              className="h-10 rounded-xl bg-slate-50"
+              placeholder={tr.appointments_title_col}
+            />
+          </Field>
+          <Field label={t.patients_notes}>
+            <textarea
+              value={form.notes}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  notes: event.target.value,
+                }))
+              }
+              className={textareaClassName}
+              rows={3}
+              placeholder={tr.patients_notes}
+            />
+          </Field>
+          <div className="md:col-span-2 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <label className="flex items-center gap-2 text-sm text-slate-600">
+              <input
+                type="checkbox"
+                checked={form.createTask}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    createTask: event.target.checked,
+                  }))
+                }
+                className="size-4 rounded border-slate-300"
+              />
+              Mirror this billing handoff as a task
+            </label>
+            <div className="flex flex-wrap justify-end gap-3">
+              <Button
+                type="button"
+                variant="outline"
+                className="rounded-2xl"
+                disabled={!form.assigneeId}
+                onClick={openBillingChatDraft}
+              >
+                Open billing chat draft
+              </Button>
+              <Button
+                type="submit"
+                className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+                disabled={
+                  submitBusy ||
+                  !form.assigneeId ||
+                  !form.dueAt ||
+                  billingStaff.length === 0
+                }
+              >
+                {submitBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                Create billing handoff
+              </Button>
+            </div>
+          </div>
+        </form>
+      ) : null}
+    </section>
+  );
+}
+
+const MemoizedAppointmentBillingHandoffSection = memo(
+  AppointmentBillingHandoffSection,
+);
+
+void MemoizedAppointmentBillingHandoffSection;
+
+function AppointmentExternalHandoffSection({
+  detail,
+  communications,
+  reminders,
+  tasks,
+  assignees,
+  defaultAssigneeId,
+  canManageCommunications,
+  canViewReminders,
+  canCreateTasks,
+  onRefresh,
+  onError,
+}: {
+  detail: AppointmentDetail;
+  communications: AppointmentCommunicationEntry[];
+  reminders: ReminderEntry[];
+  tasks: TaskEntry[];
+  assignees: StaffOption[];
+  defaultAssigneeId: string;
+  canManageCommunications: boolean;
+  canViewReminders: boolean;
+  canCreateTasks: boolean;
+  onRefresh: () => void;
+  onError: (message: string) => void;
+}) {
+  const { t } = useLang();
+  const tr = t as unknown as Record<string, string>;
+  const { staffGo } = useStaffNavigate();
+
+  const assigneeIndex = useMemo(
+    () => new Map(assignees.map((item) => [item.id, item])),
+    [assignees],
+  );
+  const initialAssigneeId = useMemo(
+    () => defaultAssigneeId || assignees[0]?.id || "",
+    [assignees, defaultAssigneeId],
+  );
+  const buildDefaultForm = useCallback(
+    (
+      formAssigneeId = initialAssigneeId,
+      formDueAt = shiftLocalDateTime(appointmentAnchorDateTime(detail), {
+        days: 1,
+      }),
+      formTarget: ExternalHandoffFormState["target"] = detail.doctor_id
+        ? "doctor"
+        : detail.type === "non_medical"
+          ? "service_provider"
+          : "clinic",
+    ) => blankExternalHandoffForm(formAssigneeId, formDueAt, formTarget),
+    [detail, initialAssigneeId],
+  );
+
+  const [form, setForm] = useState<ExternalHandoffFormState>(() =>
+    buildDefaultForm(),
+  );
+  const [submitBusy, setSubmitBusy] = useState(false);
+  const [actionBusy, setActionBusy] = useState("");
+
+  useEffect(() => {
+    setForm(buildDefaultForm());
+    setSubmitBusy(false);
+    setActionBusy("");
+  }, [buildDefaultForm]);
+
+  function openChatDraft() {
+    if (!form.assigneeId) return;
+    const assignee = assigneeIndex.get(form.assigneeId);
+    if (!assignee) return;
+
+    const targetLabel = communicationTargetLabel(form.target, detail);
+    const draftParts = [
+      `External handoff: ${detail.patient_pid} · ${detail.title}`,
+      `Target: ${targetLabel} · ${form.direction} via ${communicationChannelLabel(form.channel)}`,
+      `Slot: ${slotLabel(detail)}`,
+      form.contactName.trim() ? `Contact: ${form.contactName.trim()}` : "",
+      form.notes.trim() || "",
+    ].filter(Boolean);
+
+    const params = new URLSearchParams({
+      peer: assignee.id,
+      name: assignee.name,
+      role: assignee.role,
+      draft: draftParts.join("\n"),
+    });
+    staffGo(`/chat?${params.toString()}`);
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!form.title.trim()) return;
+
+    const targetLabel = communicationTargetLabel(form.target, detail);
+    const handoffTitle = `${EXTERNAL_HANDOFF_PREFIX} ${form.title.trim()}`;
+    const descriptionParts = [
+      `Target: ${form.target} · ${targetLabel}`,
+      `Direction: ${form.direction} via ${communicationChannelLabel(form.channel)}`,
+      `Appointment: ${detail.patient_pid} · ${detail.title} · ${slotLabel(detail)}`,
+      form.contactName.trim() ? `Contact: ${form.contactName.trim()}` : "",
+      form.notes.trim() || "",
+    ].filter(Boolean);
+
+    setSubmitBusy(true);
+    try {
+      const requests: Array<Promise<unknown>> = [
+        apiFetch<{ id: string }>(`/appointments/${detail.id}/communications`, {
+          method: "POST",
+          body: JSON.stringify({
+            target_type: form.target,
+            direction: form.direction,
+            channel: form.channel,
+            status: form.status,
+            subject: form.title.trim(),
+            message: form.notes.trim() || null,
+            contact_name: form.contactName.trim() || null,
+            due_at: form.dueAt ? toRfc3339(form.dueAt) : null,
+          }),
+        }),
+      ];
+
+      if (form.assigneeId && form.dueAt) {
+        requests.push(
+          apiFetch<{ id: string }>(`/appointments/${detail.id}/reminders`, {
+            method: "POST",
+            body: JSON.stringify({
+              user_id: form.assigneeId,
+              remind_at: toRfc3339(form.dueAt),
+              title: handoffTitle,
+              description: descriptionParts.join("\n"),
+            }),
+          }),
+        );
+
+        if (form.createTask && canCreateTasks) {
+          requests.push(
+            apiFetch<{ id: string }>("/tasks", {
+              method: "POST",
+              body: JSON.stringify({
+                title: handoffTitle,
+                description: descriptionParts.join("\n"),
+                assigned_to: form.assigneeId,
+                patient_id: detail.patient_id,
+                order_id: detail.order_id,
+                appointment_id: detail.id,
+                due_date: toRfc3339(form.dueAt),
+                priority: form.taskPriority,
+              }),
+            }),
+          );
+        }
+      }
+
+      await Promise.all(requests);
+      setForm(
+        buildDefaultForm(
+          form.assigneeId,
+          form.dueAt ? shiftLocalDateTime(form.dueAt, { days: 1 }) : "",
+          form.target,
+        ),
+      );
+      onRefresh();
+    } catch (error) {
+      onError(error instanceof Error ? error.message : tr.common_failed_create);
+    } finally {
+      setSubmitBusy(false);
+    }
+  }
+
+  async function handleCommunicationStatusUpdate(
+    communicationId: string,
+    status: AppointmentCommunicationStatus,
+  ) {
+    setActionBusy(`communication:${communicationId}:${status}`);
+    try {
+      await apiFetch(
+        `/appointments/${detail.id}/communications/${communicationId}/status`,
+        {
+          method: "POST",
+          body: JSON.stringify({ status }),
+        },
+      );
+      onRefresh();
+    } catch (error) {
+      onError(error instanceof Error ? error.message : tr.common_failed_update);
+    } finally {
+      setActionBusy("");
+    }
+  }
+
+  return (
+    <section className={sectionCardClass("p-5")}>
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-950">
+            Clinic and doctor handoff trail
+          </h3>
+          <p className="text-xs text-slate-500">
+            External communication log for clinics, doctors and service
+            providers, plus linked internal follow-up.
+          </p>
+        </div>
+        <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+          {communications.length} communication
+          {communications.length === 1 ? "" : "s"}
+        </span>
+      </div>
+      <div className="mt-4 grid gap-4 xl:grid-cols-2">
+        <div className="space-y-3">
+          {communications.length === 0 &&
+          reminders.length === 0 &&
+          tasks.length === 0 ? (
+            <EmptyState text={tr.common_not_set} />
+          ) : (
+            <>
+              {communications.map((item) => (
+                <div
+                  key={item.id}
+                  className="rounded-2xl border border-slate-200/80 bg-slate-50/80 px-4 py-3"
+                >
+                  <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-slate-900">
+                        {item.subject}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {item.created_by_name} · {item.direction} via{" "}
+                        {communicationChannelLabel(item.channel)} ·{" "}
+                        {communicationTargetLabel(item.target_type, detail)}
+                        {item.contact_name ? ` · ${item.contact_name}` : ""}
+                        {item.due_at
+                          ? ` · due ${formatDateTimeLabel(item.due_at)}`
+                          : ""}
+                      </p>
+                    </div>
+                    <span
+                      className={cn(
+                        "rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em]",
+                        communicationStatusBadgeClass(item.status),
+                      )}
+                    >
+                      {communicationStatusLabel(item.status)}
+                    </span>
+                  </div>
+                  {item.message ? (
+                    <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
+                      {item.message}
+                    </p>
+                  ) : null}
+                  {canManageCommunications ? (
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {item.status !== "answered" &&
+                      item.status !== "closed" &&
+                      item.status !== "cancelled" ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="rounded-2xl"
+                          disabled={
+                            actionBusy === `communication:${item.id}:answered`
+                          }
+                          onClick={() =>
+                            void handleCommunicationStatusUpdate(
+                              item.id,
+                              "answered",
+                            )
+                          }
+                        >
+                          {actionBusy === `communication:${item.id}:answered` ? (
+                            <LoaderCircle className="size-4 animate-spin" />
+                          ) : null}
+                          Mark answered
+                        </Button>
+                      ) : null}
+                      {item.status !== "closed" && item.status !== "cancelled" ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="rounded-2xl"
+                          disabled={
+                            actionBusy === `communication:${item.id}:closed`
+                          }
+                          onClick={() =>
+                            void handleCommunicationStatusUpdate(
+                              item.id,
+                              "closed",
+                            )
+                          }
+                        >
+                          {actionBusy === `communication:${item.id}:closed` ? (
+                            <LoaderCircle className="size-4 animate-spin" />
+                          ) : null}
+                          Close
+                        </Button>
+                      ) : null}
+                      {item.status !== "cancelled" ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="rounded-2xl"
+                          disabled={
+                            actionBusy === `communication:${item.id}:cancelled`
+                          }
+                          onClick={() =>
+                            void handleCommunicationStatusUpdate(
+                              item.id,
+                              "cancelled",
+                            )
+                          }
+                        >
+                          {actionBusy ===
+                          `communication:${item.id}:cancelled` ? (
+                            <LoaderCircle className="size-4 animate-spin" />
+                          ) : null}
+                          Cancel
+                        </Button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+              {canViewReminders && (reminders.length > 0 || tasks.length > 0) ? (
+                <div className="rounded-2xl border border-dashed border-slate-200 bg-white/70 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                    Internal follow-up trail
+                  </p>
+                  <div className="mt-3 space-y-3">
+                    {reminders.map((item) => (
+                      <div
+                        key={item.id}
+                        className="rounded-2xl border border-slate-200/80 bg-slate-50/80 px-4 py-3"
+                      >
+                        <p className="text-sm font-medium text-slate-900">
+                          {item.title.replace(`${EXTERNAL_HANDOFF_PREFIX} `, "")}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {item.user_name} · {formatDateTimeLabel(item.remind_at)}
+                        </p>
+                        {item.description ? (
+                          <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
+                            {item.description}
+                          </p>
+                        ) : null}
+                      </div>
+                    ))}
+                    {tasks.map((task) => (
+                      <div
+                        key={task.id}
+                        className="rounded-2xl border border-slate-200/80 bg-slate-50/80 px-4 py-3"
+                      >
+                        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                          <p className="text-sm font-medium text-slate-900">
+                            {task.title.replace(`${EXTERNAL_HANDOFF_PREFIX} `, "")}
+                          </p>
+                          <span className="text-xs text-slate-500">
+                            {taskStatusLabel(task.status)} ·{" "}
+                            {taskPriorityLabel(task.priority)}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {task.assigned_to_name}
+                          {task.due_date
+                            ? ` · ${formatDateTimeLabel(task.due_date)}`
+                            : ""}
+                        </p>
+                        {task.description ? (
+                          <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
+                            {task.description}
+                          </p>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </>
+          )}
+        </div>
+        {canManageCommunications ? (
+          <form
+            onSubmit={handleSubmit}
+            className="space-y-4 rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4"
+          >
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field label={tr.patients_assign_owner}>
+                <select
+                  value={form.target}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      target: event.target
+                        .value as ExternalHandoffFormState["target"],
+                    }))
+                  }
+                  className={selectClassName}
+                >
+                  <option value="clinic" disabled={!detail.provider_id}>
+                    Clinic
+                  </option>
+                  <option
+                    value="service_provider"
+                    disabled={!detail.provider_id}
+                  >
+                    Service provider
+                  </option>
+                  <option value="doctor" disabled={!detail.doctor_id}>
+                    Doctor
+                  </option>
+                </select>
+              </Field>
+              <Field label={tr.documents_source}>
+                <select
+                  value={form.channel}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      channel: event.target
+                        .value as AppointmentCommunicationChannel,
+                    }))
+                  }
+                  className={selectClassName}
+                >
+                  {COMMUNICATION_CHANNEL_OPTIONS.map((value) => (
+                    <option key={value} value={value}>
+                      {communicationChannelLabel(value)}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+            <div className="grid gap-4 md:grid-cols-3">
+              <Field label={tr.documents_source}>
+                <select
+                  value={form.direction}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      direction: event.target
+                        .value as AppointmentCommunicationDirection,
+                    }))
+                  }
+                  className={selectClassName}
+                >
+                  <option value="outbound">{tr.common_active}</option>
+                  <option value="inbound">{tr.common_active}</option>
+                </select>
+              </Field>
+              <Field label={t.users_status}>
+                <select
+                  value={form.status}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      status: event.target
+                        .value as AppointmentCommunicationStatus,
+                    }))
+                  }
+                  className={selectClassName}
+                >
+                  {COMMUNICATION_STATUS_OPTIONS.map((value) => (
+                    <option key={value} value={value}>
+                      {communicationStatusLabel(value)}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label={t.patients_assign_owner}>
+                <select
+                  value={form.assigneeId}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      assigneeId: event.target.value,
+                    }))
+                  }
+                  className={selectClassName}
+                  required
+                >
+                  <option value="">{tr.common_not_set}</option>
+                  {assignees.map((member) => (
+                    <option key={member.id} value={member.id}>
+                      {member.name} · {roleLabel(member.role)}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+            <Field label={tr.appointments_title_col}>
+              <Input
+                value={form.title}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    title: event.target.value,
+                  }))
+                }
+                placeholder={tr.appointments_title_col}
+                className="h-10 rounded-xl bg-white"
+                required
+              />
+            </Field>
+            <Field label={tr.field_phone}>
+              <Input
+                value={form.contactName}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    contactName: event.target.value,
+                  }))
+                }
+                placeholder={tr.common_doctor}
+                className="h-10 rounded-xl bg-white"
+              />
+            </Field>
+            <Field label={tr.invoices_due_at}>
+              <Input
+                type="datetime-local"
+                value={form.dueAt}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    dueAt: event.target.value,
+                  }))
+                }
+                className="h-10 rounded-xl bg-white"
+              />
+            </Field>
+            <Field label={tr.patients_notes}>
+              <textarea
+                value={form.notes}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    notes: event.target.value,
+                  }))
+                }
+                className={textareaClassName}
+                rows={5}
+                placeholder={tr.patients_notes}
+              />
+            </Field>
+            <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_180px]">
+              <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={form.createTask}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      createTask: event.target.checked,
+                    }))
+                  }
+                  className="mt-0.5 size-4 rounded border-slate-300 text-slate-950"
+                />
+                <span>
+                  Mirror this communication as an internal task when assignee
+                  and due date are set.
+                </span>
+              </label>
+              <Field label={tr.appointments_title_col}>
+                <select
+                  value={form.taskPriority}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      taskPriority: event.target.value,
+                    }))
+                  }
+                  className={selectClassName}
+                  disabled={!form.createTask}
+                >
+                  {TASK_PRIORITY_OPTIONS.map((value) => (
+                    <option key={value} value={value}>
+                      {taskPriorityLabel(value)}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+            <div className="flex flex-wrap justify-end gap-3">
+              <Button
+                type="button"
+                variant="outline"
+                className="rounded-2xl"
+                disabled={!form.assigneeId}
+                onClick={openChatDraft}
+              >
+                Open internal chat draft
+              </Button>
+              <Button
+                type="submit"
+                className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+                disabled={submitBusy || !form.title.trim()}
+              >
+                {submitBusy ? (
+                  <LoaderCircle className="size-4 animate-spin" />
+                ) : null}
+                Log communication
+              </Button>
+            </div>
+          </form>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+const MemoizedAppointmentExternalHandoffSection = memo(
+  AppointmentExternalHandoffSection,
+);
+
+function AppointmentHandoffSection({
+  detail,
+  handoffStakeholders,
+  followUpAssigneeId,
+  setFollowUpAssigneeId,
+  canManageReminders,
+  onRefresh,
+  onError,
+}: {
+  detail: AppointmentDetail;
+  handoffStakeholders: HandoffStakeholder[];
+  followUpAssigneeId: string;
+  setFollowUpAssigneeId: Dispatch<SetStateAction<string>>;
+  canManageReminders: boolean;
+  onRefresh: () => void;
+  onError: (message: string) => void;
+}) {
+  const { t } = useLang();
+  const tr = t as unknown as Record<string, string>;
+  const { staffGo } = useStaffNavigate();
+  const [followUpBusy, setFollowUpBusy] = useState(false);
+
+  useEffect(() => {
+    setFollowUpBusy(false);
+  }, [detail.id, followUpAssigneeId]);
+
+  function openChat(peer: HandoffStakeholder) {
+    const params = new URLSearchParams({
+      peer: peer.id,
+      name: peer.name,
+      role: peer.role,
+      draft: `Appointment handoff: ${detail.patient_pid} · ${detail.title} · ${slotLabel(detail)}.`,
+    });
+    staffGo(`/chat?${params.toString()}`);
+  }
+
+  async function handlePreset(preset: (typeof FOLLOW_UP_PRESETS)[number]) {
+    if (!followUpAssigneeId) return;
+    const anchor = appointmentAnchorDateTime(detail);
+    const remindAt = shiftLocalDateTime(anchor, {
+      days: "offsetDays" in preset ? preset.offsetDays : undefined,
+      months: "offsetMonths" in preset ? preset.offsetMonths : undefined,
+    });
+    if (!remindAt) return;
+
+    setFollowUpBusy(true);
+    try {
+      await apiFetch<{ id: string }>(`/appointments/${detail.id}/reminders`, {
+        method: "POST",
+        body: JSON.stringify({
+          user_id: followUpAssigneeId,
+          remind_at: toRfc3339(remindAt),
+          title: preset.title,
+          description: `Auto-planned from appointment ${detail.patient_pid} · ${detail.title}.`,
+        }),
+      });
+      onRefresh();
+    } catch (error) {
+      onError(error instanceof Error ? error.message : tr.common_failed_create);
+    } finally {
+      setFollowUpBusy(false);
+    }
+  }
+
+  return (
+    <section className={sectionCardClass("p-5")}>
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-950">
+            Handoff and follow-up
+          </h3>
+          <p className="text-xs text-slate-500">
+            Coordinate the assigned team and schedule post-care follow-up from
+            the appointment itself.
+          </p>
+        </div>
+        <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+          {handoffStakeholders.length} stakeholder
+          {handoffStakeholders.length === 1 ? "" : "s"}
+        </span>
+      </div>
+      <div className="mt-4 space-y-3">
+        {handoffStakeholders.length === 0 ? (
+          <EmptyState text={tr.common_not_set} />
+        ) : (
+          handoffStakeholders.map((peer) => (
+            <div
+              key={peer.id}
+              className="flex flex-col gap-3 rounded-2xl border border-slate-200/80 bg-slate-50/80 px-4 py-3 md:flex-row md:items-center md:justify-between"
+            >
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-semibold text-slate-950">
+                    {peer.name}
+                  </p>
+                  <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                    {roleLabel(peer.role)}
+                  </span>
+                  {peer.badges.map((badge) => (
+                    <span
+                      key={badge}
+                      className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600"
+                    >
+                      {badge}
+                    </span>
+                  ))}
+                </div>
+                <p className="mt-1 text-xs text-slate-500">
+                  {detail.patient_pid} · {slotLabel(detail)}
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                className="rounded-2xl"
+                onClick={() => openChat(peer)}
+              >
+                Open chat
+              </Button>
+            </div>
+          ))
+        )}
+      </div>
+      {canManageReminders ? (
+        <div className="mt-5 grid gap-4 md:grid-cols-[minmax(0,1fr)_auto]">
+          <Field label={tr.patients_assign_owner}>
+            <select
+              value={followUpAssigneeId}
+              onChange={(event) => setFollowUpAssigneeId(event.target.value)}
+              className={selectClassName}
+            >
+              <option value="">{tr.common_not_set}</option>
+              {handoffStakeholders.map((peer) => (
+                <option key={peer.id} value={peer.id}>
+                  {peer.name} · {roleLabel(peer.role)}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <div className="flex flex-wrap items-end gap-2">
+            {FOLLOW_UP_PRESETS.map((preset) => (
+              <Button
+                key={preset.id}
+                type="button"
+                variant="outline"
+                className="rounded-2xl"
+                disabled={followUpBusy || !followUpAssigneeId}
+                onClick={() => void handlePreset(preset)}
+              >
+                {followUpBusy ? (
+                  <LoaderCircle className="size-4 animate-spin" />
+                ) : null}
+                {preset.label}
+              </Button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+const MemoizedAppointmentHandoffSection = memo(AppointmentHandoffSection);
+
+function AppointmentFollowUpVisitSection({
+  detail,
+  appointments,
+  providers,
+  staff,
+  interpreters,
+  defaultReminderUserId,
+  onCreated,
+}: {
+  detail: AppointmentDetail;
+  appointments: AppointmentListItem[];
+  providers: ProviderSummary[];
+  staff: StaffOption[];
+  interpreters: InterpreterOption[];
+  defaultReminderUserId: string;
+  onCreated: (result: { id?: string; notice: string }) => void;
+}) {
+  const { t } = useLang();
+  const tr = t as unknown as Record<string, string>;
+  const scheduleWarningLabels = useMemo(
+    () => ({
+      patients_assign_owner: tr.patients_assign_owner,
+      common_doctor: tr.common_doctor,
+      common_provider: tr.common_provider,
+    }),
+    [tr.common_doctor, tr.common_provider, tr.patients_assign_owner],
+  );
+  const [form, setForm] = useState<FollowUpVisitFormState>(() =>
+    buildFollowUpVisitForm(detail, defaultReminderUserId, tr.phase_followup),
+  );
+  const [doctors, setDoctors] = useState<DoctorOption[]>([]);
+  const [conflicts, setConflicts] = useState<ConflictSummary | null>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setForm(buildFollowUpVisitForm(detail, defaultReminderUserId, tr.phase_followup));
+    setDoctors([]);
+    setConflicts(null);
+    setError("");
+    setBusy(false);
+  }, [defaultReminderUserId, detail, tr.phase_followup]);
+
+  useEffect(() => {
+    if (!form.providerId) {
+      setDoctors([]);
+      return;
+    }
+    let active = true;
+    getProviderDoctors(form.providerId)
+      .then((rows) => {
+        if (active) setDoctors(rows);
+      })
+      .catch(() => {
+        if (active) setDoctors([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [form.providerId]);
+
+  const conflictQuery = useMemo(() => {
+    if (!detail.patient_id || !form.date) return "";
+    return buildConflictQuery(
+      detail.patient_id,
+      "",
+      form.date,
+      form.timeStart,
+      form.timeEnd,
+      form.interpreterId,
+    );
+  }, [
+    detail.patient_id,
+    form.date,
+    form.interpreterId,
+    form.timeEnd,
+    form.timeStart,
+  ]);
+  const debouncedConflictQuery = useDebouncedValue(conflictQuery);
+
+  useEffect(() => {
+    if (!debouncedConflictQuery) {
+      setConflicts(null);
+      return;
+    }
+    let active = true;
+    apiFetch<ConflictSummary>(debouncedConflictQuery)
+      .then((value) => {
+        if (active) setConflicts(value);
+      })
+      .catch(() => {
+        if (active) setConflicts(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [debouncedConflictQuery]);
+
+  const localWarnings = useMemo(() => {
+    if (!detail.id || !form.date) return [];
+    return buildLocalScheduleWarnings(
+      appointments,
+      {
+        date: form.date,
+        timeStart: form.timeStart,
+        timeEnd: form.timeEnd,
+        ownerUserId: form.ownerUserId || detail.owner_user_id,
+        providerId: form.providerId || null,
+        doctorId: form.doctorId || null,
+      },
+      scheduleWarningLabels,
+    );
+  }, [
+    appointments,
+    detail.id,
+    detail.owner_user_id,
+    form.date,
+    form.doctorId,
+    form.ownerUserId,
+    form.providerId,
+    form.timeEnd,
+    form.timeStart,
+    scheduleWarningLabels,
+  ]);
+
+  function applyPreset(preset: (typeof FOLLOW_UP_PRESETS)[number]) {
+    const anchor = appointmentAnchorDateTime(detail);
+    const shifted = shiftLocalDateTime(anchor, {
+      days: "offsetDays" in preset ? preset.offsetDays : undefined,
+      months: "offsetMonths" in preset ? preset.offsetMonths : undefined,
+    });
+    if (!shifted) return;
+    const nextReminderAt = shiftLocalDateTime(shifted, { days: -3 });
+    setForm((current) => ({
+      ...current,
+      date: shifted.slice(0, 10),
+      timeStart: shifted.slice(11, 16),
+      timeEnd: current.timeEnd
+        ? shiftLocalDateTime(
+            `${detail.date}T${detail.time_end?.slice(0, 5) ?? current.timeEnd}`,
+            {
+              days: "offsetDays" in preset ? preset.offsetDays : undefined,
+              months:
+                "offsetMonths" in preset ? preset.offsetMonths : undefined,
+            },
+          ).slice(11, 16)
+        : current.timeEnd,
+      title:
+        current.title.trim() === "" || current.title.startsWith(t.phase_followup)
+          ? preset.title
+          : current.title,
+      reminderAt: nextReminderAt || current.reminderAt,
+    }));
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const result = await apiFetch<{
+        id: string;
+        conflicts?: ConflictSummary;
+      }>("/appointments", {
+        method: "POST",
+        body: JSON.stringify({
+          patient_id: detail.patient_id,
+          provider_id: form.providerId || null,
+          doctor_id: form.doctorId || null,
+          owner_user_id: form.ownerUserId || null,
+          interpreter_id: form.interpreterId || null,
+          order_id: form.linkOrder ? detail.order_id : null,
+          appointment_type: form.appointmentType,
+          care_path_kind: normalizeCarePathKindForAppointmentType(
+            form.appointmentType,
+            form.carePathKind,
+          ),
+          title: form.title.trim(),
+          date: form.date,
+          time_start: form.timeStart || null,
+          time_end: form.timeEnd || null,
+          location: form.location.trim() || null,
+          category: form.category.trim() || null,
+          notes: form.notes.trim() || null,
+        }),
+      });
+
+      if (result.id && form.createReminder && form.reminderUserId && form.reminderAt) {
+        await apiFetch<{ id: string }>(`/appointments/${result.id}/reminders`, {
+          method: "POST",
+          body: JSON.stringify({
+            user_id: form.reminderUserId,
+            remind_at: toRfc3339(form.reminderAt),
+            title: `Prepare follow-up visit: ${form.title.trim()}`,
+            description: `Planned from appointment ${detail.patient_pid} · ${detail.title} · ${slotLabel(detail)}.`,
+          }),
+        });
+      }
+
+      const notice = result.conflicts
+        ? `${buildScheduleNotice(result.conflicts, localWarnings)} Follow-up visit created.`
+        : tr.common_active;
+      setForm(buildFollowUpVisitForm(detail, form.reminderUserId, tr.phase_followup));
+      onCreated({ id: result.id, notice });
+    } catch (submitError) {
+      setError(
+        submitError instanceof Error
+          ? submitError.message
+          : tr.common_failed_create,
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className={sectionCardClass("p-5")}>
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-950">
+            Follow-up visit planning
+          </h3>
+          <p className="text-xs text-slate-500">
+            Schedule the next control visit or examination directly from the
+            current appointment context.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {FOLLOW_UP_PRESETS.map((preset) => (
+            <Button
+              key={preset.id}
+              type="button"
+              variant="outline"
+              size="sm"
+              className="rounded-2xl"
+              onClick={() => applyPreset(preset)}
+            >
+              {preset.label}
+            </Button>
+          ))}
+        </div>
+      </div>
+      {error ? (
+        <div className="mt-4">
+          <Banner tone="error">{error}</Banner>
+        </div>
+      ) : null}
+      <form onSubmit={handleSubmit} className="mt-4 space-y-4">
+        <Field label={t.appointments_title_col}>
+          <Input
+            value={form.title}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, title: event.target.value }))
+            }
+            className="h-10 rounded-xl bg-slate-50"
+            required
+          />
+        </Field>
+        <div className="grid gap-4 md:grid-cols-3">
+          <Field label={t.appointments_date}>
+            <Input
+              type="date"
+              value={form.date}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, date: event.target.value }))
+              }
+              className="h-10 rounded-xl bg-slate-50"
+              required
+            />
+          </Field>
+          <Field label={t.appointments_time}>
+            <Input
+              type="time"
+              value={form.timeStart}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  timeStart: event.target.value,
+                }))
+              }
+              className="h-10 rounded-xl bg-slate-50"
+            />
+          </Field>
+          <Field label={t.appointments_time}>
+            <Input
+              type="time"
+              value={form.timeEnd}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  timeEnd: event.target.value,
+                }))
+              }
+              className="h-10 rounded-xl bg-slate-50"
+            />
+          </Field>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field label={t.common_provider}>
+            <select
+              value={form.providerId}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  providerId: event.target.value,
+                  doctorId: "",
+                }))
+              }
+              className={selectClassName}
+              disabled={form.appointmentType === "internal"}
+            >
+              <option value="">{t.common_not_set}</option>
+              {providers.map((provider) => (
+                <option key={provider.id} value={provider.id}>
+                  {provider.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label={t.common_doctor}>
+            <select
+              value={form.doctorId}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  doctorId: event.target.value,
+                }))
+              }
+              className={selectClassName}
+              disabled={!form.providerId}
+            >
+              <option value="">{t.common_not_set}</option>
+              {doctors.map((doctor) => (
+                <option key={doctor.id} value={doctor.id}>
+                  {doctorLabel(doctor)}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field label={t.patients_assign_owner}>
+            <select
+              value={form.ownerUserId}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  ownerUserId: event.target.value,
+                }))
+              }
+              className={selectClassName}
+            >
+              <option value="">{t.common_not_set}</option>
+              {staff.map((member) => (
+                <option key={member.id} value={member.id}>
+                  {member.name} · {roleLabel(member.role)}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label={t.common_doctor}>
+            <select
+              value={form.interpreterId}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  interpreterId: event.target.value,
+                }))
+              }
+              className={selectClassName}
+            >
+              <option value="">{t.common_not_set}</option>
+              {interpreters.map((member) => (
+                <option key={member.id} value={member.id}>
+                  {member.name} · {roleLabel(member.role)}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field
+            label={appointmentText(
+              "Versorgungspfad",
+              "Траектория лечения",
+              "Care path",
+            )}
+          >
+            <select
+              value={form.carePathKind}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  carePathKind: event.target.value as AppointmentCarePathKind,
+                }))
+              }
+              className={selectClassName}
+              disabled={form.appointmentType !== "medical"}
+            >
+              {CARE_PATH_KIND_OPTIONS.map((value) => (
+                <option key={value} value={value}>
+                  {carePathKindLabel(value)}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label={t.appointments_location}>
+            <Input
+              value={form.location}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  location: event.target.value,
+                }))
+              }
+              className="h-10 rounded-xl bg-slate-50"
+            />
+          </Field>
+          <Field label={tr.documents_category}>
+            <Input
+              value={form.category}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  category: event.target.value,
+                }))
+              }
+              className="h-10 rounded-xl bg-slate-50"
+            />
+          </Field>
+        </div>
+        <Field label={t.patients_notes}>
+          <textarea
+            value={form.notes}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, notes: event.target.value }))
+            }
+            className={textareaClassName}
+            rows={4}
+            placeholder={tr.patients_notes}
+          />
+        </Field>
+        {detail.order_id ? (
+          <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              checked={form.linkOrder}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  linkOrder: event.target.checked,
+                }))
+              }
+              className="mt-0.5 size-4 rounded border-slate-300 text-slate-950"
+            />
+            <span>{tr.providers_linked_patients}</span>
+          </label>
+        ) : null}
+        <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_220px]">
+          <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              checked={form.createReminder}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  createReminder: event.target.checked,
+                }))
+              }
+              className="mt-0.5 size-4 rounded border-slate-300 text-slate-950"
+            />
+            <span>Create a preparation reminder on the new follow-up visit.</span>
+          </label>
+          <Field label={tr.patients_assign_owner}>
+            <select
+              value={form.reminderUserId}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  reminderUserId: event.target.value,
+                }))
+              }
+              className={selectClassName}
+              disabled={!form.createReminder}
+            >
+              <option value="">{tr.common_not_set}</option>
+              {staff.map((member) => (
+                <option key={member.id} value={member.id}>
+                  {member.name} · {roleLabel(member.role)}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+        {form.createReminder ? (
+          <Field label={tr.appointments_date}>
+            <Input
+              type="datetime-local"
+              value={form.reminderAt}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  reminderAt: event.target.value,
+                }))
+              }
+              className="h-10 rounded-xl bg-slate-50"
+            />
+          </Field>
+        ) : null}
+        <ConflictPanel conflicts={conflicts} />
+        <ScheduleWarningsPanel warnings={localWarnings} />
+        <div className="flex justify-end">
+          <Button
+            type="submit"
+            className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+            disabled={busy || !form.title.trim()}
+          >
+            {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+            Create follow-up visit
+          </Button>
+        </div>
+      </form>
+    </section>
+  );
+}
+
+const MemoizedAppointmentFollowUpVisitSection = memo(
+  AppointmentFollowUpVisitSection,
+);
+
+function AppointmentDoctorFollowUpSection({
+  detail,
+  reminders,
+  tasks,
+  assignees,
+  defaultAssigneeId,
+  canManageReminders,
+  canCreateTasks,
+  onRefresh,
+  onError,
+}: {
+  detail: AppointmentDetail;
+  reminders: ReminderEntry[];
+  tasks: TaskEntry[];
+  assignees: StaffOption[];
+  defaultAssigneeId: string;
+  canManageReminders: boolean;
+  canCreateTasks: boolean;
+  onRefresh: () => void;
+  onError: (message: string) => void;
+}) {
+  const { t } = useLang();
+  const tr = t as unknown as Record<string, string>;
+  const buildDefaultForm = useCallback(
+    (
+      assigneeId = defaultAssigneeId,
+      dueAt = shiftLocalDateTime(appointmentAnchorDateTime(detail), {
+        days: 7,
+      }),
+    ) => blankDoctorFollowUpForm(assigneeId, dueAt),
+    [defaultAssigneeId, detail],
+  );
+  const [form, setForm] = useState<DoctorFollowUpFormState>(() =>
+    buildDefaultForm(),
+  );
+  const [submitBusy, setSubmitBusy] = useState(false);
+
+  useEffect(() => {
+    setForm(buildDefaultForm());
+    setSubmitBusy(false);
+  }, [buildDefaultForm]);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!form.assigneeId || !form.dueAt) return;
+
+    const followUpTitle = `${DOCTOR_FOLLOW_UP_PREFIX} ${form.title.trim()}`;
+    const description = [
+      detail.doctor_name ? `Doctor: ${detail.doctor_name}` : "",
+      detail.provider_name ? `Clinic: ${detail.provider_name}` : "",
+      `Appointment: ${detail.patient_pid} · ${detail.title} · ${slotLabel(detail)}`,
+      form.notes.trim() || "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    setSubmitBusy(true);
+    try {
+      const requests: Array<Promise<unknown>> = [
+        apiFetch<{ id: string }>(`/appointments/${detail.id}/reminders`, {
+          method: "POST",
+          body: JSON.stringify({
+            user_id: form.assigneeId,
+            remind_at: toRfc3339(form.dueAt),
+            title: followUpTitle,
+            description,
+          }),
+        }),
+      ];
+
+      if (form.createTask && canCreateTasks) {
+        requests.push(
+          apiFetch<{ id: string }>("/tasks", {
+            method: "POST",
+            body: JSON.stringify({
+              title: followUpTitle,
+              description,
+              assigned_to: form.assigneeId,
+              patient_id: detail.patient_id,
+              order_id: detail.order_id,
+              appointment_id: detail.id,
+              due_date: toRfc3339(form.dueAt),
+              priority: form.taskPriority,
+            }),
+          }),
+        );
+      }
+
+      await Promise.all(requests);
+      setForm(
+        buildDefaultForm(
+          form.assigneeId,
+          shiftLocalDateTime(form.dueAt, { days: 7 }),
+        ),
+      );
+      onRefresh();
+    } catch (error) {
+      onError(error instanceof Error ? error.message : tr.common_failed_create);
+    } finally {
+      setSubmitBusy(false);
+    }
+  }
+
+  return (
+    <section className={sectionCardClass("p-5")}>
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-950">
+            {t.appointments_doctor_directed_followup_title}
+          </h3>
+          <p className="text-xs text-slate-500">
+            {t.appointments_doctor_directed_followup_subtitle}
+          </p>
+        </div>
+        <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+          {reminders.length + tasks.length}{" "}
+          {reminders.length + tasks.length === 1 ? "item" : "items"}
+        </span>
+      </div>
+      <div className="mt-4 grid gap-4 xl:grid-cols-2">
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+              {t.common_search}
+            </p>
+            <div className="mt-3 space-y-3">
+              {reminders.length === 0 ? (
+                <EmptyState text={tr.common_not_set} />
+              ) : (
+                reminders.map((item) => (
+                  <div
+                    key={item.id}
+                    className="rounded-2xl border border-slate-200 bg-white px-4 py-3"
+                  >
+                    <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-slate-900">
+                          {item.title.replace(`${DOCTOR_FOLLOW_UP_PREFIX} `, "")}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {item.user_name} · {formatDateTimeLabel(item.remind_at)}
+                        </p>
+                      </div>
+                      {item.is_completed ? (
+                        <span className="text-xs font-medium text-emerald-700">
+                          {t.common_completed}{" "}
+                          {formatDateTimeLabel(item.completed_at)}
+                        </span>
+                      ) : (
+                        <span className="text-xs font-medium text-amber-700">
+                          {t.common_pending}
+                        </span>
+                      )}
+                    </div>
+                    {item.description ? (
+                      <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
+                        {item.description}
+                      </p>
+                    ) : null}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+          <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+              {t.appointments_task_trail}
+            </p>
+            <div className="mt-3 space-y-3">
+              {tasks.length === 0 ? (
+                <EmptyState text={tr.common_not_set} />
+              ) : (
+                tasks.map((task) => (
+                  <div
+                    key={task.id}
+                    className="rounded-2xl border border-slate-200 bg-white px-4 py-3"
+                  >
+                    <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-slate-900">
+                          {task.title.replace(`${DOCTOR_FOLLOW_UP_PREFIX} `, "")}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {task.assigned_to_name} · {taskStatusLabel(task.status)} ·{" "}
+                          {taskPriorityLabel(task.priority)}
+                        </p>
+                      </div>
+                      <span className="text-xs text-slate-500">
+                        {task.due_date
+                          ? formatDateTimeLabel(task.due_date)
+                          : t.common_not_set}
+                      </span>
+                    </div>
+                    {task.description ? (
+                      <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
+                        {task.description}
+                      </p>
+                    ) : null}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+        {canManageReminders ? (
+          <form
+            onSubmit={handleSubmit}
+            className="space-y-4 rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4"
+          >
+            <Field label={tr.appointments_title_col}>
+              <Input
+                value={form.title}
+                onChange={(event) =>
+                  setForm((current) => ({ ...current, title: event.target.value }))
+                }
+                placeholder={tr.appointments_title_col}
+                className="h-10 rounded-xl bg-white"
+                required
+              />
+            </Field>
+            <Field label={t.patients_assign_owner}>
+              <select
+                value={form.assigneeId}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    assigneeId: event.target.value,
+                  }))
+                }
+                className={selectClassName}
+                required
+              >
+                <option value="">{tr.common_not_set}</option>
+                {assignees.map((member) => (
+                  <option key={member.id} value={member.id}>
+                    {member.name} · {roleLabel(member.role)}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label={tr.invoices_due_at}>
+              <Input
+                type="datetime-local"
+                value={form.dueAt}
+                onChange={(event) =>
+                  setForm((current) => ({ ...current, dueAt: event.target.value }))
+                }
+                className="h-10 rounded-xl bg-white"
+                required
+              />
+            </Field>
+            <Field label={tr.patients_notes}>
+              <textarea
+                value={form.notes}
+                onChange={(event) =>
+                  setForm((current) => ({ ...current, notes: event.target.value }))
+                }
+                className={textareaClassName}
+                rows={5}
+                placeholder={tr.patients_notes}
+              />
+            </Field>
+            <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_180px]">
+              <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={form.createTask}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      createTask: event.target.checked,
+                    }))
+                  }
+                  className="mt-0.5 size-4 rounded border-slate-300 text-slate-950"
+                />
+                <span>
+                  Mirror this directive as an operational task for execution and
+                  ownership.
+                </span>
+              </label>
+              <Field label={tr.appointments_title_col}>
+                <select
+                  value={form.taskPriority}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      taskPriority: event.target.value,
+                    }))
+                  }
+                  className={selectClassName}
+                  disabled={!form.createTask}
+                >
+                  {TASK_PRIORITY_OPTIONS.map((value) => (
+                    <option key={value} value={value}>
+                      {taskPriorityLabel(value)}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+            <div className="flex justify-end">
+              <Button
+                type="submit"
+                className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+                disabled={
+                  submitBusy ||
+                  !form.title.trim() ||
+                  !form.assigneeId ||
+                  !form.dueAt
+                }
+              >
+                {submitBusy ? (
+                  <LoaderCircle className="size-4 animate-spin" />
+                ) : null}
+                Create doctor follow-up
+              </Button>
+            </div>
+          </form>
+        ) : (
+          <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
+            <EmptyState text={tr.common_not_set} />
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+const MemoizedAppointmentDoctorFollowUpSection = memo(
+  AppointmentDoctorFollowUpSection,
+);
+
+function AppointmentPackageEndSection({
+  detail,
+  reminders,
+  tasks,
+  assignees,
+  defaultAssigneeId,
+  defaultTitle,
+  canManageReminders,
+  canCreateTasks,
+  onRefresh,
+  onError,
+}: {
+  detail: AppointmentDetail;
+  reminders: ReminderEntry[];
+  tasks: TaskEntry[];
+  assignees: StaffOption[];
+  defaultAssigneeId: string;
+  defaultTitle: string;
+  canManageReminders: boolean;
+  canCreateTasks: boolean;
+  onRefresh: () => void;
+  onError: (message: string) => void;
+}) {
+  const { t } = useLang();
+  const tr = t as unknown as Record<string, string>;
+  const buildDefaultForm = useCallback(
+    (assigneeId = defaultAssigneeId, title = defaultTitle) =>
+      blankPackageEndFollowUpForm(assigneeId, title),
+    [defaultAssigneeId, defaultTitle],
+  );
+  const [form, setForm] = useState<PackageEndFollowUpFormState>(() =>
+    buildDefaultForm(),
+  );
+  const [submitBusy, setSubmitBusy] = useState(false);
+
+  useEffect(() => {
+    setForm(buildDefaultForm());
+    setSubmitBusy(false);
+  }, [buildDefaultForm]);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!form.assigneeId || !form.packageEndDate) return;
+
+    const remindAt = shiftLocalDateTime(`${form.packageEndDate}T09:00`, {
+      months: -1,
+    });
+    if (!remindAt) return;
+
+    const followUpTitle = `${PACKAGE_END_FOLLOW_UP_PREFIX} ${form.title.trim()}`;
+    const description = [
+      `Package target end date: ${formatDateLabel(form.packageEndDate)}`,
+      detail.order_id ? `Order: ${detail.order_id}` : "",
+      detail.provider_name ? `Clinic: ${detail.provider_name}` : "",
+      detail.doctor_name ? `Doctor: ${detail.doctor_name}` : "",
+      `Appointment: ${detail.patient_pid} · ${detail.title} · ${slotLabel(detail)}`,
+      form.notes.trim() || "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    setSubmitBusy(true);
+    try {
+      const requests: Array<Promise<unknown>> = [
+        apiFetch<{ id: string }>(`/appointments/${detail.id}/reminders`, {
+          method: "POST",
+          body: JSON.stringify({
+            user_id: form.assigneeId,
+            remind_at: toRfc3339(remindAt),
+            title: followUpTitle,
+            description,
+          }),
+        }),
+      ];
+
+      if (form.createTask && canCreateTasks) {
+        requests.push(
+          apiFetch<{ id: string }>("/tasks", {
+            method: "POST",
+            body: JSON.stringify({
+              title: followUpTitle,
+              description,
+              assigned_to: form.assigneeId,
+              patient_id: detail.patient_id,
+              order_id: detail.order_id,
+              appointment_id: detail.id,
+              due_date: toRfc3339(remindAt),
+              priority: form.taskPriority,
+            }),
+          }),
+        );
+      }
+
+      await Promise.all(requests);
+      setForm(buildDefaultForm(form.assigneeId, defaultTitle));
+      onRefresh();
+    } catch (error) {
+      onError(error instanceof Error ? error.message : tr.common_failed_create);
+    } finally {
+      setSubmitBusy(false);
+    }
+  }
+
+  const scheduledReminder = form.packageEndDate
+    ? shiftLocalDateTime(`${form.packageEndDate}T09:00`, { months: -1 })
+    : "";
+
+  return (
+    <section className={sectionCardClass("p-5")}>
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-950">
+            Package-end follow-up
+          </h3>
+          <p className="text-xs text-slate-500">
+            Schedule the required reminder one month before the linked package
+            or order window ends.
+          </p>
+        </div>
+        <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+          {reminders.length + tasks.length} package item
+          {reminders.length + tasks.length === 1 ? "" : "s"}
+        </span>
+      </div>
+      <div className="mt-4 grid gap-4 xl:grid-cols-2">
+        <div className="space-y-3">
+          {reminders.length === 0 && tasks.length === 0 ? (
+            <EmptyState text={tr.common_not_set} />
+          ) : (
+            <>
+              {reminders.map((item) => (
+                <div
+                  key={item.id}
+                  className="rounded-2xl border border-slate-200/80 bg-slate-50/80 px-4 py-3"
+                >
+                  <p className="text-sm font-medium text-slate-900">
+                    {item.title.replace(`${PACKAGE_END_FOLLOW_UP_PREFIX} `, "")}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {item.user_name} · {formatDateTimeLabel(item.remind_at)}
+                  </p>
+                  {item.description ? (
+                    <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
+                      {item.description}
+                    </p>
+                  ) : null}
+                </div>
+              ))}
+              {tasks.map((task) => (
+                <div
+                  key={task.id}
+                  className="rounded-2xl border border-slate-200/80 bg-slate-50/80 px-4 py-3"
+                >
+                  <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                    <p className="text-sm font-medium text-slate-900">
+                      {task.title.replace(`${PACKAGE_END_FOLLOW_UP_PREFIX} `, "")}
+                    </p>
+                    <span className="text-xs text-slate-500">
+                      {taskStatusLabel(task.status)} · {taskPriorityLabel(task.priority)}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {task.assigned_to_name}
+                    {task.due_date
+                      ? ` · ${formatDateTimeLabel(task.due_date)}`
+                      : ""}
+                  </p>
+                  {task.description ? (
+                    <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
+                      {task.description}
+                    </p>
+                  ) : null}
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+        {canManageReminders ? (
+          <form
+            onSubmit={handleSubmit}
+            className="space-y-4 rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4"
+          >
+            <Field label={t.appointments_date}>
+              <Input
+                type="date"
+                value={form.packageEndDate}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    packageEndDate: event.target.value,
+                  }))
+                }
+                className="h-10 rounded-xl bg-white"
+                required
+              />
+            </Field>
+            <Field label={tr.appointments_title_col}>
+              <Input
+                value={form.title}
+                onChange={(event) =>
+                  setForm((current) => ({ ...current, title: event.target.value }))
+                }
+                className="h-10 rounded-xl bg-white"
+                required
+              />
+            </Field>
+            <Field label={t.patients_assign_owner}>
+              <select
+                value={form.assigneeId}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    assigneeId: event.target.value,
+                  }))
+                }
+                className={selectClassName}
+                required
+              >
+                <option value="">{tr.common_not_set}</option>
+                {assignees.map((member) => (
+                  <option key={member.id} value={member.id}>
+                    {member.name} · {roleLabel(member.role)}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            {scheduledReminder ? (
+              <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-700">
+                Reminder will be scheduled for{" "}
+                {formatDateTimeLabel(toRfc3339(scheduledReminder))}.
+              </div>
+            ) : null}
+            <Field label={t.patients_notes}>
+              <textarea
+                value={form.notes}
+                onChange={(event) =>
+                  setForm((current) => ({ ...current, notes: event.target.value }))
+                }
+                className={textareaClassName}
+                rows={4}
+                placeholder={tr.patients_notes}
+              />
+            </Field>
+            <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_180px]">
+              <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={form.createTask}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      createTask: event.target.checked,
+                    }))
+                  }
+                  className="mt-0.5 size-4 rounded border-slate-300 text-slate-950"
+                />
+                <span>{tr.providers_linked_patients}</span>
+              </label>
+              <Field label={tr.appointments_title_col}>
+                <select
+                  value={form.taskPriority}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      taskPriority: event.target.value,
+                    }))
+                  }
+                  className={selectClassName}
+                  disabled={!form.createTask}
+                >
+                  {TASK_PRIORITY_OPTIONS.map((value) => (
+                    <option key={value} value={value}>
+                      {taskPriorityLabel(value)}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+            <div className="flex justify-end">
+              <Button
+                type="submit"
+                className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+                disabled={
+                  submitBusy ||
+                  !form.title.trim() ||
+                  !form.assigneeId ||
+                  !form.packageEndDate
+                }
+              >
+                {submitBusy ? (
+                  <LoaderCircle className="size-4 animate-spin" />
+                ) : null}
+                Schedule package reminder
+              </Button>
+            </div>
+          </form>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+const MemoizedAppointmentPackageEndSection = memo(
+  AppointmentPackageEndSection,
+);
+
+function AppointmentIncomingDataSection({
+  detail,
+  checklist,
+  reminders,
+  tasks,
+  assignees,
+  defaultAssigneeId,
+  canCreateTasks,
+  onRefresh,
+  onError,
+}: {
+  detail: AppointmentDetail;
+  checklist: ChecklistItem[];
+  reminders: ReminderEntry[];
+  tasks: TaskEntry[];
+  assignees: StaffOption[];
+  defaultAssigneeId: string;
+  canCreateTasks: boolean;
+  onRefresh: () => void;
+  onError: (message: string) => void;
+}) {
+  const { t } = useLang();
+  const tr = t as unknown as Record<string, string>;
+  const { staffGo } = useStaffNavigate();
+  const buildDefaultForm = useCallback(
+    (
+      assigneeId = defaultAssigneeId,
+      dueAt = shiftLocalDateTime(appointmentAnchorDateTime(detail), {
+        days: 2,
+      }),
+      source: IncomingDataSource = detail.interpreter_id ? "interpreter" : "doctor",
+    ) => blankIncomingDataForm(assigneeId, dueAt, source),
+    [defaultAssigneeId, detail],
+  );
+  const [form, setForm] = useState<IncomingDataFormState>(() =>
+    buildDefaultForm(),
+  );
+  const [submitBusy, setSubmitBusy] = useState(false);
+  const [actionBusy, setActionBusy] = useState("");
+  const openChecklistCount = checklist.filter((item) => !item.is_completed).length;
+
+  useEffect(() => {
+    setForm(buildDefaultForm());
+    setSubmitBusy(false);
+    setActionBusy("");
+  }, [buildDefaultForm]);
+
+  async function completeChecklistItem(itemId: string) {
+    setActionBusy(`check:${itemId}`);
+    try {
+      await apiFetch<{ ok: boolean }>(
+        `/appointments/${detail.id}/checklist/${itemId}/complete`,
+        { method: "POST" },
+      );
+      onRefresh();
+    } catch (error) {
+      onError(
+        error instanceof Error ? error.message : "Failed to complete item",
+      );
+    } finally {
+      setActionBusy("");
+    }
+  }
+
+  function openChatDraft() {
+    if (!form.assigneeId) return;
+    const assignee = assignees.find((item) => item.id === form.assigneeId);
+    if (!assignee) return;
+
+    const draftParts = [
+      `Incoming data intake: ${detail.patient_pid} · ${detail.title}`,
+      `Source: ${incomingDataSourceLabel(form.source)}`,
+      `Category: ${incomingDataCategoryLabel(form.category)}`,
+      form.requiresCaseUpdate ? tr.common_error : "",
+      form.requiresPatientFollowUp ? "{tr.appointments_title}" : "",
+      form.notes.trim() || "",
+    ].filter(Boolean);
+
+    const params = new URLSearchParams({
+      peer: assignee.id,
+      name: assignee.name,
+      role: assignee.role,
+      draft: draftParts.join("\n"),
+    });
+    staffGo(`/chat?${params.toString()}`);
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!form.assigneeId || !form.dueAt) return;
+
+    const title = `${INCOMING_DATA_PREFIX} ${incomingDataCategoryLabel(
+      form.category,
+    )} from ${incomingDataSourceLabel(form.source)}`;
+    const description = [
+      detail.provider_name ? `Clinic: ${detail.provider_name}` : "",
+      detail.doctor_name ? `Doctor: ${detail.doctor_name}` : "",
+      `Appointment: ${detail.patient_pid} · ${detail.title} · ${slotLabel(detail)}`,
+      `Source: ${incomingDataSourceLabel(form.source)}`,
+      `Category: ${incomingDataCategoryLabel(form.category)}`,
+      form.requiresCaseUpdate ? tr.common_error : "",
+      form.requiresPatientFollowUp ? tr.common_error : "",
+      form.notes.trim() || "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+    const checklistItems = [
+      `${INCOMING_DATA_CHECKLIST_PREFIX} Review and categorize incoming data`,
+      form.requiresCaseUpdate
+        ? `${INCOMING_DATA_CHECKLIST_PREFIX} Apply update to case/anamnesis`
+        : "",
+      form.requiresPatientFollowUp
+        ? `${INCOMING_DATA_CHECKLIST_PREFIX} Patient follow-up after data triage`
+        : "",
+    ].filter(Boolean);
+
+    setSubmitBusy(true);
+    try {
+      const requests: Array<Promise<unknown>> = [
+        apiFetch<{ id: string }>(`/appointments/${detail.id}/reminders`, {
+          method: "POST",
+          body: JSON.stringify({
+            user_id: form.assigneeId,
+            remind_at: toRfc3339(form.dueAt),
+            title,
+            description,
+          }),
+        }),
+        ...checklistItems.map((item) =>
+          apiFetch<{ id: string }>(`/appointments/${detail.id}/checklist`, {
+            method: "POST",
+            body: JSON.stringify({
+              phase: "followup",
+              item_text: item,
+            }),
+          }),
+        ),
+      ];
+
+      if (form.createTask && canCreateTasks) {
+        requests.push(
+          apiFetch<{ id: string }>("/tasks", {
+            method: "POST",
+            body: JSON.stringify({
+              title,
+              description,
+              assigned_to: form.assigneeId,
+              patient_id: detail.patient_id,
+              order_id: detail.order_id,
+              appointment_id: detail.id,
+              due_date: toRfc3339(form.dueAt),
+              priority: form.taskPriority,
+            }),
+          }),
+        );
+      }
+
+      await Promise.all(requests);
+      setForm(
+        buildDefaultForm(
+          form.assigneeId,
+          shiftLocalDateTime(form.dueAt, { days: 2 }),
+          form.source,
+        ),
+      );
+      onRefresh();
+    } catch (error) {
+      onError(error instanceof Error ? error.message : tr.common_failed_create);
+    } finally {
+      setSubmitBusy(false);
+    }
+  }
+
+  return (
+    <section className={sectionCardClass("p-5")}>
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-950">
+            Incoming unprocessed medical data
+          </h3>
+          <p className="text-xs text-slate-500">
+            Capture incoming updates from patients, doctors, interpreters or
+            clinics that still need triage, categorization and case update.
+          </p>
+        </div>
+        <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+          {openChecklistCount === 0 && checklist.length > 0
+            ? "Intake clear"
+            : `${openChecklistCount} open`}
+        </span>
+      </div>
+      <div className="mt-4 grid gap-4 md:grid-cols-3">
+        <ContextCard
+          label={t.cases_status}
+          value={checklist.length === 0 ? "Not started" : `${checklist.length} item(s)`}
+          meta={
+            checklist.length === 0
+              ? "No intake checklist yet."
+              : `${openChecklistCount} item(s) still open.`
+          }
+        />
+        <ContextCard
+          label={t.common_search}
+          value={reminders.length === 0 ? "0" : String(reminders.length)}
+          meta="Deadline control for data triage and processing."
+        />
+        <ContextCard
+          label={t.cases_title}
+          value={tasks.length === 0 ? "0" : String(tasks.length)}
+          meta="Operational ownership for categorization and case updates."
+        />
+      </div>
+      <div className="mt-4 grid gap-4 xl:grid-cols-2">
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+              Intake checklist
+            </p>
+            <div className="mt-3 space-y-3">
+              {checklist.length === 0 ? (
+                <EmptyState text={tr.common_not_set} />
+              ) : (
+                checklist.map((item) => (
+                  <div
+                    key={item.id}
+                    className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 md:flex-row md:items-center md:justify-between"
+                  >
+                    <div>
+                      <p className="text-sm font-medium text-slate-900">
+                        {item.item_text.replace(
+                          `${INCOMING_DATA_CHECKLIST_PREFIX} `,
+                          "",
+                        )}
+                      </p>
+                      <p className="mt-1 text-xs uppercase tracking-[0.12em] text-slate-500">
+                        {item.phase}
+                      </p>
+                    </div>
+                    {item.is_completed ? (
+                      <span className="text-xs font-medium text-emerald-700">
+                        Completed {formatDateTimeLabel(item.completed_at)}
+                      </span>
+                    ) : (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="rounded-2xl"
+                        disabled={Boolean(actionBusy)}
+                        onClick={() => void completeChecklistItem(item.id)}
+                      >
+                        {actionBusy === `check:${item.id}` ? (
+                          <LoaderCircle className="size-4 animate-spin" />
+                        ) : null}
+                        Complete
+                      </Button>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+          <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+              Reminder and task trail
+            </p>
+            <div className="mt-3 space-y-3">
+              {reminders.length === 0 && tasks.length === 0 ? (
+                <EmptyState text={tr.common_not_set} />
+              ) : (
+                <>
+                  {reminders.map((item) => (
+                    <div
+                      key={item.id}
+                      className="rounded-2xl border border-slate-200 bg-white px-4 py-3"
+                    >
+                      <p className="text-sm font-medium text-slate-900">
+                        {item.title.replace(`${INCOMING_DATA_PREFIX} `, "")}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {item.user_name} · {formatDateTimeLabel(item.remind_at)}
+                      </p>
+                      {item.description ? (
+                        <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
+                          {item.description}
+                        </p>
+                      ) : null}
+                    </div>
+                  ))}
+                  {tasks.map((task) => (
+                    <div
+                      key={task.id}
+                      className="rounded-2xl border border-slate-200 bg-white px-4 py-3"
+                    >
+                      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                        <p className="text-sm font-medium text-slate-900">
+                          {task.title.replace(`${INCOMING_DATA_PREFIX} `, "")}
+                        </p>
+                        <span className="text-xs text-slate-500">
+                          {taskStatusLabel(task.status)} ·{" "}
+                          {taskPriorityLabel(task.priority)}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {task.assigned_to_name}
+                        {task.due_date
+                          ? ` · ${formatDateTimeLabel(task.due_date)}`
+                          : ""}
+                      </p>
+                      {task.description ? (
+                        <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
+                          {task.description}
+                        </p>
+                      ) : null}
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+        <form
+          onSubmit={handleSubmit}
+          className="space-y-4 rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4"
+        >
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field label={tr.documents_source}>
+              <select
+                value={form.source}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    source: event.target.value as IncomingDataSource,
+                  }))
+                }
+                className={selectClassName}
+              >
+                <option value="patient">{tr.orders_patient}</option>
+                <option value="doctor">{tr.common_doctor}</option>
+                <option value="clinic">{tr.common_provider}</option>
+                <option value="interpreter">{tr.role_interpreter}</option>
+                <option value="external_lab">{tr.common_provider}</option>
+                <option value="other">{tr.common_not_set}</option>
+              </select>
+            </Field>
+            <Field label={tr.documents_category}>
+              <select
+                value={form.category}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    category: event.target.value as IncomingDataCategory,
+                  }))
+                }
+                className={selectClassName}
+              >
+                <option value="medical_update">Medical update</option>
+                <option value="diagnosis">{tr.cases_preconditions}</option>
+                <option value="medication">{tr.cases_medications}</option>
+                <option value="symptom">{tr.cases_symptoms}</option>
+                <option value="lab_result">{tr.cases_title}</option>
+                <option value="imaging">{tr.documents_title}</option>
+                <option value="recommendation">Recommendation</option>
+                <option value="risk_flag">{tr.common_error}</option>
+                <option value="other">{tr.common_not_set}</option>
+              </select>
+            </Field>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field label={t.patients_assign_owner}>
+              <select
+                value={form.assigneeId}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    assigneeId: event.target.value,
+                  }))
+                }
+                className={selectClassName}
+                required
+              >
+                <option value="">{tr.common_not_set}</option>
+                {assignees.map((member) => (
+                  <option key={member.id} value={member.id}>
+                    {member.name} · {roleLabel(member.role)}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label={tr.invoices_due_at}>
+              <Input
+                type="datetime-local"
+                value={form.dueAt}
+                onChange={(event) =>
+                  setForm((current) => ({ ...current, dueAt: event.target.value }))
+                }
+                className="h-10 rounded-xl bg-white"
+                required
+              />
+            </Field>
+          </div>
+          <Field label={tr.patients_notes}>
+            <textarea
+              value={form.notes}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, notes: event.target.value }))
+              }
+              className={textareaClassName}
+              rows={5}
+              placeholder={tr.patients_notes}
+            />
+          </Field>
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={form.requiresCaseUpdate}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    requiresCaseUpdate: event.target.checked,
+                  }))
+                }
+                className="mt-0.5 size-4 rounded border-slate-300 text-slate-950"
+              />
+              <span>{tr.cases_subtitle}</span>
+            </label>
+            <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={form.requiresPatientFollowUp}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    requiresPatientFollowUp: event.target.checked,
+                  }))
+                }
+                className="mt-0.5 size-4 rounded border-slate-300 text-slate-950"
+              />
+              <span>{tr.appointments_title}</span>
+            </label>
+          </div>
+          <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_180px]">
+            <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={form.createTask}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    createTask: event.target.checked,
+                  }))
+                }
+                className="mt-0.5 size-4 rounded border-slate-300 text-slate-950"
+              />
+              <span>{tr.providers_linked_patients}</span>
+            </label>
+            <Field label={tr.appointments_title_col}>
+              <select
+                value={form.taskPriority}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    taskPriority: event.target.value,
+                  }))
+                }
+                className={selectClassName}
+                disabled={!form.createTask}
+              >
+                {TASK_PRIORITY_OPTIONS.map((value) => (
+                  <option key={value} value={value}>
+                    {taskPriorityLabel(value)}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </div>
+          <div className="flex flex-wrap justify-end gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              className="rounded-2xl"
+              disabled={!form.assigneeId}
+              onClick={openChatDraft}
+            >
+              Open internal chat draft
+            </Button>
+            <Button
+              type="submit"
+              className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+              disabled={submitBusy || !form.assigneeId || !form.dueAt}
+            >
+              {submitBusy ? (
+                <LoaderCircle className="size-4 animate-spin" />
+              ) : null}
+              Start intake flow
+            </Button>
+          </div>
+        </form>
+      </div>
+    </section>
+  );
+}
+
+const MemoizedAppointmentIncomingDataSection = memo(
+  AppointmentIncomingDataSection,
+);
+
+function AppointmentFindingsSection({
+  detail,
+  checklist,
+  reminders,
+  tasks,
+  assignees,
+  defaultAssigneeId,
+  canCreateTasks,
+  onRefresh,
+  onError,
+}: {
+  detail: AppointmentDetail;
+  checklist: ChecklistItem[];
+  reminders: ReminderEntry[];
+  tasks: TaskEntry[];
+  assignees: StaffOption[];
+  defaultAssigneeId: string;
+  canCreateTasks: boolean;
+  onRefresh: () => void;
+  onError: (message: string) => void;
+}) {
+  const { t } = useLang();
+  const tr = t as unknown as Record<string, string>;
+  const { staffGo } = useStaffNavigate();
+  const buildDefaultForm = useCallback(
+    (
+      assigneeId = defaultAssigneeId,
+      dueAt = shiftLocalDateTime(appointmentAnchorDateTime(detail), {
+        days: 3,
+      }),
+      artifact: FindingsFollowUpArtifact = detail.doctor_id
+        ? "arztbrief"
+        : "written_findings",
+    ) => blankFindingsFollowUpForm(assigneeId, dueAt, artifact),
+    [defaultAssigneeId, detail],
+  );
+  const [form, setForm] = useState<FindingsFollowUpFormState>(() =>
+    buildDefaultForm(),
+  );
+  const [submitBusy, setSubmitBusy] = useState(false);
+  const [actionBusy, setActionBusy] = useState("");
+  const openChecklistCount = checklist.filter((item) => !item.is_completed).length;
+
+  useEffect(() => {
+    setForm(buildDefaultForm());
+    setSubmitBusy(false);
+    setActionBusy("");
+  }, [buildDefaultForm]);
+
+  async function completeChecklistItem(itemId: string) {
+    setActionBusy(`check:${itemId}`);
+    try {
+      await apiFetch<{ ok: boolean }>(
+        `/appointments/${detail.id}/checklist/${itemId}/complete`,
+        { method: "POST" },
+      );
+      onRefresh();
+    } catch (error) {
+      onError(
+        error instanceof Error ? error.message : "Failed to complete item",
+      );
+    } finally {
+      setActionBusy("");
+    }
+  }
+
+  function openChatDraft() {
+    if (!form.assigneeId) return;
+    const assignee = assignees.find((item) => item.id === form.assigneeId);
+    if (!assignee) return;
+
+    const draftParts = [
+      `Findings follow-up: ${detail.patient_pid} · ${detail.title}`,
+      `Expected: ${findingsArtifactLabel(form.artifact)}`,
+      detail.provider_name ? `Clinic: ${detail.provider_name}` : "",
+      detail.doctor_name ? `Doctor: ${detail.doctor_name}` : "",
+      form.translationRequired ? "{tr.common_loading}" : "",
+      form.sendToPatient ? tr.common_error : "",
+      form.notes.trim() || "",
+    ].filter(Boolean);
+
+    const params = new URLSearchParams({
+      peer: assignee.id,
+      name: assignee.name,
+      role: assignee.role,
+      draft: draftParts.join("\n"),
+    });
+    staffGo(`/chat?${params.toString()}`);
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!form.assigneeId || !form.dueAt) return;
+
+    const artifactLabel = findingsArtifactLabel(form.artifact);
+    const title = `${FINDINGS_FOLLOW_UP_PREFIX} ${artifactLabel}`;
+    const description = [
+      detail.provider_name ? `Clinic: ${detail.provider_name}` : "",
+      detail.doctor_name ? `Doctor: ${detail.doctor_name}` : "",
+      `Appointment: ${detail.patient_pid} · ${detail.title} · ${slotLabel(detail)}`,
+      form.translationRequired ? "{tr.common_loading}" : "",
+      form.sendToPatient ? tr.common_error : "",
+      form.notes.trim() || "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+    const checklistItems = [
+      `${FINDINGS_CHECKLIST_PREFIX} Await ${artifactLabel}`,
+      `${FINDINGS_CHECKLIST_PREFIX} Review and categorize ${artifactLabel}`,
+      form.translationRequired
+        ? `${FINDINGS_CHECKLIST_PREFIX} Written translation completed`
+        : "",
+      form.sendToPatient
+        ? `${FINDINGS_CHECKLIST_PREFIX} Findings package sent to patient`
+        : "",
+    ].filter(Boolean);
+
+    setSubmitBusy(true);
+    try {
+      const requests: Array<Promise<unknown>> = [
+        apiFetch<{ id: string }>(`/appointments/${detail.id}/reminders`, {
+          method: "POST",
+          body: JSON.stringify({
+            user_id: form.assigneeId,
+            remind_at: toRfc3339(form.dueAt),
+            title,
+            description,
+          }),
+        }),
+        ...checklistItems.map((item) =>
+          apiFetch<{ id: string }>(`/appointments/${detail.id}/checklist`, {
+            method: "POST",
+            body: JSON.stringify({
+              phase: "followup",
+              item_text: item,
+            }),
+          }),
+        ),
+      ];
+
+      if (form.createTask && canCreateTasks) {
+        requests.push(
+          apiFetch<{ id: string }>("/tasks", {
+            method: "POST",
+            body: JSON.stringify({
+              title,
+              description,
+              assigned_to: form.assigneeId,
+              patient_id: detail.patient_id,
+              order_id: detail.order_id,
+              appointment_id: detail.id,
+              due_date: toRfc3339(form.dueAt),
+              priority: form.taskPriority,
+            }),
+          }),
+        );
+      }
+
+      await Promise.all(requests);
+      setForm(
+        buildDefaultForm(
+          form.assigneeId,
+          shiftLocalDateTime(form.dueAt, { days: 7 }),
+          form.artifact,
+        ),
+      );
+      onRefresh();
+    } catch (error) {
+      onError(error instanceof Error ? error.message : tr.common_failed_create);
+    } finally {
+      setSubmitBusy(false);
+    }
+  }
+
+  return (
+    <section className={sectionCardClass("p-5")}>
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-950">
+            Arztbrief and written findings
+          </h3>
+          <p className="text-xs text-slate-500">
+            Track missing findings, translation needs and patient dispatch from
+            the appointment itself.
+          </p>
+        </div>
+        <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+          {openChecklistCount === 0 && checklist.length > 0
+            ? "Follow-up ready"
+            : `${openChecklistCount} open`}
+        </span>
+      </div>
+      <div className="mt-4 grid gap-4 md:grid-cols-3">
+        <ContextCard
+          label={t.cases_status}
+          value={checklist.length === 0 ? "Not started" : `${checklist.length} item(s)`}
+          meta={
+            checklist.length === 0
+              ? "No document follow-up checklist yet."
+              : `${openChecklistCount} item(s) still open.`
+          }
+        />
+        <ContextCard
+          label={t.common_search}
+          value={reminders.length === 0 ? "0" : String(reminders.length)}
+          meta="Timing control for missing findings and document handling."
+        />
+        <ContextCard
+          label={t.cases_title}
+          value={tasks.length === 0 ? "0" : String(tasks.length)}
+          meta="Operational ownership for requesting, translating or sending findings."
+        />
+      </div>
+      <div className="mt-4 grid gap-4 xl:grid-cols-2">
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+              Checklist trail
+            </p>
+            <div className="mt-3 space-y-3">
+              {checklist.length === 0 ? (
+                <EmptyState text={tr.common_not_set} />
+              ) : (
+                checklist.map((item) => (
+                  <div
+                    key={item.id}
+                    className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 md:flex-row md:items-center md:justify-between"
+                  >
+                    <div>
+                      <p className="text-sm font-medium text-slate-900">
+                        {item.item_text.replace(`${FINDINGS_CHECKLIST_PREFIX} `, "")}
+                      </p>
+                      <p className="mt-1 text-xs uppercase tracking-[0.12em] text-slate-500">
+                        {item.phase}
+                      </p>
+                    </div>
+                    {item.is_completed ? (
+                      <span className="text-xs font-medium text-emerald-700">
+                        Completed {formatDateTimeLabel(item.completed_at)}
+                      </span>
+                    ) : (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="rounded-2xl"
+                        disabled={Boolean(actionBusy)}
+                        onClick={() => void completeChecklistItem(item.id)}
+                      >
+                        {actionBusy === `check:${item.id}` ? (
+                          <LoaderCircle className="size-4 animate-spin" />
+                        ) : null}
+                        Complete
+                      </Button>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+          <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+              Reminder and task trail
+            </p>
+            <div className="mt-3 space-y-3">
+              {reminders.length === 0 && tasks.length === 0 ? (
+                <EmptyState text={tr.common_not_set} />
+              ) : (
+                <>
+                  {reminders.map((item) => (
+                    <div
+                      key={item.id}
+                      className="rounded-2xl border border-slate-200 bg-white px-4 py-3"
+                    >
+                      <p className="text-sm font-medium text-slate-900">
+                        {item.title.replace(`${FINDINGS_FOLLOW_UP_PREFIX} `, "")}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {item.user_name} · {formatDateTimeLabel(item.remind_at)}
+                      </p>
+                      {item.description ? (
+                        <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
+                          {item.description}
+                        </p>
+                      ) : null}
+                    </div>
+                  ))}
+                  {tasks.map((task) => (
+                    <div
+                      key={task.id}
+                      className="rounded-2xl border border-slate-200 bg-white px-4 py-3"
+                    >
+                      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                        <p className="text-sm font-medium text-slate-900">
+                          {task.title.replace(`${FINDINGS_FOLLOW_UP_PREFIX} `, "")}
+                        </p>
+                        <span className="text-xs text-slate-500">
+                          {taskStatusLabel(task.status)} ·{" "}
+                          {taskPriorityLabel(task.priority)}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {task.assigned_to_name}
+                        {task.due_date
+                          ? ` · ${formatDateTimeLabel(task.due_date)}`
+                          : ""}
+                      </p>
+                      {task.description ? (
+                        <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
+                          {task.description}
+                        </p>
+                      ) : null}
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+        <form
+          onSubmit={handleSubmit}
+          className="space-y-4 rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4"
+        >
+          <Field label={tr.documents_source}>
+            <select
+              value={form.artifact}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  artifact: event.target.value as FindingsFollowUpArtifact,
+                }))
+              }
+              className={selectClassName}
+            >
+              <option value="arztbrief">Arztbrief</option>
+              <option value="written_findings">Written findings</option>
+              <option value="both">Both</option>
+            </select>
+          </Field>
+          <Field label={t.patients_assign_owner}>
+            <select
+              value={form.assigneeId}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  assigneeId: event.target.value,
+                }))
+              }
+              className={selectClassName}
+              required
+            >
+              <option value="">{tr.common_not_set}</option>
+              {assignees.map((member) => (
+                <option key={member.id} value={member.id}>
+                  {member.name} · {roleLabel(member.role)}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label={tr.invoices_due_at}>
+            <Input
+              type="datetime-local"
+              value={form.dueAt}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, dueAt: event.target.value }))
+              }
+              className="h-10 rounded-xl bg-white"
+              required
+            />
+          </Field>
+          <Field label={tr.patients_notes}>
+            <textarea
+              value={form.notes}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, notes: event.target.value }))
+              }
+              className={textareaClassName}
+              rows={5}
+              placeholder={tr.patients_notes}
+            />
+          </Field>
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={form.translationRequired}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    translationRequired: event.target.checked,
+                  }))
+                }
+                className="mt-0.5 size-4 rounded border-slate-300 text-slate-950"
+              />
+              <span>{tr.common_loading}</span>
+            </label>
+            <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={form.sendToPatient}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    sendToPatient: event.target.checked,
+                  }))
+                }
+                className="mt-0.5 size-4 rounded border-slate-300 text-slate-950"
+              />
+              <span>{tr.common_error}</span>
+            </label>
+          </div>
+          <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_180px]">
+            <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={form.createTask}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    createTask: event.target.checked,
+                  }))
+                }
+                className="mt-0.5 size-4 rounded border-slate-300 text-slate-950"
+              />
+              <span>{tr.providers_linked_patients}</span>
+            </label>
+            <Field label={tr.appointments_title_col}>
+              <select
+                value={form.taskPriority}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    taskPriority: event.target.value,
+                  }))
+                }
+                className={selectClassName}
+                disabled={!form.createTask}
+              >
+                {TASK_PRIORITY_OPTIONS.map((value) => (
+                  <option key={value} value={value}>
+                    {taskPriorityLabel(value)}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </div>
+          <div className="flex flex-wrap justify-end gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              className="rounded-2xl"
+              disabled={!form.assigneeId}
+              onClick={openChatDraft}
+            >
+              Open internal chat draft
+            </Button>
+            <Button
+              type="submit"
+              className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+              disabled={submitBusy || !form.assigneeId || !form.dueAt}
+            >
+              {submitBusy ? (
+                <LoaderCircle className="size-4 animate-spin" />
+              ) : null}
+              Start findings follow-up
+            </Button>
+          </div>
+        </form>
+      </div>
+    </section>
+  );
+}
+
+const MemoizedAppointmentFindingsSection = memo(
+  AppointmentFindingsSection,
+);
+
 function StaffAppointmentsPage() {
   const { user } = useAuth();
   const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
   const { staffGo } = useStaffNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const detailTab = normalizeAppointmentWorkspaceTab(
+    searchParams.get("detailTab"),
+  );
   const permissions = appointmentPermissions(user?.role);
   const isMobile = useIsMobile();
   const calendarRef = useRef<FullCalendar | null>(null);
@@ -2462,23 +9904,9 @@ function StaffAppointmentsPage() {
   const [queueModalOpen, setQueueModalOpen] = useState(false);
 
   const [createOpen, setCreateOpen] = useState(false);
-  const [createForm, setCreateForm] = useState<AppointmentFormState>(
+  const [createSeed, setCreateSeed] = useState<AppointmentFormState>(
     blankAppointmentForm(),
   );
-  const [createDoctors, setCreateDoctors] = useState<DoctorOption[]>([]);
-  const [createConflicts, setCreateConflicts] =
-    useState<ConflictSummary | null>(null);
-  const [createError, setCreateError] = useState("");
-  const [createBusy, setCreateBusy] = useState(false);
-  const [followUpVisitForm, setFollowUpVisitForm] =
-    useState<FollowUpVisitFormState | null>(null);
-  const [followUpVisitDoctors, setFollowUpVisitDoctors] = useState<
-    DoctorOption[]
-  >([]);
-  const [followUpVisitConflicts, setFollowUpVisitConflicts] =
-    useState<ConflictSummary | null>(null);
-  const [followUpVisitError, setFollowUpVisitError] = useState("");
-  const [followUpVisitBusy, setFollowUpVisitBusy] = useState(false);
 
   const [detailOpen, setDetailOpen] = useState(false);
   const [selectedId, setSelectedId] = useState("");
@@ -2500,63 +9928,7 @@ function StaffAppointmentsPage() {
   >([]);
   const [detailVersion, setDetailVersion] = useState(0);
 
-  const [editForm, setEditForm] = useState<AppointmentFormState | null>(null);
-  const [editRecurrenceScope, setEditRecurrenceScope] =
-    useState<AppointmentRecurringActionScope>("single");
-  const [statusRecurrenceScope, setStatusRecurrenceScope] =
-    useState<AppointmentRecurringActionScope>("single");
-  const [editDoctors, setEditDoctors] = useState<DoctorOption[]>([]);
-  const [editConflicts, setEditConflicts] = useState<ConflictSummary | null>(
-    null,
-  );
-  const [editError, setEditError] = useState("");
-  const [editBusy, setEditBusy] = useState(false);
-
-  const [checklistForm, setChecklistForm] =
-    useState<ChecklistFormState>(blankChecklistForm());
-  const [checklistBusy, setChecklistBusy] = useState(false);
-  const [reminderForm, setReminderForm] =
-    useState<ReminderFormState>(blankReminderForm());
-  const [reminderBusy, setReminderBusy] = useState(false);
-  const [doctorFollowUpForm, setDoctorFollowUpForm] =
-    useState<DoctorFollowUpFormState>(blankDoctorFollowUpForm());
-  const [doctorFollowUpBusy, setDoctorFollowUpBusy] = useState(false);
-  const [packageEndFollowUpForm, setPackageEndFollowUpForm] =
-    useState<PackageEndFollowUpFormState>(blankPackageEndFollowUpForm());
-  const [packageEndFollowUpBusy, setPackageEndFollowUpBusy] = useState(false);
-  const [externalHandoffForm, setExternalHandoffForm] =
-    useState<ExternalHandoffFormState>(blankExternalHandoffForm());
-  const [externalHandoffBusy, setExternalHandoffBusy] = useState(false);
-  const [billingHandoffForm, setBillingHandoffForm] =
-    useState<BillingHandoffFormState>(blankBillingHandoffForm());
-  const [billingHandoffBusy, setBillingHandoffBusy] = useState(false);
-  const [findingsFollowUpForm, setFindingsFollowUpForm] =
-    useState<FindingsFollowUpFormState>(blankFindingsFollowUpForm());
-  const [findingsFollowUpBusy, setFindingsFollowUpBusy] = useState(false);
-  const [incomingDataForm, setIncomingDataForm] =
-    useState<IncomingDataFormState>(blankIncomingDataForm());
-  const [incomingDataBusy, setIncomingDataBusy] = useState(false);
-  const [reportForm, setReportForm] =
-    useState<ReportFormState>(blankReportForm());
-  const [taskForm, setTaskForm] = useState<TaskFormState>(blankTaskForm());
-  const [taskBusy, setTaskBusy] = useState(false);
-  const [serviceForm, setServiceForm] = useState<ConciergeServiceFormState>(
-    blankConciergeServiceForm(),
-  );
-  const [serviceDrafts, setServiceDrafts] = useState<
-    Record<string, ConciergeServiceDraftState>
-  >({});
-  const [serviceBusy, setServiceBusy] = useState(false);
   const [followUpAssigneeId, setFollowUpAssigneeId] = useState("");
-  const [followUpBusy, setFollowUpBusy] = useState(false);
-  const [completionPlan, setCompletionPlan] = useState<Record<string, boolean>>(
-    defaultCompletionPlan,
-  );
-  const [completionBusy, setCompletionBusy] = useState(false);
-  const [reportRejectReason, setReportRejectReason] = useState("");
-  const [timelineFilter, setTimelineFilter] = useState<
-    "all" | AppointmentTimelineKind
-  >("all");
   const [actionBusy, setActionBusy] = useState("");
   const [calendarQuickActionMenu, setCalendarQuickActionMenu] =
     useState<CalendarQuickActionMenuState | null>(null);
@@ -2618,14 +9990,6 @@ function StaffAppointmentsPage() {
     () => new Map(appointments.map((item) => [item.id, item])),
     [appointments],
   );
-  const scheduleWarningLabels = useMemo(
-    () => ({
-      patients_assign_owner: tr.patients_assign_owner,
-      common_doctor: tr.common_doctor,
-      common_provider: tr.common_provider,
-    }),
-    [tr.common_doctor, tr.common_provider, tr.patients_assign_owner],
-  );
   const mineFilterActive = user
     ? user.role === "interpreter"
       ? filters.interpreterId === user.id
@@ -2645,101 +10009,6 @@ function StaffAppointmentsPage() {
               : filters.appointmentType === "internal"
                 ? "internal"
                 : "all";
-  const createLocalWarnings = useMemo(
-    () =>
-      buildLocalScheduleWarnings(
-        appointments,
-        {
-          date: createForm.date,
-          timeStart: createForm.timeStart,
-          timeEnd: createForm.timeEnd,
-          ownerUserId: createForm.ownerUserId || user?.id || null,
-          providerId: createForm.providerId || null,
-          doctorId: createForm.doctorId || null,
-        },
-        scheduleWarningLabels,
-      ),
-    [
-      appointments,
-      createForm.date,
-      createForm.timeStart,
-      createForm.timeEnd,
-      createForm.ownerUserId,
-      createForm.providerId,
-      createForm.doctorId,
-      scheduleWarningLabels,
-      user?.id,
-    ],
-  );
-  const detailPatientId = detail?.patient_id ?? "";
-  const detailAppointmentId = detail?.id ?? "";
-  const detailOwnerUserId = detail?.owner_user_id ?? null;
-  const editFormDate = editForm?.date ?? "";
-  const editFormTimeStart = editForm?.timeStart ?? "";
-  const editFormTimeEnd = editForm?.timeEnd ?? "";
-  const editFormInterpreterId = editForm?.interpreterId ?? "";
-  const editFormOwnerUserId = editForm?.ownerUserId || detailOwnerUserId;
-  const editFormProviderId = editForm?.providerId ?? "";
-  const editFormDoctorId = editForm?.doctorId ?? "";
-  const editLocalWarnings = useMemo(() => {
-    if (!detailAppointmentId || !editFormDate) return [];
-    return buildLocalScheduleWarnings(
-      appointments,
-      {
-        appointmentId: detailAppointmentId,
-        date: editFormDate,
-        timeStart: editFormTimeStart,
-        timeEnd: editFormTimeEnd,
-        ownerUserId: editFormOwnerUserId,
-        providerId: editFormProviderId || null,
-        doctorId: editFormDoctorId || null,
-      },
-      scheduleWarningLabels,
-    );
-  }, [
-    appointments,
-    detailAppointmentId,
-    editFormDate,
-    editFormTimeStart,
-    editFormTimeEnd,
-    editFormOwnerUserId,
-    editFormProviderId,
-    editFormDoctorId,
-    scheduleWarningLabels,
-  ]);
-  const followUpVisitDate = followUpVisitForm?.date ?? "";
-  const followUpVisitTimeStart = followUpVisitForm?.timeStart ?? "";
-  const followUpVisitTimeEnd = followUpVisitForm?.timeEnd ?? "";
-  const followUpVisitInterpreterId = followUpVisitForm?.interpreterId ?? "";
-  const followUpVisitOwnerUserId =
-    followUpVisitForm?.ownerUserId || detailOwnerUserId;
-  const followUpVisitProviderId = followUpVisitForm?.providerId ?? "";
-  const followUpVisitDoctorId = followUpVisitForm?.doctorId ?? "";
-  const followUpVisitLocalWarnings = useMemo(() => {
-    if (!detailAppointmentId || !followUpVisitDate) return [];
-    return buildLocalScheduleWarnings(
-      appointments,
-      {
-        date: followUpVisitDate,
-        timeStart: followUpVisitTimeStart,
-        timeEnd: followUpVisitTimeEnd,
-        ownerUserId: followUpVisitOwnerUserId,
-        providerId: followUpVisitProviderId || null,
-        doctorId: followUpVisitDoctorId || null,
-      },
-      scheduleWarningLabels,
-    );
-  }, [
-    appointments,
-    detailAppointmentId,
-    followUpVisitDate,
-    followUpVisitTimeStart,
-    followUpVisitTimeEnd,
-    followUpVisitOwnerUserId,
-    followUpVisitProviderId,
-    followUpVisitDoctorId,
-    scheduleWarningLabels,
-  ]);
   const taskAssignableStaff = useMemo(
     () =>
       staff.filter((member) => TASK_ASSIGNABLE_ROLES.has(member.role)),
@@ -2756,32 +10025,6 @@ function StaffAppointmentsPage() {
   const nonMedicalProviders = useMemo(
     () => providers.filter((provider) => provider.provider_type === "non_medical"),
     [providers],
-  );
-  const patientLabelIndex = useMemo(
-    () =>
-      new Map(
-        patients.map((item) => [
-          item.id,
-          `${item.patient_id} · ${patientName(item)}`,
-        ]),
-      ),
-    [patients],
-  );
-  const providerLabelIndex = useMemo(
-    () => new Map(providers.map((item) => [item.id, providerLabel(item)])),
-    [providers],
-  );
-  const createDoctorLabelIndex = useMemo(
-    () => new Map(createDoctors.map((item) => [item.id, doctorLabel(item)])),
-    [createDoctors],
-  );
-  const staffLabelIndex = useMemo(
-    () => new Map(staff.map((item) => [item.id, staffLabel(item)])),
-    [staff],
-  );
-  const interpreterLabelIndex = useMemo(
-    () => new Map(interpreters.map((item) => [item.id, staffLabel(item)])),
-    [interpreters],
   );
   const canShowConciergeSection =
     permissions.canViewConciergeServices && detail?.type === "non_medical";
@@ -2834,108 +10077,273 @@ function StaffAppointmentsPage() {
     schedulerQuickScopeOptions.find(
       (option) => option.id === schedulerQuickScopeValue,
     )?.label ?? t.providers_all;
-  const selectedCreatePatientLabel =
-    (createForm.patientId
-      ? patientLabelIndex.get(createForm.patientId)
-      : undefined) ?? t.orders_patient;
-  const selectedCreateProviderLabel =
-    (createForm.providerId
-      ? providerLabelIndex.get(createForm.providerId)
-      : undefined) ?? t.common_not_set;
-  const selectedCreateDoctorLabel =
-    (createForm.doctorId
-      ? createDoctorLabelIndex.get(createForm.doctorId)
-      : undefined) ?? t.common_not_set;
-  const selectedCreateOwnerLabel =
-    (createForm.ownerUserId
-      ? staffLabelIndex.get(createForm.ownerUserId)
-      : undefined) ?? t.common_not_set;
-  const selectedCreateInterpreterLabel =
-    (createForm.interpreterId
-      ? interpreterLabelIndex.get(createForm.interpreterId)
-      : undefined) ?? t.common_not_set;
-  const handoffStakeholders =
-    detail && !detail.is_blocked
-      ? buildHandoffStakeholders(detail, detailAssignments, tr)
-      : [];
-  const openChecklistCount = detailChecklist.filter(
-    (item) => !item.is_completed,
-  ).length;
-  const openTaskCount = detailTasks.filter(
-    (item) => !["completed", "cancelled"].includes(item.status),
-  ).length;
-  const pendingReminderCount = detailReminders.filter(
-    (item) => !item.is_completed,
-  ).length;
-  const selectedCompletionPresetCount = FOLLOW_UP_PRESETS.filter(
-    (preset) => completionPlan[preset.id],
-  ).length;
-  const doctorDirectedReminders = detailReminders.filter((item) =>
-    item.title.startsWith(DOCTOR_FOLLOW_UP_PREFIX),
+  const detailDefaultAssigneeId = useMemo(
+    () =>
+      detail ? resolveFollowUpDefaultAssignee(detail, detailAssignments) : "",
+    [detail, detailAssignments],
   );
-  const doctorDirectedTasks = detailTasks.filter((item) =>
-    item.title.startsWith(DOCTOR_FOLLOW_UP_PREFIX),
-  );
-  const packageEndReminders = detailReminders.filter((item) =>
-    item.title.startsWith(PACKAGE_END_FOLLOW_UP_PREFIX),
-  );
-  const packageEndTasks = detailTasks.filter((item) =>
-    item.title.startsWith(PACKAGE_END_FOLLOW_UP_PREFIX),
-  );
-  const externalCommunicationEntries = detailCommunications.filter((item) =>
-    ["clinic", "doctor", "service_provider"].includes(item.target_type),
-  );
-  const externalHandoffReminders = detailReminders.filter((item) =>
-    item.title.startsWith(EXTERNAL_HANDOFF_PREFIX),
-  );
-  const externalHandoffTasks = detailTasks.filter((item) =>
-    item.title.startsWith(EXTERNAL_HANDOFF_PREFIX),
-  );
-  const billingHandoffReminders = detailReminders.filter((item) =>
-    item.title.startsWith(BILLING_HANDOFF_PREFIX),
-  );
-  const billingHandoffTasks = detailTasks.filter((item) =>
-    item.title.startsWith(BILLING_HANDOFF_PREFIX),
-  );
-  const canShowBillingHandoffSection =
-    permissions.canManageConciergeBilling ||
-    billingHandoffTasks.length > 0 ||
-    billingHandoffReminders.length > 0;
-  const findingsChecklist = detailChecklist.filter((item) =>
-    item.item_text.startsWith(FINDINGS_CHECKLIST_PREFIX),
-  );
-  const findingsReminders = detailReminders.filter((item) =>
-    item.title.startsWith(FINDINGS_FOLLOW_UP_PREFIX),
-  );
-  const findingsTasks = detailTasks.filter((item) =>
-    item.title.startsWith(FINDINGS_FOLLOW_UP_PREFIX),
-  );
-  const incomingDataChecklist = detailChecklist.filter((item) =>
-    item.item_text.startsWith(INCOMING_DATA_CHECKLIST_PREFIX),
-  );
-  const incomingDataReminders = detailReminders.filter((item) =>
-    item.title.startsWith(INCOMING_DATA_PREFIX),
-  );
-  const incomingDataTasks = detailTasks.filter((item) =>
-    item.title.startsWith(INCOMING_DATA_PREFIX),
-  );
-  const doctorFollowUpAssignees = Array.from(
-    new Map(
-      [...handoffStakeholders, ...taskAssignableStaff].map((item) => [
-        item.id,
-        {
+  const {
+    handoffStakeholders,
+    openChecklistCount,
+    openTaskCount,
+    pendingReminderCount,
+    doctorDirectedReminders,
+    doctorDirectedTasks,
+    packageEndReminders,
+    packageEndTasks,
+    externalCommunicationEntries,
+    externalHandoffReminders,
+    externalHandoffTasks,
+    billingHandoffReminders,
+    billingHandoffTasks,
+    canShowBillingHandoffSection,
+    findingsChecklist,
+    findingsReminders,
+    findingsTasks,
+    incomingDataChecklist,
+    incomingDataReminders,
+    incomingDataTasks,
+    doctorFollowUpAssignees,
+    interpreterReportReady,
+    readyConciergeServices,
+    settledConciergeServices,
+    openBillingHandoffTasks,
+    billingReadinessWarnings,
+    completionWarnings,
+  } = useMemo(() => {
+    const handoffStakeholders =
+      detail && !detail.is_blocked
+        ? buildHandoffStakeholders(detail, detailAssignments, {
+            cases_title: tr.cases_title,
+            patients_assign_owner: tr.patients_assign_owner,
+            role_interpreter: tr.role_interpreter,
+          })
+        : [];
+
+    let openChecklistCount = 0;
+    let openTaskCount = 0;
+    let pendingReminderCount = 0;
+    let serviceInFlightCount = 0;
+    let openIncomingDataChecklistCount = 0;
+
+    const findingsChecklist: ChecklistItem[] = [];
+    const incomingDataChecklist: ChecklistItem[] = [];
+    const doctorDirectedReminders: ReminderEntry[] = [];
+    const packageEndReminders: ReminderEntry[] = [];
+    const externalHandoffReminders: ReminderEntry[] = [];
+    const billingHandoffReminders: ReminderEntry[] = [];
+    const findingsReminders: ReminderEntry[] = [];
+    const incomingDataReminders: ReminderEntry[] = [];
+    const doctorDirectedTasks: TaskEntry[] = [];
+    const packageEndTasks: TaskEntry[] = [];
+    const externalHandoffTasks: TaskEntry[] = [];
+    const billingHandoffTasks: TaskEntry[] = [];
+    const openBillingHandoffTasks: TaskEntry[] = [];
+    const findingsTasks: TaskEntry[] = [];
+    const incomingDataTasks: TaskEntry[] = [];
+    const externalCommunicationEntries: AppointmentCommunicationEntry[] = [];
+    const readyConciergeServices: ConciergeServiceEntry[] = [];
+    const settledConciergeServices: ConciergeServiceEntry[] = [];
+
+    for (const item of detailChecklist) {
+      if (!item.is_completed) {
+        openChecklistCount += 1;
+      }
+      if (item.item_text.startsWith(FINDINGS_CHECKLIST_PREFIX)) {
+        findingsChecklist.push(item);
+      }
+      if (item.item_text.startsWith(INCOMING_DATA_CHECKLIST_PREFIX)) {
+        incomingDataChecklist.push(item);
+        if (!item.is_completed) {
+          openIncomingDataChecklistCount += 1;
+        }
+      }
+    }
+
+    for (const item of detailReminders) {
+      if (!item.is_completed) {
+        pendingReminderCount += 1;
+      }
+      if (item.title.startsWith(DOCTOR_FOLLOW_UP_PREFIX)) {
+        doctorDirectedReminders.push(item);
+      }
+      if (item.title.startsWith(PACKAGE_END_FOLLOW_UP_PREFIX)) {
+        packageEndReminders.push(item);
+      }
+      if (item.title.startsWith(EXTERNAL_HANDOFF_PREFIX)) {
+        externalHandoffReminders.push(item);
+      }
+      if (item.title.startsWith(BILLING_HANDOFF_PREFIX)) {
+        billingHandoffReminders.push(item);
+      }
+      if (item.title.startsWith(FINDINGS_FOLLOW_UP_PREFIX)) {
+        findingsReminders.push(item);
+      }
+      if (item.title.startsWith(INCOMING_DATA_PREFIX)) {
+        incomingDataReminders.push(item);
+      }
+    }
+
+    for (const item of detailTasks) {
+      const isOpenTask =
+        item.status !== "completed" && item.status !== "cancelled";
+      if (isOpenTask) {
+        openTaskCount += 1;
+      }
+      if (item.title.startsWith(DOCTOR_FOLLOW_UP_PREFIX)) {
+        doctorDirectedTasks.push(item);
+      }
+      if (item.title.startsWith(PACKAGE_END_FOLLOW_UP_PREFIX)) {
+        packageEndTasks.push(item);
+      }
+      if (item.title.startsWith(EXTERNAL_HANDOFF_PREFIX)) {
+        externalHandoffTasks.push(item);
+      }
+      if (item.title.startsWith(BILLING_HANDOFF_PREFIX)) {
+        billingHandoffTasks.push(item);
+        if (isOpenTask) {
+          openBillingHandoffTasks.push(item);
+        }
+      }
+      if (item.title.startsWith(FINDINGS_FOLLOW_UP_PREFIX)) {
+        findingsTasks.push(item);
+      }
+      if (item.title.startsWith(INCOMING_DATA_PREFIX)) {
+        incomingDataTasks.push(item);
+      }
+    }
+
+    for (const item of detailCommunications) {
+      if (
+        item.target_type === "clinic" ||
+        item.target_type === "doctor" ||
+        item.target_type === "service_provider"
+      ) {
+        externalCommunicationEntries.push(item);
+      }
+    }
+
+    for (const item of detailServices) {
+      if (item.status !== "completed" && item.status !== "cancelled") {
+        serviceInFlightCount += 1;
+      }
+      if (item.billing_status === "ready") {
+        readyConciergeServices.push(item);
+      }
+      if (
+        item.billing_status === "billed" ||
+        item.billing_status === "settled"
+      ) {
+        settledConciergeServices.push(item);
+      }
+    }
+
+    const doctorFollowUpAssigneeMap = new Map<
+      string,
+      { id: string; name: string; role: string }
+    >();
+    for (const item of handoffStakeholders) {
+      doctorFollowUpAssigneeMap.set(item.id, {
+        id: item.id,
+        name: item.name,
+        role: item.role,
+      });
+    }
+    for (const item of taskAssignableStaff) {
+      if (!doctorFollowUpAssigneeMap.has(item.id)) {
+        doctorFollowUpAssigneeMap.set(item.id, {
           id: item.id,
           name: item.name,
           role: item.role,
-        },
-      ]),
-    ).values(),
-  ).sort((left, right) =>
-    `${left.role}:${left.name}`.localeCompare(`${right.role}:${right.name}`),
-  );
-  const interpreterReportReady = !detail?.interpreter_id
-    ? true
-    : detailReport?.approval_status === "approved";
+        });
+      }
+    }
+    const doctorFollowUpAssignees = Array.from(
+      doctorFollowUpAssigneeMap.values(),
+    ).sort((left, right) =>
+      `${left.role}:${left.name}`.localeCompare(`${right.role}:${right.name}`),
+    );
+    const interpreterReportReady = !detail?.interpreter_id
+      ? true
+      : detailReport?.approval_status === "approved";
+    const canShowBillingHandoffSection =
+      permissions.canManageConciergeBilling ||
+      billingHandoffTasks.length > 0 ||
+      billingHandoffReminders.length > 0;
+    const billingReadinessWarnings = [
+      detail?.interpreter_id && !interpreterReportReady ? tr.common_error : "",
+      detail?.type === "non_medical" && serviceInFlightCount > 0
+        ? `${serviceInFlightCount} concierge service(s) are still operationally open.`
+        : "",
+      detail?.type === "non_medical" &&
+      detailServices.length > 0 &&
+      readyConciergeServices.length === 0 &&
+      settledConciergeServices.length === 0
+        ? tr.common_not_set
+        : "",
+      billingStaff.length === 0 ? tr.common_not_set : "",
+    ].filter(Boolean);
+    const completionWarnings = [
+      openChecklistCount > 0
+        ? `${openChecklistCount} checklist item(s) still open.`
+        : "",
+      openIncomingDataChecklistCount > 0
+        ? `${openIncomingDataChecklistCount} incoming data item(s) still need triage.`
+        : "",
+      openTaskCount > 0 ? `${openTaskCount} operational task(s) still open.` : "",
+      !interpreterReportReady && detail?.interpreter_id ? tr.common_error : "",
+      detail?.type === "non_medical" && serviceInFlightCount > 0
+        ? `${serviceInFlightCount} concierge service(s) are still in progress.`
+        : "",
+    ].filter(Boolean);
+
+    return {
+      handoffStakeholders,
+      openChecklistCount,
+      openTaskCount,
+      pendingReminderCount,
+      doctorDirectedReminders,
+      doctorDirectedTasks,
+      packageEndReminders,
+      packageEndTasks,
+      externalCommunicationEntries,
+      externalHandoffReminders,
+      externalHandoffTasks,
+      billingHandoffReminders,
+      billingHandoffTasks,
+      canShowBillingHandoffSection,
+      findingsChecklist,
+      findingsReminders,
+      findingsTasks,
+      incomingDataChecklist,
+      incomingDataReminders,
+      incomingDataTasks,
+      doctorFollowUpAssignees,
+      interpreterReportReady,
+      readyConciergeServices,
+      settledConciergeServices,
+      openBillingHandoffTasks,
+      billingReadinessWarnings,
+      completionWarnings,
+    };
+  }, [
+    billingStaff.length,
+    detail,
+    detailAssignments,
+    detailChecklist,
+    detailCommunications,
+    detailReminders,
+    detailReport?.approval_status,
+    detailServices,
+    detailTasks,
+    permissions.canManageConciergeBilling,
+    taskAssignableStaff,
+    tr.cases_title,
+    tr.common_error,
+    tr.common_not_set,
+    tr.patients_assign_owner,
+    tr.role_interpreter,
+  ]);
   const canResubmitRejectedReport =
     permissions.canSubmitReport &&
     canResubmitInterpreterReport({
@@ -2948,31 +10356,6 @@ function StaffAppointmentsPage() {
     detail?.interpreter_id === user?.id &&
     (!detailReport || canResubmitRejectedReport),
   );
-  const serviceInFlightCount = detailServices.filter(
-    (item) => !["completed", "cancelled"].includes(item.status),
-  ).length;
-  const readyConciergeServices = detailServices.filter(
-    (item) => item.billing_status === "ready",
-  );
-  const settledConciergeServices = detailServices.filter((item) =>
-    ["billed", "settled"].includes(item.billing_status),
-  );
-  const openBillingHandoffTasks = billingHandoffTasks.filter(
-    (item) => !["completed", "cancelled"].includes(item.status),
-  );
-  const billingReadinessWarnings = [
-    detail?.interpreter_id && !interpreterReportReady ? tr.common_error : "",
-    detail?.type === "non_medical" && serviceInFlightCount > 0
-      ? `${serviceInFlightCount} concierge service(s) are still operationally open.`
-      : "",
-    detail?.type === "non_medical" &&
-    detailServices.length > 0 &&
-    readyConciergeServices.length === 0 &&
-    settledConciergeServices.length === 0
-      ? tr.common_not_set
-      : "",
-    billingStaff.length === 0 ? tr.common_not_set : "",
-  ].filter(Boolean);
   const showReportReviewActions = Boolean(
     (permissions.canApproveReport || permissions.canRejectReport) &&
     detailReport &&
@@ -2985,25 +10368,6 @@ function StaffAppointmentsPage() {
       : detailReport.approval_status === "rejected"
         ? `Returned ${formatDateTimeLabel(detailReport.approved_at)}`
         : tr.mfa_pending;
-  const openFindingsChecklistCount = findingsChecklist.filter(
-    (item) => !item.is_completed,
-  ).length;
-  const openIncomingDataChecklistCount = incomingDataChecklist.filter(
-    (item) => !item.is_completed,
-  ).length;
-  const completionWarnings = [
-    openChecklistCount > 0
-      ? `${openChecklistCount} checklist item(s) still open.`
-      : "",
-    openIncomingDataChecklistCount > 0
-      ? `${openIncomingDataChecklistCount} incoming data item(s) still need triage.`
-      : "",
-    openTaskCount > 0 ? `${openTaskCount} operational task(s) still open.` : "",
-    !interpreterReportReady && detail?.interpreter_id ? tr.common_error : "",
-    detail?.type === "non_medical" && serviceInFlightCount > 0
-      ? `${serviceInFlightCount} concierge service(s) are still in progress.`
-      : "",
-  ].filter(Boolean);
   const timelineLabels = useMemo(
     () => ({
       appointments_timeline_appointment_created:
@@ -3078,52 +10442,17 @@ function StaffAppointmentsPage() {
       timelineLabels,
     ],
   );
-  const visibleTimelineEvents = useMemo(
-    () =>
-      timelineFilter === "all"
-        ? timelineEvents
-        : timelineEvents.filter((item) => item.kind === timelineFilter),
-    [timelineEvents, timelineFilter],
-  );
   const detailAttention = detail
     ? (attentionIndex.get(detail.id) ?? null)
     : null;
   const activeCalendarQuickActionItem = calendarQuickActionMenu
     ? (appointmentsIndex.get(calendarQuickActionMenu.appointmentId) ?? null)
     : null;
-  const detailLineageText = detail ? recurrenceLineageText(detail, t) : "";
-  const detailLineageBadge = detail ? recurrenceLineageBadge(detail, t) : "";
-  const detailCurrentLineageHistory = detail
-    ? currentRecurringLineageHistory(detail)
-    : null;
-  const detailRelatedLineageCount = detail
-    ? Math.max(0, detail.recurring_lineage_history.length - 1)
-    : 0;
   const activeCalendarQuickActionScope =
     activeCalendarQuickActionItem?.recurrence_frequency
       ? calendarQuickActionScope
       : "single";
-  const selectedRecurringStatusTargets =
-    detail && detail.recurrence_frequency
-      ? recurringStatusTargetsForScope(detail, statusRecurrenceScope)
-      : detail
-        ? [
-            {
-              id: detail.id,
-              date: detail.date,
-              status: detail.status,
-              recurrence_index: detail.recurrence_index,
-              open_checklist_count: openChecklistCount,
-            },
-          ]
-        : [];
-  const completionScopeBlockers = selectedRecurringStatusTargets.filter(
-    (item) =>
-      !["completed", "cancelled"].includes(item.status) &&
-      item.open_checklist_count > 0,
-  );
-
-  function syncQuery(next: Record<string, string | null>) {
+  const syncQuery = useCallback((next: Record<string, string | null>) => {
     const params = new URLSearchParams(searchParams);
     Object.entries(next).forEach(([key, value]) => {
       if (value) {
@@ -3133,7 +10462,33 @@ function StaffAppointmentsPage() {
       }
     });
     setSearchParams(params, { replace: true });
-  }
+  }, [searchParams, setSearchParams]);
+
+  const closeDetailWorkspace = useCallback(
+    (clearQuery = true) => {
+      setDetailOpen(false);
+      setSelectedId("");
+      setDetailLoading(false);
+      setDetailError("");
+      setDetail(null);
+      setDetailAssignments([]);
+      setDetailCommunications([]);
+      setDetailTasks([]);
+      setDetailServices([]);
+      setDetailChecklist([]);
+      setDetailReminders([]);
+      setDetailReport(null);
+      setFollowUpAssigneeId("");
+      setActionBusy("");
+      if (clearQuery) {
+        syncQuery({
+          appointment: null,
+          detailTab: null,
+        });
+      }
+    },
+    [syncQuery],
+  );
 
   useEffect(() => {
     if (!calendarQuickActionMenu) return;
@@ -3216,18 +10571,27 @@ function StaffAppointmentsPage() {
       setDetailOpen(true);
     }
 
+    if (!appointmentParam && (selectedId || detailOpen)) {
+      closeDetailWorkspace(false);
+    }
+
     if (createParam && permissions.canCreate) {
       const next = blankAppointmentForm();
       next.patientId = patientParam;
-      setCreateError("");
-      setCreateConflicts(null);
-      setCreateForm(next);
+      setCreateSeed(next);
       setCreateOpen(true);
       const params = new URLSearchParams(searchParams);
       params.delete("create");
       setSearchParams(params, { replace: true });
     }
-  }, [permissions.canCreate, searchParams, selectedId, setSearchParams]);
+  }, [
+    closeDetailWorkspace,
+    detailOpen,
+    permissions.canCreate,
+    searchParams,
+    selectedId,
+    setSearchParams,
+  ]);
 
   useEffect(() => {
     setAppointmentsNotice("");
@@ -3303,25 +10667,6 @@ function StaffAppointmentsPage() {
   ]);
 
   useEffect(() => {
-    if (!createForm.providerId) {
-      setCreateDoctors([]);
-      setCreateForm((current) => ({ ...current, doctorId: "" }));
-      return;
-    }
-    let active = true;
-    getProviderDoctors(createForm.providerId)
-      .then((rows) => {
-        if (active) setCreateDoctors(rows);
-      })
-      .catch(() => {
-        if (active) setCreateDoctors([]);
-      });
-    return () => {
-      active = false;
-    };
-  }, [createForm.providerId]);
-
-  useEffect(() => {
     if (!filters.providerId) {
       setFilterDoctors([]);
       setFilters((current) =>
@@ -3341,164 +10686,6 @@ function StaffAppointmentsPage() {
       active = false;
     };
   }, [filters.providerId]);
-
-  useEffect(() => {
-    if (!editForm?.providerId) {
-      setEditDoctors([]);
-      return;
-    }
-    let active = true;
-    getProviderDoctors(editForm.providerId)
-      .then((rows) => {
-        if (active) setEditDoctors(rows);
-      })
-      .catch(() => {
-        if (active) setEditDoctors([]);
-      });
-    return () => {
-      active = false;
-    };
-  }, [editForm?.providerId]);
-
-  useEffect(() => {
-    if (!followUpVisitForm?.providerId) {
-      setFollowUpVisitDoctors([]);
-      return;
-    }
-    let active = true;
-    getProviderDoctors(followUpVisitForm.providerId)
-      .then((rows) => {
-        if (active) setFollowUpVisitDoctors(rows);
-      })
-      .catch(() => {
-        if (active) setFollowUpVisitDoctors([]);
-      });
-    return () => {
-      active = false;
-    };
-  }, [followUpVisitForm?.providerId]);
-
-  useEffect(() => {
-    if (
-      !createOpen ||
-      !permissions.canCreate ||
-      !createForm.patientId ||
-      !createForm.date
-    ) {
-      setCreateConflicts(null);
-      return;
-    }
-    let active = true;
-    apiFetch<ConflictSummary>(
-      buildConflictQuery(
-        createForm.patientId,
-        "",
-        createForm.date,
-        createForm.timeStart,
-        createForm.timeEnd,
-        createForm.interpreterId,
-      ),
-    )
-      .then((value) => {
-        if (active) setCreateConflicts(value);
-      })
-      .catch(() => {
-        if (active) setCreateConflicts(null);
-      });
-    return () => {
-      active = false;
-    };
-  }, [
-    createOpen,
-    permissions.canCreate,
-    createForm.patientId,
-    createForm.date,
-    createForm.timeStart,
-    createForm.timeEnd,
-    createForm.interpreterId,
-  ]);
-
-  useEffect(() => {
-    if (
-      !detailOpen ||
-      !permissions.canEditSchedule ||
-      !detailPatientId ||
-      !detailAppointmentId ||
-      !editFormDate
-    ) {
-      setEditConflicts(null);
-      return;
-    }
-    let active = true;
-    apiFetch<ConflictSummary>(
-      buildConflictQuery(
-        detailPatientId,
-        detailAppointmentId,
-        editFormDate,
-        editFormTimeStart,
-        editFormTimeEnd,
-        editFormInterpreterId,
-      ),
-    )
-      .then((value) => {
-        if (active) setEditConflicts(value);
-      })
-      .catch(() => {
-        if (active) setEditConflicts(null);
-      });
-    return () => {
-      active = false;
-    };
-  }, [
-    detailOpen,
-    permissions.canEditSchedule,
-    detailPatientId,
-    detailAppointmentId,
-    editFormDate,
-    editFormTimeStart,
-    editFormTimeEnd,
-    editFormInterpreterId,
-  ]);
-
-  useEffect(() => {
-    if (
-      !detailOpen ||
-      !permissions.canCreate ||
-      !detailPatientId ||
-      !followUpVisitDate
-    ) {
-      setFollowUpVisitConflicts(null);
-      return;
-    }
-    let active = true;
-    apiFetch<ConflictSummary>(
-      buildConflictQuery(
-        detailPatientId,
-        "",
-        followUpVisitDate,
-        followUpVisitTimeStart,
-        followUpVisitTimeEnd,
-        followUpVisitInterpreterId,
-      ),
-    )
-      .then((value) => {
-        if (active) setFollowUpVisitConflicts(value);
-      })
-      .catch(() => {
-        if (active) setFollowUpVisitConflicts(null);
-      });
-    return () => {
-      active = false;
-    };
-  }, [
-    detailOpen,
-    permissions.canCreate,
-    detailPatientId,
-    followUpVisitDate,
-    followUpVisitTimeStart,
-    followUpVisitTimeEnd,
-    followUpVisitInterpreterId,
-  ]);
 
   useEffect(() => {
     if (!selectedId || !detailOpen) return;
@@ -3559,168 +10746,11 @@ function StaffAppointmentsPage() {
         setDetailTasks(tasks);
         setDetailServices(services);
         setDetailCommunications(communications);
-        setChecklistForm(blankChecklistForm());
-        setReminderForm(blankReminderForm());
-        setReportForm(
-          report && report.approval_status === "rejected"
-            ? {
-                hours: report.hours,
-                reportText: report.report_text ?? "",
-              }
-            : blankReportForm(),
+        const followUpDefaultAssignee = resolveFollowUpDefaultAssignee(
+          appointmentDetail,
+          assignments,
         );
-        setReportRejectReason(
-          report?.approval_status === "rejected" ? (report.notes ?? "") : "",
-        );
-        setTimelineFilter("all");
-        setTaskForm(
-          blankTaskForm(
-            appointmentDetail.interpreter_id ??
-              appointmentDetail.owner_user_id ??
-              taskAssignableStaff[0]?.id ??
-              "",
-            buildTaskDefaultDueDate(appointmentDetail),
-          ),
-        );
-        const followUpDefaultAssignee =
-          assignments.find(
-            (item) =>
-              !item.revoked_at &&
-              item.user_active &&
-              item.user_role === "patient_manager",
-          )?.user_id ??
-          appointmentDetail.owner_user_id ??
-          assignments.find((item) => !item.revoked_at && item.user_active)
-            ?.user_id ??
-          "";
         setFollowUpAssigneeId(followUpDefaultAssignee);
-        setFollowUpVisitForm(
-          buildFollowUpVisitForm(
-            appointmentDetail,
-            followUpDefaultAssignee,
-            tr.phase_followup,
-          ),
-        );
-        setFollowUpVisitError("");
-        setDoctorFollowUpForm(
-          blankDoctorFollowUpForm(
-            followUpDefaultAssignee,
-            shiftLocalDateTime(appointmentAnchorDateTime(appointmentDetail), {
-              days: 7,
-            }),
-          ),
-        );
-        setPackageEndFollowUpForm(
-          blankPackageEndFollowUpForm(
-            followUpDefaultAssignee,
-            tr.appointments_new ?? "",
-          ),
-        );
-        setExternalHandoffForm(
-          blankExternalHandoffForm(
-            followUpDefaultAssignee,
-            shiftLocalDateTime(appointmentAnchorDateTime(appointmentDetail), {
-              days: 1,
-            }),
-            appointmentDetail.doctor_id
-              ? "doctor"
-              : appointmentDetail.type === "non_medical"
-                ? "service_provider"
-                : "clinic",
-          ),
-        );
-        setBillingHandoffForm(
-          blankBillingHandoffForm(
-            billingStaff[0]?.id ?? "",
-            shiftLocalDateTime(appointmentAnchorDateTime(appointmentDetail), {
-              days: 1,
-            }),
-            appointmentDetail.type === "non_medical"
-              ? "concierge_settlement"
-              : appointmentDetail.interpreter_id
-                ? "interpreter_hours"
-                : "patient_invoice",
-          ),
-        );
-        setFindingsFollowUpForm(
-          blankFindingsFollowUpForm(
-            followUpDefaultAssignee,
-            shiftLocalDateTime(appointmentAnchorDateTime(appointmentDetail), {
-              days: 3,
-            }),
-            appointmentDetail.doctor_id ? "arztbrief" : "written_findings",
-          ),
-        );
-        setIncomingDataForm(
-          blankIncomingDataForm(
-            followUpDefaultAssignee,
-            shiftLocalDateTime(appointmentAnchorDateTime(appointmentDetail), {
-              days: 2,
-            }),
-            appointmentDetail.interpreter_id ? "interpreter" : "doctor",
-          ),
-        );
-        setCompletionPlan(defaultCompletionPlan());
-        setServiceForm(
-          blankConciergeServiceForm({
-            providerId:
-              appointmentDetail.provider_id &&
-              nonMedicalProviders.some(
-                (provider) => provider.id === appointmentDetail.provider_id,
-              )
-                ? appointmentDetail.provider_id
-                : "",
-            assignedConciergeId:
-              appointmentDetail.owner_role === "concierge"
-                ? (appointmentDetail.owner_user_id ?? "")
-                : (conciergeStaff[0]?.id ?? ""),
-            serviceKind: appointmentDetail.category
-              ?.toLowerCase()
-              .includes("transfer")
-              ? "transfer"
-              : "other",
-            title: appointmentDetail.title,
-            startsAt: appointmentDetail.time_start
-              ? `${appointmentDetail.date}T${appointmentDetail.time_start.slice(0, 5)}`
-              : "",
-            endsAt: appointmentDetail.time_end
-              ? `${appointmentDetail.date}T${appointmentDetail.time_end.slice(0, 5)}`
-              : "",
-            currency: "EUR",
-          }),
-        );
-        setServiceDrafts(
-          Object.fromEntries(
-            services.map((service) => [service.id, buildServiceDraft(service)]),
-          ),
-        );
-        setReportRejectReason("");
-        setEditError("");
-        setEditRecurrenceScope("single");
-        setStatusRecurrenceScope("single");
-        setEditForm({
-          patientId: appointmentDetail.patient_id,
-          providerId: appointmentDetail.provider_id ?? "",
-          doctorId: appointmentDetail.doctor_id ?? "",
-          ownerUserId: appointmentDetail.owner_user_id ?? "",
-          interpreterId: appointmentDetail.interpreter_id ?? "",
-          appointmentType: appointmentDetail.type,
-          carePathKind: appointmentDetail.care_path_kind ?? "regular",
-          title: appointmentDetail.title,
-          date: appointmentDetail.date,
-          timeStart: appointmentDetail.time_start ?? "",
-          timeEnd: appointmentDetail.time_end ?? "",
-          location: appointmentDetail.location ?? "",
-          category: appointmentDetail.category ?? "",
-          notes: appointmentDetail.notes ?? "",
-          repeatEnabled: Boolean(appointmentDetail.recurrence_frequency),
-          repeatFrequency: appointmentDetail.recurrence_frequency ?? "weekly",
-          repeatInterval: String(appointmentDetail.recurrence_interval ?? 1),
-          repeatCount: appointmentDetail.recurrence_count
-            ? String(appointmentDetail.recurrence_count)
-            : "",
-          repeatUntil: appointmentDetail.recurrence_until ?? "",
-        });
       } catch (error) {
         if (!active) return;
         setDetail(null);
@@ -3728,27 +10758,10 @@ function StaffAppointmentsPage() {
         setDetailChecklist([]);
         setDetailReminders([]);
         setDetailReport(null);
-        setReportRejectReason("");
         setDetailTasks([]);
         setDetailServices([]);
         setDetailCommunications([]);
-        setTaskForm(blankTaskForm());
-        setServiceForm(blankConciergeServiceForm());
-        setServiceDrafts({});
         setFollowUpAssigneeId("");
-        setFollowUpVisitForm(null);
-        setFollowUpVisitDoctors([]);
-        setFollowUpVisitConflicts(null);
-        setFollowUpVisitError("");
-        setTimelineFilter("all");
-        setDoctorFollowUpForm(blankDoctorFollowUpForm());
-        setPackageEndFollowUpForm(blankPackageEndFollowUpForm());
-        setExternalHandoffForm(blankExternalHandoffForm());
-        setBillingHandoffForm(blankBillingHandoffForm());
-        setFindingsFollowUpForm(blankFindingsFollowUpForm());
-        setIncomingDataForm(blankIncomingDataForm());
-        setCompletionPlan(defaultCompletionPlan());
-        setEditForm(null);
         setDetailError(
           error instanceof Error ? error.message : "Failed to load appointment",
         );
@@ -3771,10 +10784,6 @@ function StaffAppointmentsPage() {
     permissions.canViewTasks,
     permissions.canViewConciergeServices,
     permissions.canViewCommunications,
-    taskAssignableStaff,
-    billingStaff,
-    conciergeStaff,
-    nonMedicalProviders,
     tr.appointments_new,
     tr.phase_followup,
   ]);
@@ -3866,27 +10875,36 @@ function StaffAppointmentsPage() {
       ),
     [permissions.canEditSchedule, scopedAppointments],
   );
+  const shouldRenderFiltersDialog = filtersModalOpen;
+  const shouldRenderSearchSheet = searchModalOpen;
+  const shouldRenderQueueSheet = queueModalOpen;
+  const shouldRenderDetailSheetContent =
+    detailOpen || detailLoading || Boolean(detailError) || Boolean(detail);
+  const showInlineDetailWorkspace = detailOpen && !isMobile;
 
-  function refreshAppointments() {
+  const refreshAppointments = useCallback(() => {
     startTransition(() => setAppointmentsVersion((current) => current + 1));
-  }
+  }, []);
 
-  function refreshDetail() {
+  const refreshDetail = useCallback(() => {
     startTransition(() => {
       setDetailVersion((current) => current + 1);
       setAppointmentsVersion((current) => current + 1);
     });
-  }
+  }, []);
 
-  function statusActionKey(
-    appointmentId: string,
-    status: AppointmentStatus,
-    recurrenceScope: AppointmentRecurringActionScope = "single",
-  ) {
-    return recurrenceScope === "single"
-      ? `status:${appointmentId}:${status}`
-      : `status:${appointmentId}:${status}:${recurrenceScope}`;
-  }
+  const reportDetailError = useCallback((message: string) => {
+    setDetailError(message);
+  }, []);
+
+  const reportAppointmentsNotice = useCallback((notice: string) => {
+    setAppointmentsNotice(notice);
+  }, []);
+
+  const handleEditSaved = useCallback((notice: string) => {
+    setAppointmentsNotice(notice);
+    refreshDetail();
+  }, [refreshDetail]);
 
   function syncCalendar(nextView?: CalendarView, nextDate?: string) {
     const api = calendarRef.current?.getApi();
@@ -4030,6 +11048,7 @@ function StaffAppointmentsPage() {
       provider: null,
       doctor: null,
       appointment: null,
+      detailTab: null,
     });
   }
 
@@ -4045,9 +11064,7 @@ function StaffAppointmentsPage() {
         );
       }
     }
-    setCreateError("");
-    setCreateConflicts(null);
-    setCreateForm(next);
+    setCreateSeed(next);
     setCreateOpen(true);
   }
 
@@ -4057,9 +11074,7 @@ function StaffAppointmentsPage() {
     };
     const handleCreateRequest = () => {
       if (!permissions.canCreate) return;
-      setCreateError("");
-      setCreateConflicts(null);
-      setCreateForm(blankAppointmentForm());
+      setCreateSeed(blankAppointmentForm());
       setCreateOpen(true);
     };
 
@@ -4082,16 +11097,32 @@ function StaffAppointmentsPage() {
         handleCreateRequest as EventListener,
       );
     };
-  }, [permissions.canCreate]);
+  }, [permissions.canCreate, refreshAppointments]);
 
-  function openDetailSheet(id: string) {
+  const openDetailSheet = useCallback((id: string) => {
     setCalendarQuickActionMenu(null);
     startTransition(() => {
       setSelectedId(id);
       setDetailOpen(true);
     });
-    syncQuery({ appointment: id });
-  }
+    syncQuery({
+      appointment: id,
+      detailTab: "overview",
+    });
+  }, [syncQuery]);
+
+  const handleFollowUpVisitCreated = useCallback(
+    ({ id, notice }: { id?: string; notice: string }) => {
+      setAppointmentsNotice(notice);
+      refreshAppointments();
+      if (id) {
+        openDetailSheet(id);
+      } else {
+        refreshDetail();
+      }
+    },
+    [openDetailSheet, refreshAppointments, refreshDetail],
+  );
 
   function openCalendarQuickActionLayer(
     event: ReactMouseEvent<HTMLButtonElement>,
@@ -4247,82 +11278,6 @@ function StaffAppointmentsPage() {
     );
   }
 
-  async function handleCreateSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setCreateBusy(true);
-    setCreateError("");
-    try {
-      if (!createForm.patientId) {
-        setCreateError(`${t.orders_patient}: ${t.cf_required}`);
-        return;
-      }
-      const repeatInterval = parsePositiveIntegerInput(
-        createForm.repeatInterval,
-      );
-      const repeatCount = parsePositiveIntegerInput(createForm.repeatCount);
-      if (createForm.repeatEnabled) {
-        if (!repeatInterval) {
-          setCreateError("Repeat interval must be a positive number.");
-          return;
-        }
-        if (!repeatCount && !createForm.repeatUntil) {
-          setCreateError(
-            "Set either total occurrences or a repeat-until date for recurring appointments.",
-          );
-          return;
-        }
-      }
-      const result = await apiFetch<{
-        id: string;
-        conflicts?: ConflictSummary;
-        series_created_count?: number;
-      }>("/appointments", {
-        method: "POST",
-        body: JSON.stringify({
-          patient_id: createForm.patientId,
-          provider_id: createForm.providerId || null,
-          doctor_id: createForm.doctorId || null,
-          owner_user_id: createForm.ownerUserId || null,
-          interpreter_id: createForm.interpreterId || null,
-          appointment_type: createForm.appointmentType,
-          care_path_kind: normalizeCarePathKindForAppointmentType(
-            createForm.appointmentType,
-            createForm.carePathKind,
-          ),
-          title: createForm.title.trim(),
-          date: createForm.date,
-          time_start: createForm.timeStart || null,
-          time_end: createForm.timeEnd || null,
-          location: createForm.location.trim() || null,
-          category: createForm.category.trim() || null,
-          notes: createForm.notes.trim() || null,
-          recurrence_frequency: createForm.repeatEnabled
-            ? createForm.repeatFrequency
-            : null,
-          recurrence_interval: createForm.repeatEnabled ? repeatInterval : null,
-          recurrence_count: createForm.repeatEnabled ? repeatCount : null,
-          recurrence_until:
-            createForm.repeatEnabled && createForm.repeatUntil
-              ? createForm.repeatUntil
-              : null,
-        }),
-      });
-      const notice = buildScheduleNotice(result.conflicts, createLocalWarnings);
-      setCreateOpen(false);
-      setCreateForm(blankAppointmentForm());
-      setCreateConflicts(null);
-      setAppointmentsNotice(notice);
-      refreshAppointments();
-      if (result.id) openDetailSheet(result.id);
-    } catch (error) {
-      setCreateError(
-        error instanceof Error ? error.message : "Failed to create appointment",
-      );
-    } finally {
-      setCreateBusy(false);
-    }
-  }
-
   async function handleInlineReschedule(
     info: EventDropArg | EventResizeDoneArg,
   ) {
@@ -4422,1241 +11377,6 @@ function StaffAppointmentsPage() {
     }
   }
 
-  async function handleStatusChange(
-    status: AppointmentStatus,
-    recurrenceScope: AppointmentRecurringActionScope = "single",
-  ) {
-    if (!detail) return;
-    await performStatusChange(detail.id, status, recurrenceScope);
-  }
-
-  async function handleAssignInterpreter(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!detail || !editForm?.interpreterId) return;
-    setActionBusy("assign");
-    try {
-      await apiFetch<{ ok: boolean }>(
-        `/appointments/${detail.id}/assign-interpreter`,
-        {
-          method: "POST",
-          body: JSON.stringify({ interpreter_id: editForm.interpreterId }),
-        },
-      );
-      refreshDetail();
-    } catch (error) {
-      setDetailError(
-        error instanceof Error ? error.message : "Failed to assign interpreter",
-      );
-    } finally {
-      setActionBusy("");
-    }
-  }
-
-  async function handleInterpreterResponse(response: InterpreterResponse) {
-    if (!detail) return;
-    setActionBusy(`response:${response}`);
-    try {
-      await apiFetch<{ ok: boolean }>(
-        `/appointments/${detail.id}/interpreter-response`,
-        {
-          method: "POST",
-          body: JSON.stringify({ response }),
-        },
-      );
-      refreshDetail();
-    } catch (error) {
-      setDetailError(
-        error instanceof Error ? error.message : "Failed to submit response",
-      );
-    } finally {
-      setActionBusy("");
-    }
-  }
-
-  async function handleEditSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!detail || !editForm) return;
-    setEditBusy(true);
-    setEditError("");
-    try {
-      const applyRecurrenceRule =
-        Boolean(detail.recurrence_frequency) &&
-        editRecurrenceScope !== "single";
-      const repeatInterval = parsePositiveIntegerInput(editForm.repeatInterval);
-      const repeatCount = parsePositiveIntegerInput(editForm.repeatCount);
-      if (applyRecurrenceRule) {
-        if (!repeatInterval) {
-          setEditError("Repeat interval must be a positive number.");
-          return;
-        }
-        if (!repeatCount && !editForm.repeatUntil) {
-          setEditError(
-            "Set either total occurrences or a repeat-until date for recurring updates.",
-          );
-          return;
-        }
-      }
-      const result = await apiFetch<{
-        ok: boolean;
-        conflicts?: ConflictSummary;
-      }>(`/appointments/${detail.id}/update`, {
-        method: "POST",
-        body: JSON.stringify({
-          provider_id: editForm.providerId || null,
-          doctor_id: editForm.doctorId || null,
-          owner_user_id: editForm.ownerUserId || null,
-          interpreter_id: editForm.interpreterId || null,
-          care_path_kind: normalizeCarePathKindForAppointmentType(
-            detail.type,
-            editForm.carePathKind,
-          ),
-          title: editForm.title.trim(),
-          date: editForm.date,
-          time_start: editForm.timeStart || null,
-          time_end: editForm.timeEnd || null,
-          location: editForm.location.trim() || null,
-          recurrence_frequency: applyRecurrenceRule
-            ? editForm.repeatFrequency
-            : null,
-          recurrence_interval: applyRecurrenceRule ? repeatInterval : null,
-          recurrence_count: applyRecurrenceRule ? repeatCount : null,
-          recurrence_until:
-            applyRecurrenceRule && editForm.repeatUntil
-              ? editForm.repeatUntil
-              : null,
-          recurrence_scope: detail.recurrence_frequency
-            ? editRecurrenceScope
-            : "single",
-        }),
-      });
-      setAppointmentsNotice(
-        buildScheduleNotice(result.conflicts, editLocalWarnings),
-      );
-      refreshDetail();
-    } catch (error) {
-      setEditError(
-        error instanceof Error ? error.message : "Failed to save schedule",
-      );
-    } finally {
-      setEditBusy(false);
-    }
-  }
-
-  async function handleChecklistSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!detail) return;
-    setChecklistBusy(true);
-    try {
-      await apiFetch<{ id: string }>(`/appointments/${detail.id}/checklist`, {
-        method: "POST",
-        body: JSON.stringify({
-          phase: checklistForm.phase,
-          item_text: checklistForm.itemText.trim(),
-        }),
-      });
-      setChecklistForm(blankChecklistForm());
-      refreshDetail();
-    } catch (error) {
-      setDetailError(
-        error instanceof Error ? error.message : "Failed to add checklist item",
-      );
-    } finally {
-      setChecklistBusy(false);
-    }
-  }
-
-  async function createChecklistItem(phase: string, itemText: string) {
-    if (!detail) return;
-    await apiFetch<{ id: string }>(`/appointments/${detail.id}/checklist`, {
-      method: "POST",
-      body: JSON.stringify({
-        phase,
-        item_text: itemText,
-      }),
-    });
-  }
-
-  async function handleChecklistComplete(itemId: string) {
-    if (!detail) return;
-    setActionBusy(`check:${itemId}`);
-    try {
-      await apiFetch<{ ok: boolean }>(
-        `/appointments/${detail.id}/checklist/${itemId}/complete`,
-        { method: "POST" },
-      );
-      refreshDetail();
-    } catch (error) {
-      setDetailError(
-        error instanceof Error ? error.message : "Failed to complete item",
-      );
-    } finally {
-      setActionBusy("");
-    }
-  }
-
-  async function handleReminderSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!detail) return;
-    setReminderBusy(true);
-    try {
-      await apiFetch<{ id: string }>(`/appointments/${detail.id}/reminders`, {
-        method: "POST",
-        body: JSON.stringify({
-          user_id: reminderForm.userId,
-          remind_at: toRfc3339(reminderForm.remindAt),
-          title: reminderForm.title.trim(),
-          description: reminderForm.description.trim() || null,
-        }),
-      });
-      setReminderForm(blankReminderForm());
-      refreshDetail();
-    } catch (error) {
-      setDetailError(
-        error instanceof Error ? error.message : "Failed to add reminder",
-      );
-    } finally {
-      setReminderBusy(false);
-    }
-  }
-
-  async function handleReminderComplete(reminderId: string) {
-    if (!detail) return;
-    setActionBusy(`reminder:${reminderId}`);
-    try {
-      await apiFetch<{ ok: boolean }>(
-        `/appointments/${detail.id}/reminders/${reminderId}/complete`,
-        { method: "POST" },
-      );
-      refreshDetail();
-    } catch (error) {
-      setDetailError(
-        error instanceof Error ? error.message : "Failed to complete reminder",
-      );
-    } finally {
-      setActionBusy("");
-    }
-  }
-
-  async function handleReportSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!detail) return;
-    setActionBusy("report-submit");
-    try {
-      await apiFetch<{ id: string }>(`/appointments/${detail.id}/report`, {
-        method: "POST",
-        body: JSON.stringify({
-          hours: Number(reportForm.hours),
-          report_text: reportForm.reportText.trim() || null,
-        }),
-      });
-      setReportForm(blankReportForm());
-      refreshDetail();
-    } catch (error) {
-      setDetailError(
-        error instanceof Error ? error.message : "Failed to submit report",
-      );
-    } finally {
-      setActionBusy("");
-    }
-  }
-
-  async function handleApproveReport() {
-    if (!detail) return;
-    setActionBusy("report-approve");
-    try {
-      await apiFetch<{ ok: boolean }>(
-        `/appointments/${detail.id}/report/approve`,
-        {
-          method: "POST",
-        },
-      );
-      refreshDetail();
-    } catch (error) {
-      setDetailError(
-        error instanceof Error ? error.message : "Failed to approve report",
-      );
-    } finally {
-      setActionBusy("");
-    }
-  }
-
-  async function handleRejectReport() {
-    if (!detail) return;
-    setActionBusy("report-reject");
-    try {
-      await apiFetch<{ ok: boolean }>(
-        `/appointments/${detail.id}/report/reject`,
-        {
-          method: "POST",
-          body: JSON.stringify({ notes: reportRejectReason.trim() || null }),
-        },
-      );
-      setReportRejectReason("");
-      refreshDetail();
-    } catch (error) {
-      setDetailError(
-        error instanceof Error ? error.message : "Failed to reject report",
-      );
-    } finally {
-      setActionBusy("");
-    }
-  }
-
-  async function handleTaskSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!detail) return;
-    setTaskBusy(true);
-    try {
-      await apiFetch<{ id: string }>("/tasks", {
-        method: "POST",
-        body: JSON.stringify({
-          title: taskForm.title.trim(),
-          description: taskForm.description.trim() || null,
-          assigned_to: taskForm.assignedTo,
-          patient_id: detail.patient_id,
-          order_id: detail.order_id,
-          appointment_id: detail.id,
-          due_date: taskForm.dueDate ? toRfc3339(taskForm.dueDate) : null,
-          priority: taskForm.priority,
-        }),
-      });
-      setTaskForm(
-        blankTaskForm(
-          detail.interpreter_id ??
-            detail.owner_user_id ??
-            taskAssignableStaff[0]?.id ??
-            "",
-          buildTaskDefaultDueDate(detail),
-        ),
-      );
-      refreshDetail();
-    } catch (error) {
-      setDetailError(
-        error instanceof Error ? error.message : "Failed to create task",
-      );
-    } finally {
-      setTaskBusy(false);
-    }
-  }
-
-  async function handleTaskStatus(taskId: string, status: string) {
-    setActionBusy(`task:${taskId}:${status}`);
-    try {
-      await apiFetch<{ ok: boolean }>(`/tasks/${taskId}/status`, {
-        method: "POST",
-        body: JSON.stringify({ status }),
-      });
-      refreshDetail();
-    } catch (error) {
-      setDetailError(
-        error instanceof Error ? error.message : "Failed to update task",
-      );
-    } finally {
-      setActionBusy("");
-    }
-  }
-
-  function updateServiceDraft(
-    serviceId: string,
-    patch: Partial<ConciergeServiceDraftState>,
-  ) {
-    setServiceDrafts((current) => {
-      const existingDraft = current[serviceId];
-      if (existingDraft) {
-        return {
-          ...current,
-          [serviceId]: { ...existingDraft, ...patch },
-        };
-      }
-      const service = detailServices.find((item) => item.id === serviceId);
-      if (!service) return current;
-      return {
-        ...current,
-        [serviceId]: { ...buildServiceDraft(service), ...patch },
-      };
-    });
-  }
-
-  async function handleServiceSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!detail) return;
-    setServiceBusy(true);
-    try {
-      await apiFetch<ConciergeServiceEntry>("/concierge-services", {
-        method: "POST",
-        body: JSON.stringify({
-          patient_id: detail.patient_id,
-          appointment_id: detail.id,
-          provider_id: serviceForm.providerId || null,
-          assigned_concierge_id: serviceForm.assignedConciergeId || null,
-          service_kind: serviceForm.serviceKind,
-          title: serviceForm.title.trim(),
-          vendor_name: serviceForm.vendorName.trim() || null,
-          vendor_contact: serviceForm.vendorContact.trim() || null,
-          starts_at: serviceForm.startsAt
-            ? toRfc3339(serviceForm.startsAt)
-            : null,
-          ends_at: serviceForm.endsAt ? toRfc3339(serviceForm.endsAt) : null,
-          cost_estimate: serviceForm.costEstimate
-            ? Number(serviceForm.costEstimate)
-            : null,
-          currency: serviceForm.currency.trim().toUpperCase() || "EUR",
-          service_notes: serviceForm.serviceNotes.trim() || null,
-        }),
-      });
-      setServiceForm(
-        blankConciergeServiceForm({
-          providerId:
-            detail.provider_id &&
-            nonMedicalProviders.some(
-              (provider) => provider.id === detail.provider_id,
-            )
-              ? detail.provider_id
-              : "",
-          assignedConciergeId:
-            detail.owner_role === "concierge"
-              ? (detail.owner_user_id ?? "")
-              : (conciergeStaff[0]?.id ?? ""),
-          title: detail.title,
-          startsAt: detail.time_start
-            ? `${detail.date}T${detail.time_start.slice(0, 5)}`
-            : "",
-          endsAt: detail.time_end
-            ? `${detail.date}T${detail.time_end.slice(0, 5)}`
-            : "",
-          currency: "EUR",
-        }),
-      );
-      refreshDetail();
-    } catch (error) {
-      setDetailError(
-        error instanceof Error ? error.message : tr.common_failed_create,
-      );
-    } finally {
-      setServiceBusy(false);
-    }
-  }
-
-  async function handleServiceSave(serviceId: string) {
-    const draft = serviceDrafts[serviceId];
-    if (!draft) return;
-    setActionBusy(`service:${serviceId}`);
-    try {
-      const payload = permissions.canManageConciergeBilling
-        ? {
-            provider_id: draft.providerId || null,
-            assigned_concierge_id: draft.assignedConciergeId || null,
-            title: draft.title.trim(),
-            status: draft.status,
-            billing_status: draft.billingStatus,
-            booking_reference: draft.bookingReference.trim() || null,
-            vendor_name: draft.vendorName.trim() || null,
-            vendor_contact: draft.vendorContact.trim() || null,
-            starts_at: draft.startsAt ? toRfc3339(draft.startsAt) : null,
-            ends_at: draft.endsAt ? toRfc3339(draft.endsAt) : null,
-            actual_cost: draft.actualCost ? Number(draft.actualCost) : null,
-            currency: draft.currency.trim().toUpperCase() || "EUR",
-            service_notes: draft.serviceNotes.trim() || null,
-            billing_notes: draft.billingNotes.trim() || null,
-          }
-        : {
-            status: draft.status,
-            booking_reference: draft.bookingReference.trim() || null,
-            vendor_name: draft.vendorName.trim() || null,
-            vendor_contact: draft.vendorContact.trim() || null,
-            starts_at: draft.startsAt ? toRfc3339(draft.startsAt) : null,
-            ends_at: draft.endsAt ? toRfc3339(draft.endsAt) : null,
-            actual_cost: draft.actualCost ? Number(draft.actualCost) : null,
-            service_notes: draft.serviceNotes.trim() || null,
-          };
-      await apiFetch<ConciergeServiceEntry>(
-        `/concierge-services/${serviceId}/update`,
-        {
-          method: "POST",
-          body: JSON.stringify(payload),
-        },
-      );
-      refreshDetail();
-    } catch (error) {
-      setDetailError(
-        error instanceof Error ? error.message : tr.common_failed_update,
-      );
-    } finally {
-      setActionBusy("");
-    }
-  }
-
-  function openInternalChat(
-    peerId: string,
-    name: string,
-    role: string,
-    draft: string,
-  ) {
-    const params = new URLSearchParams({
-      peer: peerId,
-      name,
-      role,
-      draft,
-    });
-    staffGo(`/chat?${params.toString()}`);
-  }
-
-  function openAppointmentChat(peer: HandoffStakeholder) {
-    if (!detail) return;
-    openInternalChat(
-      peer.id,
-      peer.name,
-      peer.role,
-      `Appointment handoff: ${detail.patient_pid} · ${detail.title} · ${slotLabel(detail)}.`,
-    );
-  }
-
-  async function createAppointmentDirective(params: {
-    title: string;
-    assigneeId: string;
-    remindAt: string;
-    description: string;
-    createTask: boolean;
-    taskPriority: string;
-  }) {
-    if (!detail) return;
-
-    const requests: Array<Promise<unknown>> = [
-      apiFetch<{ id: string }>(`/appointments/${detail.id}/reminders`, {
-        method: "POST",
-        body: JSON.stringify({
-          user_id: params.assigneeId,
-          remind_at: toRfc3339(params.remindAt),
-          title: params.title,
-          description: params.description,
-        }),
-      }),
-    ];
-
-    if (params.createTask && permissions.canCreateTasks) {
-      requests.push(
-        apiFetch<{ id: string }>("/tasks", {
-          method: "POST",
-          body: JSON.stringify({
-            title: params.title,
-            description: params.description,
-            assigned_to: params.assigneeId,
-            patient_id: detail.patient_id,
-            order_id: detail.order_id,
-            appointment_id: detail.id,
-            due_date: toRfc3339(params.remindAt),
-            priority: params.taskPriority,
-          }),
-        }),
-      );
-    }
-
-    await Promise.all(requests);
-  }
-
-  async function handleFollowUpPreset(
-    preset: (typeof FOLLOW_UP_PRESETS)[number],
-  ) {
-    if (!detail || !followUpAssigneeId) return;
-    const anchor = appointmentAnchorDateTime(detail);
-    const remindAt = shiftLocalDateTime(anchor, {
-      days: "offsetDays" in preset ? preset.offsetDays : undefined,
-      months: "offsetMonths" in preset ? preset.offsetMonths : undefined,
-    });
-    if (!remindAt) return;
-    setFollowUpBusy(true);
-    try {
-      await apiFetch<{ id: string }>(`/appointments/${detail.id}/reminders`, {
-        method: "POST",
-        body: JSON.stringify({
-          user_id: followUpAssigneeId,
-          remind_at: toRfc3339(remindAt),
-          title: preset.title,
-          description: `Auto-planned from appointment ${detail.patient_pid} · ${detail.title}.`,
-        }),
-      });
-      refreshDetail();
-    } catch (error) {
-      setDetailError(
-        error instanceof Error ? error.message : tr.common_failed_create,
-      );
-    } finally {
-      setFollowUpBusy(false);
-    }
-  }
-
-  async function handleDoctorFollowUpSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!detail || !doctorFollowUpForm.assigneeId || !doctorFollowUpForm.dueAt)
-      return;
-
-    const followUpTitle = `${DOCTOR_FOLLOW_UP_PREFIX} ${doctorFollowUpForm.title.trim()}`;
-    const descriptionParts = [
-      detail.doctor_name ? `Doctor: ${detail.doctor_name}` : "",
-      detail.provider_name ? `Clinic: ${detail.provider_name}` : "",
-      `Appointment: ${detail.patient_pid} · ${detail.title} · ${slotLabel(detail)}`,
-      doctorFollowUpForm.notes.trim() || "",
-    ].filter(Boolean);
-    const description = descriptionParts.join("\n");
-
-    setDoctorFollowUpBusy(true);
-    try {
-      await createAppointmentDirective({
-        title: followUpTitle,
-        assigneeId: doctorFollowUpForm.assigneeId,
-        remindAt: doctorFollowUpForm.dueAt,
-        description,
-        createTask: doctorFollowUpForm.createTask,
-        taskPriority: doctorFollowUpForm.taskPriority,
-      });
-      setDoctorFollowUpForm(
-        blankDoctorFollowUpForm(
-          doctorFollowUpForm.assigneeId,
-          shiftLocalDateTime(doctorFollowUpForm.dueAt, { days: 7 }),
-        ),
-      );
-      refreshDetail();
-    } catch (error) {
-      setDetailError(
-        error instanceof Error ? error.message : tr.common_failed_create,
-      );
-    } finally {
-      setDoctorFollowUpBusy(false);
-    }
-  }
-
-  async function handlePackageEndFollowUpSubmit(
-    event: FormEvent<HTMLFormElement>,
-  ) {
-    event.preventDefault();
-    if (
-      !detail ||
-      !packageEndFollowUpForm.assigneeId ||
-      !packageEndFollowUpForm.packageEndDate
-    ) {
-      return;
-    }
-
-    const remindAt = shiftLocalDateTime(
-      `${packageEndFollowUpForm.packageEndDate}T09:00`,
-      { months: -1 },
-    );
-    if (!remindAt) return;
-
-    const followUpTitle = `${PACKAGE_END_FOLLOW_UP_PREFIX} ${packageEndFollowUpForm.title.trim()}`;
-    const descriptionParts = [
-      `Package target end date: ${formatDateLabel(packageEndFollowUpForm.packageEndDate)}`,
-      detail.order_id ? `Order: ${detail.order_id}` : "",
-      detail.provider_name ? `Clinic: ${detail.provider_name}` : "",
-      detail.doctor_name ? `Doctor: ${detail.doctor_name}` : "",
-      `Appointment: ${detail.patient_pid} · ${detail.title} · ${slotLabel(detail)}`,
-      packageEndFollowUpForm.notes.trim() || "",
-    ].filter(Boolean);
-
-    setPackageEndFollowUpBusy(true);
-    try {
-      await createAppointmentDirective({
-        title: followUpTitle,
-        assigneeId: packageEndFollowUpForm.assigneeId,
-        remindAt,
-        description: descriptionParts.join("\n"),
-        createTask: packageEndFollowUpForm.createTask,
-        taskPriority: packageEndFollowUpForm.taskPriority,
-      });
-      setPackageEndFollowUpForm(
-        blankPackageEndFollowUpForm(
-          packageEndFollowUpForm.assigneeId,
-          tr.appointments_new ?? "",
-        ),
-      );
-      refreshDetail();
-    } catch (error) {
-      setDetailError(
-        error instanceof Error ? error.message : tr.common_failed_create,
-      );
-    } finally {
-      setPackageEndFollowUpBusy(false);
-    }
-  }
-
-  function openExternalHandoffChatDraft() {
-    if (!detail || !externalHandoffForm.assigneeId) return;
-    const assignee = doctorFollowUpAssignees.find(
-      (item) => item.id === externalHandoffForm.assigneeId,
-    );
-    if (!assignee) return;
-
-    const targetLabel = communicationTargetLabel(
-      externalHandoffForm.target,
-      detail,
-    );
-    const draftParts = [
-      `External handoff: ${detail.patient_pid} · ${detail.title}`,
-      `Target: ${targetLabel} · ${externalHandoffForm.direction} via ${communicationChannelLabel(externalHandoffForm.channel)}`,
-      `Slot: ${slotLabel(detail)}`,
-      externalHandoffForm.contactName.trim()
-        ? `Contact: ${externalHandoffForm.contactName.trim()}`
-        : "",
-      externalHandoffForm.notes.trim() || "",
-    ].filter(Boolean);
-
-    openInternalChat(
-      assignee.id,
-      assignee.name,
-      assignee.role,
-      draftParts.join("\n"),
-    );
-  }
-
-  async function handleExternalHandoffSubmit(
-    event: FormEvent<HTMLFormElement>,
-  ) {
-    event.preventDefault();
-    if (!detail || !externalHandoffForm.title.trim()) return;
-
-    const targetLabel = communicationTargetLabel(
-      externalHandoffForm.target,
-      detail,
-    );
-    const handoffTitle = `${EXTERNAL_HANDOFF_PREFIX} ${externalHandoffForm.title.trim()}`;
-    const descriptionParts = [
-      `Target: ${externalHandoffForm.target} · ${targetLabel}`,
-      `Direction: ${externalHandoffForm.direction} via ${communicationChannelLabel(externalHandoffForm.channel)}`,
-      `Appointment: ${detail.patient_pid} · ${detail.title} · ${slotLabel(detail)}`,
-      externalHandoffForm.contactName.trim()
-        ? `Contact: ${externalHandoffForm.contactName.trim()}`
-        : "",
-      externalHandoffForm.notes.trim() || "",
-    ].filter(Boolean);
-
-    setExternalHandoffBusy(true);
-    try {
-      const requests: Array<Promise<unknown>> = [
-        apiFetch<{ id: string }>(`/appointments/${detail.id}/communications`, {
-          method: "POST",
-          body: JSON.stringify({
-            target_type: externalHandoffForm.target,
-            direction: externalHandoffForm.direction,
-            channel: externalHandoffForm.channel,
-            status: externalHandoffForm.status,
-            subject: externalHandoffForm.title.trim(),
-            message: externalHandoffForm.notes.trim() || null,
-            contact_name: externalHandoffForm.contactName.trim() || null,
-            due_at: externalHandoffForm.dueAt
-              ? toRfc3339(externalHandoffForm.dueAt)
-              : null,
-          }),
-        }),
-      ];
-
-      if (externalHandoffForm.assigneeId && externalHandoffForm.dueAt) {
-        requests.push(
-          apiFetch<{ id: string }>(`/appointments/${detail.id}/reminders`, {
-            method: "POST",
-            body: JSON.stringify({
-              user_id: externalHandoffForm.assigneeId,
-              remind_at: toRfc3339(externalHandoffForm.dueAt),
-              title: handoffTitle,
-              description: descriptionParts.join("\n"),
-            }),
-          }),
-        );
-
-        if (externalHandoffForm.createTask && permissions.canCreateTasks) {
-          requests.push(
-            apiFetch<{ id: string }>("/tasks", {
-              method: "POST",
-              body: JSON.stringify({
-                title: handoffTitle,
-                description: descriptionParts.join("\n"),
-                assigned_to: externalHandoffForm.assigneeId,
-                patient_id: detail.patient_id,
-                order_id: detail.order_id,
-                appointment_id: detail.id,
-                due_date: toRfc3339(externalHandoffForm.dueAt),
-                priority: externalHandoffForm.taskPriority,
-              }),
-            }),
-          );
-        }
-      }
-
-      await Promise.all(requests);
-      setExternalHandoffForm(
-        blankExternalHandoffForm(
-          externalHandoffForm.assigneeId,
-          externalHandoffForm.dueAt
-            ? shiftLocalDateTime(externalHandoffForm.dueAt, { days: 1 })
-            : "",
-          externalHandoffForm.target,
-        ),
-      );
-      refreshDetail();
-    } catch (error) {
-      setDetailError(
-        error instanceof Error ? error.message : tr.common_failed_create,
-      );
-    } finally {
-      setExternalHandoffBusy(false);
-    }
-  }
-
-  async function handleCommunicationStatusUpdate(
-    communicationId: string,
-    status: AppointmentCommunicationStatus,
-  ) {
-    if (!detail) return;
-    setActionBusy(`communication:${communicationId}:${status}`);
-    try {
-      await apiFetch(
-        `/appointments/${detail.id}/communications/${communicationId}/status`,
-        {
-          method: "POST",
-          body: JSON.stringify({ status }),
-        },
-      );
-      refreshDetail();
-    } catch (error) {
-      setDetailError(
-        error instanceof Error ? error.message : tr.common_failed_update,
-      );
-    } finally {
-      setActionBusy("");
-    }
-  }
-
-  function openBillingHandoffChatDraft() {
-    if (!detail || !billingHandoffForm.assigneeId) return;
-    const assignee = billingStaff.find(
-      (item) => item.id === billingHandoffForm.assigneeId,
-    );
-    if (!assignee) return;
-
-    const draftParts = [
-      `Billing handoff: ${detail.patient_pid} · ${detail.title}`,
-      `Track: ${billingHandoffKindLabel(billingHandoffForm.kind)}`,
-      `Slot: ${slotLabel(detail)}`,
-      billingHandoffForm.kind === "interpreter_hours" && detailReport
-        ? `Interpreter hours: ${detailReport.hours}h · ${reportApprovalLabel(detailReport.approval_status)}`
-        : "",
-      billingHandoffForm.kind === "concierge_settlement"
-        ? `Concierge services: ${readyConciergeServices.length} ready · ${settledConciergeServices.length} billed/settled`
-        : "",
-      billingHandoffForm.notes.trim() || "",
-    ].filter(Boolean);
-
-    openInternalChat(
-      assignee.id,
-      assignee.name,
-      assignee.role,
-      draftParts.join("\n"),
-    );
-  }
-
-  async function handleBillingHandoffSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!detail || !billingHandoffForm.assigneeId || !billingHandoffForm.dueAt)
-      return;
-
-    const titleSuffix =
-      billingHandoffForm.title.trim() ||
-      billingHandoffKindLabel(billingHandoffForm.kind);
-    const handoffTitle = `${BILLING_HANDOFF_PREFIX} ${titleSuffix}`;
-    const descriptionParts = [
-      `Track: ${billingHandoffKindLabel(billingHandoffForm.kind)}`,
-      `Appointment: ${detail.patient_pid} · ${detail.title} · ${slotLabel(detail)}`,
-      detail.provider_name ? `Clinic: ${detail.provider_name}` : "",
-      detail.doctor_name ? `Doctor: ${detail.doctor_name}` : "",
-      billingHandoffForm.kind === "interpreter_hours" && detailReport
-        ? `Interpreter hours: ${detailReport.hours}h · ${reportApprovalLabel(detailReport.approval_status)}`
-        : "",
-      billingHandoffForm.kind === "concierge_settlement"
-        ? `Concierge services ready: ${readyConciergeServices.length}; billed or settled: ${settledConciergeServices.length}`
-        : "",
-      billingHandoffForm.notes.trim() || "",
-    ].filter(Boolean);
-
-    setBillingHandoffBusy(true);
-    try {
-      await createAppointmentDirective({
-        title: handoffTitle,
-        assigneeId: billingHandoffForm.assigneeId,
-        remindAt: billingHandoffForm.dueAt,
-        description: descriptionParts.join("\n"),
-        createTask: billingHandoffForm.createTask,
-        taskPriority: billingHandoffForm.taskPriority,
-      });
-      setBillingHandoffForm(
-        blankBillingHandoffForm(
-          billingHandoffForm.assigneeId,
-          shiftLocalDateTime(billingHandoffForm.dueAt, { days: 1 }),
-          billingHandoffForm.kind,
-        ),
-      );
-      refreshDetail();
-    } catch (error) {
-      setDetailError(
-        error instanceof Error ? error.message : tr.common_failed_create,
-      );
-    } finally {
-      setBillingHandoffBusy(false);
-    }
-  }
-
-  function openFindingsFollowUpChatDraft() {
-    if (!detail || !findingsFollowUpForm.assigneeId) return;
-    const assignee = doctorFollowUpAssignees.find(
-      (item) => item.id === findingsFollowUpForm.assigneeId,
-    );
-    if (!assignee) return;
-
-    const draftParts = [
-      `Findings follow-up: ${detail.patient_pid} · ${detail.title}`,
-      `Expected: ${findingsArtifactLabel(findingsFollowUpForm.artifact)}`,
-      detail.provider_name ? `Clinic: ${detail.provider_name}` : "",
-      detail.doctor_name ? `Doctor: ${detail.doctor_name}` : "",
-      findingsFollowUpForm.translationRequired ? "{tr.common_loading}" : "",
-      findingsFollowUpForm.sendToPatient ? tr.common_error : "",
-      findingsFollowUpForm.notes.trim() || "",
-    ].filter(Boolean);
-
-    openInternalChat(
-      assignee.id,
-      assignee.name,
-      assignee.role,
-      draftParts.join("\n"),
-    );
-  }
-
-  async function handleFindingsFollowUpSubmit(
-    event: FormEvent<HTMLFormElement>,
-  ) {
-    event.preventDefault();
-    if (
-      !detail ||
-      !findingsFollowUpForm.assigneeId ||
-      !findingsFollowUpForm.dueAt
-    )
-      return;
-
-    const artifactLabel = findingsArtifactLabel(findingsFollowUpForm.artifact);
-    const title = `${FINDINGS_FOLLOW_UP_PREFIX} ${artifactLabel}`;
-    const descriptionParts = [
-      detail.provider_name ? `Clinic: ${detail.provider_name}` : "",
-      detail.doctor_name ? `Doctor: ${detail.doctor_name}` : "",
-      `Appointment: ${detail.patient_pid} · ${detail.title} · ${slotLabel(detail)}`,
-      findingsFollowUpForm.translationRequired ? "{tr.common_loading}" : "",
-      findingsFollowUpForm.sendToPatient ? tr.common_error : "",
-      findingsFollowUpForm.notes.trim() || "",
-    ].filter(Boolean);
-
-    const checklistItems = [
-      `${FINDINGS_CHECKLIST_PREFIX} Await ${artifactLabel}`,
-      `${FINDINGS_CHECKLIST_PREFIX} Review and categorize ${artifactLabel}`,
-      findingsFollowUpForm.translationRequired
-        ? `${FINDINGS_CHECKLIST_PREFIX} Written translation completed`
-        : "",
-      findingsFollowUpForm.sendToPatient
-        ? `${FINDINGS_CHECKLIST_PREFIX} Findings package sent to patient`
-        : "",
-    ].filter(Boolean);
-
-    setFindingsFollowUpBusy(true);
-    try {
-      await Promise.all([
-        createAppointmentDirective({
-          title,
-          assigneeId: findingsFollowUpForm.assigneeId,
-          remindAt: findingsFollowUpForm.dueAt,
-          description: descriptionParts.join("\n"),
-          createTask: findingsFollowUpForm.createTask,
-          taskPriority: findingsFollowUpForm.taskPriority,
-        }),
-        ...checklistItems.map((item) => createChecklistItem("followup", item)),
-      ]);
-      setFindingsFollowUpForm(
-        blankFindingsFollowUpForm(
-          findingsFollowUpForm.assigneeId,
-          shiftLocalDateTime(findingsFollowUpForm.dueAt, { days: 7 }),
-          findingsFollowUpForm.artifact,
-        ),
-      );
-      refreshDetail();
-    } catch (error) {
-      setDetailError(
-        error instanceof Error ? error.message : tr.common_failed_create,
-      );
-    } finally {
-      setFindingsFollowUpBusy(false);
-    }
-  }
-
-  function openIncomingDataChatDraft() {
-    if (!detail || !incomingDataForm.assigneeId) return;
-    const assignee = doctorFollowUpAssignees.find(
-      (item) => item.id === incomingDataForm.assigneeId,
-    );
-    if (!assignee) return;
-
-    const draftParts = [
-      `Incoming data intake: ${detail.patient_pid} · ${detail.title}`,
-      `Source: ${incomingDataSourceLabel(incomingDataForm.source)}`,
-      `Category: ${incomingDataCategoryLabel(incomingDataForm.category)}`,
-      incomingDataForm.requiresCaseUpdate ? tr.common_error : "",
-      incomingDataForm.requiresPatientFollowUp ? "{tr.appointments_title}" : "",
-      incomingDataForm.notes.trim() || "",
-    ].filter(Boolean);
-
-    openInternalChat(
-      assignee.id,
-      assignee.name,
-      assignee.role,
-      draftParts.join("\n"),
-    );
-  }
-
-  async function handleIncomingDataSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!detail || !incomingDataForm.assigneeId || !incomingDataForm.dueAt)
-      return;
-
-    const title = `${INCOMING_DATA_PREFIX} ${incomingDataCategoryLabel(
-      incomingDataForm.category,
-    )} from ${incomingDataSourceLabel(incomingDataForm.source)}`;
-    const descriptionParts = [
-      detail.provider_name ? `Clinic: ${detail.provider_name}` : "",
-      detail.doctor_name ? `Doctor: ${detail.doctor_name}` : "",
-      `Appointment: ${detail.patient_pid} · ${detail.title} · ${slotLabel(detail)}`,
-      `Source: ${incomingDataSourceLabel(incomingDataForm.source)}`,
-      `Category: ${incomingDataCategoryLabel(incomingDataForm.category)}`,
-      incomingDataForm.requiresCaseUpdate ? tr.common_error : "",
-      incomingDataForm.requiresPatientFollowUp ? tr.common_error : "",
-      incomingDataForm.notes.trim() || "",
-    ].filter(Boolean);
-
-    const checklistItems = [
-      `${INCOMING_DATA_CHECKLIST_PREFIX} Review and categorize incoming data`,
-      incomingDataForm.requiresCaseUpdate
-        ? `${INCOMING_DATA_CHECKLIST_PREFIX} Apply update to case/anamnesis`
-        : "",
-      incomingDataForm.requiresPatientFollowUp
-        ? `${INCOMING_DATA_CHECKLIST_PREFIX} Patient follow-up after data triage`
-        : "",
-    ].filter(Boolean);
-
-    setIncomingDataBusy(true);
-    try {
-      await Promise.all([
-        createAppointmentDirective({
-          title,
-          assigneeId: incomingDataForm.assigneeId,
-          remindAt: incomingDataForm.dueAt,
-          description: descriptionParts.join("\n"),
-          createTask: incomingDataForm.createTask,
-          taskPriority: incomingDataForm.taskPriority,
-        }),
-        ...checklistItems.map((item) => createChecklistItem("followup", item)),
-      ]);
-      setIncomingDataForm(
-        blankIncomingDataForm(
-          incomingDataForm.assigneeId,
-          shiftLocalDateTime(incomingDataForm.dueAt, { days: 2 }),
-          incomingDataForm.source,
-        ),
-      );
-      refreshDetail();
-    } catch (error) {
-      setDetailError(
-        error instanceof Error ? error.message : tr.common_failed_create,
-      );
-    } finally {
-      setIncomingDataBusy(false);
-    }
-  }
-
-  function applyFollowUpVisitPreset(
-    preset: (typeof FOLLOW_UP_PRESETS)[number],
-  ) {
-    if (!followUpVisitForm || !detail) return;
-    const anchor = appointmentAnchorDateTime(detail);
-    const shifted = shiftLocalDateTime(anchor, {
-      days: "offsetDays" in preset ? preset.offsetDays : undefined,
-      months: "offsetMonths" in preset ? preset.offsetMonths : undefined,
-    });
-    if (!shifted) return;
-    const nextReminderAt = shiftLocalDateTime(shifted, { days: -3 });
-    setFollowUpVisitForm((current) =>
-      current
-        ? {
-            ...current,
-            date: shifted.slice(0, 10),
-            timeStart: shifted.slice(11, 16),
-            timeEnd: current.timeEnd
-              ? shiftLocalDateTime(
-                  `${detail.date}T${detail.time_end?.slice(0, 5) ?? current.timeEnd}`,
-                  {
-                    days:
-                      "offsetDays" in preset ? preset.offsetDays : undefined,
-                    months:
-                      "offsetMonths" in preset
-                        ? preset.offsetMonths
-                        : undefined,
-                  },
-                ).slice(11, 16)
-              : current.timeEnd,
-            title:
-              current.title.trim() === "" ||
-              current.title.startsWith(t.phase_followup)
-                ? preset.title
-                : current.title,
-            reminderAt: nextReminderAt || current.reminderAt,
-          }
-        : current,
-    );
-  }
-
-  async function handleFollowUpVisitSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!detail || !followUpVisitForm) return;
-    setFollowUpVisitBusy(true);
-    setFollowUpVisitError("");
-    try {
-      const result = await apiFetch<{
-        id: string;
-        conflicts?: ConflictSummary;
-      }>("/appointments", {
-        method: "POST",
-        body: JSON.stringify({
-          patient_id: detail.patient_id,
-          provider_id: followUpVisitForm.providerId || null,
-          doctor_id: followUpVisitForm.doctorId || null,
-          owner_user_id: followUpVisitForm.ownerUserId || null,
-          interpreter_id: followUpVisitForm.interpreterId || null,
-          order_id: followUpVisitForm.linkOrder ? detail.order_id : null,
-          appointment_type: followUpVisitForm.appointmentType,
-          care_path_kind: normalizeCarePathKindForAppointmentType(
-            followUpVisitForm.appointmentType,
-            followUpVisitForm.carePathKind,
-          ),
-          title: followUpVisitForm.title.trim(),
-          date: followUpVisitForm.date,
-          time_start: followUpVisitForm.timeStart || null,
-          time_end: followUpVisitForm.timeEnd || null,
-          location: followUpVisitForm.location.trim() || null,
-          category: followUpVisitForm.category.trim() || null,
-          notes: followUpVisitForm.notes.trim() || null,
-        }),
-      });
-
-      if (
-        result.id &&
-        followUpVisitForm.createReminder &&
-        followUpVisitForm.reminderUserId &&
-        followUpVisitForm.reminderAt
-      ) {
-        await apiFetch<{ id: string }>(`/appointments/${result.id}/reminders`, {
-          method: "POST",
-          body: JSON.stringify({
-            user_id: followUpVisitForm.reminderUserId,
-            remind_at: toRfc3339(followUpVisitForm.reminderAt),
-            title: `Prepare follow-up visit: ${followUpVisitForm.title.trim()}`,
-            description: `Planned from appointment ${detail.patient_pid} · ${detail.title} · ${slotLabel(detail)}.`,
-          }),
-        });
-      }
-
-      setAppointmentsNotice(
-        result.conflicts
-          ? `${buildScheduleNotice(result.conflicts, followUpVisitLocalWarnings)} Follow-up visit created.`
-          : tr.common_active,
-      );
-      refreshAppointments();
-      setFollowUpVisitForm(
-        buildFollowUpVisitForm(
-          detail,
-          followUpVisitForm.reminderUserId,
-          tr.phase_followup,
-        ),
-      );
-      if (result.id) {
-        openDetailSheet(result.id);
-      } else {
-        refreshDetail();
-      }
-    } catch (error) {
-      setFollowUpVisitError(
-        error instanceof Error ? error.message : tr.common_failed_create,
-      );
-    } finally {
-      setFollowUpVisitBusy(false);
-    }
-  }
-
-  async function handleCompleteWithFollowUp() {
-    if (!detail) return;
-    const selectedPresets = FOLLOW_UP_PRESETS.filter(
-      (preset) => completionPlan[preset.id],
-    );
-    if (selectedPresets.length > 0 && !followUpAssigneeId) return;
-
-    setCompletionBusy(true);
-    let completed = false;
-    try {
-      await apiFetch<{ ok: boolean }>(`/appointments/${detail.id}/status`, {
-        method: "POST",
-        body: JSON.stringify({ status: "completed" }),
-      });
-      completed = true;
-
-      if (selectedPresets.length > 0) {
-        const anchor = appointmentAnchorDateTime(detail);
-        await Promise.all(
-          selectedPresets.map((preset) => {
-            const remindAt = shiftLocalDateTime(anchor, {
-              days: "offsetDays" in preset ? preset.offsetDays : undefined,
-              months:
-                "offsetMonths" in preset ? preset.offsetMonths : undefined,
-            });
-            return apiFetch<{ id: string }>(
-              `/appointments/${detail.id}/reminders`,
-              {
-                method: "POST",
-                body: JSON.stringify({
-                  user_id: followUpAssigneeId,
-                  remind_at: toRfc3339(remindAt),
-                  title: preset.title,
-                  description: `Auto-planned during appointment completion for ${detail.patient_pid} · ${detail.title}.`,
-                }),
-              },
-            );
-          }),
-        );
-      }
-
-      setAppointmentsNotice(
-        selectedPresets.length > 0
-          ? `Appointment completed. ${selectedPresets.length} follow-up reminder(s) scheduled.`
-          : tr.common_active,
-      );
-      refreshDetail();
-    } catch (error) {
-      if (completed) {
-        setDetailError(
-          error instanceof Error
-            ? `Appointment completed, but follow-up scheduling failed: ${error.message}`
-            : tr.common_error,
-        );
-        refreshDetail();
-      } else {
-        setDetailError(
-          error instanceof Error ? error.message : tr.common_failed_update,
-        );
-      }
-    } finally {
-      setCompletionBusy(false);
-    }
-  }
-
   if (!permissions.canViewPage) {
     return (
       <div className={sectionCardClass("p-8 text-sm text-muted-foreground")}>
@@ -5665,8 +11385,402 @@ function StaffAppointmentsPage() {
     );
   }
 
+  function renderInlineDetailWorkspace() {
+    if (detailLoading) {
+      return (
+        <div className="flex min-h-[320px] items-center justify-center text-muted-foreground">
+          <LoaderCircle className="mr-2 size-4 animate-spin" />
+          Loading appointment
+        </div>
+      );
+    }
+
+    if (detailError) {
+      return <Banner tone="error">{detailError}</Banner>;
+    }
+
+    if (!detail) {
+      return (
+        <section className={sectionCardClass("p-5")}>
+          <EmptyState text="Select an appointment from the calendar or list." />
+        </section>
+      );
+    }
+
+    const coordinationEmpty = appointmentText(
+      "Für diesen Termin sind keine Koordinationsflächen verfügbar.",
+      "Для этого приёма нет координационных блоков.",
+      "No coordination surfaces are available for this appointment.",
+    );
+    const clinicalEmpty = appointmentText(
+      "Für diesen Termin sind keine klinischen Blöcke verfügbar.",
+      "Для этого приёма нет клинических блоков.",
+      "No clinical surfaces are available for this appointment.",
+    );
+    const workflowEmpty = appointmentText(
+      "Für diesen Termin sind keine Workflow-Blöcke verfügbar.",
+      "Для этого приёма нет workflow-блоков.",
+      "No workflow surfaces are available for this appointment.",
+    );
+    const servicesEmpty = appointmentText(
+      "Für diesen Termin sind keine Service- oder Billing-Blöcke verfügbar.",
+      "Для этого приёма нет сервисных или billing-блоков.",
+      "No service or billing surfaces are available for this appointment.",
+    );
+    const notesEmpty = appointmentText(
+      "Für diesen Termin sind keine Notizen verfügbar.",
+      "Для этого приёма нет заметок.",
+      "No notes are available for this appointment.",
+    );
+
+    const showOverviewDetails = detailTab === "overview";
+    const showTimelineTab = detailTab === "timeline";
+    const showCoordinationTab = detailTab === "coordination";
+    const showClinicalTab = detailTab === "clinical";
+    const showWorkflowTab = detailTab === "workflow";
+    const showServicesTab = detailTab === "services";
+    const showNotesTab = detailTab === "notes";
+
+    const hasCoordinationContent = !detail.is_blocked;
+    const hasClinicalContent =
+      (!detail.is_blocked &&
+        permissions.canManageChecklist &&
+        permissions.canViewReminders) ||
+      permissions.canViewReport;
+    const hasWorkflowContent =
+      permissions.canManageStatus ||
+      permissions.canEditSchedule ||
+      permissions.canAssignInterpreter ||
+      permissions.canRespondToAssignment ||
+      permissions.canManageChecklist ||
+      permissions.canViewReminders ||
+      permissions.canViewTasks;
+    const hasServicesContent =
+      canShowConciergeSection || canShowBillingHandoffSection;
+
+    return (
+      <div className="space-y-6">
+        {appointmentsNotice ? (
+          <Banner tone="warning">{appointmentsNotice}</Banner>
+        ) : null}
+        <MemoizedAppointmentOverviewSection
+          detail={detail}
+          onOpenDetail={openDetailSheet}
+        />
+
+        {showOverviewDetails ? (
+          <>
+            <MemoizedAppointmentSnapshotSection detail={detail} />
+            {detailAttention ? (
+              <MemoizedAppointmentAttentionSection attention={detailAttention} />
+            ) : null}
+            <MemoizedAppointmentLinksSection detail={detail} staffGo={staffGo} />
+          </>
+        ) : null}
+
+        {showTimelineTab ? (
+          <MemoizedAppointmentTimelineSection
+            key={`${detail.id}:${detailVersion}:workspace`}
+            timelineEvents={timelineEvents}
+          />
+        ) : null}
+
+        {showCoordinationTab ? (
+          hasCoordinationContent ? (
+            <>
+              {!detail.is_blocked ? (
+                <MemoizedAppointmentHandoffSection
+                  detail={detail}
+                  handoffStakeholders={handoffStakeholders}
+                  followUpAssigneeId={followUpAssigneeId}
+                  setFollowUpAssigneeId={setFollowUpAssigneeId}
+                  canManageReminders={permissions.canManageReminders}
+                  onRefresh={refreshDetail}
+                  onError={reportDetailError}
+                />
+              ) : null}
+              {!detail.is_blocked && permissions.canCreate ? (
+                <MemoizedAppointmentFollowUpVisitSection
+                  detail={detail}
+                  appointments={appointments}
+                  providers={providers}
+                  staff={staff}
+                  interpreters={interpreters}
+                  defaultReminderUserId={detailDefaultAssigneeId}
+                  onCreated={handleFollowUpVisitCreated}
+                />
+              ) : null}
+              {!detail.is_blocked && permissions.canViewReminders ? (
+                <MemoizedAppointmentDoctorFollowUpSection
+                  detail={detail}
+                  reminders={doctorDirectedReminders}
+                  tasks={doctorDirectedTasks}
+                  assignees={doctorFollowUpAssignees}
+                  defaultAssigneeId={detailDefaultAssigneeId}
+                  canManageReminders={permissions.canManageReminders}
+                  canCreateTasks={permissions.canCreateTasks}
+                  onRefresh={refreshDetail}
+                  onError={reportDetailError}
+                />
+              ) : null}
+              {!detail.is_blocked &&
+              permissions.canViewReminders &&
+              detail.order_id ? (
+                <MemoizedAppointmentPackageEndSection
+                  detail={detail}
+                  reminders={packageEndReminders}
+                  tasks={packageEndTasks}
+                  assignees={doctorFollowUpAssignees}
+                  defaultAssigneeId={detailDefaultAssigneeId}
+                  defaultTitle={tr.appointments_new ?? ""}
+                  canManageReminders={permissions.canManageReminders}
+                  canCreateTasks={permissions.canCreateTasks}
+                  onRefresh={refreshDetail}
+                  onError={reportDetailError}
+                />
+              ) : null}
+              {!detail.is_blocked &&
+              permissions.canViewCommunications &&
+              (detail.provider_id || detail.doctor_id) ? (
+                <MemoizedAppointmentExternalHandoffSection
+                  detail={detail}
+                  communications={externalCommunicationEntries}
+                  reminders={externalHandoffReminders}
+                  tasks={externalHandoffTasks}
+                  assignees={doctorFollowUpAssignees}
+                  defaultAssigneeId={detailDefaultAssigneeId}
+                  canManageCommunications={permissions.canManageCommunications}
+                  canViewReminders={permissions.canViewReminders}
+                  canCreateTasks={permissions.canCreateTasks}
+                  onRefresh={refreshDetail}
+                  onError={reportDetailError}
+                />
+              ) : null}
+            </>
+          ) : (
+            <section className={sectionCardClass("p-5")}>
+              <EmptyState text={coordinationEmpty} />
+            </section>
+          )
+        ) : null}
+
+        {showClinicalTab ? (
+          hasClinicalContent ? (
+            <>
+              {!detail.is_blocked &&
+              permissions.canManageChecklist &&
+              permissions.canViewReminders ? (
+                <MemoizedAppointmentIncomingDataSection
+                  detail={detail}
+                  checklist={incomingDataChecklist}
+                  reminders={incomingDataReminders}
+                  tasks={incomingDataTasks}
+                  assignees={doctorFollowUpAssignees}
+                  defaultAssigneeId={detailDefaultAssigneeId}
+                  canCreateTasks={permissions.canCreateTasks}
+                  onRefresh={refreshDetail}
+                  onError={reportDetailError}
+                />
+              ) : null}
+              {!detail.is_blocked &&
+              permissions.canManageChecklist &&
+              permissions.canViewReminders &&
+              (detail.provider_id || detail.doctor_id) ? (
+                <MemoizedAppointmentFindingsSection
+                  detail={detail}
+                  checklist={findingsChecklist}
+                  reminders={findingsReminders}
+                  tasks={findingsTasks}
+                  assignees={doctorFollowUpAssignees}
+                  defaultAssigneeId={detailDefaultAssigneeId}
+                  canCreateTasks={permissions.canCreateTasks}
+                  onRefresh={refreshDetail}
+                  onError={reportDetailError}
+                />
+              ) : null}
+              {permissions.canViewReport ? (
+                <MemoizedAppointmentReportSection
+                  detail={detail}
+                  detailReport={detailReport}
+                  reportReviewMeta={reportReviewMeta}
+                  canSubmitInterpreterReport={canSubmitInterpreterReport}
+                  canResubmitRejectedReport={canResubmitRejectedReport}
+                  showReportReviewActions={showReportReviewActions}
+                  canApproveReport={permissions.canApproveReport}
+                  canRejectReport={permissions.canRejectReport}
+                  onRefresh={refreshDetail}
+                  onError={reportDetailError}
+                />
+              ) : null}
+            </>
+          ) : (
+            <section className={sectionCardClass("p-5")}>
+              <EmptyState text={clinicalEmpty} />
+            </section>
+          )
+        ) : null}
+
+        {showWorkflowTab ? (
+          hasWorkflowContent ? (
+            <>
+              {permissions.canManageStatus ? (
+                <MemoizedAppointmentCompletionSection
+                  detail={detail}
+                  detailReport={detailReport}
+                  handoffStakeholders={handoffStakeholders}
+                  openChecklistCount={openChecklistCount}
+                  openTaskCount={openTaskCount}
+                  pendingReminderCount={pendingReminderCount}
+                  interpreterReportReady={interpreterReportReady}
+                  completionWarnings={completionWarnings}
+                  followUpAssigneeId={followUpAssigneeId}
+                  setFollowUpAssigneeId={setFollowUpAssigneeId}
+                  onRefresh={refreshDetail}
+                  onError={reportDetailError}
+                  onNotice={reportAppointmentsNotice}
+                />
+              ) : null}
+              {permissions.canManageStatus ? (
+                <MemoizedAppointmentStatusSection
+                  detail={detail}
+                  openChecklistCount={openChecklistCount}
+                  onRefresh={refreshDetail}
+                  onError={reportDetailError}
+                />
+              ) : null}
+              {permissions.canEditSchedule ? (
+                <MemoizedEditAppointmentSection
+                  detail={detail}
+                  appointments={appointments}
+                  providers={providers}
+                  staff={staff}
+                  interpreters={interpreters}
+                  onSaved={handleEditSaved}
+                />
+              ) : null}
+              <MemoizedAppointmentInterpreterSection
+                detail={detail}
+                interpreters={interpreters}
+                currentUserId={user?.id}
+                canAssign={permissions.canAssignInterpreter}
+                canRespond={permissions.canRespondToAssignment}
+                onRefresh={refreshDetail}
+                onError={reportDetailError}
+              />
+              {permissions.canManageChecklist ? (
+                <MemoizedAppointmentChecklistSection
+                  detail={detail}
+                  items={detailChecklist}
+                  onRefresh={refreshDetail}
+                  onError={reportDetailError}
+                />
+              ) : null}
+              {permissions.canViewReminders ? (
+                <MemoizedAppointmentRemindersSection
+                  detail={detail}
+                  reminders={detailReminders}
+                  staff={staff}
+                  canManageReminders={permissions.canManageReminders}
+                  onRefresh={refreshDetail}
+                  onError={reportDetailError}
+                />
+              ) : null}
+              {permissions.canViewTasks ? (
+                <MemoizedAppointmentTasksSection
+                  detail={detail}
+                  tasks={detailTasks}
+                  assignableStaff={taskAssignableStaff}
+                  canCreateTasks={permissions.canCreateTasks}
+                  onRefresh={refreshDetail}
+                  onError={reportDetailError}
+                />
+              ) : null}
+            </>
+          ) : (
+            <section className={sectionCardClass("p-5")}>
+              <EmptyState text={workflowEmpty} />
+            </section>
+          )
+        ) : null}
+
+        {showServicesTab ? (
+          hasServicesContent ? (
+            <>
+              {canShowConciergeSection ? (
+                <MemoizedAppointmentConciergeSection
+                  detail={detail}
+                  services={detailServices}
+                  nonMedicalProviders={nonMedicalProviders}
+                  conciergeStaff={conciergeStaff}
+                  canManageConciergeServices={
+                    permissions.canManageConciergeServices
+                  }
+                  canManageConciergeBilling={permissions.canManageConciergeBilling}
+                  onRefresh={refreshDetail}
+                  onError={reportDetailError}
+                />
+              ) : null}
+              {canShowBillingHandoffSection ? (
+                <MemoizedAppointmentBillingHandoffSection
+                  detail={detail}
+                  detailReport={detailReport}
+                  reportReviewMeta={reportReviewMeta}
+                  interpreterReportReady={interpreterReportReady}
+                  serviceCount={detailServices.length}
+                  billingStaff={billingStaff}
+                  reminders={billingHandoffReminders}
+                  tasks={billingHandoffTasks}
+                  openTasks={openBillingHandoffTasks}
+                  readyServices={readyConciergeServices}
+                  settledServices={settledConciergeServices}
+                  warnings={billingReadinessWarnings}
+                  canManageConciergeBilling={permissions.canManageConciergeBilling}
+                  canCreateTasks={permissions.canCreateTasks}
+                  onRefresh={refreshDetail}
+                  onError={reportDetailError}
+                />
+              ) : null}
+            </>
+          ) : (
+            <section className={sectionCardClass("p-5")}>
+              <EmptyState text={servicesEmpty} />
+            </section>
+          )
+        ) : null}
+
+        {showNotesTab ? (
+          permissions.canViewNotes && !detail.is_blocked ? (
+            <section className={sectionCardClass("p-5")}>
+              <h3 className="text-sm font-semibold text-slate-950">
+                {t.patients_notes}
+              </h3>
+              <div className="mt-4 grid gap-4 md:grid-cols-3">
+                <TextPanel
+                  title={t.phase_discovery}
+                  text={detail.preparation_notes}
+                />
+                <TextPanel
+                  title={t.phase_followup}
+                  text={detail.followup_notes}
+                />
+                <TextPanel title={t.patients_notes} text={detail.notes} />
+              </div>
+            </section>
+          ) : (
+            <section className={sectionCardClass("p-5")}>
+              <EmptyState text={notesEmpty} />
+            </section>
+          )
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <>
+      {showInlineDetailWorkspace ? (
+        renderInlineDetailWorkspace()
+      ) : (
       <div className="space-y-4">
         {/* Page header */}
         <div className="flex items-center justify-between gap-3">
@@ -5845,76 +11959,79 @@ function StaffAppointmentsPage() {
           <div className="grid gap-1">
 
               <Dialog open={filtersModalOpen} onOpenChange={setFiltersModalOpen}>
-                <DialogContent className="sm:max-w-[420px]">
-                  <DialogHeader className="space-y-0">
-                    <DialogTitle className="text-sm font-semibold text-slate-950">
-                      {appointmentText("Filter", "Фильтры", "Filters")}
-                    </DialogTitle>
-                  </DialogHeader>
-                  <div className="grid gap-3 pt-1">
-                    <Field
-                      compact
-                      label={appointmentText(
-                        "Operativer Bereich",
-                        "Операционная область",
-                        "Operational scope",
-                      )}
-                    >
-                      <ShadSelect
-                        value={operationalScope}
-                        onValueChange={(value) =>
-                          applyOperationalScope((value as OperationalScope) ?? "all")
-                        }
+                {shouldRenderFiltersDialog ? (
+                  <DialogContent className="sm:max-w-[420px]">
+                    <DialogHeader className="space-y-0">
+                      <DialogTitle className="text-sm font-semibold text-slate-950">
+                        {appointmentText("Filter", "Фильтры", "Filters")}
+                      </DialogTitle>
+                    </DialogHeader>
+                    <div className="grid gap-3 pt-1">
+                      <Field
+                        compact
+                        label={appointmentText(
+                          "Operativer Bereich",
+                          "Операционная область",
+                          "Operational scope",
+                        )}
                       >
-                        <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
-                          <SelectValue>{selectedOperationalScopeLabel}</SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                          {scopeOptions.map((option) => (
-                            <SelectItem key={`scheduler-sheet-${option.id}`} value={option.id}>
-                              {option.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </ShadSelect>
-                    </Field>
-                    <Field
-                      compact
-                      label={appointmentText(
-                        "Schnellbereich",
-                        "Быстрая область",
-                        "Quick scope",
-                      )}
-                    >
-                      <ShadSelect
-                        value={schedulerQuickScopeValue}
-                        onValueChange={(value) =>
-                          applySchedulerQuickScope((value as SchedulerQuickScope) ?? "all")
-                        }
+                        <ShadSelect
+                          value={operationalScope}
+                          onValueChange={(value) =>
+                            applyOperationalScope((value as OperationalScope) ?? "all")
+                          }
+                        >
+                          <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
+                            <SelectValue>{selectedOperationalScopeLabel}</SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            {scopeOptions.map((option) => (
+                              <SelectItem key={`scheduler-sheet-${option.id}`} value={option.id}>
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </ShadSelect>
+                      </Field>
+                      <Field
+                        compact
+                        label={appointmentText(
+                          "Schnellbereich",
+                          "Быстрая область",
+                          "Quick scope",
+                        )}
                       >
-                        <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
-                          <SelectValue>{selectedSchedulerQuickScopeLabel}</SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                          {schedulerQuickScopeOptions.map((option) => (
-                            <SelectItem key={`scheduler-quick-${option.id}`} value={option.id}>
-                              {option.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </ShadSelect>
-                    </Field>
-                  </div>
-                </DialogContent>
+                        <ShadSelect
+                          value={schedulerQuickScopeValue}
+                          onValueChange={(value) =>
+                            applySchedulerQuickScope((value as SchedulerQuickScope) ?? "all")
+                          }
+                        >
+                          <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
+                            <SelectValue>{selectedSchedulerQuickScopeLabel}</SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            {schedulerQuickScopeOptions.map((option) => (
+                              <SelectItem key={`scheduler-quick-${option.id}`} value={option.id}>
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </ShadSelect>
+                      </Field>
+                    </div>
+                  </DialogContent>
+                ) : null}
               </Dialog>
 
               <Sheet open={searchModalOpen} onOpenChange={setSearchModalOpen}>
-                <SheetContent side="right" className="w-full sm:max-w-[420px]">
-                  <section
-                    className={sectionCardClass(
-                      "h-full overflow-y-auto border-0 p-5 shadow-none",
-                    )}
-                  >
+                {shouldRenderSearchSheet ? (
+                  <SheetContent side="right" className="w-full sm:max-w-[420px]">
+                    <section
+                      className={sectionCardClass(
+                        "h-full overflow-y-auto border-0 p-5 shadow-none",
+                      )}
+                    >
               <div className="mb-4 flex items-center justify-between">
                 <div>
                   <h2 className="text-sm font-semibold text-slate-950">
@@ -5935,6 +12052,7 @@ function StaffAppointmentsPage() {
                         provider: null,
                         doctor: null,
                         appointment: null,
+                        detailTab: null,
                       });
                     }}
                   >
@@ -6141,17 +12259,19 @@ function StaffAppointmentsPage() {
                     </Field>
                   </div>
                 </div>
-                  </section>
-                </SheetContent>
+                    </section>
+                  </SheetContent>
+                ) : null}
               </Sheet>
 
               <Sheet open={queueModalOpen} onOpenChange={setQueueModalOpen}>
-                <SheetContent side="right" className="w-full sm:max-w-[640px]">
-                  <section
-                    className={sectionCardClass(
-                      "h-full overflow-y-auto border-0 p-5 shadow-none",
-                    )}
-                  >
+                {shouldRenderQueueSheet ? (
+                  <SheetContent side="right" className="w-full sm:max-w-[640px]">
+                    <section
+                      className={sectionCardClass(
+                        "h-full overflow-y-auto border-0 p-5 shadow-none",
+                      )}
+                    >
                 <div className="mb-4 flex items-center justify-between">
                   <div>
                     <h2 className="text-sm font-semibold text-slate-950">
@@ -6330,8 +12450,9 @@ function StaffAppointmentsPage() {
                     ))
                   )}
                 </div>
-                  </section>
-                </SheetContent>
+                    </section>
+                  </SheetContent>
+                ) : null}
               </Sheet>
 
               <div className="appointments-scheduler-divider w-full rounded-[6px] p-3">
@@ -6580,475 +12701,39 @@ function StaffAppointmentsPage() {
           </div>
         )}
       </div>
+      )}
 
-      <Sheet open={createOpen} onOpenChange={setCreateOpen}>
-        <SheetContent side="right" className="w-full sm:max-w-[760px]">
-          <form onSubmit={handleCreateSubmit} className="flex flex-col flex-1 min-h-0">
-            <SheetHeader className="shrink-0 px-4 pt-3 pb-1">
-              <SheetTitle>{tr.appointments_new}</SheetTitle>
-            </SheetHeader>
-            <div className="flex-1 overflow-y-auto px-4 py-2">
-              <div className="space-y-4">
-                {createError ? <Banner tone="error">{createError}</Banner> : null}
-                <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
-                  <div className="grid gap-4 md:grid-cols-3">
-                <Field compact label={t.orders_patient}>
-                  <ShadSelect
-                    value={createForm.patientId}
-                    onValueChange={(value) =>
-                      setCreateForm((current) => ({
-                        ...current,
-                        patientId: value ?? "",
-                      }))
-                    }
-                  >
-                    <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
-                      <SelectValue>{selectedCreatePatientLabel}</SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="">{t.orders_patient}</SelectItem>
-                      {patients.map((patient) => (
-                      <SelectItem key={patient.id} value={patient.id}>
-                        {patient.patient_id} · {patientName(patient)}
-                      </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </ShadSelect>
-                </Field>
-                <Field compact label={t.appointments_type}>
-                  <ShadSelect
-                    value={createForm.appointmentType}
-                    onValueChange={(value) =>
-                      setCreateForm((current) => ({
-                        ...current,
-                        appointmentType: (value as AppointmentKind) ?? current.appointmentType,
-                        carePathKind:
-                          value === "medical" ? current.carePathKind : "regular",
-                        providerId: value === "internal" ? "" : current.providerId,
-                        doctorId: value === "internal" ? "" : current.doctorId,
-                      }))
-                    }
-                  >
-                    <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
-                      <SelectValue>
-                        {appointmentTypeLabel(createForm.appointmentType, tr)}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {TYPE_OPTIONS.map((value) => (
-                        <SelectItem key={value} value={value}>
-                          {appointmentTypeLabel(value, tr)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </ShadSelect>
-                </Field>
-                <Field compact label={appointmentText("Versorgungspfad", "Траектория лечения", "Care path")}>
-                  <ShadSelect
-                    value={createForm.carePathKind}
-                    onValueChange={(value) =>
-                      setCreateForm((current) => ({
-                        ...current,
-                        carePathKind: (value as AppointmentCarePathKind) ?? current.carePathKind,
-                      }))
-                    }
-                    disabled={createForm.appointmentType !== "medical"}
-                  >
-                    <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
-                      <SelectValue>{carePathKindLabel(createForm.carePathKind)}</SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {CARE_PATH_KIND_OPTIONS.map((value) => (
-                        <SelectItem key={value} value={value}>
-                          {carePathKindLabel(value)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </ShadSelect>
-                </Field>
-              </div>
-              <Field compact label={t.appointments_title_col}>
-                <Input
-                  value={createForm.title}
-                  onChange={(event) =>
-                    setCreateForm((current) => ({
-                      ...current,
-                      title: event.target.value,
-                    }))
-                  }
-                  required
-                  className={createSheetInputClassName}
-                />
-              </Field>
-              <div className="grid gap-4 md:grid-cols-3">
-                <Field compact label={t.appointments_date}>
-                  <Input
-                    type="date"
-                    value={createForm.date}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({
-                        ...current,
-                        date: event.target.value,
-                      }))
-                    }
-                    required
-                    className={createSheetInputClassName}
-                  />
-                </Field>
-                <Field compact label={t.appointments_time}>
-                  <Input
-                    type="time"
-                    value={createForm.timeStart}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({
-                        ...current,
-                        timeStart: event.target.value,
-                      }))
-                    }
-                    className={createSheetInputClassName}
-                  />
-                </Field>
-                <Field compact label={t.appointments_time}>
-                  <Input
-                    type="time"
-                    value={createForm.timeEnd}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({
-                        ...current,
-                        timeEnd: event.target.value,
-                      }))
-                    }
-                    className={createSheetInputClassName}
-                  />
-                </Field>
-              </div>
-              <div className="space-y-3 rounded-lg border border-border/60 bg-card p-3">
-                <label className="flex items-start gap-3 text-sm text-foreground">
-                  <input
-                    type="checkbox"
-                    checked={createForm.repeatEnabled}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({
-                        ...current,
-                        repeatEnabled: event.target.checked,
-                        repeatInterval: current.repeatInterval || "1",
-                        repeatCount:
-                          event.target.checked && !current.repeatCount
-                            ? "4"
-                            : current.repeatCount,
-                      }))
-                    }
-                    className="mt-0.5 size-4 rounded border-input bg-card text-[var(--brand)]"
-                  />
-                  <span>
-                    <span className="block font-medium text-foreground">
-                      Repeat this appointment
-                    </span>
-                    <span className="block text-xs text-muted-foreground">
-                      Create a recurring series from the current date and time
-                      slot.
-                    </span>
-                  </span>
-                </label>
-                {createForm.repeatEnabled ? (
-                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                    <Field compact label="Frequency">
-                      <ShadSelect
-                        value={createForm.repeatFrequency}
-                        onValueChange={(value) =>
-                          setCreateForm((current) => ({
-                            ...current,
-                            repeatFrequency:
-                              (value as AppointmentRecurrenceFrequency) ?? current.repeatFrequency,
-                          }))
-                        }
-                      >
-                        <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
-                          <SelectValue>
-                            {recurrenceFrequencyLabel(createForm.repeatFrequency)}
-                          </SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                          {RECURRENCE_FREQUENCY_OPTIONS.map((value) => (
-                            <SelectItem key={value} value={value}>
-                              {recurrenceFrequencyLabel(value)}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </ShadSelect>
-                    </Field>
-                    <Field compact label="Every">
-                      <Input
-                        type="number"
-                        min="1"
-                        step="1"
-                        value={createForm.repeatInterval}
-                        onChange={(event) =>
-                          setCreateForm((current) => ({
-                            ...current,
-                            repeatInterval: event.target.value,
-                          }))
-                        }
-                        className={createSheetInputClassName}
-                      />
-                    </Field>
-                    <Field compact label={appointmentText("Anzahl Termine", "Всего повторов", "Total occurrences")}>
-                      <Input
-                        type="number"
-                        min="2"
-                        step="1"
-                        value={createForm.repeatCount}
-                        onChange={(event) =>
-                          setCreateForm((current) => ({
-                            ...current,
-                            repeatCount: event.target.value,
-                          }))
-                        }
-                        className={createSheetInputClassName}
-                      />
-                    </Field>
-                    <Field compact label={appointmentText("Wiederholen bis", "Повторять до", "Repeat until")}>
-                      <Input
-                        type="date"
-                        value={createForm.repeatUntil}
-                        onChange={(event) =>
-                          setCreateForm((current) => ({
-                            ...current,
-                            repeatUntil: event.target.value,
-                          }))
-                        }
-                        className={createSheetInputClassName}
-                      />
-                    </Field>
-                  </div>
-                ) : null}
-                  </div>
-                </section>
-                <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
-                  <div className="grid gap-4 md:grid-cols-2">
-                <Field compact label={t.common_provider}>
-                  <ShadSelect
-                    value={createForm.providerId}
-                    onValueChange={(value) =>
-                      setCreateForm((current) => ({
-                        ...current,
-                        providerId: value ?? "",
-                        doctorId: "",
-                      }))
-                    }
-                    disabled={createForm.appointmentType === "internal"}
-                  >
-                    <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
-                      <SelectValue>{selectedCreateProviderLabel}</SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="">{t.common_not_set}</SelectItem>
-                    {providers.map((provider) => (
-                      <SelectItem key={provider.id} value={provider.id}>
-                        {providerLabel(provider)}
-                      </SelectItem>
-                    ))}
-                    </SelectContent>
-                  </ShadSelect>
-                </Field>
-                <Field compact label={t.common_doctor}>
-                  <ShadSelect
-                    value={createForm.doctorId}
-                    onValueChange={(value) =>
-                      setCreateForm((current) => ({
-                        ...current,
-                        doctorId: value ?? "",
-                      }))
-                    }
-                    disabled={!createForm.providerId}
-                  >
-                    <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
-                      <SelectValue>{selectedCreateDoctorLabel}</SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="">{t.common_not_set}</SelectItem>
-                      {createDoctors.map((doctor) => (
-                        <SelectItem key={doctor.id} value={doctor.id}>
-                          {doctorLabel(doctor)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </ShadSelect>
-                </Field>
-                  </div>
-                </section>
-                <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
-                  <div className="grid gap-4 md:grid-cols-2">
-                <Field compact label={t.patients_assign_owner}>
-                  <ShadSelect
-                    value={createForm.ownerUserId}
-                    onValueChange={(value) =>
-                      setCreateForm((current) => ({
-                        ...current,
-                        ownerUserId: value ?? "",
-                      }))
-                    }
-                  >
-                    <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
-                      <SelectValue>{selectedCreateOwnerLabel}</SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="">{t.common_not_set}</SelectItem>
-                    {staff.map((member) => (
-                      <SelectItem key={member.id} value={member.id}>
-                        {staffLabel(member)}
-                      </SelectItem>
-                    ))}
-                    </SelectContent>
-                  </ShadSelect>
-                </Field>
-                <Field compact label={t.common_doctor}>
-                  <ShadSelect
-                    value={createForm.interpreterId}
-                    onValueChange={(value) =>
-                      setCreateForm((current) => ({
-                        ...current,
-                        interpreterId: value ?? "",
-                      }))
-                    }
-                  >
-                    <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
-                      <SelectValue>{selectedCreateInterpreterLabel}</SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="">{tr.common_not_set}</SelectItem>
-                    {interpreters.map((member) => (
-                      <SelectItem key={member.id} value={member.id}>
-                        {staffLabel(member)}
-                      </SelectItem>
-                    ))}
-                    </SelectContent>
-                  </ShadSelect>
-                </Field>
-              </div>
-              <div className="grid gap-4 md:grid-cols-2">
-                <Field compact label={t.appointments_location}>
-                  <Input
-                    value={createForm.location}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({
-                        ...current,
-                        location: event.target.value,
-                      }))
-                    }
-                    className={createSheetInputClassName}
-                  />
-                </Field>
-                <Field compact label={tr.documents_category}>
-                  <Input
-                    value={createForm.category}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({
-                        ...current,
-                        category: event.target.value,
-                      }))
-                    }
-                    className={createSheetInputClassName}
-                  />
-                </Field>
-              </div>
-              <Field compact label={t.patients_notes}>
-                <textarea
-                  value={createForm.notes}
-                  onChange={(event) =>
-                    setCreateForm((current) => ({
-                      ...current,
-                      notes: event.target.value,
-                    }))
-                  }
-                  className={createSheetTextareaClassName}
-                  rows={4}
-                />
-              </Field>
-                </section>
-                <ConflictPanel conflicts={createConflicts} />
-                <ScheduleWarningsPanel warnings={createLocalWarnings} />
-              </div>
-            </div>
-            <div className="shrink-0 flex justify-end gap-2 px-4 py-3 bg-popover">
-              <Button
-                type="button"
-                variant="outline"
-                className="h-9 rounded-lg"
-                onClick={() => setCreateOpen(false)}
-              >
-                {tr.common_cancel}
-              </Button>
-              <Button
-                type="submit"
-                className="h-9 rounded-lg gap-1.5 px-3.5"
-                disabled={createBusy}
-              >
-                {createBusy ? (
-                  <LoaderCircle className="size-4 animate-spin" />
-                ) : (
-                  <Plus className="size-4" />
-                )}
-                {createBusy ? t.patients_creating : t.appointments_new}
-              </Button>
-            </div>
-          </form>
-        </SheetContent>
-      </Sheet>
+      <MemoizedCreateAppointmentSheet
+        open={createOpen}
+        seed={createSeed}
+        appointments={appointments}
+        patients={patients}
+        providers={providers}
+        interpreters={interpreters}
+        staff={staff}
+        userId={user?.id}
+        onOpenChange={setCreateOpen}
+        onCreated={({ id, notice }) => {
+          setAppointmentsNotice(notice);
+          refreshAppointments();
+          if (id) {
+            openDetailSheet(id);
+          }
+        }}
+      />
 
+      {isMobile ? (
       <Sheet
         open={detailOpen}
         onOpenChange={(open) => {
-          setDetailOpen(open);
-          if (!open) {
-            setSelectedId("");
-            setDetail(null);
-            setDetailAssignments([]);
-            setDetailTasks([]);
-            setDetailServices([]);
-            setDetailChecklist([]);
-            setDetailReminders([]);
-            setDetailReport(null);
-            setReminderForm(blankReminderForm());
-            setDoctorFollowUpForm(blankDoctorFollowUpForm());
-            setDoctorFollowUpBusy(false);
-            setPackageEndFollowUpForm(
-              blankPackageEndFollowUpForm("", tr.appointments_new ?? ""),
-            );
-            setPackageEndFollowUpBusy(false);
-            setExternalHandoffForm(blankExternalHandoffForm());
-            setExternalHandoffBusy(false);
-            setBillingHandoffForm(blankBillingHandoffForm());
-            setBillingHandoffBusy(false);
-            setFindingsFollowUpForm(blankFindingsFollowUpForm());
-            setFindingsFollowUpBusy(false);
-            setIncomingDataForm(blankIncomingDataForm());
-            setIncomingDataBusy(false);
-            setReportForm(blankReportForm());
-            setTaskForm(blankTaskForm());
-            setTaskBusy(false);
-            setServiceForm(blankConciergeServiceForm());
-            setServiceDrafts({});
-            setServiceBusy(false);
-            setFollowUpAssigneeId("");
-            setFollowUpBusy(false);
-            setCompletionPlan(defaultCompletionPlan());
-            setCompletionBusy(false);
-            setReportRejectReason("");
-            setActionBusy("");
-            setEditForm(null);
-            setEditRecurrenceScope("single");
-            setStatusRecurrenceScope("single");
-            setFollowUpVisitForm(null);
-            setFollowUpVisitDoctors([]);
-            setFollowUpVisitConflicts(null);
-            setFollowUpVisitError("");
-            setFollowUpVisitBusy(false);
-            setTimelineFilter("all");
-            syncQuery({ appointment: null });
+          if (open) {
+            setDetailOpen(true);
+            return;
           }
+          closeDetailWorkspace();
         }}
       >
+        {shouldRenderDetailSheetContent ? (
         <SheetContent side="right" className="w-full sm:max-w-[860px]">
           <SheetHeader className="border-b border-border/70 pb-4">
             <SheetTitle>{tr.appointments_title}</SheetTitle>
@@ -7069,4887 +12754,242 @@ function StaffAppointmentsPage() {
               </div>
             ) : detail ? (
               <div className="space-y-6 pt-5">
-                <section className={sectionCardClass("p-5")}>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span
-                      className={cn(
-                        "rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em]",
-                        typeBadgeClass(detail.type),
-                      )}
-                    >
-                      {appointmentTypeLabel(detail.type, tr)}
-                    </span>
-                    {detail.care_path_kind ? (
-                      <span className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-violet-700">
-                        {carePathKindLabel(detail.care_path_kind)}
-                      </span>
-                    ) : null}
-                    <span
-                      className={cn(
-                        "rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em]",
-                        statusBadgeClass(detail.status),
-                      )}
-                    >
-                      {statusLabel(detail.status)}
-                    </span>
-                    {detail.recurrence_frequency ? (
-                      <span className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-sky-700">
-                        {recurrenceFrequencyLabel(detail.recurrence_frequency)}{" "}
-                        series
-                      </span>
-                    ) : null}
-                    {detailLineageBadge ? (
-                      <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-700">
-                        {detailLineageBadge}
-                      </span>
-                    ) : null}
-                    {detail.interpreter_response ? (
-                      <span className="rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
-                        Interpreter {responseLabel(detail.interpreter_response)}
-                      </span>
-                    ) : null}
-                  </div>
-                  <div className="mt-4 flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                    <div>
-                      <h2 className="text-2xl font-semibold text-slate-950">
-                        {detail.title}
-                      </h2>
-                      <p className="mt-2 text-sm text-slate-600">
-                        {detail.patient_pid} · {detail.patient_name}
-                      </p>
-                    </div>
-                    <div className="grid gap-2 text-sm text-slate-600">
-                      <InfoLine icon={Clock3} label={slotLabel(detail)} />
-                      <InfoLine
-                        icon={MapPin}
-                        label={detail.location || tr.common_not_set}
-                      />
-                      <InfoLine
-                        icon={Stethoscope}
-                        label={detail.provider_name || tr.common_not_set}
-                      />
-                    </div>
-                  </div>
-                  {detail.is_blocked ? (
-                    <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-                      Concierge view is intentionally limited for medical slots.
-                      Clinical notes and provider specifics stay hidden here.
-                    </div>
-                  ) : null}
-                  {!detail.is_blocked && detail.recurrence_frequency ? (
-                    <div className="mt-4 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
-                      {t.appointments_recurring_series}:{" "}
-                      {t.appointments_occurrence.toLowerCase()}{" "}
-                      {detail.recurrence_index + 1}/
-                      {detail.recurrence_series_size}.{" "}
-                      {recurrenceCadenceLabel(detail)}
-                      {detail.recurrence_until
-                        ? ` ${t.appointments_until} ${detail.recurrence_until}.`
-                        : detail.recurrence_count
-                          ? ` ${t.appointments_total_planned_occurrences}: ${detail.recurrence_count}.`
-                          : "."}{" "}
-                      {t.appointments_scope_bulk_status_hint}{" "}
-                      {t.appointments_scope_following_hint}
-                      {detailLineageText ? (
-                        <span className="mt-2 block rounded-xl border border-sky-300/70 bg-white/70 px-3 py-2 text-xs font-medium text-sky-900">
-                          {detailLineageText}
-                        </span>
-                      ) : null}
-                      {detailCurrentLineageHistory ? (
-                        <div className="mt-3 grid gap-2 md:grid-cols-4">
-                          <div className="rounded-xl border border-sky-300/70 bg-white/70 px-3 py-2">
-                            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-sky-700">
-                              {t.appointments_lineage_current_branch}
-                            </p>
-                            <p className="mt-1 text-lg font-semibold text-sky-950">
-                              {detailCurrentLineageHistory.total_occurrences}
-                            </p>
-                            <p className="text-[11px] text-sky-800">
-                              {t.appointments_lineage_total_occurrences}
-                            </p>
-                          </div>
-                          <div className="rounded-xl border border-sky-300/70 bg-white/70 px-3 py-2">
-                            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-sky-700">
-                              {t.common_active}
-                            </p>
-                            <p className="mt-1 text-lg font-semibold text-sky-950">
-                              {detailCurrentLineageHistory.active_occurrences}
-                            </p>
-                            <p className="text-[11px] text-sky-800">
-                              {t.appointments_lineage_still_operational}
-                            </p>
-                          </div>
-                          <div className="rounded-xl border border-sky-300/70 bg-white/70 px-3 py-2">
-                            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-sky-700">
-                              {t.dash_completed}
-                            </p>
-                            <p className="mt-1 text-lg font-semibold text-sky-950">
-                              {
-                                detailCurrentLineageHistory.completed_occurrences
-                              }
-                            </p>
-                            <p className="text-[11px] text-sky-800">
-                              {t.appointments_lineage_completed_occurrences}
-                            </p>
-                          </div>
-                          <div className="rounded-xl border border-sky-300/70 bg-white/70 px-3 py-2">
-                            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-sky-700">
-                              {t.appointments_lineage_related_branches}
-                            </p>
-                            <p className="mt-1 text-lg font-semibold text-sky-950">
-                              {detailRelatedLineageCount}
-                            </p>
-                            <p className="text-[11px] text-sky-800">
-                              {t.appointments_lineage_related_branches_meta}
-                            </p>
-                          </div>
-                        </div>
-                      ) : null}
-                      {detail.recurring_scope_preview.length > 0 ? (
-                        <div className="mt-3 rounded-xl border border-sky-300/70 bg-white/70 p-3">
-                          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-sky-900">
-                            {t.appointments_active_series_path}
-                          </p>
-                          <div className="mt-2 space-y-1.5">
-                            {detail.recurring_scope_preview.map((item) => (
-                              <div
-                                key={item.id}
-                                className={cn(
-                                  "flex flex-wrap items-center gap-2 rounded-lg px-2 py-1.5 text-xs",
-                                  item.id === detail.id
-                                    ? "bg-sky-100 text-sky-950"
-                                    : "bg-sky-50 text-sky-900",
-                                )}
-                              >
-                                <span className="font-semibold">
-                                  #{item.recurrence_index + 1}
-                                </span>
-                                <span>{item.date}</span>
-                                {item.id === detail.id ? (
-                                  <span className="rounded-full border border-sky-300 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em]">
-                                    {t.appointments_current_occurrence}
-                                  </span>
-                                ) : null}
-                                {item.open_checklist_count > 0 ? (
-                                  <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-amber-800">
-                                    {item.open_checklist_count}{" "}
-                                    {item.open_checklist_count === 1
-                                      ? t.appointments_open_checklist
-                                      : t.appointments_open_checklists}
-                                  </span>
-                                ) : null}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ) : null}
-                      {detail.recurring_lineage_history.length > 0 ? (
-                        <div className="mt-3 rounded-xl border border-sky-300/70 bg-white/70 p-3">
-                          <div className="flex flex-col gap-1 md:flex-row md:items-end md:justify-between">
-                            <div>
-                              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-sky-900">
-                                {t.appointments_lineage_history}
-                              </p>
-                              <p className="text-xs text-sky-800">
-                                {t.appointments_lineage_history_hint}
-                              </p>
-                            </div>
-                            <span className="text-[11px] font-medium text-sky-800">
-                              {detail.recurring_lineage_history.length}{" "}
-                              {t.appointments_lineage_related_series}
-                            </span>
-                          </div>
-                          <div className="mt-3 grid gap-2">
-                            {detail.recurring_lineage_history.map((item) => (
-                              <div
-                                key={item.series_id}
-                                className={cn(
-                                  "rounded-xl border px-3 py-2",
-                                  item.relation === "current"
-                                    ? "border-sky-400 bg-sky-100/80 text-sky-950"
-                                    : "border-sky-200 bg-sky-50 text-sky-900",
-                                )}
-                              >
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <span className="rounded-full border border-sky-300 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em]">
-                                    {recurringLineageRelationLabel(item, t)}
-                                  </span>
-                                  <span className="text-xs font-medium">
-                                    {recurringLineageSplitLabel(item, t)}
-                                  </span>
-                                  <span className="text-xs text-sky-700">
-                                    {item.first_date} to {item.last_date}
-                                  </span>
-                                  {item.series_id !== detail.id ? (
-                                    <button
-                                      type="button"
-                                      className="rounded-full border border-sky-300 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-sky-900 transition hover:bg-sky-100"
-                                      onClick={() =>
-                                        openDetailSheet(item.series_id)
-                                      }
-                                    >
-                                      {t.appointments_open_branch_root}
-                                    </button>
-                                  ) : null}
-                                </div>
-                                <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-sky-900">
-                                  <span className="rounded-full border border-sky-200 bg-white px-2 py-0.5">
-                                    {item.total_occurrences}{" "}
-                                    {t.appointments_lineage_total_short}
-                                  </span>
-                                  <span className="rounded-full border border-sky-200 bg-white px-2 py-0.5">
-                                    {item.active_occurrences}{" "}
-                                    {t.appointments_lineage_active_short}
-                                  </span>
-                                  <span className="rounded-full border border-sky-200 bg-white px-2 py-0.5">
-                                    {item.completed_occurrences}{" "}
-                                    {t.appointments_lineage_completed_short}
-                                  </span>
-                                  <span className="rounded-full border border-sky-200 bg-white px-2 py-0.5">
-                                    {item.cancelled_occurrences}{" "}
-                                    {t.appointments_lineage_cancelled_short}
-                                  </span>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </section>
-                <section className={sectionCardClass("p-5")}>
-                  <h3 className="text-sm font-semibold text-slate-950">
-                    {t.appointments_title}
-                  </h3>
-                  <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                    <ContextCard
-                      label={t.orders_phase}
-                      value={detail.checklist_phase || tr.phase_discovery}
-                      meta={appointmentTypeLabel(detail.type, tr)}
-                    />
-                    <ContextCard
-                      label={t.patients_assign_owner}
-                      value={detail.owner_name || tr.common_not_set}
-                      meta={
-                        detail.owner_role
-                          ? roleLabel(detail.owner_role)
-                          : tr.common_not_set
-                      }
-                    />
-                    <ContextCard
-                      label={t.common_doctor}
-                      value={detail.interpreter_name || tr.common_not_set}
-                      meta={
-                        detail.interpreter_response
-                          ? responseLabel(detail.interpreter_response)
-                          : tr.mfa_pending
-                      }
-                    />
-                    <ContextCard
-                      label={tr.providers_linked_patients}
-                      value={detail.order_id || tr.common_not_set}
-                      meta={
-                        detail.category ||
-                        formatDateTimeLabel(detail.created_at)
-                      }
-                    />
-                  </div>
-                </section>
+                <MemoizedAppointmentOverviewSection
+                  detail={detail}
+                  onOpenDetail={openDetailSheet}
+                />
+                <MemoizedAppointmentSnapshotSection detail={detail} />
                 {detailAttention ? (
-                  <section className={sectionCardClass("p-5")}>
-                    <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                      <div>
-                        <h3 className="text-sm font-semibold text-slate-950">
-                          {t.common_error}
-                        </h3>
-                        <p className="text-xs text-slate-500">
-                          This appointment still has unresolved operational
-                          follow-up.
-                        </p>
-                      </div>
-                      <span className="rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-rose-700">
-                        {detailAttention.attention_score} issue
-                        {detailAttention.attention_score === 1 ? "" : "s"}
-                      </span>
-                    </div>
-                    <div className="mt-4 space-y-3">
-                      {detailAttention.reasons.map((reason) => (
-                        <div
-                          key={reason}
-                          className="rounded-2xl border border-rose-200/80 bg-rose-50/80 px-4 py-3 text-sm text-rose-800"
-                        >
-                          {reason}
-                        </div>
-                      ))}
-                    </div>
-                    {detailAttention.next_due_at ? (
-                      <p className="mt-4 text-xs text-slate-500">
-                        Next due checkpoint:{" "}
-                        {formatDateTimeLabel(detailAttention.next_due_at)}
-                      </p>
-                    ) : null}
-                  </section>
+                  <MemoizedAppointmentAttentionSection
+                    attention={detailAttention}
+                  />
                 ) : null}
-                <section className={sectionCardClass("p-5")}>
-                  <h3 className="text-sm font-semibold text-slate-950">
-                    {t.providers_linked_patients}
-                  </h3>
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="rounded-2xl"
-                      onClick={() =>
-                        staffGo(`/patients?patient=${detail.patient_id}`)
-                      }
-                    >
-                      Patient
-                    </Button>
-                    {detail.order_id ? (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="rounded-2xl"
-                        onClick={() =>
-                          staffGo(`/orders?order=${detail.order_id}`)
-                        }
-                      >
-                        Order
-                      </Button>
-                    ) : null}
-                    {detail.provider_id ? (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="rounded-2xl"
-                        onClick={() =>
-                          staffGo(`/providers?provider=${detail.provider_id}`)
-                        }
-                      >
-                        Clinic
-                      </Button>
-                    ) : null}
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="rounded-2xl"
-                      onClick={() =>
-                        staffGo(
-                          `/documents?appointment=${detail.id}&patient=${detail.patient_id}`,
-                        )
-                      }
-                    >
-                      Documents
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="rounded-2xl"
-                      onClick={() =>
-                        staffGo(`/cases?patient=${detail.patient_id}`)
-                      }
-                    >
-                      Cases
-                    </Button>
-                  </div>
-                </section>
-                <section className={sectionCardClass("p-5")}>
-                  <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                    <div>
-                      <h3 className="text-sm font-semibold text-slate-950">
-                        {t.appointments_title}
-                      </h3>
-                      <p className="text-xs text-slate-500">
-                        Unified event trail across scheduling, interpreter
-                        handling, follow-up, concierge work and operational
-                        execution.
-                      </p>
-                    </div>
-                    <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
-                      {visibleTimelineEvents.length} event
-                      {visibleTimelineEvents.length === 1 ? "" : "s"}
-                    </span>
-                  </div>
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    {(
-                      [
-                        "all",
-                        "workflow",
-                        "communication",
-                        "interpreter",
-                        "clinical",
-                        "followup",
-                        "concierge",
-                      ] as const
-                    ).map((filter) => (
-                      <Button
-                        key={filter}
-                        type="button"
-                        variant={
-                          timelineFilter === filter ? "default" : "outline"
-                        }
-                        size="sm"
-                        className={cn(
-                          "rounded-2xl",
-                          timelineFilter === filter
-                            ? "bg-slate-950 text-white hover:bg-slate-800"
-                            : "",
-                        )}
-                        onClick={() => setTimelineFilter(filter)}
-                      >
-                        {filter === "all"
-                          ? "All"
-                          : filter === "followup"
-                            ? t.phase_followup
-                            : filter === "communication"
-                              ? "Communication"
-                              : filter.charAt(0).toUpperCase() +
-                                filter.slice(1)}
-                      </Button>
-                    ))}
-                  </div>
-                  <div className="mt-4 space-y-3">
-                    {visibleTimelineEvents.length === 0 ? (
-                      <EmptyState text={t.common_not_set} />
-                    ) : (
-                      visibleTimelineEvents.map((item) => (
-                        <div
-                          key={item.id}
-                          className="flex flex-col gap-3 rounded-2xl border border-slate-200/80 bg-slate-50/80 px-4 py-3 md:flex-row md:items-start md:justify-between"
-                        >
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <p className="text-sm font-semibold text-slate-950">
-                                {item.title}
-                              </p>
-                              <span
-                                className={cn(
-                                  "rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em]",
-                                  timelineToneClass(item.tone),
-                                )}
-                              >
-                                {item.kind}
-                              </span>
-                            </div>
-                            <p className="mt-1 text-xs text-slate-500">
-                              {formatDateTimeLabel(item.occurredAt)}
-                            </p>
-                            {item.detail ? (
-                              <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
-                                {item.detail}
-                              </p>
-                            ) : null}
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </section>
+                <MemoizedAppointmentLinksSection
+                  detail={detail}
+                  staffGo={staffGo}
+                />
+                <MemoizedAppointmentTimelineSection
+                  key={`${detail.id}:${detailVersion}`}
+                  timelineEvents={timelineEvents}
+                />
                 {!detail.is_blocked ? (
-                  <section className={sectionCardClass("p-5")}>
-                    <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                      <div>
-                        <h3 className="text-sm font-semibold text-slate-950">
-                          Handoff and follow-up
-                        </h3>
-                        <p className="text-xs text-slate-500">
-                          Coordinate the assigned team and schedule post-care
-                          follow-up from the appointment itself.
-                        </p>
-                      </div>
-                      <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
-                        {handoffStakeholders.length} stakeholder
-                        {handoffStakeholders.length === 1 ? "" : "s"}
-                      </span>
-                    </div>
-                    <div className="mt-4 space-y-3">
-                      {handoffStakeholders.length === 0 ? (
-                        <EmptyState text={tr.common_not_set} />
-                      ) : (
-                        handoffStakeholders.map((peer) => (
-                          <div
-                            key={peer.id}
-                            className="flex flex-col gap-3 rounded-2xl border border-slate-200/80 bg-slate-50/80 px-4 py-3 md:flex-row md:items-center md:justify-between"
-                          >
-                            <div className="min-w-0">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <p className="text-sm font-semibold text-slate-950">
-                                  {peer.name}
-                                </p>
-                                <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                  {roleLabel(peer.role)}
-                                </span>
-                                {peer.badges.map((badge) => (
-                                  <span
-                                    key={badge}
-                                    className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600"
-                                  >
-                                    {badge}
-                                  </span>
-                                ))}
-                              </div>
-                              <p className="mt-1 text-xs text-slate-500">
-                                {detail.patient_pid} · {slotLabel(detail)}
-                              </p>
-                            </div>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              className="rounded-2xl"
-                              onClick={() => openAppointmentChat(peer)}
-                            >
-                              Open chat
-                            </Button>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                    {permissions.canManageReminders ? (
-                      <div className="mt-5 grid gap-4 md:grid-cols-[minmax(0,1fr)_auto]">
-                        <Field label={tr.patients_assign_owner}>
-                          <select
-                            value={followUpAssigneeId}
-                            onChange={(event) =>
-                              setFollowUpAssigneeId(event.target.value)
-                            }
-                            className={selectClassName}
-                          >
-                            <option value="">{tr.common_not_set}</option>
-                            {handoffStakeholders.map((peer) => (
-                              <option key={peer.id} value={peer.id}>
-                                {peer.name} · {roleLabel(peer.role)}
-                              </option>
-                            ))}
-                          </select>
-                        </Field>
-                        <div className="flex flex-wrap items-end gap-2">
-                          {FOLLOW_UP_PRESETS.map((preset) => (
-                            <Button
-                              key={preset.id}
-                              type="button"
-                              variant="outline"
-                              className="rounded-2xl"
-                              disabled={followUpBusy || !followUpAssigneeId}
-                              onClick={() => handleFollowUpPreset(preset)}
-                            >
-                              {followUpBusy ? (
-                                <LoaderCircle className="size-4 animate-spin" />
-                              ) : null}
-                              {preset.label}
-                            </Button>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null}
-                  </section>
+                  <MemoizedAppointmentHandoffSection
+                    detail={detail}
+                    handoffStakeholders={handoffStakeholders}
+                    followUpAssigneeId={followUpAssigneeId}
+                    setFollowUpAssigneeId={setFollowUpAssigneeId}
+                    canManageReminders={permissions.canManageReminders}
+                    onRefresh={refreshDetail}
+                    onError={reportDetailError}
+                  />
                 ) : null}
-                {!detail.is_blocked &&
-                permissions.canCreate &&
-                followUpVisitForm ? (
-                  <section className={sectionCardClass("p-5")}>
-                    <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                      <div>
-                        <h3 className="text-sm font-semibold text-slate-950">
-                          Follow-up visit planning
-                        </h3>
-                        <p className="text-xs text-slate-500">
-                          Schedule the next control visit or examination
-                          directly from the current appointment context.
-                        </p>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {FOLLOW_UP_PRESETS.map((preset) => (
-                          <Button
-                            key={preset.id}
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="rounded-2xl"
-                            onClick={() => applyFollowUpVisitPreset(preset)}
-                          >
-                            {preset.label}
-                          </Button>
-                        ))}
-                      </div>
-                    </div>
-                    {followUpVisitError ? (
-                      <div className="mt-4">
-                        <Banner tone="error">{followUpVisitError}</Banner>
-                      </div>
-                    ) : null}
-                    <form
-                      onSubmit={handleFollowUpVisitSubmit}
-                      className="mt-4 space-y-4"
-                    >
-                      <Field label={t.appointments_title_col}>
-                        <Input
-                          value={followUpVisitForm.title}
-                          onChange={(event) =>
-                            setFollowUpVisitForm((current) =>
-                              current
-                                ? { ...current, title: event.target.value }
-                                : current,
-                            )
-                          }
-                          className="h-10 rounded-xl bg-slate-50"
-                          required
-                        />
-                      </Field>
-                      <div className="grid gap-4 md:grid-cols-3">
-                        <Field label={t.appointments_date}>
-                          <Input
-                            type="date"
-                            value={followUpVisitForm.date}
-                            onChange={(event) =>
-                              setFollowUpVisitForm((current) =>
-                                current
-                                  ? { ...current, date: event.target.value }
-                                  : current,
-                              )
-                            }
-                            className="h-10 rounded-xl bg-slate-50"
-                            required
-                          />
-                        </Field>
-                        <Field label={t.appointments_time}>
-                          <Input
-                            type="time"
-                            value={followUpVisitForm.timeStart}
-                            onChange={(event) =>
-                              setFollowUpVisitForm((current) =>
-                                current
-                                  ? {
-                                      ...current,
-                                      timeStart: event.target.value,
-                                    }
-                                  : current,
-                              )
-                            }
-                            className="h-10 rounded-xl bg-slate-50"
-                          />
-                        </Field>
-                        <Field label={t.appointments_time}>
-                          <Input
-                            type="time"
-                            value={followUpVisitForm.timeEnd}
-                            onChange={(event) =>
-                              setFollowUpVisitForm((current) =>
-                                current
-                                  ? { ...current, timeEnd: event.target.value }
-                                  : current,
-                              )
-                            }
-                            className="h-10 rounded-xl bg-slate-50"
-                          />
-                        </Field>
-                      </div>
-                      <div className="grid gap-4 md:grid-cols-2">
-                        <Field label={t.common_provider}>
-                          <select
-                            value={followUpVisitForm.providerId}
-                            onChange={(event) =>
-                              setFollowUpVisitForm((current) =>
-                                current
-                                  ? {
-                                      ...current,
-                                      providerId: event.target.value,
-                                      doctorId: "",
-                                    }
-                                  : current,
-                              )
-                            }
-                            className={selectClassName}
-                            disabled={
-                              followUpVisitForm.appointmentType === "internal"
-                            }
-                          >
-                            <option value="">{t.common_not_set}</option>
-                            {providers.map((provider) => (
-                              <option key={provider.id} value={provider.id}>
-                                {provider.name}
-                              </option>
-                            ))}
-                          </select>
-                        </Field>
-                        <Field label={t.common_doctor}>
-                          <select
-                            value={followUpVisitForm.doctorId}
-                            onChange={(event) =>
-                              setFollowUpVisitForm((current) =>
-                                current
-                                  ? { ...current, doctorId: event.target.value }
-                                  : current,
-                              )
-                            }
-                            className={selectClassName}
-                            disabled={!followUpVisitForm.providerId}
-                          >
-                            <option value="">{t.common_not_set}</option>
-                            {followUpVisitDoctors.map((doctor) => (
-                              <option key={doctor.id} value={doctor.id}>
-                                {doctorLabel(doctor)}
-                              </option>
-                            ))}
-                          </select>
-                        </Field>
-                      </div>
-                      <div className="grid gap-4 md:grid-cols-2">
-                        <Field label={t.patients_assign_owner}>
-                          <select
-                            value={followUpVisitForm.ownerUserId}
-                            onChange={(event) =>
-                              setFollowUpVisitForm((current) =>
-                                current
-                                  ? {
-                                      ...current,
-                                      ownerUserId: event.target.value,
-                                    }
-                                  : current,
-                              )
-                            }
-                            className={selectClassName}
-                          >
-                            <option value="">{t.common_not_set}</option>
-                            {staff.map((member) => (
-                              <option key={member.id} value={member.id}>
-                                {member.name} · {roleLabel(member.role)}
-                              </option>
-                            ))}
-                          </select>
-                        </Field>
-                        <Field label={t.common_doctor}>
-                          <select
-                            value={followUpVisitForm.interpreterId}
-                            onChange={(event) =>
-                              setFollowUpVisitForm((current) =>
-                                current
-                                  ? {
-                                      ...current,
-                                      interpreterId: event.target.value,
-                                    }
-                                  : current,
-                              )
-                            }
-                            className={selectClassName}
-                          >
-                            <option value="">{t.common_not_set}</option>
-                            {interpreters.map((member) => (
-                              <option key={member.id} value={member.id}>
-                                {member.name} · {roleLabel(member.role)}
-                              </option>
-                            ))}
-                          </select>
-                        </Field>
-                      </div>
-                      <div className="grid gap-4 md:grid-cols-2">
-                        <Field label={appointmentText("Versorgungspfad", "Траектория лечения", "Care path")}>
-                          <select
-                            value={followUpVisitForm.carePathKind}
-                            onChange={(event) =>
-                              setFollowUpVisitForm((current) =>
-                                current
-                                  ? {
-                                      ...current,
-                                      carePathKind: event.target
-                                        .value as AppointmentCarePathKind,
-                                    }
-                                  : current,
-                              )
-                            }
-                            className={selectClassName}
-                            disabled={
-                              followUpVisitForm.appointmentType !== "medical"
-                            }
-                          >
-                            {CARE_PATH_KIND_OPTIONS.map((value) => (
-                              <option key={value} value={value}>
-                                {carePathKindLabel(value)}
-                              </option>
-                            ))}
-                          </select>
-                        </Field>
-                        <Field label={t.appointments_location}>
-                          <Input
-                            value={followUpVisitForm.location}
-                            onChange={(event) =>
-                              setFollowUpVisitForm((current) =>
-                                current
-                                  ? { ...current, location: event.target.value }
-                                  : current,
-                              )
-                            }
-                            className="h-10 rounded-xl bg-slate-50"
-                          />
-                        </Field>
-                        <Field label={tr.documents_category}>
-                          <Input
-                            value={followUpVisitForm.category}
-                            onChange={(event) =>
-                              setFollowUpVisitForm((current) =>
-                                current
-                                  ? { ...current, category: event.target.value }
-                                  : current,
-                              )
-                            }
-                            className="h-10 rounded-xl bg-slate-50"
-                          />
-                        </Field>
-                      </div>
-                      <Field label={t.patients_notes}>
-                        <textarea
-                          value={followUpVisitForm.notes}
-                          onChange={(event) =>
-                            setFollowUpVisitForm((current) =>
-                              current
-                                ? { ...current, notes: event.target.value }
-                                : current,
-                            )
-                          }
-                          className={textareaClassName}
-                          rows={4}
-                          placeholder={tr.patients_notes}
-                        />
-                      </Field>
-                      {detail.order_id ? (
-                        <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm text-slate-700">
-                          <input
-                            type="checkbox"
-                            checked={followUpVisitForm.linkOrder}
-                            onChange={(event) =>
-                              setFollowUpVisitForm((current) =>
-                                current
-                                  ? {
-                                      ...current,
-                                      linkOrder: event.target.checked,
-                                    }
-                                  : current,
-                              )
-                            }
-                            className="mt-0.5 size-4 rounded border-slate-300 text-slate-950"
-                          />
-                          <span>{tr.providers_linked_patients}</span>
-                        </label>
-                      ) : null}
-                      <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_220px]">
-                        <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm text-slate-700">
-                          <input
-                            type="checkbox"
-                            checked={followUpVisitForm.createReminder}
-                            onChange={(event) =>
-                              setFollowUpVisitForm((current) =>
-                                current
-                                  ? {
-                                      ...current,
-                                      createReminder: event.target.checked,
-                                    }
-                                  : current,
-                              )
-                            }
-                            className="mt-0.5 size-4 rounded border-slate-300 text-slate-950"
-                          />
-                          <span>
-                            Create a preparation reminder on the new follow-up
-                            visit.
-                          </span>
-                        </label>
-                        <Field label={tr.patients_assign_owner}>
-                          <select
-                            value={followUpVisitForm.reminderUserId}
-                            onChange={(event) =>
-                              setFollowUpVisitForm((current) =>
-                                current
-                                  ? {
-                                      ...current,
-                                      reminderUserId: event.target.value,
-                                    }
-                                  : current,
-                              )
-                            }
-                            className={selectClassName}
-                            disabled={!followUpVisitForm.createReminder}
-                          >
-                            <option value="">{tr.common_not_set}</option>
-                            {staff.map((member) => (
-                              <option key={member.id} value={member.id}>
-                                {member.name} · {roleLabel(member.role)}
-                              </option>
-                            ))}
-                          </select>
-                        </Field>
-                      </div>
-                      {followUpVisitForm.createReminder ? (
-                        <Field label={tr.appointments_date}>
-                          <Input
-                            type="datetime-local"
-                            value={followUpVisitForm.reminderAt}
-                            onChange={(event) =>
-                              setFollowUpVisitForm((current) =>
-                                current
-                                  ? {
-                                      ...current,
-                                      reminderAt: event.target.value,
-                                    }
-                                  : current,
-                              )
-                            }
-                            className="h-10 rounded-xl bg-slate-50"
-                          />
-                        </Field>
-                      ) : null}
-                      <ConflictPanel conflicts={followUpVisitConflicts} />
-                      <ScheduleWarningsPanel
-                        warnings={followUpVisitLocalWarnings}
-                      />
-                      <div className="flex justify-end">
-                        <Button
-                          type="submit"
-                          className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
-                          disabled={
-                            followUpVisitBusy || !followUpVisitForm.title.trim()
-                          }
-                        >
-                          {followUpVisitBusy ? (
-                            <LoaderCircle className="size-4 animate-spin" />
-                          ) : null}
-                          Create follow-up visit
-                        </Button>
-                      </div>
-                    </form>
-                  </section>
+                {!detail.is_blocked && permissions.canCreate ? (
+                  <MemoizedAppointmentFollowUpVisitSection
+                    detail={detail}
+                    appointments={appointments}
+                    providers={providers}
+                    staff={staff}
+                    interpreters={interpreters}
+                    defaultReminderUserId={detailDefaultAssigneeId}
+                    onCreated={handleFollowUpVisitCreated}
+                  />
                 ) : null}
                 {!detail.is_blocked && permissions.canViewReminders ? (
-                  <section className={sectionCardClass("p-5")}>
-                    <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                      <div>
-                        <h3 className="text-sm font-semibold text-slate-950">
-                          {t.appointments_doctor_directed_followup_title}
-                        </h3>
-                        <p className="text-xs text-slate-500">
-                          {t.appointments_doctor_directed_followup_subtitle}
-                        </p>
-                      </div>
-                      <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
-                        {doctorDirectedReminders.length +
-                          doctorDirectedTasks.length}{" "}
-                        {doctorDirectedReminders.length +
-                          doctorDirectedTasks.length ===
-                        1
-                          ? t.appointments_directed_item_singular
-                          : t.appointments_directed_item_plural}
-                      </span>
-                    </div>
-                    <div className="mt-4 grid gap-4 xl:grid-cols-2">
-                      <div className="space-y-3">
-                        <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
-                          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                            {t.appointments_reminder_trail}
-                          </p>
-                          <div className="mt-3 space-y-3">
-                            {doctorDirectedReminders.length === 0 ? (
-                              <EmptyState text={tr.common_not_set} />
-                            ) : (
-                              doctorDirectedReminders.map((item) => (
-                                <div
-                                  key={item.id}
-                                  className="rounded-2xl border border-slate-200 bg-white px-4 py-3"
-                                >
-                                  <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                                    <div>
-                                      <p className="text-sm font-medium text-slate-900">
-                                        {item.title.replace(
-                                          `${DOCTOR_FOLLOW_UP_PREFIX} `,
-                                          "",
-                                        )}
-                                      </p>
-                                      <p className="mt-1 text-xs text-slate-500">
-                                        {item.user_name} ·{" "}
-                                        {formatDateTimeLabel(item.remind_at)}
-                                      </p>
-                                    </div>
-                                    {item.is_completed ? (
-                                      <span className="text-xs font-medium text-emerald-700">
-                                        {t.common_completed}{" "}
-                                        {formatDateTimeLabel(item.completed_at)}
-                                      </span>
-                                    ) : (
-                                      <span className="text-xs font-medium text-amber-700">
-                                        {t.common_pending}
-                                      </span>
-                                    )}
-                                  </div>
-                                  {item.description ? (
-                                    <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
-                                      {item.description}
-                                    </p>
-                                  ) : null}
-                                </div>
-                              ))
-                            )}
-                          </div>
-                        </div>
-                        <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
-                          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                            {t.appointments_task_trail}
-                          </p>
-                          <div className="mt-3 space-y-3">
-                            {doctorDirectedTasks.length === 0 ? (
-                              <EmptyState text={tr.common_not_set} />
-                            ) : (
-                              doctorDirectedTasks.map((task) => (
-                                <div
-                                  key={task.id}
-                                  className="rounded-2xl border border-slate-200 bg-white px-4 py-3"
-                                >
-                                  <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                                    <div>
-                                      <p className="text-sm font-medium text-slate-900">
-                                        {task.title.replace(
-                                          `${DOCTOR_FOLLOW_UP_PREFIX} `,
-                                          "",
-                                        )}
-                                      </p>
-                                      <p className="mt-1 text-xs text-slate-500">
-                                        {task.assigned_to_name} ·{" "}
-                                        {taskStatusLabel(task.status)} ·{" "}
-                                        {taskPriorityLabel(task.priority)}
-                                      </p>
-                                    </div>
-                                    <span className="text-xs text-slate-500">
-                                      {task.due_date
-                                        ? formatDateTimeLabel(task.due_date)
-                                        : t.common_not_set}
-                                    </span>
-                                  </div>
-                                  {task.description ? (
-                                    <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
-                                      {task.description}
-                                    </p>
-                                  ) : null}
-                                </div>
-                              ))
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                      {permissions.canManageReminders ? (
-                        <form
-                          onSubmit={handleDoctorFollowUpSubmit}
-                          className="space-y-4 rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4"
-                        >
-                          <Field label={tr.appointments_title_col}>
-                            <Input
-                              value={doctorFollowUpForm.title}
-                              onChange={(event) =>
-                                setDoctorFollowUpForm((current) => ({
-                                  ...current,
-                                  title: event.target.value,
-                                }))
-                              }
-                              placeholder={tr.appointments_title_col}
-                              className="h-10 rounded-xl bg-white"
-                              required
-                            />
-                          </Field>
-                          <Field label={t.patients_assign_owner}>
-                            <select
-                              value={doctorFollowUpForm.assigneeId}
-                              onChange={(event) =>
-                                setDoctorFollowUpForm((current) => ({
-                                  ...current,
-                                  assigneeId: event.target.value,
-                                }))
-                              }
-                              className={selectClassName}
-                              required
-                            >
-                              <option value="">{tr.common_not_set}</option>
-                              {doctorFollowUpAssignees.map((member) => (
-                                <option key={member.id} value={member.id}>
-                                  {member.name} · {roleLabel(member.role)}
-                                </option>
-                              ))}
-                            </select>
-                          </Field>
-                          <Field label={tr.invoices_due_at}>
-                            <Input
-                              type="datetime-local"
-                              value={doctorFollowUpForm.dueAt}
-                              onChange={(event) =>
-                                setDoctorFollowUpForm((current) => ({
-                                  ...current,
-                                  dueAt: event.target.value,
-                                }))
-                              }
-                              className="h-10 rounded-xl bg-white"
-                              required
-                            />
-                          </Field>
-                          <Field label={tr.patients_notes}>
-                            <textarea
-                              value={doctorFollowUpForm.notes}
-                              onChange={(event) =>
-                                setDoctorFollowUpForm((current) => ({
-                                  ...current,
-                                  notes: event.target.value,
-                                }))
-                              }
-                              className={textareaClassName}
-                              rows={5}
-                              placeholder={tr.patients_notes}
-                            />
-                          </Field>
-                          <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_180px]">
-                            <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
-                              <input
-                                type="checkbox"
-                                checked={doctorFollowUpForm.createTask}
-                                onChange={(event) =>
-                                  setDoctorFollowUpForm((current) => ({
-                                    ...current,
-                                    createTask: event.target.checked,
-                                  }))
-                                }
-                                className="mt-0.5 size-4 rounded border-slate-300 text-slate-950"
-                              />
-                              <span>
-                                Mirror this directive as an operational task for
-                                execution and ownership.
-                              </span>
-                            </label>
-                            <Field label={tr.appointments_title_col}>
-                              <select
-                                value={doctorFollowUpForm.taskPriority}
-                                onChange={(event) =>
-                                  setDoctorFollowUpForm((current) => ({
-                                    ...current,
-                                    taskPriority: event.target.value,
-                                  }))
-                                }
-                                className={selectClassName}
-                                disabled={!doctorFollowUpForm.createTask}
-                              >
-                                {TASK_PRIORITY_OPTIONS.map((value) => (
-                                  <option key={value} value={value}>
-                                    {taskPriorityLabel(value)}
-                                  </option>
-                                ))}
-                              </select>
-                            </Field>
-                          </div>
-                          <div className="flex justify-end">
-                            <Button
-                              type="submit"
-                              className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
-                              disabled={
-                                doctorFollowUpBusy ||
-                                !doctorFollowUpForm.title.trim() ||
-                                !doctorFollowUpForm.assigneeId ||
-                                !doctorFollowUpForm.dueAt
-                              }
-                            >
-                              {doctorFollowUpBusy ? (
-                                <LoaderCircle className="size-4 animate-spin" />
-                              ) : null}
-                              Create doctor follow-up
-                            </Button>
-                          </div>
-                        </form>
-                      ) : (
-                        <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
-                          <EmptyState text={tr.common_not_set} />
-                        </div>
-                      )}
-                    </div>
-                  </section>
+                  <MemoizedAppointmentDoctorFollowUpSection
+                    detail={detail}
+                    reminders={doctorDirectedReminders}
+                    tasks={doctorDirectedTasks}
+                    assignees={doctorFollowUpAssignees}
+                    defaultAssigneeId={detailDefaultAssigneeId}
+                    canManageReminders={permissions.canManageReminders}
+                    canCreateTasks={permissions.canCreateTasks}
+                    onRefresh={refreshDetail}
+                    onError={reportDetailError}
+                  />
                 ) : null}
                 {!detail.is_blocked &&
                 permissions.canManageChecklist &&
                 permissions.canViewReminders ? (
-                  <section className={sectionCardClass("p-5")}>
-                    <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                      <div>
-                        <h3 className="text-sm font-semibold text-slate-950">
-                          Incoming unprocessed medical data
-                        </h3>
-                        <p className="text-xs text-slate-500">
-                          Capture incoming updates from patients, doctors,
-                          interpreters or clinics that still need triage,
-                          categorization and case update.
-                        </p>
-                      </div>
-                      <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
-                        {openIncomingDataChecklistCount === 0 &&
-                        incomingDataChecklist.length > 0
-                          ? "Intake clear"
-                          : `${openIncomingDataChecklistCount} open`}
-                      </span>
-                    </div>
-                    <div className="mt-4 grid gap-4 md:grid-cols-3">
-                      <ContextCard
-                        label={t.cases_status}
-                        value={
-                          incomingDataChecklist.length === 0
-                            ? "Not started"
-                            : `${incomingDataChecklist.length} item(s)`
-                        }
-                        meta={
-                          incomingDataChecklist.length === 0
-                            ? "No intake checklist yet."
-                            : `${openIncomingDataChecklistCount} item(s) still open.`
-                        }
-                      />
-                      <ContextCard
-                        label={t.common_search}
-                        value={
-                          incomingDataReminders.length === 0
-                            ? "0"
-                            : String(incomingDataReminders.length)
-                        }
-                        meta="Deadline control for data triage and processing."
-                      />
-                      <ContextCard
-                        label={t.cases_title}
-                        value={
-                          incomingDataTasks.length === 0
-                            ? "0"
-                            : String(incomingDataTasks.length)
-                        }
-                        meta="Operational ownership for categorization and case updates."
-                      />
-                    </div>
-                    <div className="mt-4 grid gap-4 xl:grid-cols-2">
-                      <div className="space-y-4">
-                        <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
-                          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                            Intake checklist
-                          </p>
-                          <div className="mt-3 space-y-3">
-                            {incomingDataChecklist.length === 0 ? (
-                              <EmptyState text={tr.common_not_set} />
-                            ) : (
-                              incomingDataChecklist.map((item) => (
-                                <div
-                                  key={item.id}
-                                  className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 md:flex-row md:items-center md:justify-between"
-                                >
-                                  <div>
-                                    <p className="text-sm font-medium text-slate-900">
-                                      {item.item_text.replace(
-                                        `${INCOMING_DATA_CHECKLIST_PREFIX} `,
-                                        "",
-                                      )}
-                                    </p>
-                                    <p className="mt-1 text-xs uppercase tracking-[0.12em] text-slate-500">
-                                      {item.phase}
-                                    </p>
-                                  </div>
-                                  {item.is_completed ? (
-                                    <span className="text-xs font-medium text-emerald-700">
-                                      Completed{" "}
-                                      {formatDateTimeLabel(item.completed_at)}
-                                    </span>
-                                  ) : (
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      size="sm"
-                                      className="rounded-2xl"
-                                      disabled={Boolean(actionBusy)}
-                                      onClick={() =>
-                                        handleChecklistComplete(item.id)
-                                      }
-                                    >
-                                      {actionBusy === `check:${item.id}` ? (
-                                        <LoaderCircle className="size-4 animate-spin" />
-                                      ) : null}
-                                      Complete
-                                    </Button>
-                                  )}
-                                </div>
-                              ))
-                            )}
-                          </div>
-                        </div>
-                        <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
-                          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                            Reminder and task trail
-                          </p>
-                          <div className="mt-3 space-y-3">
-                            {incomingDataReminders.length === 0 &&
-                            incomingDataTasks.length === 0 ? (
-                              <EmptyState text={tr.common_not_set} />
-                            ) : (
-                              <>
-                                {incomingDataReminders.map((item) => (
-                                  <div
-                                    key={item.id}
-                                    className="rounded-2xl border border-slate-200 bg-white px-4 py-3"
-                                  >
-                                    <p className="text-sm font-medium text-slate-900">
-                                      {item.title.replace(
-                                        `${INCOMING_DATA_PREFIX} `,
-                                        "",
-                                      )}
-                                    </p>
-                                    <p className="mt-1 text-xs text-slate-500">
-                                      {item.user_name} ·{" "}
-                                      {formatDateTimeLabel(item.remind_at)}
-                                    </p>
-                                    {item.description ? (
-                                      <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
-                                        {item.description}
-                                      </p>
-                                    ) : null}
-                                  </div>
-                                ))}
-                                {incomingDataTasks.map((task) => (
-                                  <div
-                                    key={task.id}
-                                    className="rounded-2xl border border-slate-200 bg-white px-4 py-3"
-                                  >
-                                    <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                                      <p className="text-sm font-medium text-slate-900">
-                                        {task.title.replace(
-                                          `${INCOMING_DATA_PREFIX} `,
-                                          "",
-                                        )}
-                                      </p>
-                                      <span className="text-xs text-slate-500">
-                                        {taskStatusLabel(task.status)} ·{" "}
-                                        {taskPriorityLabel(task.priority)}
-                                      </span>
-                                    </div>
-                                    <p className="mt-1 text-xs text-slate-500">
-                                      {task.assigned_to_name}
-                                      {task.due_date
-                                        ? ` · ${formatDateTimeLabel(task.due_date)}`
-                                        : ""}
-                                    </p>
-                                    {task.description ? (
-                                      <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
-                                        {task.description}
-                                      </p>
-                                    ) : null}
-                                  </div>
-                                ))}
-                              </>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                      <form
-                        onSubmit={handleIncomingDataSubmit}
-                        className="space-y-4 rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4"
-                      >
-                        <div className="grid gap-4 md:grid-cols-2">
-                          <Field label={tr.documents_source}>
-                            <select
-                              value={incomingDataForm.source}
-                              onChange={(event) =>
-                                setIncomingDataForm((current) => ({
-                                  ...current,
-                                  source: event.target
-                                    .value as IncomingDataSource,
-                                }))
-                              }
-                              className={selectClassName}
-                            >
-                              <option value="patient">
-                                {tr.orders_patient}
-                              </option>
-                              <option value="doctor">{tr.common_doctor}</option>
-                              <option value="clinic">
-                                {tr.common_provider}
-                              </option>
-                              <option value="interpreter">
-                                {tr.role_interpreter}
-                              </option>
-                              <option value="external_lab">
-                                {tr.common_provider}
-                              </option>
-                              <option value="other">{tr.common_not_set}</option>
-                            </select>
-                          </Field>
-                          <Field label={tr.documents_category}>
-                            <select
-                              value={incomingDataForm.category}
-                              onChange={(event) =>
-                                setIncomingDataForm((current) => ({
-                                  ...current,
-                                  category: event.target
-                                    .value as IncomingDataCategory,
-                                }))
-                              }
-                              className={selectClassName}
-                            >
-                              <option value="medical_update">
-                                Medical update
-                              </option>
-                              <option value="diagnosis">
-                                {tr.cases_preconditions}
-                              </option>
-                              <option value="medication">
-                                {tr.cases_medications}
-                              </option>
-                              <option value="symptom">
-                                {tr.cases_symptoms}
-                              </option>
-                              <option value="lab_result">
-                                {tr.cases_title}
-                              </option>
-                              <option value="imaging">
-                                {tr.documents_title}
-                              </option>
-                              <option value="recommendation">
-                                Recommendation
-                              </option>
-                              <option value="risk_flag">
-                                {tr.common_error}
-                              </option>
-                              <option value="other">{tr.common_not_set}</option>
-                            </select>
-                          </Field>
-                        </div>
-                        <div className="grid gap-4 md:grid-cols-2">
-                          <Field label={t.patients_assign_owner}>
-                            <select
-                              value={incomingDataForm.assigneeId}
-                              onChange={(event) =>
-                                setIncomingDataForm((current) => ({
-                                  ...current,
-                                  assigneeId: event.target.value,
-                                }))
-                              }
-                              className={selectClassName}
-                              required
-                            >
-                              <option value="">{tr.common_not_set}</option>
-                              {doctorFollowUpAssignees.map((member) => (
-                                <option key={member.id} value={member.id}>
-                                  {member.name} · {roleLabel(member.role)}
-                                </option>
-                              ))}
-                            </select>
-                          </Field>
-                          <Field label={tr.invoices_due_at}>
-                            <Input
-                              type="datetime-local"
-                              value={incomingDataForm.dueAt}
-                              onChange={(event) =>
-                                setIncomingDataForm((current) => ({
-                                  ...current,
-                                  dueAt: event.target.value,
-                                }))
-                              }
-                              className="h-10 rounded-xl bg-white"
-                              required
-                            />
-                          </Field>
-                        </div>
-                        <Field label={tr.patients_notes}>
-                          <textarea
-                            value={incomingDataForm.notes}
-                            onChange={(event) =>
-                              setIncomingDataForm((current) => ({
-                                ...current,
-                                notes: event.target.value,
-                              }))
-                            }
-                            className={textareaClassName}
-                            rows={5}
-                            placeholder={tr.patients_notes}
-                          />
-                        </Field>
-                        <div className="grid gap-3 md:grid-cols-2">
-                          <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
-                            <input
-                              type="checkbox"
-                              checked={incomingDataForm.requiresCaseUpdate}
-                              onChange={(event) =>
-                                setIncomingDataForm((current) => ({
-                                  ...current,
-                                  requiresCaseUpdate: event.target.checked,
-                                }))
-                              }
-                              className="mt-0.5 size-4 rounded border-slate-300 text-slate-950"
-                            />
-                            <span>{tr.cases_subtitle}</span>
-                          </label>
-                          <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
-                            <input
-                              type="checkbox"
-                              checked={incomingDataForm.requiresPatientFollowUp}
-                              onChange={(event) =>
-                                setIncomingDataForm((current) => ({
-                                  ...current,
-                                  requiresPatientFollowUp: event.target.checked,
-                                }))
-                              }
-                              className="mt-0.5 size-4 rounded border-slate-300 text-slate-950"
-                            />
-                            <span>{tr.appointments_title}</span>
-                          </label>
-                        </div>
-                        <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_180px]">
-                          <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
-                            <input
-                              type="checkbox"
-                              checked={incomingDataForm.createTask}
-                              onChange={(event) =>
-                                setIncomingDataForm((current) => ({
-                                  ...current,
-                                  createTask: event.target.checked,
-                                }))
-                              }
-                              className="mt-0.5 size-4 rounded border-slate-300 text-slate-950"
-                            />
-                            <span>{tr.providers_linked_patients}</span>
-                          </label>
-                          <Field label={tr.appointments_title_col}>
-                            <select
-                              value={incomingDataForm.taskPriority}
-                              onChange={(event) =>
-                                setIncomingDataForm((current) => ({
-                                  ...current,
-                                  taskPriority: event.target.value,
-                                }))
-                              }
-                              className={selectClassName}
-                              disabled={!incomingDataForm.createTask}
-                            >
-                              {TASK_PRIORITY_OPTIONS.map((value) => (
-                                <option key={value} value={value}>
-                                  {taskPriorityLabel(value)}
-                                </option>
-                              ))}
-                            </select>
-                          </Field>
-                        </div>
-                        <div className="flex flex-wrap justify-end gap-3">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            className="rounded-2xl"
-                            disabled={!incomingDataForm.assigneeId}
-                            onClick={openIncomingDataChatDraft}
-                          >
-                            Open internal chat draft
-                          </Button>
-                          <Button
-                            type="submit"
-                            className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
-                            disabled={
-                              incomingDataBusy ||
-                              !incomingDataForm.assigneeId ||
-                              !incomingDataForm.dueAt
-                            }
-                          >
-                            {incomingDataBusy ? (
-                              <LoaderCircle className="size-4 animate-spin" />
-                            ) : null}
-                            Start intake flow
-                          </Button>
-                        </div>
-                      </form>
-                    </div>
-                  </section>
+                  <MemoizedAppointmentIncomingDataSection
+                    detail={detail}
+                    checklist={incomingDataChecklist}
+                    reminders={incomingDataReminders}
+                    tasks={incomingDataTasks}
+                    assignees={doctorFollowUpAssignees}
+                    defaultAssigneeId={detailDefaultAssigneeId}
+                    canCreateTasks={permissions.canCreateTasks}
+                    onRefresh={refreshDetail}
+                    onError={reportDetailError}
+                  />
                 ) : null}
                 {!detail.is_blocked &&
                 permissions.canViewReminders &&
                 detail.order_id ? (
-                  <section className={sectionCardClass("p-5")}>
-                    <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                      <div>
-                        <h3 className="text-sm font-semibold text-slate-950">
-                          Package-end follow-up
-                        </h3>
-                        <p className="text-xs text-slate-500">
-                          Schedule the required reminder one month before the
-                          linked package or order window ends.
-                        </p>
-                      </div>
-                      <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
-                        {packageEndReminders.length + packageEndTasks.length}{" "}
-                        package item
-                        {packageEndReminders.length + packageEndTasks.length ===
-                        1
-                          ? ""
-                          : "s"}
-                      </span>
-                    </div>
-                    <div className="mt-4 grid gap-4 xl:grid-cols-2">
-                      <div className="space-y-3">
-                        {packageEndReminders.length === 0 &&
-                        packageEndTasks.length === 0 ? (
-                          <EmptyState text={tr.common_not_set} />
-                        ) : (
-                          <>
-                            {packageEndReminders.map((item) => (
-                              <div
-                                key={item.id}
-                                className="rounded-2xl border border-slate-200/80 bg-slate-50/80 px-4 py-3"
-                              >
-                                <p className="text-sm font-medium text-slate-900">
-                                  {item.title.replace(
-                                    `${PACKAGE_END_FOLLOW_UP_PREFIX} `,
-                                    "",
-                                  )}
-                                </p>
-                                <p className="mt-1 text-xs text-slate-500">
-                                  {item.user_name} ·{" "}
-                                  {formatDateTimeLabel(item.remind_at)}
-                                </p>
-                                {item.description ? (
-                                  <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
-                                    {item.description}
-                                  </p>
-                                ) : null}
-                              </div>
-                            ))}
-                            {packageEndTasks.map((task) => (
-                              <div
-                                key={task.id}
-                                className="rounded-2xl border border-slate-200/80 bg-slate-50/80 px-4 py-3"
-                              >
-                                <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                                  <p className="text-sm font-medium text-slate-900">
-                                    {task.title.replace(
-                                      `${PACKAGE_END_FOLLOW_UP_PREFIX} `,
-                                      "",
-                                    )}
-                                  </p>
-                                  <span className="text-xs text-slate-500">
-                                    {taskStatusLabel(task.status)} ·{" "}
-                                    {taskPriorityLabel(task.priority)}
-                                  </span>
-                                </div>
-                                <p className="mt-1 text-xs text-slate-500">
-                                  {task.assigned_to_name}
-                                  {task.due_date
-                                    ? ` · ${formatDateTimeLabel(task.due_date)}`
-                                    : ""}
-                                </p>
-                                {task.description ? (
-                                  <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
-                                    {task.description}
-                                  </p>
-                                ) : null}
-                              </div>
-                            ))}
-                          </>
-                        )}
-                      </div>
-                      {permissions.canManageReminders ? (
-                        <form
-                          onSubmit={handlePackageEndFollowUpSubmit}
-                          className="space-y-4 rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4"
-                        >
-                          <Field label={t.appointments_date}>
-                            <Input
-                              type="date"
-                              value={packageEndFollowUpForm.packageEndDate}
-                              onChange={(event) =>
-                                setPackageEndFollowUpForm((current) => ({
-                                  ...current,
-                                  packageEndDate: event.target.value,
-                                }))
-                              }
-                              className="h-10 rounded-xl bg-white"
-                              required
-                            />
-                          </Field>
-                          <Field label={tr.appointments_title_col}>
-                            <Input
-                              value={packageEndFollowUpForm.title}
-                              onChange={(event) =>
-                                setPackageEndFollowUpForm((current) => ({
-                                  ...current,
-                                  title: event.target.value,
-                                }))
-                              }
-                              className="h-10 rounded-xl bg-white"
-                              required
-                            />
-                          </Field>
-                          <Field label={t.patients_assign_owner}>
-                            <select
-                              value={packageEndFollowUpForm.assigneeId}
-                              onChange={(event) =>
-                                setPackageEndFollowUpForm((current) => ({
-                                  ...current,
-                                  assigneeId: event.target.value,
-                                }))
-                              }
-                              className={selectClassName}
-                              required
-                            >
-                              <option value="">{tr.common_not_set}</option>
-                              {doctorFollowUpAssignees.map((member) => (
-                                <option key={member.id} value={member.id}>
-                                  {member.name} · {roleLabel(member.role)}
-                                </option>
-                              ))}
-                            </select>
-                          </Field>
-                          {packageEndFollowUpForm.packageEndDate ? (
-                            <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-700">
-                              Reminder will be scheduled for{" "}
-                              {formatDateTimeLabel(
-                                toRfc3339(
-                                  shiftLocalDateTime(
-                                    `${packageEndFollowUpForm.packageEndDate}T09:00`,
-                                    { months: -1 },
-                                  ),
-                                ),
-                              )}
-                              .
-                            </div>
-                          ) : null}
-                          <Field label={t.patients_notes}>
-                            <textarea
-                              value={packageEndFollowUpForm.notes}
-                              onChange={(event) =>
-                                setPackageEndFollowUpForm((current) => ({
-                                  ...current,
-                                  notes: event.target.value,
-                                }))
-                              }
-                              className={textareaClassName}
-                              rows={4}
-                              placeholder={tr.patients_notes}
-                            />
-                          </Field>
-                          <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_180px]">
-                            <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
-                              <input
-                                type="checkbox"
-                                checked={packageEndFollowUpForm.createTask}
-                                onChange={(event) =>
-                                  setPackageEndFollowUpForm((current) => ({
-                                    ...current,
-                                    createTask: event.target.checked,
-                                  }))
-                                }
-                                className="mt-0.5 size-4 rounded border-slate-300 text-slate-950"
-                              />
-                              <span>{tr.providers_linked_patients}</span>
-                            </label>
-                            <Field label={tr.appointments_title_col}>
-                              <select
-                                value={packageEndFollowUpForm.taskPriority}
-                                onChange={(event) =>
-                                  setPackageEndFollowUpForm((current) => ({
-                                    ...current,
-                                    taskPriority: event.target.value,
-                                  }))
-                                }
-                                className={selectClassName}
-                                disabled={!packageEndFollowUpForm.createTask}
-                              >
-                                {TASK_PRIORITY_OPTIONS.map((value) => (
-                                  <option key={value} value={value}>
-                                    {taskPriorityLabel(value)}
-                                  </option>
-                                ))}
-                              </select>
-                            </Field>
-                          </div>
-                          <div className="flex justify-end">
-                            <Button
-                              type="submit"
-                              className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
-                              disabled={
-                                packageEndFollowUpBusy ||
-                                !packageEndFollowUpForm.title.trim() ||
-                                !packageEndFollowUpForm.assigneeId ||
-                                !packageEndFollowUpForm.packageEndDate
-                              }
-                            >
-                              {packageEndFollowUpBusy ? (
-                                <LoaderCircle className="size-4 animate-spin" />
-                              ) : null}
-                              Schedule package reminder
-                            </Button>
-                          </div>
-                        </form>
-                      ) : null}
-                    </div>
-                  </section>
+                  <MemoizedAppointmentPackageEndSection
+                    detail={detail}
+                    reminders={packageEndReminders}
+                    tasks={packageEndTasks}
+                    assignees={doctorFollowUpAssignees}
+                    defaultAssigneeId={detailDefaultAssigneeId}
+                    defaultTitle={tr.appointments_new ?? ""}
+                    canManageReminders={permissions.canManageReminders}
+                    canCreateTasks={permissions.canCreateTasks}
+                    onRefresh={refreshDetail}
+                    onError={reportDetailError}
+                  />
                 ) : null}
                 {!detail.is_blocked &&
                 permissions.canViewCommunications &&
                 (detail.provider_id || detail.doctor_id) ? (
-                  <section className={sectionCardClass("p-5")}>
-                    <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                      <div>
-                        <h3 className="text-sm font-semibold text-slate-950">
-                          Clinic and doctor handoff trail
-                        </h3>
-                        <p className="text-xs text-slate-500">
-                          External communication log for clinics, doctors and
-                          service providers, plus linked internal follow-up.
-                        </p>
-                      </div>
-                      <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
-                        {externalCommunicationEntries.length} communication
-                        {externalCommunicationEntries.length === 1 ? "" : "s"}
-                      </span>
-                    </div>
-                    <div className="mt-4 grid gap-4 xl:grid-cols-2">
-                      <div className="space-y-3">
-                        {externalCommunicationEntries.length === 0 &&
-                        externalHandoffReminders.length === 0 &&
-                        externalHandoffTasks.length === 0 ? (
-                          <EmptyState text={tr.common_not_set} />
-                        ) : (
-                          <>
-                            {externalCommunicationEntries.map((item) => (
-                              <div
-                                key={item.id}
-                                className="rounded-2xl border border-slate-200/80 bg-slate-50/80 px-4 py-3"
-                              >
-                                <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                                  <div className="min-w-0">
-                                    <p className="text-sm font-medium text-slate-900">
-                                      {item.subject}
-                                    </p>
-                                    <p className="mt-1 text-xs text-slate-500">
-                                      {item.created_by_name} · {item.direction}{" "}
-                                      via{" "}
-                                      {communicationChannelLabel(item.channel)}{" "}
-                                      ·{" "}
-                                      {communicationTargetLabel(
-                                        item.target_type,
-                                        detail,
-                                      )}
-                                      {item.contact_name
-                                        ? ` · ${item.contact_name}`
-                                        : ""}
-                                      {item.due_at
-                                        ? ` · due ${formatDateTimeLabel(item.due_at)}`
-                                        : ""}
-                                    </p>
-                                  </div>
-                                  <span
-                                    className={cn(
-                                      "rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em]",
-                                      communicationStatusBadgeClass(
-                                        item.status,
-                                      ),
-                                    )}
-                                  >
-                                    {communicationStatusLabel(item.status)}
-                                  </span>
-                                </div>
-                                {item.message ? (
-                                  <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
-                                    {item.message}
-                                  </p>
-                                ) : null}
-                                {permissions.canManageCommunications ? (
-                                  <div className="mt-4 flex flex-wrap gap-2">
-                                    {item.status !== "answered" &&
-                                    item.status !== "closed" &&
-                                    item.status !== "cancelled" ? (
-                                      <Button
-                                        type="button"
-                                        variant="outline"
-                                        size="sm"
-                                        className="rounded-2xl"
-                                        disabled={
-                                          actionBusy ===
-                                          `communication:${item.id}:answered`
-                                        }
-                                        onClick={() =>
-                                          handleCommunicationStatusUpdate(
-                                            item.id,
-                                            "answered",
-                                          )
-                                        }
-                                      >
-                                        {actionBusy ===
-                                        `communication:${item.id}:answered` ? (
-                                          <LoaderCircle className="size-4 animate-spin" />
-                                        ) : null}
-                                        Mark answered
-                                      </Button>
-                                    ) : null}
-                                    {item.status !== "closed" &&
-                                    item.status !== "cancelled" ? (
-                                      <Button
-                                        type="button"
-                                        variant="outline"
-                                        size="sm"
-                                        className="rounded-2xl"
-                                        disabled={
-                                          actionBusy ===
-                                          `communication:${item.id}:closed`
-                                        }
-                                        onClick={() =>
-                                          handleCommunicationStatusUpdate(
-                                            item.id,
-                                            "closed",
-                                          )
-                                        }
-                                      >
-                                        {actionBusy ===
-                                        `communication:${item.id}:closed` ? (
-                                          <LoaderCircle className="size-4 animate-spin" />
-                                        ) : null}
-                                        Close
-                                      </Button>
-                                    ) : null}
-                                    {item.status !== "cancelled" ? (
-                                      <Button
-                                        type="button"
-                                        variant="outline"
-                                        size="sm"
-                                        className="rounded-2xl"
-                                        disabled={
-                                          actionBusy ===
-                                          `communication:${item.id}:cancelled`
-                                        }
-                                        onClick={() =>
-                                          handleCommunicationStatusUpdate(
-                                            item.id,
-                                            "cancelled",
-                                          )
-                                        }
-                                      >
-                                        {actionBusy ===
-                                        `communication:${item.id}:cancelled` ? (
-                                          <LoaderCircle className="size-4 animate-spin" />
-                                        ) : null}
-                                        Cancel
-                                      </Button>
-                                    ) : null}
-                                  </div>
-                                ) : null}
-                              </div>
-                            ))}
-                            {permissions.canViewReminders &&
-                            (externalHandoffReminders.length > 0 ||
-                              externalHandoffTasks.length > 0) ? (
-                              <div className="rounded-2xl border border-dashed border-slate-200 bg-white/70 p-4">
-                                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                                  Internal follow-up trail
-                                </p>
-                                <div className="mt-3 space-y-3">
-                                  {externalHandoffReminders.map((item) => (
-                                    <div
-                                      key={item.id}
-                                      className="rounded-2xl border border-slate-200/80 bg-slate-50/80 px-4 py-3"
-                                    >
-                                      <p className="text-sm font-medium text-slate-900">
-                                        {item.title.replace(
-                                          `${EXTERNAL_HANDOFF_PREFIX} `,
-                                          "",
-                                        )}
-                                      </p>
-                                      <p className="mt-1 text-xs text-slate-500">
-                                        {item.user_name} ·{" "}
-                                        {formatDateTimeLabel(item.remind_at)}
-                                      </p>
-                                      {item.description ? (
-                                        <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
-                                          {item.description}
-                                        </p>
-                                      ) : null}
-                                    </div>
-                                  ))}
-                                  {externalHandoffTasks.map((task) => (
-                                    <div
-                                      key={task.id}
-                                      className="rounded-2xl border border-slate-200/80 bg-slate-50/80 px-4 py-3"
-                                    >
-                                      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                                        <p className="text-sm font-medium text-slate-900">
-                                          {task.title.replace(
-                                            `${EXTERNAL_HANDOFF_PREFIX} `,
-                                            "",
-                                          )}
-                                        </p>
-                                        <span className="text-xs text-slate-500">
-                                          {taskStatusLabel(task.status)} ·{" "}
-                                          {taskPriorityLabel(task.priority)}
-                                        </span>
-                                      </div>
-                                      <p className="mt-1 text-xs text-slate-500">
-                                        {task.assigned_to_name}
-                                        {task.due_date
-                                          ? ` · ${formatDateTimeLabel(task.due_date)}`
-                                          : ""}
-                                      </p>
-                                      {task.description ? (
-                                        <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
-                                          {task.description}
-                                        </p>
-                                      ) : null}
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            ) : null}
-                          </>
-                        )}
-                      </div>
-                      {permissions.canManageCommunications ? (
-                        <form
-                          onSubmit={handleExternalHandoffSubmit}
-                          className="space-y-4 rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4"
-                        >
-                          <div className="grid gap-4 md:grid-cols-2">
-                            <Field label={tr.patients_assign_owner}>
-                              <select
-                                value={externalHandoffForm.target}
-                                onChange={(event) =>
-                                  setExternalHandoffForm((current) => ({
-                                    ...current,
-                                    target: event.target
-                                      .value as ExternalHandoffFormState["target"],
-                                  }))
-                                }
-                                className={selectClassName}
-                              >
-                                <option
-                                  value="clinic"
-                                  disabled={!detail.provider_id}
-                                >
-                                  Clinic
-                                </option>
-                                <option
-                                  value="service_provider"
-                                  disabled={!detail.provider_id}
-                                >
-                                  Service provider
-                                </option>
-                                <option
-                                  value="doctor"
-                                  disabled={!detail.doctor_id}
-                                >
-                                  Doctor
-                                </option>
-                              </select>
-                            </Field>
-                            <Field label={tr.documents_source}>
-                              <select
-                                value={externalHandoffForm.channel}
-                                onChange={(event) =>
-                                  setExternalHandoffForm((current) => ({
-                                    ...current,
-                                    channel: event.target
-                                      .value as AppointmentCommunicationChannel,
-                                  }))
-                                }
-                                className={selectClassName}
-                              >
-                                {COMMUNICATION_CHANNEL_OPTIONS.map((value) => (
-                                  <option key={value} value={value}>
-                                    {communicationChannelLabel(value)}
-                                  </option>
-                                ))}
-                              </select>
-                            </Field>
-                          </div>
-                          <div className="grid gap-4 md:grid-cols-3">
-                            <Field label={tr.documents_source}>
-                              <select
-                                value={externalHandoffForm.direction}
-                                onChange={(event) =>
-                                  setExternalHandoffForm((current) => ({
-                                    ...current,
-                                    direction: event.target
-                                      .value as AppointmentCommunicationDirection,
-                                  }))
-                                }
-                                className={selectClassName}
-                              >
-                                <option value="outbound">
-                                  {tr.common_active}
-                                </option>
-                                <option value="inbound">
-                                  {tr.common_active}
-                                </option>
-                              </select>
-                            </Field>
-                            <Field label={t.users_status}>
-                              <select
-                                value={externalHandoffForm.status}
-                                onChange={(event) =>
-                                  setExternalHandoffForm((current) => ({
-                                    ...current,
-                                    status: event.target
-                                      .value as AppointmentCommunicationStatus,
-                                  }))
-                                }
-                                className={selectClassName}
-                              >
-                                {COMMUNICATION_STATUS_OPTIONS.map((value) => (
-                                  <option key={value} value={value}>
-                                    {communicationStatusLabel(value)}
-                                  </option>
-                                ))}
-                              </select>
-                            </Field>
-                            <Field label={t.patients_assign_owner}>
-                              <select
-                                value={externalHandoffForm.assigneeId}
-                                onChange={(event) =>
-                                  setExternalHandoffForm((current) => ({
-                                    ...current,
-                                    assigneeId: event.target.value,
-                                  }))
-                                }
-                                className={selectClassName}
-                                required
-                              >
-                                <option value="">{tr.common_not_set}</option>
-                                {doctorFollowUpAssignees.map((member) => (
-                                  <option key={member.id} value={member.id}>
-                                    {member.name} · {roleLabel(member.role)}
-                                  </option>
-                                ))}
-                              </select>
-                            </Field>
-                          </div>
-                          <Field label={tr.appointments_title_col}>
-                            <Input
-                              value={externalHandoffForm.title}
-                              onChange={(event) =>
-                                setExternalHandoffForm((current) => ({
-                                  ...current,
-                                  title: event.target.value,
-                                }))
-                              }
-                              placeholder={tr.appointments_title_col}
-                              className="h-10 rounded-xl bg-white"
-                              required
-                            />
-                          </Field>
-                          <Field label={tr.field_phone}>
-                            <Input
-                              value={externalHandoffForm.contactName}
-                              onChange={(event) =>
-                                setExternalHandoffForm((current) => ({
-                                  ...current,
-                                  contactName: event.target.value,
-                                }))
-                              }
-                              placeholder={tr.common_doctor}
-                              className="h-10 rounded-xl bg-white"
-                            />
-                          </Field>
-                          <Field label={tr.invoices_due_at}>
-                            <Input
-                              type="datetime-local"
-                              value={externalHandoffForm.dueAt}
-                              onChange={(event) =>
-                                setExternalHandoffForm((current) => ({
-                                  ...current,
-                                  dueAt: event.target.value,
-                                }))
-                              }
-                              className="h-10 rounded-xl bg-white"
-                            />
-                          </Field>
-                          <Field label={tr.patients_notes}>
-                            <textarea
-                              value={externalHandoffForm.notes}
-                              onChange={(event) =>
-                                setExternalHandoffForm((current) => ({
-                                  ...current,
-                                  notes: event.target.value,
-                                }))
-                              }
-                              className={textareaClassName}
-                              rows={5}
-                              placeholder={tr.patients_notes}
-                            />
-                          </Field>
-                          <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_180px]">
-                            <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
-                              <input
-                                type="checkbox"
-                                checked={externalHandoffForm.createTask}
-                                onChange={(event) =>
-                                  setExternalHandoffForm((current) => ({
-                                    ...current,
-                                    createTask: event.target.checked,
-                                  }))
-                                }
-                                className="mt-0.5 size-4 rounded border-slate-300 text-slate-950"
-                              />
-                              <span>
-                                Mirror this communication as an internal task
-                                when assignee and due date are set.
-                              </span>
-                            </label>
-                            <Field label={tr.appointments_title_col}>
-                              <select
-                                value={externalHandoffForm.taskPriority}
-                                onChange={(event) =>
-                                  setExternalHandoffForm((current) => ({
-                                    ...current,
-                                    taskPriority: event.target.value,
-                                  }))
-                                }
-                                className={selectClassName}
-                                disabled={!externalHandoffForm.createTask}
-                              >
-                                {TASK_PRIORITY_OPTIONS.map((value) => (
-                                  <option key={value} value={value}>
-                                    {taskPriorityLabel(value)}
-                                  </option>
-                                ))}
-                              </select>
-                            </Field>
-                          </div>
-                          <div className="flex flex-wrap justify-end gap-3">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              className="rounded-2xl"
-                              disabled={!externalHandoffForm.assigneeId}
-                              onClick={openExternalHandoffChatDraft}
-                            >
-                              Open internal chat draft
-                            </Button>
-                            <Button
-                              type="submit"
-                              className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
-                              disabled={
-                                externalHandoffBusy ||
-                                !externalHandoffForm.title.trim()
-                              }
-                            >
-                              {externalHandoffBusy ? (
-                                <LoaderCircle className="size-4 animate-spin" />
-                              ) : null}
-                              Log communication
-                            </Button>
-                          </div>
-                        </form>
-                      ) : null}
-                    </div>
-                  </section>
+                  <MemoizedAppointmentExternalHandoffSection
+                    detail={detail}
+                    communications={externalCommunicationEntries}
+                    reminders={externalHandoffReminders}
+                    tasks={externalHandoffTasks}
+                    assignees={doctorFollowUpAssignees}
+                    defaultAssigneeId={detailDefaultAssigneeId}
+                    canManageCommunications={permissions.canManageCommunications}
+                    canViewReminders={permissions.canViewReminders}
+                    canCreateTasks={permissions.canCreateTasks}
+                    onRefresh={refreshDetail}
+                    onError={reportDetailError}
+                  />
                 ) : null}
                 {!detail.is_blocked &&
                 permissions.canManageChecklist &&
                 permissions.canViewReminders &&
                 (detail.provider_id || detail.doctor_id) ? (
-                  <section className={sectionCardClass("p-5")}>
-                    <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                      <div>
-                        <h3 className="text-sm font-semibold text-slate-950">
-                          Arztbrief and written findings
-                        </h3>
-                        <p className="text-xs text-slate-500">
-                          Track missing findings, translation needs and patient
-                          dispatch from the appointment itself.
-                        </p>
-                      </div>
-                      <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
-                        {openFindingsChecklistCount === 0 &&
-                        findingsChecklist.length > 0
-                          ? "Follow-up ready"
-                          : `${openFindingsChecklistCount} open`}
-                      </span>
-                    </div>
-                    <div className="mt-4 grid gap-4 md:grid-cols-3">
-                      <ContextCard
-                        label={t.cases_status}
-                        value={
-                          findingsChecklist.length === 0
-                            ? "Not started"
-                            : `${findingsChecklist.length} item(s)`
-                        }
-                        meta={
-                          findingsChecklist.length === 0
-                            ? "No document follow-up checklist yet."
-                            : `${openFindingsChecklistCount} item(s) still open.`
-                        }
-                      />
-                      <ContextCard
-                        label={t.common_search}
-                        value={
-                          findingsReminders.length === 0
-                            ? "0"
-                            : String(findingsReminders.length)
-                        }
-                        meta="Timing control for missing findings and document handling."
-                      />
-                      <ContextCard
-                        label={t.cases_title}
-                        value={
-                          findingsTasks.length === 0
-                            ? "0"
-                            : String(findingsTasks.length)
-                        }
-                        meta="Operational ownership for requesting, translating or sending findings."
-                      />
-                    </div>
-                    <div className="mt-4 grid gap-4 xl:grid-cols-2">
-                      <div className="space-y-4">
-                        <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
-                          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                            Checklist trail
-                          </p>
-                          <div className="mt-3 space-y-3">
-                            {findingsChecklist.length === 0 ? (
-                              <EmptyState text={tr.common_not_set} />
-                            ) : (
-                              findingsChecklist.map((item) => (
-                                <div
-                                  key={item.id}
-                                  className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 md:flex-row md:items-center md:justify-between"
-                                >
-                                  <div>
-                                    <p className="text-sm font-medium text-slate-900">
-                                      {item.item_text.replace(
-                                        `${FINDINGS_CHECKLIST_PREFIX} `,
-                                        "",
-                                      )}
-                                    </p>
-                                    <p className="mt-1 text-xs uppercase tracking-[0.12em] text-slate-500">
-                                      {item.phase}
-                                    </p>
-                                  </div>
-                                  {item.is_completed ? (
-                                    <span className="text-xs font-medium text-emerald-700">
-                                      Completed{" "}
-                                      {formatDateTimeLabel(item.completed_at)}
-                                    </span>
-                                  ) : (
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      size="sm"
-                                      className="rounded-2xl"
-                                      disabled={Boolean(actionBusy)}
-                                      onClick={() =>
-                                        handleChecklistComplete(item.id)
-                                      }
-                                    >
-                                      {actionBusy === `check:${item.id}` ? (
-                                        <LoaderCircle className="size-4 animate-spin" />
-                                      ) : null}
-                                      Complete
-                                    </Button>
-                                  )}
-                                </div>
-                              ))
-                            )}
-                          </div>
-                        </div>
-                        <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
-                          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                            Reminder and task trail
-                          </p>
-                          <div className="mt-3 space-y-3">
-                            {findingsReminders.length === 0 &&
-                            findingsTasks.length === 0 ? (
-                              <EmptyState text={tr.common_not_set} />
-                            ) : (
-                              <>
-                                {findingsReminders.map((item) => (
-                                  <div
-                                    key={item.id}
-                                    className="rounded-2xl border border-slate-200 bg-white px-4 py-3"
-                                  >
-                                    <p className="text-sm font-medium text-slate-900">
-                                      {item.title.replace(
-                                        `${FINDINGS_FOLLOW_UP_PREFIX} `,
-                                        "",
-                                      )}
-                                    </p>
-                                    <p className="mt-1 text-xs text-slate-500">
-                                      {item.user_name} ·{" "}
-                                      {formatDateTimeLabel(item.remind_at)}
-                                    </p>
-                                    {item.description ? (
-                                      <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
-                                        {item.description}
-                                      </p>
-                                    ) : null}
-                                  </div>
-                                ))}
-                                {findingsTasks.map((task) => (
-                                  <div
-                                    key={task.id}
-                                    className="rounded-2xl border border-slate-200 bg-white px-4 py-3"
-                                  >
-                                    <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                                      <p className="text-sm font-medium text-slate-900">
-                                        {task.title.replace(
-                                          `${FINDINGS_FOLLOW_UP_PREFIX} `,
-                                          "",
-                                        )}
-                                      </p>
-                                      <span className="text-xs text-slate-500">
-                                        {taskStatusLabel(task.status)} ·{" "}
-                                        {taskPriorityLabel(task.priority)}
-                                      </span>
-                                    </div>
-                                    <p className="mt-1 text-xs text-slate-500">
-                                      {task.assigned_to_name}
-                                      {task.due_date
-                                        ? ` · ${formatDateTimeLabel(task.due_date)}`
-                                        : ""}
-                                    </p>
-                                    {task.description ? (
-                                      <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
-                                        {task.description}
-                                      </p>
-                                    ) : null}
-                                  </div>
-                                ))}
-                              </>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                      {permissions.canManageReminders ? (
-                        <form
-                          onSubmit={handleFindingsFollowUpSubmit}
-                          className="space-y-4 rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4"
-                        >
-                          <div className="grid gap-4 md:grid-cols-2">
-                            <Field label={tr.documents_filename}>
-                              <select
-                                value={findingsFollowUpForm.artifact}
-                                onChange={(event) =>
-                                  setFindingsFollowUpForm((current) => ({
-                                    ...current,
-                                    artifact: event.target
-                                      .value as FindingsFollowUpArtifact,
-                                  }))
-                                }
-                                className={selectClassName}
-                              >
-                                <option value="arztbrief">Arztbrief</option>
-                                <option value="written_findings">
-                                  Written findings
-                                </option>
-                                <option value="both">
-                                  Arztbrief + written findings
-                                </option>
-                              </select>
-                            </Field>
-                            <Field label={t.patients_assign_owner}>
-                              <select
-                                value={findingsFollowUpForm.assigneeId}
-                                onChange={(event) =>
-                                  setFindingsFollowUpForm((current) => ({
-                                    ...current,
-                                    assigneeId: event.target.value,
-                                  }))
-                                }
-                                className={selectClassName}
-                                required
-                              >
-                                <option value="">{tr.common_not_set}</option>
-                                {doctorFollowUpAssignees.map((member) => (
-                                  <option key={member.id} value={member.id}>
-                                    {member.name} · {roleLabel(member.role)}
-                                  </option>
-                                ))}
-                              </select>
-                            </Field>
-                          </div>
-                          <Field label={tr.invoices_due_at}>
-                            <Input
-                              type="datetime-local"
-                              value={findingsFollowUpForm.dueAt}
-                              onChange={(event) =>
-                                setFindingsFollowUpForm((current) => ({
-                                  ...current,
-                                  dueAt: event.target.value,
-                                }))
-                              }
-                              className="h-10 rounded-xl bg-white"
-                              required
-                            />
-                          </Field>
-                          <Field label={tr.patients_notes}>
-                            <textarea
-                              value={findingsFollowUpForm.notes}
-                              onChange={(event) =>
-                                setFindingsFollowUpForm((current) => ({
-                                  ...current,
-                                  notes: event.target.value,
-                                }))
-                              }
-                              className={textareaClassName}
-                              rows={5}
-                              placeholder={tr.patients_notes}
-                            />
-                          </Field>
-                          <div className="grid gap-3 md:grid-cols-2">
-                            <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
-                              <input
-                                type="checkbox"
-                                checked={
-                                  findingsFollowUpForm.translationRequired
-                                }
-                                onChange={(event) =>
-                                  setFindingsFollowUpForm((current) => ({
-                                    ...current,
-                                    translationRequired: event.target.checked,
-                                  }))
-                                }
-                                className="mt-0.5 size-4 rounded border-slate-300 text-slate-950"
-                              />
-                              <span>{tr.common_loading}</span>
-                            </label>
-                            <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
-                              <input
-                                type="checkbox"
-                                checked={findingsFollowUpForm.sendToPatient}
-                                onChange={(event) =>
-                                  setFindingsFollowUpForm((current) => ({
-                                    ...current,
-                                    sendToPatient: event.target.checked,
-                                  }))
-                                }
-                                className="mt-0.5 size-4 rounded border-slate-300 text-slate-950"
-                              />
-                              <span>
-                                Patient dispatch required after processing.
-                              </span>
-                            </label>
-                          </div>
-                          <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_180px]">
-                            <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
-                              <input
-                                type="checkbox"
-                                checked={findingsFollowUpForm.createTask}
-                                onChange={(event) =>
-                                  setFindingsFollowUpForm((current) => ({
-                                    ...current,
-                                    createTask: event.target.checked,
-                                  }))
-                                }
-                                className="mt-0.5 size-4 rounded border-slate-300 text-slate-950"
-                              />
-                              <span>
-                                Create a linked task for the findings workflow.
-                              </span>
-                            </label>
-                            <Field label={tr.appointments_title_col}>
-                              <select
-                                value={findingsFollowUpForm.taskPriority}
-                                onChange={(event) =>
-                                  setFindingsFollowUpForm((current) => ({
-                                    ...current,
-                                    taskPriority: event.target.value,
-                                  }))
-                                }
-                                className={selectClassName}
-                                disabled={!findingsFollowUpForm.createTask}
-                              >
-                                {TASK_PRIORITY_OPTIONS.map((value) => (
-                                  <option key={value} value={value}>
-                                    {taskPriorityLabel(value)}
-                                  </option>
-                                ))}
-                              </select>
-                            </Field>
-                          </div>
-                          <div className="flex flex-wrap justify-end gap-3">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              className="rounded-2xl"
-                              disabled={!findingsFollowUpForm.assigneeId}
-                              onClick={openFindingsFollowUpChatDraft}
-                            >
-                              Open internal chat draft
-                            </Button>
-                            <Button
-                              type="submit"
-                              className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
-                              disabled={
-                                findingsFollowUpBusy ||
-                                !findingsFollowUpForm.assigneeId ||
-                                !findingsFollowUpForm.dueAt
-                              }
-                            >
-                              {findingsFollowUpBusy ? (
-                                <LoaderCircle className="size-4 animate-spin" />
-                              ) : null}
-                              Start findings follow-up
-                            </Button>
-                          </div>
-                        </form>
-                      ) : null}
-                    </div>
-                  </section>
+                  <MemoizedAppointmentFindingsSection
+                    detail={detail}
+                    checklist={findingsChecklist}
+                    reminders={findingsReminders}
+                    tasks={findingsTasks}
+                    assignees={doctorFollowUpAssignees}
+                    defaultAssigneeId={detailDefaultAssigneeId}
+                    canCreateTasks={permissions.canCreateTasks}
+                    onRefresh={refreshDetail}
+                    onError={reportDetailError}
+                  />
                 ) : null}
                 {permissions.canManageStatus ? (
-                  <section className={sectionCardClass("p-5")}>
-                    <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                      <div>
-                        <h3 className="text-sm font-semibold text-slate-950">
-                          Completion readiness
-                        </h3>
-                        <p className="text-xs text-slate-500">
-                          Review operational blockers before closing the
-                          appointment and launching standard post-care
-                          follow-up.
-                        </p>
-                      </div>
-                      <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
-                        {detail.status === "completed"
-                          ? "Completed"
-                          : statusLabel(detail.status)}
-                      </span>
-                    </div>
-                    <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                      <ContextCard
-                        label={t.cases_status}
-                        value={
-                          openChecklistCount === 0
-                            ? "Ready"
-                            : `${openChecklistCount} open`
-                        }
-                        meta={
-                          openChecklistCount === 0
-                            ? "No pending checklist items."
-                            : "Finish outstanding preparation or follow-up steps."
-                        }
-                      />
-                      <ContextCard
-                        label={t.cases_title}
-                        value={
-                          openTaskCount === 0
-                            ? "Ready"
-                            : `${openTaskCount} open`
-                        }
-                        meta={
-                          openTaskCount === 0
-                            ? "No open operational tasks."
-                            : "Resolve active PM, interpreter or concierge tasks."
-                        }
-                      />
-                      <ContextCard
-                        label={t.common_search}
-                        value={appointmentText(
-                          `${pendingReminderCount} ausstehend`,
-                          `${pendingReminderCount} ожидает`,
-                          `${pendingReminderCount} pending`,
-                        )}
-                        meta={
-                          pendingReminderCount === 0
-                            ? appointmentText(
-                                "Keine offenen Erinnerungen.",
-                                "Нет активных напоминаний.",
-                                "No outstanding reminders.",
-                              )
-                            : appointmentText(
-                                "Offene Erinnerungen bleiben auch nach dem Abschluss aktiv.",
-                                "Ожидающие напоминания остаются активными и после закрытия.",
-                                "Pending reminders stay active after closure.",
-                              )
-                        }
-                      />
-                      <ContextCard
-                        label={tr.role_interpreter}
-                        value={
-                          !detail.interpreter_id
-                            ? appointmentText("Nicht erforderlich", "Не требуется", "Not required")
-                            : interpreterReportReady
-                              ? appointmentText("Freigegeben", "Согласовано", "Approved")
-                              : appointmentText("Ausstehend", "Ожидается", "Pending")
-                        }
-                        meta={
-                          !detail.interpreter_id
-                            ? appointmentText(
-                                "Kein Dolmetscher verknupft.",
-                                "Переводчик не привязан.",
-                                "No interpreter linked.",
-                              )
-                            : detailReport
-                              ? detailReport.approval_status
-                              : appointmentText(
-                                  "Noch kein Bericht eingereicht.",
-                                  "Отчёт ещё не отправлен.",
-                                  "No report submitted yet.",
-                                )
-                        }
-                      />
-                    </div>
-                    {completionWarnings.length > 0 ? (
-                      <div className="mt-4">
-                        <Banner tone="warning">
-                          <div className="space-y-1">
-                            {completionWarnings.map((warning) => (
-                              <p key={warning}>{warning}</p>
-                            ))}
-                          </div>
-                        </Banner>
-                      </div>
-                    ) : null}
-                    {detail.status !== "completed" &&
-                    detail.status !== "cancelled" ? (
-                      <div className="mt-5 space-y-4">
-                        <Field label={tr.patients_assign_owner}>
-                          <select
-                            value={followUpAssigneeId}
-                            onChange={(event) =>
-                              setFollowUpAssigneeId(event.target.value)
-                            }
-                            className={selectClassName}
-                          >
-                            <option value="">{tr.common_not_set}</option>
-                            {handoffStakeholders.map((peer) => (
-                              <option key={peer.id} value={peer.id}>
-                                {peer.name} · {roleLabel(peer.role)}
-                              </option>
-                            ))}
-                          </select>
-                        </Field>
-                        <div className="flex flex-wrap gap-2">
-                          {FOLLOW_UP_PRESETS.map((preset) => (
-                            <Button
-                              key={preset.id}
-                              type="button"
-                              variant={
-                                completionPlan[preset.id]
-                                  ? "default"
-                                  : "outline"
-                              }
-                              size="sm"
-                              className={cn(
-                                "rounded-2xl",
-                                completionPlan[preset.id]
-                                  ? "bg-slate-950 text-white hover:bg-slate-800"
-                                  : "",
-                              )}
-                              onClick={() =>
-                                setCompletionPlan((current) => ({
-                                  ...current,
-                                  [preset.id]: !current[preset.id],
-                                }))
-                              }
-                            >
-                              {preset.label}
-                            </Button>
-                          ))}
-                        </div>
-                        <div className="flex flex-wrap justify-end gap-3">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            className="rounded-2xl"
-                            disabled={completionBusy || Boolean(actionBusy)}
-                            onClick={() => handleStatusChange("completed")}
-                          >
-                            {t.appointments_complete_only}
-                          </Button>
-                          <Button
-                            type="button"
-                            className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
-                            disabled={
-                              completionBusy ||
-                              Boolean(actionBusy) ||
-                              (selectedCompletionPresetCount > 0 &&
-                                !followUpAssigneeId)
-                            }
-                            onClick={handleCompleteWithFollowUp}
-                          >
-                            {completionBusy ? (
-                              <LoaderCircle className="size-4 animate-spin" />
-                            ) : null}
-                            {t.appointments_complete_and_schedule}
-                          </Button>
-                        </div>
-                      </div>
-                    ) : null}
-                  </section>
+                  <MemoizedAppointmentCompletionSection
+                    detail={detail}
+                    detailReport={detailReport}
+                    handoffStakeholders={handoffStakeholders}
+                    openChecklistCount={openChecklistCount}
+                    openTaskCount={openTaskCount}
+                    pendingReminderCount={pendingReminderCount}
+                    interpreterReportReady={interpreterReportReady}
+                    completionWarnings={completionWarnings}
+                    followUpAssigneeId={followUpAssigneeId}
+                    setFollowUpAssigneeId={setFollowUpAssigneeId}
+                    onRefresh={refreshDetail}
+                    onError={reportDetailError}
+                    onNotice={reportAppointmentsNotice}
+                  />
                 ) : null}
                 {permissions.canManageStatus ? (
-                  <section className={sectionCardClass("p-5")}>
-                    <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-                      <div>
-                        <h3 className="text-sm font-semibold text-slate-950">
-                          {t.users_status}
-                        </h3>
-                        {detail.recurrence_frequency ? (
-                          <p className="mt-1 text-xs text-slate-500">
-                            {t.appointments_scope_bulk_status_hint}
-                          </p>
-                        ) : null}
-                      </div>
-                      {detail.recurrence_frequency ? (
-                        <div className="w-full md:w-[240px]">
-                          <Field label={t.appointments_scope_apply_status}>
-                            <select
-                              value={statusRecurrenceScope}
-                              onChange={(event) =>
-                                setStatusRecurrenceScope(
-                                  event.target
-                                    .value as AppointmentRecurringActionScope,
-                                )
-                              }
-                              className={selectClassName}
-                            >
-                              <option value="single">
-                                {t.appointments_scope_single}
-                              </option>
-                              <option value="following">
-                                {t.appointments_scope_following}
-                              </option>
-                              <option value="series">
-                                {t.appointments_scope_series}
-                              </option>
-                            </select>
-                          </Field>
-                        </div>
-                      ) : null}
-                    </div>
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      {STATUS_OPTIONS.map((status) => (
-                        <Button
-                          key={status}
-                          variant={
-                            detail.status === status ? "default" : "outline"
-                          }
-                          className={cn(
-                            "rounded-2xl",
-                            detail.status === status
-                              ? "bg-slate-950 text-white hover:bg-slate-800"
-                              : "",
-                          )}
-                          disabled={Boolean(actionBusy)}
-                          onClick={() =>
-                            handleStatusChange(
-                              status,
-                              detail.recurrence_frequency
-                                ? statusRecurrenceScope
-                                : "single",
-                            )
-                          }
-                        >
-                          {actionBusy ===
-                          statusActionKey(
-                            detail.id,
-                            status,
-                            detail.recurrence_frequency
-                              ? statusRecurrenceScope
-                              : "single",
-                          ) ? (
-                            <LoaderCircle className="size-4 animate-spin" />
-                          ) : null}
-                          {detail.recurrence_frequency && status === "cancelled"
-                            ? statusRecurrenceScope === "following"
-                              ? t.appointments_cancel_this_and_following
-                              : statusRecurrenceScope === "series"
-                                ? t.appointments_cancel_whole_series
-                                : "Cancel this occurrence"
-                            : statusLabel(status)}
-                        </Button>
-                      ))}
-                    </div>
-                    {detail.recurrence_frequency ? (
-                      <div className="mt-4 space-y-3">
-                        <p className="text-xs text-slate-500">
-                          {t.appointments_scope_targets}{" "}
-                          <span className="font-semibold text-slate-700">
-                            {selectedRecurringStatusTargets.length}
-                          </span>{" "}
-                          {selectedRecurringStatusTargets.length === 1
-                            ? t.appointments_active_occurrence
-                            : t.appointments_active_occurrences}
-                          .
-                        </p>
-                        {completionScopeBlockers.length > 0 ? (
-                          <Banner tone="warning">
-                            Completing this scope is currently blocked by{" "}
-                            {completionScopeBlockers.length} occurrence
-                            {completionScopeBlockers.length === 1
-                              ? ""
-                              : "s"}:{" "}
-                            {completionScopeBlockers
-                              .map((item) => recurringOccurrenceLabel(item, t))
-                              .join("; ")}
-                          </Banner>
-                        ) : null}
-                      </div>
-                    ) : null}
-                  </section>
+                  <MemoizedAppointmentStatusSection
+                    detail={detail}
+                    openChecklistCount={openChecklistCount}
+                    onRefresh={refreshDetail}
+                    onError={reportDetailError}
+                  />
                 ) : null}
-                {permissions.canEditSchedule && editForm ? (
-                  <section className={sectionCardClass("p-5")}>
-                    <h3 className="text-sm font-semibold text-slate-950">
-                      {t.appointments_title}
-                    </h3>
-                    {editError ? (
-                      <div className="mt-4">
-                        <Banner tone="error">{editError}</Banner>
-                      </div>
-                    ) : null}
-                    <form
-                      onSubmit={handleEditSubmit}
-                      className="mt-4 space-y-4"
-                    >
-                      <Field label={t.appointments_title_col}>
-                        <Input
-                          value={editForm.title}
-                          onChange={(event) =>
-                            setEditForm((current) =>
-                              current
-                                ? { ...current, title: event.target.value }
-                                : current,
-                            )
-                          }
-                          className="h-10 rounded-xl bg-slate-50"
-                        />
-                      </Field>
-                      <Field label={appointmentText("Versorgungspfad", "Траектория лечения", "Care path")}>
-                        <select
-                          value={editForm.carePathKind}
-                          onChange={(event) =>
-                            setEditForm((current) =>
-                              current
-                                ? {
-                                    ...current,
-                                    carePathKind: event.target
-                                      .value as AppointmentCarePathKind,
-                                  }
-                                : current,
-                            )
-                          }
-                          className={selectClassName}
-                          disabled={detail.type !== "medical"}
-                        >
-                          {CARE_PATH_KIND_OPTIONS.map((value) => (
-                            <option key={value} value={value}>
-                              {carePathKindLabel(value)}
-                            </option>
-                          ))}
-                        </select>
-                      </Field>
-                      <div className="grid gap-4 md:grid-cols-3">
-                        <Field label={t.appointments_date}>
-                          <Input
-                            type="date"
-                            value={editForm.date}
-                            onChange={(event) =>
-                              setEditForm((current) =>
-                                current
-                                  ? { ...current, date: event.target.value }
-                                  : current,
-                              )
-                            }
-                            className="h-10 rounded-xl bg-slate-50"
-                          />
-                        </Field>
-                        <Field label={t.appointments_time}>
-                          <Input
-                            type="time"
-                            value={editForm.timeStart}
-                            onChange={(event) =>
-                              setEditForm((current) =>
-                                current
-                                  ? {
-                                      ...current,
-                                      timeStart: event.target.value,
-                                    }
-                                  : current,
-                              )
-                            }
-                            className="h-10 rounded-xl bg-slate-50"
-                          />
-                        </Field>
-                        <Field label={t.appointments_time}>
-                          <Input
-                            type="time"
-                            value={editForm.timeEnd}
-                            onChange={(event) =>
-                              setEditForm((current) =>
-                                current
-                                  ? { ...current, timeEnd: event.target.value }
-                                  : current,
-                              )
-                            }
-                            className="h-10 rounded-xl bg-slate-50"
-                          />
-                        </Field>
-                      </div>
-                      <div className="grid gap-4 md:grid-cols-2">
-                        <Field label={t.common_provider}>
-                          <select
-                            value={editForm.providerId}
-                            onChange={(event) =>
-                              setEditForm((current) =>
-                                current
-                                  ? {
-                                      ...current,
-                                      providerId: event.target.value,
-                                      doctorId: "",
-                                    }
-                                  : current,
-                              )
-                            }
-                            className={selectClassName}
-                            disabled={detail.type === "internal"}
-                          >
-                            <option value="">{t.common_not_set}</option>
-                            {providers.map((provider) => (
-                              <option key={provider.id} value={provider.id}>
-                                {provider.name}
-                              </option>
-                            ))}
-                          </select>
-                        </Field>
-                        <Field label={t.common_doctor}>
-                          <select
-                            value={editForm.doctorId}
-                            onChange={(event) =>
-                              setEditForm((current) =>
-                                current
-                                  ? { ...current, doctorId: event.target.value }
-                                  : current,
-                              )
-                            }
-                            className={selectClassName}
-                            disabled={!editForm.providerId}
-                          >
-                            <option value="">{t.common_not_set}</option>
-                            {editDoctors.map((doctor) => (
-                              <option key={doctor.id} value={doctor.id}>
-                                {doctorLabel(doctor)}
-                              </option>
-                            ))}
-                          </select>
-                        </Field>
-                      </div>
-                      <div className="grid gap-4 md:grid-cols-2">
-                        <Field label={t.patients_assign_owner}>
-                          <select
-                            value={editForm.ownerUserId}
-                            onChange={(event) =>
-                              setEditForm((current) =>
-                                current
-                                  ? {
-                                      ...current,
-                                      ownerUserId: event.target.value,
-                                    }
-                                  : current,
-                              )
-                            }
-                            className={selectClassName}
-                          >
-                            <option value="">{t.common_not_set}</option>
-                            {staff.map((member) => (
-                              <option key={member.id} value={member.id}>
-                                {member.name} · {roleLabel(member.role)}
-                              </option>
-                            ))}
-                          </select>
-                        </Field>
-                        <Field label={t.common_doctor}>
-                          <select
-                            value={editForm.interpreterId}
-                            onChange={(event) =>
-                              setEditForm((current) =>
-                                current
-                                  ? {
-                                      ...current,
-                                      interpreterId: event.target.value,
-                                    }
-                                  : current,
-                              )
-                            }
-                            className={selectClassName}
-                          >
-                            <option value="">{t.common_not_set}</option>
-                            {interpreters.map((member) => (
-                              <option key={member.id} value={member.id}>
-                                {member.name} · {roleLabel(member.role)}
-                              </option>
-                            ))}
-                          </select>
-                        </Field>
-                      </div>
-                      <Field label={t.appointments_location}>
-                        <Input
-                          value={editForm.location}
-                          onChange={(event) =>
-                            setEditForm((current) =>
-                              current
-                                ? { ...current, location: event.target.value }
-                                : current,
-                            )
-                          }
-                          className="h-10 rounded-xl bg-slate-50"
-                        />
-                      </Field>
-                      {detail.recurrence_frequency ? (
-                        <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3">
-                          <Field label={t.appointments_scope_apply_schedule}>
-                            <select
-                              value={editRecurrenceScope}
-                              onChange={(event) =>
-                                setEditRecurrenceScope(
-                                  event.target
-                                    .value as AppointmentRecurringActionScope,
-                                )
-                              }
-                              className={selectClassName}
-                            >
-                              <option value="single">
-                                {t.appointments_scope_single}
-                              </option>
-                              <option value="following">
-                                {t.appointments_scope_following}
-                              </option>
-                              <option value="series">
-                                {t.appointments_scope_series}
-                              </option>
-                            </select>
-                          </Field>
-                          <p className="mt-2 text-xs text-sky-800">
-                            {t.appointments_scope_following_hint}
-                          </p>
-                          <div className="mt-4 grid gap-4 md:grid-cols-2">
-                            <Field label={appointmentText("Wiederholungsrhythmus", "Частота повторения", "Repeat frequency")}>
-                              <select
-                                value={editForm.repeatFrequency}
-                                onChange={(event) =>
-                                  setEditForm((current) =>
-                                    current
-                                      ? {
-                                          ...current,
-                                          repeatFrequency: event.target
-                                            .value as AppointmentRecurrenceFrequency,
-                                        }
-                                      : current,
-                                  )
-                                }
-                                className={selectClassName}
-                                disabled={editRecurrenceScope === "single"}
-                              >
-                                <option value="daily">{recurrenceFrequencyLabel("daily")}</option>
-                                <option value="weekly">{recurrenceFrequencyLabel("weekly")}</option>
-                                <option value="monthly">{recurrenceFrequencyLabel("monthly")}</option>
-                              </select>
-                            </Field>
-                            <Field label={appointmentText("Wiederholen alle", "Повторять каждые", "Repeat every")}>
-                              <Input
-                                inputMode="numeric"
-                                pattern="[0-9]*"
-                                value={editForm.repeatInterval}
-                                onChange={(event) =>
-                                  setEditForm((current) =>
-                                    current
-                                      ? {
-                                          ...current,
-                                          repeatInterval: event.target.value,
-                                        }
-                                      : current,
-                                  )
-                                }
-                                className="h-10 rounded-xl bg-white/80"
-                                disabled={editRecurrenceScope === "single"}
-                              />
-                            </Field>
-                            <Field label={appointmentText("Anzahl Termine", "Всего повторов", "Total occurrences")}>
-                              <Input
-                                inputMode="numeric"
-                                pattern="[0-9]*"
-                                value={editForm.repeatCount}
-                                onChange={(event) =>
-                                  setEditForm((current) =>
-                                    current
-                                      ? {
-                                          ...current,
-                                          repeatCount: event.target.value,
-                                        }
-                                      : current,
-                                  )
-                                }
-                                className="h-10 rounded-xl bg-white/80"
-                                placeholder={appointmentText(
-                                  "Optional, wenn ein Enddatum gesetzt ist",
-                                  "Необязательно, если указана дата окончания",
-                                  "Optional when repeat-until is set",
-                                )}
-                                disabled={editRecurrenceScope === "single"}
-                              />
-                            </Field>
-                            <Field label={appointmentText("Wiederholen bis", "Повторять до", "Repeat until")}>
-                              <Input
-                                type="date"
-                                value={editForm.repeatUntil}
-                                onChange={(event) =>
-                                  setEditForm((current) =>
-                                    current
-                                      ? {
-                                          ...current,
-                                          repeatUntil: event.target.value,
-                                        }
-                                      : current,
-                                  )
-                                }
-                                className="h-10 rounded-xl bg-white/80"
-                                disabled={editRecurrenceScope === "single"}
-                              />
-                            </Field>
-                          </div>
-                          <p className="mt-3 text-xs text-sky-800">
-                            Recurrence rule edits only apply when you target
-                            <span className="font-semibold">
-                              {" "}
-                              this and following
-                            </span>{" "}
-                            or the{" "}
-                            <span className="font-semibold">whole series</span>.
-                            Single-occurrence updates keep the current slot
-                            detached from rule changes.
-                          </p>
-                        </div>
-                      ) : null}
-                      <ConflictPanel conflicts={editConflicts} />
-                      <ScheduleWarningsPanel warnings={editLocalWarnings} />
-                      <div className="flex justify-end">
-                        <Button
-                          type="submit"
-                          className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
-                          disabled={editBusy}
-                        >
-                          {editBusy ? (
-                            <LoaderCircle className="size-4 animate-spin" />
-                          ) : null}
-                          {editBusy ? t.patients_saving : t.common_save}
-                        </Button>
-                      </div>
-                    </form>
-                  </section>
+                {permissions.canEditSchedule ? (
+                  <MemoizedEditAppointmentSection
+                    detail={detail}
+                    appointments={appointments}
+                    providers={providers}
+                    staff={staff}
+                    interpreters={interpreters}
+                    onSaved={handleEditSaved}
+                  />
                 ) : null}
-                {permissions.canAssignInterpreter && !detail.is_blocked ? (
-                  <section className={sectionCardClass("p-5")}>
-                    <h3 className="text-sm font-semibold text-slate-950">
-                      {t.role_interpreter}
-                    </h3>
-                    <form
-                      onSubmit={handleAssignInterpreter}
-                      className="mt-4 grid gap-4 md:grid-cols-[minmax(0,1fr)_auto]"
-                    >
-                      <Field label={t.common_doctor}>
-                        <select
-                          value={editForm?.interpreterId ?? ""}
-                          onChange={(event) =>
-                            setEditForm((current) =>
-                              current
-                                ? {
-                                    ...current,
-                                    interpreterId: event.target.value,
-                                  }
-                                : current,
-                            )
-                          }
-                          className={selectClassName}
-                        >
-                          <option value="">{t.common_not_set}</option>
-                          {interpreters.map((member) => (
-                            <option key={member.id} value={member.id}>
-                              {member.name} · {roleLabel(member.role)}
-                            </option>
-                          ))}
-                        </select>
-                      </Field>
-                      <div className="flex items-end">
-                        <Button
-                          type="submit"
-                          className="rounded-2xl"
-                          disabled={
-                            !editForm?.interpreterId || actionBusy === "assign"
-                          }
-                        >
-                          {actionBusy === "assign" ? (
-                            <LoaderCircle className="size-4 animate-spin" />
-                          ) : null}
-                          Assign interpreter
-                        </Button>
-                      </div>
-                    </form>
-                  </section>
-                ) : null}
-                {permissions.canRespondToAssignment &&
-                detail.interpreter_id === user?.id ? (
-                  <section className={sectionCardClass("p-5")}>
-                    <h3 className="text-sm font-semibold text-slate-950">
-                      {t.role_interpreter}
-                    </h3>
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      {INTERPRETER_RESPONSE_OPTIONS.map((value) => (
-                        <Button
-                          key={value}
-                          variant={
-                            detail.interpreter_response === value
-                              ? "default"
-                              : "outline"
-                          }
-                          className="rounded-2xl"
-                          disabled={Boolean(actionBusy)}
-                          onClick={() => handleInterpreterResponse(value)}
-                        >
-                          {actionBusy === `response:${value}` ? (
-                            <LoaderCircle className="size-4 animate-spin" />
-                          ) : null}
-                          {responseLabel(value)}
-                        </Button>
-                      ))}
-                    </div>
-                  </section>
-                ) : null}
+                <MemoizedAppointmentInterpreterSection
+                  detail={detail}
+                  interpreters={interpreters}
+                  currentUserId={user?.id}
+                  canAssign={permissions.canAssignInterpreter}
+                  canRespond={permissions.canRespondToAssignment}
+                  onRefresh={refreshDetail}
+                  onError={reportDetailError}
+                />
                 {permissions.canManageChecklist ? (
-                  <section className={sectionCardClass("p-5")}>
-                    <h3 className="text-sm font-semibold text-slate-950">
-                      {t.orders_phase}
-                    </h3>
-                    <div className="mt-4 space-y-3">
-                      {detailChecklist.length === 0 ? (
-                        <EmptyState text={t.common_not_set} />
-                      ) : (
-                        detailChecklist.map((item) => (
-                          <div
-                            key={item.id}
-                            className="flex flex-col gap-3 rounded-2xl border border-slate-200/80 bg-slate-50/80 px-4 py-3 md:flex-row md:items-center md:justify-between"
-                          >
-                            <div>
-                              <p className="text-sm font-medium text-slate-900">
-                                {item.item_text}
-                              </p>
-                              <p className="mt-1 text-xs uppercase tracking-[0.12em] text-slate-500">
-                                {item.phase}
-                              </p>
-                            </div>
-                            {item.is_completed ? (
-                              <span className="text-xs font-medium text-emerald-700">
-                                {t.common_completed}{" "}
-                                {formatDateTimeLabel(item.completed_at)}
-                              </span>
-                            ) : (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="rounded-2xl"
-                                disabled={Boolean(actionBusy)}
-                                onClick={() => handleChecklistComplete(item.id)}
-                              >
-                                {actionBusy === `check:${item.id}` ? (
-                                  <LoaderCircle className="size-4 animate-spin" />
-                                ) : null}
-                                {t.common_active}
-                              </Button>
-                            )}
-                          </div>
-                        ))
-                      )}
-                    </div>
-                    <form
-                      onSubmit={handleChecklistSubmit}
-                      className="mt-5 grid gap-4 md:grid-cols-[180px_minmax(0,1fr)_auto]"
-                    >
-                      <Field label={t.orders_phase}>
-                        <select
-                          value={checklistForm.phase}
-                          onChange={(event) =>
-                            setChecklistForm((current) => ({
-                              ...current,
-                              phase: event.target.value,
-                            }))
-                          }
-                          className={selectClassName}
-                        >
-                          {CHECKLIST_PHASES.map((phase) => (
-                            <option key={phase} value={phase}>
-                              {phase}
-                            </option>
-                          ))}
-                        </select>
-                      </Field>
-                      <Field label={t.orders_phase}>
-                        <Input
-                          value={checklistForm.itemText}
-                          onChange={(event) =>
-                            setChecklistForm((current) => ({
-                              ...current,
-                              itemText: event.target.value,
-                            }))
-                          }
-                          placeholder={tr.appointments_title_col}
-                          className="h-10 rounded-xl bg-slate-50"
-                          required
-                        />
-                      </Field>
-                      <div className="flex items-end">
-                        <Button
-                          type="submit"
-                          className="rounded-2xl"
-                          disabled={
-                            checklistBusy || !checklistForm.itemText.trim()
-                          }
-                        >
-                          {checklistBusy ? (
-                            <LoaderCircle className="size-4 animate-spin" />
-                          ) : null}
-                          Add checklist item
-                        </Button>
-                      </div>
-                    </form>
-                  </section>
+                  <MemoizedAppointmentChecklistSection
+                    detail={detail}
+                    items={detailChecklist}
+                    onRefresh={refreshDetail}
+                    onError={reportDetailError}
+                  />
                 ) : null}
                 {permissions.canViewReminders ? (
-                  <section className={sectionCardClass("p-5")}>
-                    <h3 className="text-sm font-semibold text-slate-950">
-                      {t.patients_notes}
-                    </h3>
-                    <div className="mt-4 space-y-3">
-                      {detailReminders.length === 0 ? (
-                        <EmptyState text={t.common_not_set} />
-                      ) : (
-                        detailReminders.map((item) => (
-                          <div
-                            key={item.id}
-                            className="flex flex-col gap-3 rounded-2xl border border-slate-200/80 bg-slate-50/80 px-4 py-3 md:flex-row md:items-center md:justify-between"
-                          >
-                            <div>
-                              <p className="text-sm font-medium text-slate-900">
-                                {item.title}
-                              </p>
-                              <p className="mt-1 text-xs text-slate-500">
-                                {item.user_name} ·{" "}
-                                {formatDateTimeLabel(item.remind_at)}
-                              </p>
-                              {item.description ? (
-                                <p className="mt-2 text-sm text-slate-600">
-                                  {item.description}
-                                </p>
-                              ) : null}
-                            </div>
-                            {item.is_completed ? (
-                              <span className="text-xs font-medium text-emerald-700">
-                                Completed{" "}
-                                {formatDateTimeLabel(item.completed_at)}
-                              </span>
-                            ) : (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="rounded-2xl"
-                                disabled={Boolean(actionBusy)}
-                                onClick={() => handleReminderComplete(item.id)}
-                              >
-                                {actionBusy === `reminder:${item.id}` ? (
-                                  <LoaderCircle className="size-4 animate-spin" />
-                                ) : null}
-                                {t.common_active}
-                              </Button>
-                            )}
-                          </div>
-                        ))
-                      )}
-                    </div>
-                    {permissions.canManageReminders ? (
-                      <form
-                        onSubmit={handleReminderSubmit}
-                        className="mt-5 grid gap-4 md:grid-cols-2"
-                      >
-                        <Field label={t.patients_assign_owner}>
-                          <select
-                            value={reminderForm.userId}
-                            onChange={(event) =>
-                              setReminderForm((current) => ({
-                                ...current,
-                                userId: event.target.value,
-                              }))
-                            }
-                            className={selectClassName}
-                            required
-                          >
-                            <option value="">{t.common_not_set}</option>
-                            {staff.map((member) => (
-                              <option key={member.id} value={member.id}>
-                                {member.name} · {roleLabel(member.role)}
-                              </option>
-                            ))}
-                          </select>
-                        </Field>
-                        <Field label={t.appointments_date}>
-                          <Input
-                            type="datetime-local"
-                            value={reminderForm.remindAt}
-                            onChange={(event) =>
-                              setReminderForm((current) => ({
-                                ...current,
-                                remindAt: event.target.value,
-                              }))
-                            }
-                            className="h-10 rounded-xl bg-slate-50"
-                            required
-                          />
-                        </Field>
-                        <Field label={t.appointments_title_col}>
-                          <Input
-                            value={reminderForm.title}
-                            onChange={(event) =>
-                              setReminderForm((current) => ({
-                                ...current,
-                                title: event.target.value,
-                              }))
-                            }
-                            className="h-10 rounded-xl bg-slate-50"
-                            required
-                          />
-                        </Field>
-                        <Field label={t.providers_service_desc}>
-                          <textarea
-                            value={reminderForm.description}
-                            onChange={(event) =>
-                              setReminderForm((current) => ({
-                                ...current,
-                                description: event.target.value,
-                              }))
-                            }
-                            className={textareaClassName}
-                            rows={3}
-                          />
-                        </Field>
-                        <div className="md:col-span-2 flex justify-end">
-                          <Button
-                            type="submit"
-                            className="rounded-2xl"
-                            disabled={
-                              reminderBusy ||
-                              !reminderForm.userId ||
-                              !reminderForm.remindAt ||
-                              !reminderForm.title.trim()
-                            }
-                          >
-                            {reminderBusy ? (
-                              <LoaderCircle className="size-4 animate-spin" />
-                            ) : null}
-                            {t.appointments_add_reminder}
-                          </Button>
-                        </div>
-                      </form>
-                    ) : null}
-                  </section>
+                  <MemoizedAppointmentRemindersSection
+                    detail={detail}
+                    reminders={detailReminders}
+                    staff={staff}
+                    canManageReminders={permissions.canManageReminders}
+                    onRefresh={refreshDetail}
+                    onError={reportDetailError}
+                  />
                 ) : null}
                 {permissions.canViewReport ? (
-                  <section className={sectionCardClass("p-5")}>
-                    <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                      <div>
-                        <h3 className="text-sm font-semibold text-slate-950">
-                          {t.appointments_interpreter_report_title}
-                        </h3>
-                        <p className="text-xs text-slate-500">
-                          {t.appointments_interpreter_report_subtitle}
-                        </p>
-                      </div>
-                      {detailReport ? (
-                        <span
-                          className={cn(
-                            "rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em]",
-                            reportApprovalBadgeClass(
-                              detailReport.approval_status,
-                            ),
-                          )}
-                        >
-                          {reportApprovalLabel(detailReport.approval_status)}
-                        </span>
-                      ) : null}
-                    </div>
-
-                    {detailReport ? (
-                      <div className="mt-4 space-y-4">
-                        <div className="grid gap-3 xl:grid-cols-3">
-                          <ContextCard
-                            label={t.common_doctor}
-                            value={detailReport.interpreter_name}
-                            meta={`${t.appointments_report_submitted_prefix} ${formatDateTimeLabel(detailReport.created_at)}`}
-                          />
-                          <ContextCard
-                            label={t.appointments_time}
-                            value={`${detailReport.hours} h`}
-                            meta={
-                              detailReport.approval_status === "approved"
-                                ? interpreterReportBillingSyncLabel(
-                                    detailReport.billing_sync_status,
-                                    t,
-                                  )
-                                : detailReport.approval_status === "rejected"
-                                  ? t.appointments_report_needs_interpreter_revision
-                                  : t.appointments_report_waiting_teamlead_review
-                            }
-                          />
-                          <ContextCard
-                            label={tr.patients_notes}
-                            value={
-                              detailReport.approved_by_name ??
-                              (detailReport.approval_status === "pending"
-                                ? t.common_pending
-                                : t.appointments_report_no_reviewer_recorded)
-                            }
-                            meta={reportReviewMeta}
-                          />
-                        </div>
-
-                        {detailReport.notes ? (
-                          <Banner
-                            tone={
-                              detailReport.approval_status === "rejected"
-                                ? "error"
-                                : "warning"
-                            }
-                          >
-                            <span className="font-medium">
-                              {t.appointments_report_reviewer_notes}:
-                            </span>{" "}
-                            {detailReport.notes}
-                          </Banner>
-                        ) : null}
-
-                        {detailReport.approval_status === "approved" ? (
-                          <div
-                            className={cn(
-                              "rounded-2xl border px-4 py-3 text-sm",
-                              interpreterReportBillingSyncClass(
-                                detailReport.billing_sync_status,
-                              ),
-                            )}
-                          >
-                            <div className="font-medium">
-                              {t.appointments_report_billing_sync}
-                            </div>
-                            <div className="mt-1">
-                              {interpreterReportBillingSyncLabel(
-                                detailReport.billing_sync_status,
-                                t,
-                              )}
-                            </div>
-                            <div className="mt-1 text-xs opacity-80">
-                              {detailReport.billing_service_key ? (
-                                <span>
-                                  Catalog key:{" "}
-                                  {detailReport.billing_service_key}
-                                </span>
-                              ) : null}
-                              {detailReport.billing_service_key &&
-                              detailReport.billing_leistung_id
-                                ? " · "
-                                : null}
-                              {detailReport.billing_leistung_id ? (
-                                <span>
-                                  Order line: {detailReport.billing_leistung_id}
-                                </span>
-                              ) : null}
-                            </div>
-                          </div>
-                        ) : null}
-
-                        <div className="rounded-2xl border border-slate-200/80 bg-white px-4 py-3">
-                          {detailReport.report_text ? (
-                            <p className="text-sm leading-6 text-slate-700">
-                              {detailReport.report_text}
-                            </p>
-                          ) : (
-                            <p className="text-sm text-slate-500">
-                              No free-text report submitted.
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="mt-4">
-                        <EmptyState text={tr.common_not_set} />
-                      </div>
-                    )}
-
-                    {canSubmitInterpreterReport ? (
-                      <form
-                        onSubmit={handleReportSubmit}
-                        className="mt-5 grid gap-4 md:grid-cols-[180px_minmax(0,1fr)]"
-                      >
-                        {canResubmitRejectedReport ? (
-                          <div className="md:col-span-2">
-                            <Banner tone="warning">
-                              The latest report was returned. Update the hours
-                              or report text and resubmit it for teamlead
-                              approval.
-                            </Banner>
-                          </div>
-                        ) : null}
-                        <Field label={t.appointments_time}>
-                          <Input
-                            type="number"
-                            min="0"
-                            step="0.25"
-                            value={reportForm.hours}
-                            onChange={(event) =>
-                              setReportForm((current) => ({
-                                ...current,
-                                hours: event.target.value,
-                              }))
-                            }
-                            className="h-10 rounded-xl bg-slate-50"
-                            required
-                          />
-                        </Field>
-                        <Field label={tr.patients_notes}>
-                          <textarea
-                            value={reportForm.reportText}
-                            onChange={(event) =>
-                              setReportForm((current) => ({
-                                ...current,
-                                reportText: event.target.value,
-                              }))
-                            }
-                            className={textareaClassName}
-                            rows={4}
-                            placeholder={tr.patients_notes}
-                          />
-                        </Field>
-                        <div className="md:col-span-2 flex justify-end">
-                          <Button
-                            type="submit"
-                            className="rounded-2xl"
-                            disabled={
-                              actionBusy === "report-submit" ||
-                              !reportForm.hours
-                            }
-                          >
-                            {actionBusy === "report-submit" ? (
-                              <LoaderCircle className="size-4 animate-spin" />
-                            ) : null}
-                            {canResubmitRejectedReport
-                              ? "Resubmit report"
-                              : t.common_save}
-                          </Button>
-                        </div>
-                      </form>
-                    ) : null}
-
-                    {showReportReviewActions ? (
-                      <div className="mt-5 grid gap-4 md:grid-cols-[minmax(0,1fr)_auto]">
-                        <Field label={tr.patients_notes}>
-                          <textarea
-                            value={reportRejectReason}
-                            onChange={(event) =>
-                              setReportRejectReason(event.target.value)
-                            }
-                            className={textareaClassName}
-                            rows={3}
-                            placeholder={tr.patients_notes}
-                          />
-                        </Field>
-                        <div className="flex items-end gap-3">
-                          {permissions.canRejectReport ? (
-                            <Button
-                              variant="outline"
-                              className="rounded-2xl border-rose-200 text-rose-700 hover:bg-rose-50"
-                              disabled={actionBusy === "report-reject"}
-                              onClick={handleRejectReport}
-                            >
-                              {actionBusy === "report-reject" ? (
-                                <LoaderCircle className="size-4 animate-spin" />
-                              ) : null}
-                              Return for revision
-                            </Button>
-                          ) : null}
-                          {permissions.canApproveReport ? (
-                            <Button
-                              className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
-                              disabled={actionBusy === "report-approve"}
-                              onClick={handleApproveReport}
-                            >
-                              {actionBusy === "report-approve" ? (
-                                <LoaderCircle className="size-4 animate-spin" />
-                              ) : null}
-                              Approve hours and report
-                            </Button>
-                          ) : null}
-                        </div>
-                      </div>
-                    ) : null}
-                  </section>
+                  <MemoizedAppointmentReportSection
+                    detail={detail}
+                    detailReport={detailReport}
+                    reportReviewMeta={reportReviewMeta}
+                    canSubmitInterpreterReport={canSubmitInterpreterReport}
+                    canResubmitRejectedReport={canResubmitRejectedReport}
+                    showReportReviewActions={showReportReviewActions}
+                    canApproveReport={permissions.canApproveReport}
+                    canRejectReport={permissions.canRejectReport}
+                    onRefresh={refreshDetail}
+                    onError={reportDetailError}
+                  />
                 ) : null}
                 {permissions.canViewTasks ? (
-                  <section className={sectionCardClass("p-5")}>
-                    <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                      <div>
-                        <h3 className="text-sm font-semibold text-slate-950">
-                          Operational tasks
-                        </h3>
-                        <p className="text-xs text-slate-500">
-                          Appointment-linked follow-up for PM, teamlead,
-                          interpreter and concierge.
-                        </p>
-                      </div>
-                      <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
-                        {detailTasks.length} linked
-                      </span>
-                    </div>
-                    <div className="mt-4 space-y-3">
-                      {detailTasks.length === 0 ? (
-                        <EmptyState text={tr.common_not_set} />
-                      ) : (
-                        detailTasks.map((task) => (
-                          <div
-                            key={task.id}
-                            className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4"
-                          >
-                            <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                              <div className="min-w-0">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <p className="text-sm font-semibold text-slate-950">
-                                    {task.title}
-                                  </p>
-                                  <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                    {taskStatusLabel(task.status)}
-                                  </span>
-                                  <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                    {taskPriorityLabel(task.priority)}
-                                  </span>
-                                </div>
-                                <p className="mt-1 text-xs text-slate-500">
-                                  {task.assigned_to_name} ·{" "}
-                                  {roleLabel(task.assigned_to_role)}
-                                  {task.due_date
-                                    ? appointmentText(
-                                        ` · Fallig ${formatDateTimeLabel(task.due_date)}`,
-                                        ` · Срок ${formatDateTimeLabel(task.due_date)}`,
-                                        ` · Due ${formatDateTimeLabel(task.due_date)}`,
-                                      )
-                                    : ""}
-                                </p>
-                                {task.description ? (
-                                  <p className="mt-3 text-sm leading-6 text-slate-600">
-                                    {task.description}
-                                  </p>
-                                ) : null}
-                              </div>
-                              <div className="flex flex-wrap gap-2">
-                                {TASK_STATUS_OPTIONS.map((status) => (
-                                  <Button
-                                    key={status}
-                                    type="button"
-                                    variant={
-                                      task.status === status
-                                        ? "default"
-                                        : "outline"
-                                    }
-                                    size="sm"
-                                    className={cn(
-                                      "rounded-2xl",
-                                      task.status === status
-                                        ? "bg-slate-950 text-white hover:bg-slate-800"
-                                        : "",
-                                    )}
-                                    disabled={
-                                      Boolean(actionBusy) ||
-                                      task.status === status
-                                    }
-                                    onClick={() =>
-                                      handleTaskStatus(task.id, status)
-                                    }
-                                  >
-                                    {actionBusy ===
-                                    `task:${task.id}:${status}` ? (
-                                      <LoaderCircle className="size-4 animate-spin" />
-                                    ) : null}
-                                    {taskStatusLabel(status)}
-                                  </Button>
-                                ))}
-                              </div>
-                            </div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                    {permissions.canCreateTasks ? (
-                      <form
-                        onSubmit={handleTaskSubmit}
-                        className="mt-5 grid gap-4 md:grid-cols-2"
-                      >
-                        <Field label={tr.appointments_title_col}>
-                          <Input
-                            value={taskForm.title}
-                            onChange={(event) =>
-                              setTaskForm((current) => ({
-                                ...current,
-                                title: event.target.value,
-                              }))
-                            }
-                            placeholder={tr.appointments_title_col}
-                            className="h-10 rounded-xl bg-slate-50"
-                            required
-                          />
-                        </Field>
-                        <Field label={tr.patients_assign_owner}>
-                          <select
-                            value={taskForm.assignedTo}
-                            onChange={(event) =>
-                              setTaskForm((current) => ({
-                                ...current,
-                                assignedTo: event.target.value,
-                              }))
-                            }
-                            className={selectClassName}
-                            required
-                          >
-                            <option value="">{tr.common_not_set}</option>
-                            {taskAssignableStaff.map((member) => (
-                              <option key={member.id} value={member.id}>
-                                {member.name} · {roleLabel(member.role)}
-                              </option>
-                            ))}
-                          </select>
-                        </Field>
-                        <Field label={tr.invoices_due_at}>
-                          <Input
-                            type="datetime-local"
-                            value={taskForm.dueDate}
-                            onChange={(event) =>
-                              setTaskForm((current) => ({
-                                ...current,
-                                dueDate: event.target.value,
-                              }))
-                            }
-                            className="h-10 rounded-xl bg-slate-50"
-                          />
-                        </Field>
-                        <Field label={t.users_status}>
-                          <select
-                            value={taskForm.priority}
-                            onChange={(event) =>
-                              setTaskForm((current) => ({
-                                ...current,
-                                priority: event.target.value,
-                              }))
-                            }
-                            className={selectClassName}
-                          >
-                            {TASK_PRIORITY_OPTIONS.map((priority) => (
-                              <option key={priority} value={priority}>
-                                {taskPriorityLabel(priority)}
-                              </option>
-                            ))}
-                          </select>
-                        </Field>
-                        <Field label={t.providers_service_desc}>
-                          <textarea
-                            value={taskForm.description}
-                            onChange={(event) =>
-                              setTaskForm((current) => ({
-                                ...current,
-                                description: event.target.value,
-                              }))
-                            }
-                            className={textareaClassName}
-                            rows={3}
-                            placeholder={tr.patients_notes}
-                          />
-                        </Field>
-                        <div className="flex items-end justify-end md:col-span-2">
-                          <Button
-                            type="submit"
-                            className="rounded-2xl"
-                            disabled={
-                              taskBusy ||
-                              !taskForm.title.trim() ||
-                              !taskForm.assignedTo
-                            }
-                          >
-                            {taskBusy ? (
-                              <LoaderCircle className="size-4 animate-spin" />
-                            ) : null}
-                            Add task
-                          </Button>
-                        </div>
-                      </form>
-                    ) : null}
-                  </section>
+                  <MemoizedAppointmentTasksSection
+                    detail={detail}
+                    tasks={detailTasks}
+                    assignableStaff={taskAssignableStaff}
+                    canCreateTasks={permissions.canCreateTasks}
+                    onRefresh={refreshDetail}
+                    onError={reportDetailError}
+                  />
                 ) : null}
                 {canShowConciergeSection ? (
-                  <section className={sectionCardClass("p-5")}>
-                    <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                      <div>
-                        <h3 className="text-sm font-semibold text-slate-950">
-                          Concierge and VIP services
-                        </h3>
-                        <p className="text-xs text-slate-500">
-                          Travel, transfer and VIP execution linked to this
-                          appointment.
-                        </p>
-                      </div>
-                      <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
-                        {detailServices.length} service
-                        {detailServices.length === 1 ? "" : "s"}
-                      </span>
-                    </div>
-                    <div className="mt-4 space-y-4">
-                      {detailServices.length === 0 ? (
-                        <EmptyState text={tr.common_not_set} />
-                      ) : (
-                        detailServices.map((service) => {
-                          const draft =
-                            serviceDrafts[service.id] ??
-                            buildServiceDraft(service);
-                          return (
-                            <div
-                              key={service.id}
-                              className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4"
-                            >
-                              <div className="flex flex-col gap-4">
-                                <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-                                  <div className="min-w-0">
-                                    <div className="flex flex-wrap items-center gap-2">
-                                      <p className="text-sm font-semibold text-slate-950">
-                                        {service.title}
-                                      </p>
-                                      <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                        {serviceKindLabel(service.service_kind)}
-                                      </span>
-                                      <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                        {taskStatusLabel(service.status)}
-                                      </span>
-                                      <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                        {billingStatusLabel(
-                                          service.billing_status,
-                                        )}
-                                      </span>
-                                    </div>
-                                    <p className="mt-1 text-xs text-slate-500">
-                                      {service.assigned_concierge_name ||
-                                        tr.common_not_set}
-                                      {service.provider_name
-                                        ? ` · ${service.provider_name}`
-                                        : ""}
-                                      {service.starts_at
-                                        ? ` · ${formatDateTimeLabel(service.starts_at)}`
-                                        : ""}
-                                    </p>
-                                  </div>
-                                  <div className="text-xs text-slate-500 xl:text-right">
-                                    <div>
-                                      Estimate{" "}
-                                      {formatMoneyLabel(
-                                        service.cost_estimate,
-                                        draft.currency || service.currency,
-                                      )}
-                                    </div>
-                                    <div>
-                                      Actual{" "}
-                                      {formatMoneyLabel(
-                                        draft.actualCost || service.actual_cost,
-                                        draft.currency || service.currency,
-                                      )}
-                                    </div>
-                                  </div>
-                                </div>
-                                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                                  {permissions.canManageConciergeBilling ? (
-                                    <>
-                                      <Field label={t.appointments_title_col}>
-                                        <Input
-                                          value={draft.title}
-                                          onChange={(event) =>
-                                            updateServiceDraft(service.id, {
-                                              title: event.target.value,
-                                            })
-                                          }
-                                          className="h-10 rounded-xl bg-white"
-                                        />
-                                      </Field>
-                                      <Field label={t.common_provider}>
-                                        <select
-                                          value={draft.providerId}
-                                          onChange={(event) =>
-                                            updateServiceDraft(service.id, {
-                                              providerId: event.target.value,
-                                            })
-                                          }
-                                          className={selectClassName}
-                                        >
-                                          <option value="">No provider</option>
-                                          {nonMedicalProviders.map(
-                                            (provider) => (
-                                              <option
-                                                key={provider.id}
-                                                value={provider.id}
-                                              >
-                                                {provider.name}
-                                              </option>
-                                            ),
-                                          )}
-                                        </select>
-                                      </Field>
-                                      <Field label={tr.role_concierge}>
-                                        <select
-                                          value={draft.assignedConciergeId}
-                                          onChange={(event) =>
-                                            updateServiceDraft(service.id, {
-                                              assignedConciergeId:
-                                                event.target.value,
-                                            })
-                                          }
-                                          className={selectClassName}
-                                        >
-                                          <option value="">No concierge</option>
-                                          {conciergeStaff.map((member) => (
-                                            <option
-                                              key={member.id}
-                                              value={member.id}
-                                            >
-                                              {member.name}
-                                            </option>
-                                          ))}
-                                        </select>
-                                      </Field>
-                                    </>
-                                  ) : null}
-                                  <Field label={tr.users_status}>
-                                    <select
-                                      value={draft.status}
-                                      onChange={(event) =>
-                                        updateServiceDraft(service.id, {
-                                          status: event.target.value,
-                                        })
-                                      }
-                                      className={selectClassName}
-                                    >
-                                      {CONCIERGE_SERVICE_STATUS_OPTIONS.map(
-                                        (status) => (
-                                          <option key={status} value={status}>
-                                            {taskStatusLabel(status)}
-                                          </option>
-                                        ),
-                                      )}
-                                    </select>
-                                  </Field>
-                                  <Field label={tr.appointments_title_col}>
-                                    <Input
-                                      value={draft.bookingReference}
-                                      onChange={(event) =>
-                                        updateServiceDraft(service.id, {
-                                          bookingReference: event.target.value,
-                                        })
-                                      }
-                                      className="h-10 rounded-xl bg-white"
-                                    />
-                                  </Field>
-                                  <Field label={tr.contracts_total}>
-                                    <Input
-                                      type="number"
-                                      min="0"
-                                      step="0.01"
-                                      value={draft.actualCost}
-                                      onChange={(event) =>
-                                        updateServiceDraft(service.id, {
-                                          actualCost: event.target.value,
-                                        })
-                                      }
-                                      className="h-10 rounded-xl bg-white"
-                                    />
-                                  </Field>
-                                  <Field label={tr.common_provider}>
-                                    <Input
-                                      value={draft.vendorName}
-                                      onChange={(event) =>
-                                        updateServiceDraft(service.id, {
-                                          vendorName: event.target.value,
-                                        })
-                                      }
-                                      className="h-10 rounded-xl bg-white"
-                                    />
-                                  </Field>
-                                  <Field label={tr.field_phone}>
-                                    <Input
-                                      value={draft.vendorContact}
-                                      onChange={(event) =>
-                                        updateServiceDraft(service.id, {
-                                          vendorContact: event.target.value,
-                                        })
-                                      }
-                                      className="h-10 rounded-xl bg-white"
-                                    />
-                                  </Field>
-                                  <Field
-                                    label={tr.providers_service_valid_from}
-                                  >
-                                    <Input
-                                      type="datetime-local"
-                                      value={draft.startsAt}
-                                      onChange={(event) =>
-                                        updateServiceDraft(service.id, {
-                                          startsAt: event.target.value,
-                                        })
-                                      }
-                                      className="h-10 rounded-xl bg-white"
-                                    />
-                                  </Field>
-                                  <Field label={tr.providers_service_valid_to}>
-                                    <Input
-                                      type="datetime-local"
-                                      value={draft.endsAt}
-                                      onChange={(event) =>
-                                        updateServiceDraft(service.id, {
-                                          endsAt: event.target.value,
-                                        })
-                                      }
-                                      className="h-10 rounded-xl bg-white"
-                                    />
-                                  </Field>
-                                  {permissions.canManageConciergeBilling ? (
-                                    <>
-                                      <Field label={tr.users_status}>
-                                        <select
-                                          value={draft.billingStatus}
-                                          onChange={(event) =>
-                                            updateServiceDraft(service.id, {
-                                              billingStatus: event.target.value,
-                                            })
-                                          }
-                                          className={selectClassName}
-                                        >
-                                          {CONCIERGE_BILLING_STATUS_OPTIONS.map(
-                                            (status) => (
-                                              <option
-                                                key={status}
-                                                value={status}
-                                              >
-                                                {billingStatusLabel(status)}
-                                              </option>
-                                            ),
-                                          )}
-                                        </select>
-                                      </Field>
-                                      <Field label={tr.contracts_total}>
-                                        <Input
-                                          value={draft.currency}
-                                          onChange={(event) =>
-                                            updateServiceDraft(service.id, {
-                                              currency: event.target.value,
-                                            })
-                                          }
-                                          className="h-10 rounded-xl bg-white"
-                                          maxLength={3}
-                                        />
-                                      </Field>
-                                    </>
-                                  ) : null}
-                                </div>
-                                <div className="grid gap-4 md:grid-cols-2">
-                                  <Field label={tr.patients_notes}>
-                                    <textarea
-                                      value={draft.serviceNotes}
-                                      onChange={(event) =>
-                                        updateServiceDraft(service.id, {
-                                          serviceNotes: event.target.value,
-                                        })
-                                      }
-                                      className={textareaClassName}
-                                      rows={3}
-                                    />
-                                  </Field>
-                                  {permissions.canManageConciergeBilling ? (
-                                    <Field label={tr.patients_notes}>
-                                      <textarea
-                                        value={draft.billingNotes}
-                                        onChange={(event) =>
-                                          updateServiceDraft(service.id, {
-                                            billingNotes: event.target.value,
-                                          })
-                                        }
-                                        className={textareaClassName}
-                                        rows={3}
-                                      />
-                                    </Field>
-                                  ) : null}
-                                </div>
-                                <div className="flex justify-end">
-                                  <Button
-                                    type="button"
-                                    className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
-                                    disabled={
-                                      actionBusy === `service:${service.id}`
-                                    }
-                                    onClick={() =>
-                                      handleServiceSave(service.id)
-                                    }
-                                  >
-                                    {actionBusy === `service:${service.id}` ? (
-                                      <LoaderCircle className="size-4 animate-spin" />
-                                    ) : null}
-                                    Save service
-                                  </Button>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-                    {permissions.canManageConciergeServices ? (
-                      <form
-                        onSubmit={handleServiceSubmit}
-                        className="mt-5 grid gap-4 md:grid-cols-2"
-                      >
-                        <Field label={tr.documents_category}>
-                          <select
-                            value={serviceForm.serviceKind}
-                            onChange={(event) =>
-                              setServiceForm((current) => ({
-                                ...current,
-                                serviceKind: event.target.value,
-                              }))
-                            }
-                            className={selectClassName}
-                          >
-                            {CONCIERGE_SERVICE_KIND_OPTIONS.map((kind) => (
-                              <option key={kind} value={kind}>
-                                {serviceKindLabel(kind)}
-                              </option>
-                            ))}
-                          </select>
-                        </Field>
-                        <Field label={tr.appointments_title_col}>
-                          <Input
-                            value={serviceForm.title}
-                            onChange={(event) =>
-                              setServiceForm((current) => ({
-                                ...current,
-                                title: event.target.value,
-                              }))
-                            }
-                            className="h-10 rounded-xl bg-slate-50"
-                            required
-                          />
-                        </Field>
-                        <Field label={t.common_provider}>
-                          <select
-                            value={serviceForm.providerId}
-                            onChange={(event) =>
-                              setServiceForm((current) => ({
-                                ...current,
-                                providerId: event.target.value,
-                              }))
-                            }
-                            className={selectClassName}
-                          >
-                            <option value="">No provider</option>
-                            {nonMedicalProviders.map((provider) => (
-                              <option key={provider.id} value={provider.id}>
-                                {provider.name}
-                              </option>
-                            ))}
-                          </select>
-                        </Field>
-                        <Field label={tr.role_concierge}>
-                          <select
-                            value={serviceForm.assignedConciergeId}
-                            onChange={(event) =>
-                              setServiceForm((current) => ({
-                                ...current,
-                                assignedConciergeId: event.target.value,
-                              }))
-                            }
-                            className={selectClassName}
-                          >
-                            <option value="">No concierge</option>
-                            {conciergeStaff.map((member) => (
-                              <option key={member.id} value={member.id}>
-                                {member.name}
-                              </option>
-                            ))}
-                          </select>
-                        </Field>
-                        <Field label={tr.providers_service_valid_from}>
-                          <Input
-                            type="datetime-local"
-                            value={serviceForm.startsAt}
-                            onChange={(event) =>
-                              setServiceForm((current) => ({
-                                ...current,
-                                startsAt: event.target.value,
-                              }))
-                            }
-                            className="h-10 rounded-xl bg-slate-50"
-                          />
-                        </Field>
-                        <Field label={tr.providers_service_valid_to}>
-                          <Input
-                            type="datetime-local"
-                            value={serviceForm.endsAt}
-                            onChange={(event) =>
-                              setServiceForm((current) => ({
-                                ...current,
-                                endsAt: event.target.value,
-                              }))
-                            }
-                            className="h-10 rounded-xl bg-slate-50"
-                          />
-                        </Field>
-                        <Field label={tr.common_provider}>
-                          <Input
-                            value={serviceForm.vendorName}
-                            onChange={(event) =>
-                              setServiceForm((current) => ({
-                                ...current,
-                                vendorName: event.target.value,
-                              }))
-                            }
-                            className="h-10 rounded-xl bg-slate-50"
-                          />
-                        </Field>
-                        <Field label={tr.field_phone}>
-                          <Input
-                            value={serviceForm.vendorContact}
-                            onChange={(event) =>
-                              setServiceForm((current) => ({
-                                ...current,
-                                vendorContact: event.target.value,
-                              }))
-                            }
-                            className="h-10 rounded-xl bg-slate-50"
-                          />
-                        </Field>
-                        <Field label={tr.contracts_total}>
-                          <Input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            value={serviceForm.costEstimate}
-                            onChange={(event) =>
-                              setServiceForm((current) => ({
-                                ...current,
-                                costEstimate: event.target.value,
-                              }))
-                            }
-                            className="h-10 rounded-xl bg-slate-50"
-                          />
-                        </Field>
-                        <Field label={tr.contracts_total}>
-                          <Input
-                            value={serviceForm.currency}
-                            onChange={(event) =>
-                              setServiceForm((current) => ({
-                                ...current,
-                                currency: event.target.value,
-                              }))
-                            }
-                            className="h-10 rounded-xl bg-slate-50"
-                            maxLength={3}
-                          />
-                        </Field>
-                        <Field label={tr.patients_notes}>
-                          <textarea
-                            value={serviceForm.serviceNotes}
-                            onChange={(event) =>
-                              setServiceForm((current) => ({
-                                ...current,
-                                serviceNotes: event.target.value,
-                              }))
-                            }
-                            className={textareaClassName}
-                            rows={3}
-                          />
-                        </Field>
-                        <div className="flex items-end justify-end md:col-span-2">
-                          <Button
-                            type="submit"
-                            className="rounded-2xl"
-                            disabled={serviceBusy || !serviceForm.title.trim()}
-                          >
-                            {serviceBusy ? (
-                              <LoaderCircle className="size-4 animate-spin" />
-                            ) : null}
-                            Add service
-                          </Button>
-                        </div>
-                      </form>
-                    ) : null}
-                  </section>
+                  <MemoizedAppointmentConciergeSection
+                    detail={detail}
+                    services={detailServices}
+                    nonMedicalProviders={nonMedicalProviders}
+                    conciergeStaff={conciergeStaff}
+                    canManageConciergeServices={
+                      permissions.canManageConciergeServices
+                    }
+                    canManageConciergeBilling={permissions.canManageConciergeBilling}
+                    onRefresh={refreshDetail}
+                    onError={reportDetailError}
+                  />
                 ) : null}
                 {canShowBillingHandoffSection ? (
-                  <section className={sectionCardClass("p-5")}>
-                    <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                      <div>
-                        <h3 className="text-sm font-semibold text-slate-950">
-                          {appointmentText(
-                            "Ubergabe an Abrechnung und Settlement",
-                            "Передача в биллинг и расчёты",
-                            "Billing and settlement handoff",
-                          )}
-                        </h3>
-                        <p className="text-xs text-slate-500">
-                          {appointmentText(
-                            "Strukturierte Ubergabe an die Abrechnung, bevor die Dokumentenschicht nachzieht.",
-                            "Структурированная передача в биллинг до того, как подключится документный слой.",
-                            "Structured transfer to billing before the document layer lands.",
-                          )}
-                        </p>
-                      </div>
-                      <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
-                        {billingHandoffTasks.length +
-                          billingHandoffReminders.length}{" "}
-                        {appointmentText("verknupft", "связано", "linked")}
-                      </span>
-                    </div>
-
-                    <div className="mt-4 grid gap-3 xl:grid-cols-3">
-                      <ContextCard
-                        label={tr.role_interpreter}
-                        value={
-                          detail?.interpreter_id
-                            ? interpreterReportReady && detailReport
-                              ? appointmentText(
-                                  `${detailReport.hours} Std. freigegeben`,
-                                  `${detailReport.hours} ч согласовано`,
-                                  `${detailReport.hours} h approved`,
-                                )
-                              : appointmentText(
-                                  "Freigabe ausstehend",
-                                  "Ожидает согласования",
-                                  "Pending approval",
-                                )
-                            : appointmentText("Nicht erforderlich", "Не требуется", "Not required")
-                        }
-                        meta={
-                          detail?.interpreter_id
-                            ? detailReport
-                              ? reportReviewMeta ||
-                                reportApprovalLabel(
-                                  detailReport.approval_status,
-                                )
-                              : appointmentText(
-                                  "Kein Bericht eingereicht",
-                                  "Отчёт не отправлен",
-                                  "No report submitted",
-                                )
-                            : appointmentText(
-                                "Kein Dolmetscher fur diesen Termin",
-                                "Для этого приёма нет переводчика",
-                                "No interpreter on this appointment",
-                              )
-                        }
-                      />
-                      <ContextCard
-                        label={tr.role_concierge}
-                        value={
-                          detail?.type === "non_medical"
-                            ? appointmentText(
-                                `${readyConciergeServices.length} bereit / ${settledConciergeServices.length} abgerechnet`,
-                                `${readyConciergeServices.length} готово / ${settledConciergeServices.length} выставлено`,
-                                `${readyConciergeServices.length} ready / ${settledConciergeServices.length} billed`,
-                              )
-                            : appointmentText("Nicht anwendbar", "Не применимо", "Not applicable")
-                        }
-                        meta={
-                          detail?.type === "non_medical"
-                            ? appointmentText(
-                                `${detailServices.length} Leistung(en) verknupft`,
-                                `${detailServices.length} услуг(а) связано`,
-                                `${detailServices.length} service(s) linked`,
-                              )
-                            : appointmentText(
-                                "Medizinischer Termin",
-                                "Медицинский приём",
-                                "Medical appointment",
-                              )
-                        }
-                      />
-                      <ContextCard
-                        label={tr.role_billing}
-                        value={appointmentText(
-                          `${openBillingHandoffTasks.length} offene Aufgabe(n)`,
-                          `${openBillingHandoffTasks.length} открытых задач`,
-                          `${openBillingHandoffTasks.length} open task(s)`,
-                        )}
-                        meta={appointmentText(
-                          `${billingHandoffReminders.length} Erinnerung(en) verknupft`,
-                          `${billingHandoffReminders.length} напоминаний связано`,
-                          `${billingHandoffReminders.length} reminder(s) linked`,
-                        )}
-                      />
-                    </div>
-
-                    {billingReadinessWarnings.length > 0 ? (
-                      <div className="mt-4 space-y-2">
-                        {billingReadinessWarnings.map((warning) => (
-                          <Banner key={warning} tone="warning">
-                            {warning}
-                          </Banner>
-                        ))}
-                      </div>
-                    ) : null}
-
-                    <div className="mt-5 grid gap-4 xl:grid-cols-2">
-                      <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
-                        <div className="flex items-center justify-between gap-3">
-                          <h4 className="text-sm font-semibold text-slate-950">
-                            {appointmentText(
-                              "Billing-Erinnerungen",
-                              "Напоминания для биллинга",
-                              "Billing reminders",
-                            )}
-                          </h4>
-                          <span className="text-xs text-slate-500">
-                            {billingHandoffReminders.length}{" "}
-                            {appointmentText("verknupft", "связано", "linked")}
-                          </span>
-                        </div>
-                        <div className="mt-3 space-y-3">
-                          {billingHandoffReminders.length === 0 ? (
-                            <EmptyState text={tr.common_not_set} />
-                          ) : (
-                            billingHandoffReminders.map((item) => (
-                              <div
-                                key={item.id}
-                                className="rounded-2xl border border-slate-200 bg-white px-4 py-3"
-                              >
-                                <p className="text-sm font-medium text-slate-900">
-                                  {item.title}
-                                </p>
-                                <p className="mt-1 text-xs text-slate-500">
-                                  {item.user_name} ·{" "}
-                                  {formatDateTimeLabel(item.remind_at)}
-                                </p>
-                                {item.description ? (
-                                  <p className="mt-2 text-sm text-slate-600">
-                                    {item.description}
-                                  </p>
-                                ) : null}
-                              </div>
-                            ))
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
-                        <div className="flex items-center justify-between gap-3">
-                          <h4 className="text-sm font-semibold text-slate-950">
-                            {appointmentText(
-                              "Billing-Aufgaben",
-                              "Задачи биллинга",
-                              "Billing tasks",
-                            )}
-                          </h4>
-                          <span className="text-xs text-slate-500">
-                            {billingHandoffTasks.length}{" "}
-                            {appointmentText("verknupft", "связано", "linked")}
-                          </span>
-                        </div>
-                        <div className="mt-3 space-y-3">
-                          {billingHandoffTasks.length === 0 ? (
-                            <EmptyState text={tr.common_not_set} />
-                          ) : (
-                            billingHandoffTasks.map((task) => (
-                              <div
-                                key={task.id}
-                                className="rounded-2xl border border-slate-200 bg-white px-4 py-3"
-                              >
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <p className="text-sm font-medium text-slate-900">
-                                    {task.title}
-                                  </p>
-                                  <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                    {taskStatusLabel(task.status)}
-                                  </span>
-                                  <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                    {taskPriorityLabel(task.priority)}
-                                  </span>
-                                </div>
-                                <p className="mt-1 text-xs text-slate-500">
-                                  {task.assigned_to_name} ·{" "}
-                                  {roleLabel(task.assigned_to_role)}
-                                  {task.due_date
-                                    ? appointmentText(
-                                        ` · Fallig ${formatDateTimeLabel(task.due_date)}`,
-                                        ` · Срок ${formatDateTimeLabel(task.due_date)}`,
-                                        ` · Due ${formatDateTimeLabel(task.due_date)}`,
-                                      )
-                                    : ""}
-                                </p>
-                                {task.description ? (
-                                  <p className="mt-2 text-sm text-slate-600">
-                                    {task.description}
-                                  </p>
-                                ) : null}
-                              </div>
-                            ))
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    {permissions.canManageConciergeBilling ? (
-                      <form
-                        onSubmit={handleBillingHandoffSubmit}
-                        className="mt-5 grid gap-4 md:grid-cols-2"
-                      >
-                        <Field label={tr.role_billing}>
-                          <select
-                            value={billingHandoffForm.kind}
-                            onChange={(event) =>
-                              setBillingHandoffForm((current) => ({
-                                ...current,
-                                kind: event.target.value as BillingHandoffKind,
-                              }))
-                            }
-                            className={selectClassName}
-                          >
-                            {(
-                              [
-                                "interpreter_hours",
-                                "concierge_settlement",
-                                "patient_invoice",
-                                "provider_invoice",
-                                "payment_confirmation",
-                                "other",
-                              ] as BillingHandoffKind[]
-                            ).map((kind) => (
-                              <option key={kind} value={kind}>
-                                {billingHandoffKindLabel(kind)}
-                              </option>
-                            ))}
-                          </select>
-                        </Field>
-                        <Field label={tr.role_billing}>
-                          <select
-                            value={billingHandoffForm.assigneeId}
-                            onChange={(event) =>
-                              setBillingHandoffForm((current) => ({
-                                ...current,
-                                assigneeId: event.target.value,
-                              }))
-                            }
-                            className={selectClassName}
-                            required
-                          >
-                            <option value="">
-                              {appointmentText(
-                                "Billing-Zustandigen auswahlen",
-                                "Выберите ответственного из биллинга",
-                                "Select billing assignee",
-                              )}
-                            </option>
-                            {billingStaff.map((member) => (
-                              <option key={member.id} value={member.id}>
-                                {member.name} · {roleLabel(member.role)}
-                              </option>
-                            ))}
-                          </select>
-                        </Field>
-                        <Field label={tr.invoices_due_at}>
-                          <Input
-                            type="datetime-local"
-                            value={billingHandoffForm.dueAt}
-                            onChange={(event) =>
-                              setBillingHandoffForm((current) => ({
-                                ...current,
-                                dueAt: event.target.value,
-                              }))
-                            }
-                            className="h-10 rounded-xl bg-slate-50"
-                            required
-                          />
-                        </Field>
-                        <Field label={tr.appointments_title_col}>
-                          <select
-                            value={billingHandoffForm.taskPriority}
-                            onChange={(event) =>
-                              setBillingHandoffForm((current) => ({
-                                ...current,
-                                taskPriority: event.target.value,
-                              }))
-                            }
-                            className={selectClassName}
-                          >
-                            {TASK_PRIORITY_OPTIONS.map((priority) => (
-                              <option key={priority} value={priority}>
-                                {taskPriorityLabel(priority)}
-                              </option>
-                            ))}
-                          </select>
-                        </Field>
-                        <Field label={tr.appointments_title_col}>
-                          <Input
-                            value={billingHandoffForm.title}
-                            onChange={(event) =>
-                              setBillingHandoffForm((current) => ({
-                                ...current,
-                                title: event.target.value,
-                              }))
-                            }
-                            className="h-10 rounded-xl bg-slate-50"
-                            placeholder={tr.appointments_title_col}
-                          />
-                        </Field>
-                        <Field label={t.patients_notes}>
-                          <textarea
-                            value={billingHandoffForm.notes}
-                            onChange={(event) =>
-                              setBillingHandoffForm((current) => ({
-                                ...current,
-                                notes: event.target.value,
-                              }))
-                            }
-                            className={textareaClassName}
-                            rows={3}
-                            placeholder={tr.patients_notes}
-                          />
-                        </Field>
-                        <div className="md:col-span-2 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                          <label className="flex items-center gap-2 text-sm text-slate-600">
-                            <input
-                              type="checkbox"
-                              checked={billingHandoffForm.createTask}
-                              onChange={(event) =>
-                                setBillingHandoffForm((current) => ({
-                                  ...current,
-                                  createTask: event.target.checked,
-                                }))
-                              }
-                              className="size-4 rounded border-slate-300"
-                            />
-                            Mirror this billing handoff as a task
-                          </label>
-                          <div className="flex flex-wrap justify-end gap-3">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              className="rounded-2xl"
-                              disabled={!billingHandoffForm.assigneeId}
-                              onClick={openBillingHandoffChatDraft}
-                            >
-                              Open billing chat draft
-                            </Button>
-                            <Button
-                              type="submit"
-                              className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
-                              disabled={
-                                billingHandoffBusy ||
-                                !billingHandoffForm.assigneeId ||
-                                !billingHandoffForm.dueAt ||
-                                billingStaff.length === 0
-                              }
-                            >
-                              {billingHandoffBusy ? (
-                                <LoaderCircle className="size-4 animate-spin" />
-                              ) : null}
-                              Create billing handoff
-                            </Button>
-                          </div>
-                        </div>
-                      </form>
-                    ) : null}
-                  </section>
+                  <MemoizedAppointmentBillingHandoffSection
+                    detail={detail}
+                    detailReport={detailReport}
+                    reportReviewMeta={reportReviewMeta}
+                    interpreterReportReady={interpreterReportReady}
+                    serviceCount={detailServices.length}
+                    billingStaff={billingStaff}
+                    reminders={billingHandoffReminders}
+                    tasks={billingHandoffTasks}
+                    openTasks={openBillingHandoffTasks}
+                    readyServices={readyConciergeServices}
+                    settledServices={settledConciergeServices}
+                    warnings={billingReadinessWarnings}
+                    canManageConciergeBilling={permissions.canManageConciergeBilling}
+                    canCreateTasks={permissions.canCreateTasks}
+                    onRefresh={refreshDetail}
+                    onError={reportDetailError}
+                  />
                 ) : null}
                 {permissions.canViewNotes && !detail.is_blocked ? (
                   <section className={sectionCardClass("p-5")}>
@@ -11977,7 +13017,9 @@ function StaffAppointmentsPage() {
             )}
           </div>
         </SheetContent>
+        ) : null}
       </Sheet>
+      ) : null}
     </>
   );
 }

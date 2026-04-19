@@ -3,9 +3,11 @@ import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { canAccessPatientPortalRoute, canAccessStaffRoute } from "@/lib/staff-route-access";
 import { NavStateProvider } from "@/lib/nav-state";
+import { AppointmentWorkspaceNav } from "./appointment-workspace-nav";
 import { NavPanel } from "./nav-panel";
 import { PatientWorkspaceNav } from "./patient-workspace-nav";
 import { Topbar } from "./topbar";
+import { Toaster } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 
 export function AppLayout() {
@@ -46,6 +48,11 @@ function AppLayoutInner() {
   const { user } = useAuth();
   const location = useLocation();
   const showPatientWorkspaceNav = Boolean(matchPath("/patients/:id", location.pathname));
+  const appointmentParams = new URLSearchParams(location.search);
+  const showAppointmentWorkspaceNav =
+    user?.role !== "patient" &&
+    location.pathname === "/appointments" &&
+    Boolean(appointmentParams.get("appointment"));
 
   if (
     user &&
@@ -61,7 +68,11 @@ function AppLayoutInner() {
         <Topbar />
         <div className="flex-1 flex overflow-hidden gap-[6px] p-[6px] bg-muted/50">
           <NavPanel />
-          {showPatientWorkspaceNav ? <PatientWorkspaceNav /> : null}
+          {showPatientWorkspaceNav ? (
+            <PatientWorkspaceNav />
+          ) : showAppointmentWorkspaceNav ? (
+            <AppointmentWorkspaceNav />
+          ) : null}
           <main
             className={cn(
               "flex-1 overflow-auto rounded-xl bg-card px-7 py-6 transition-[padding] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]"
@@ -71,6 +82,7 @@ function AppLayoutInner() {
           </main>
         </div>
       </div>
+      <Toaster />
     </div>
   );
 }
