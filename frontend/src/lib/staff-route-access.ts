@@ -123,6 +123,7 @@ export const ROLES_CASES = [
 
 /** `crates/server/src/routes/orders.rs:157` (`list_orders`) */
 export const ROLES_ORDERS = [
+  "ceo",
   "patient_manager",
   "billing",
 ] as const satisfies readonly StaffRole[];

@@ -185,10 +185,10 @@ describe("canAccessStaffRoute", () => {
     expect(canAccessStaffRoute("sales", "/cases")).toBe(false);
   });
 
-  it("blocks non-order roles from /orders (Phase F: matches list_orders allow list)", () => {
+  it("blocks non-order roles from /orders", () => {
     expect(canAccessStaffRoute("patient_manager", "/orders")).toBe(true);
     expect(canAccessStaffRoute("billing", "/orders")).toBe(true);
-    expect(canAccessStaffRoute("ceo", "/orders")).toBe(false);
+    expect(canAccessStaffRoute("ceo", "/orders")).toBe(true);
     expect(canAccessStaffRoute("interpreter", "/orders")).toBe(false);
     expect(canAccessStaffRoute("sales", "/orders")).toBe(false);
   });
