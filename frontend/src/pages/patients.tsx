@@ -87,7 +87,7 @@ type PatientSummary = {
   created_at: string;
 };
 
-type PatientDetail = PatientSummary & {
+export type PatientDetail = PatientSummary & {
   updated_at?: string;
   phone_secondary?: string | null;
   address_street?: string | null;
@@ -102,7 +102,7 @@ type PatientDetail = PatientSummary & {
   notes?: string | null;
 };
 
-type PatientAssignment = {
+export type PatientAssignment = {
   user_id: string;
   user_name: string;
   user_role: string;
@@ -112,7 +112,7 @@ type PatientAssignment = {
   revoked_at: string | null;
 };
 
-type StaffOption = {
+export type StaffOption = {
   id: string;
   name: string;
   role: string;
@@ -272,7 +272,7 @@ function patientToForm(detail: PatientDetail): PatientFormState {
   };
 }
 
-type PatientsDictionary = Record<string, string>;
+export type PatientsDictionary = Record<string, string>;
 
 type CreatePatientSheetProps = {
   open: boolean;
@@ -410,6 +410,7 @@ type PatientDetailSheetProps = {
   onOpenAppointments: () => void;
   onOpenContracts: () => void;
   onOpenDocuments: () => void;
+  hideFooterActions?: boolean;
 };
 
 function PatientDetailSheet({
@@ -435,6 +436,7 @@ function PatientDetailSheet({
   onOpenAppointments,
   onOpenContracts,
   onOpenDocuments,
+  hideFooterActions = false,
 }: PatientDetailSheetProps) {
   const [form, setForm] = useState<PatientFormState>(blankPatientForm);
   const [busy, setBusy] = useState(false);
@@ -547,22 +549,24 @@ function PatientDetailSheet({
               ) : null}
             </div>
 
-            <div className="shrink-0 flex justify-end gap-2 px-4 py-3 bg-popover">
-              <Button
-                type="button"
-                variant="outline"
-                className="h-9 rounded-lg"
-                onClick={() => onOpenChange(false)}
-              >
-                {dictionary.common_cancel}
-              </Button>
-              {canCreateEdit ? (
-                <Button type="submit" className="h-9 rounded-lg gap-1.5 px-3.5" disabled={busy}>
-                  {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                  {busy ? dictionary.patients_saving : dictionary.patients_save}
+            {!hideFooterActions ? (
+              <div className="shrink-0 flex justify-end gap-2 px-4 py-3 bg-popover">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-9 rounded-lg"
+                  onClick={() => onOpenChange(false)}
+                >
+                  {dictionary.common_cancel}
                 </Button>
-              ) : null}
-            </div>
+                {canCreateEdit ? (
+                  <Button type="submit" className="h-9 rounded-lg gap-1.5 px-3.5" disabled={busy}>
+                    {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                    {busy ? dictionary.patients_saving : dictionary.patients_save}
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
           </form>
         ) : detailError ? (
           <div className="p-4">
@@ -578,7 +582,7 @@ function PatientDetailSheet({
   );
 }
 
-const MemoizedPatientDetailSheet = memo(PatientDetailSheet);
+export const MemoizedPatientDetailSheet = memo(PatientDetailSheet);
 
 function buildPatientsPath(filters: PatientFilters) {
   const params = new URLSearchParams();

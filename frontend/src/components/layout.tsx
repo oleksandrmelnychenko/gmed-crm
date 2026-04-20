@@ -75,7 +75,8 @@ function AppLayoutInner() {
           ) : null}
           <main
             className={cn(
-              "flex-1 overflow-auto rounded-xl bg-card px-7 py-6 transition-[padding] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]"
+              "flex-1 overflow-auto rounded-xl px-7 py-6 transition-[padding] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]",
+              showAppointmentWorkspaceNav ? "bg-white" : "bg-card",
             )}
           >
             <Outlet />

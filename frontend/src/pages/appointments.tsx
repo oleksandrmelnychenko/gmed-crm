@@ -91,6 +91,13 @@ import {
   type AppointmentTimelineKind,
 } from "@/pages/appointments.helpers";
 import { PatientAppointmentsPage } from "@/pages/patient-appointments";
+import {
+  MemoizedPatientDetailSheet,
+  type PatientAssignment as PatientSheetAssignment,
+  type PatientDetail as PatientSheetDetail,
+  type PatientsDictionary,
+  type StaffOption as PatientSheetStaffOption,
+} from "@/pages/patients";
 
 type AppointmentKind = "medical" | "non_medical" | "internal";
 type AppointmentCarePathKind =
@@ -428,6 +435,14 @@ type SchedulerQuickScope =
   | "medical"
   | "non_medical"
   | "internal";
+type LinkedPreviewKind =
+  | "patient"
+  | "order"
+  | "provider"
+  | "documents"
+  | "cases";
+type LinkedPreviewRecord = Record<string, unknown>;
+type LinkedPreviewPayload = LinkedPreviewRecord | LinkedPreviewRecord[];
 
 type FiltersState = {
   search: string;
@@ -644,6 +659,12 @@ type AppointmentPermissions = {
   canManageConciergeBilling: boolean;
   canViewCommunications: boolean;
   canManageCommunications: boolean;
+};
+
+type LinkedPatientPermissions = {
+  canCreateEdit: boolean;
+  canViewAssignments: boolean;
+  canManageAssignments: boolean;
 };
 
 type OperationalScopeOption = {
@@ -1315,6 +1336,51 @@ function runtimeLocale() {
   return getLang() === "ru" ? "ru-RU" : "de-DE";
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function normalizeLinkedPreviewPayload(
+  payload: unknown,
+): LinkedPreviewPayload | null {
+  if (Array.isArray(payload)) {
+    return payload.filter(isRecord);
+  }
+  if (!isRecord(payload)) return null;
+  if (Array.isArray(payload.items)) {
+    return payload.items.filter(isRecord);
+  }
+  return payload;
+}
+
+function linkedPreviewText(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "—";
+  if (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => linkedPreviewText(item)).join(", ");
+  }
+  return JSON.stringify(value);
+}
+
+function readLinkedPreviewValue(
+  record: LinkedPreviewRecord,
+  keys: string[],
+): string {
+  for (const key of keys) {
+    const value = record[key];
+    if (value !== undefined && value !== null && value !== "") {
+      return linkedPreviewText(value);
+    }
+  }
+  return "—";
+}
+
 function appointmentText(de: string, ru: string, _en: string) {
   void _en;
   return getLang() === "ru" ? ru : de;
@@ -1805,6 +1871,21 @@ function operationalScopeReason(
         (tr?.appointments_title ?? appointmentText("Termin", "Приём", "Appointment"))
       );
   }
+}
+
+function linkedPatientPermissions(role?: string): LinkedPatientPermissions {
+  return {
+    canCreateEdit: role === "ceo" || role === "patient_manager",
+    canViewAssignments: [
+      "ceo",
+      "patient_manager",
+      "teamlead_interpreter",
+      "interpreter",
+      "concierge",
+    ].includes(role ?? ""),
+    canManageAssignments:
+      role === "ceo" || role === "patient_manager" || role === "teamlead_interpreter",
+  };
 }
 
 function operationalScopeOptions(
@@ -2419,7 +2500,7 @@ function buildHandoffStakeholders(
 
 function sectionCardClass(extra?: string) {
   return cn(
-    "rounded-[1.75rem] border border-border/70 bg-card shadow-[0_20px_60px_rgba(15,23,42,0.05)]",
+    "rounded-[1.75rem] border border-border/70 bg-card",
     extra,
   );
 }
@@ -3381,8 +3462,8 @@ function EditAppointmentSection({
   }
 
   return (
-    <section className={sectionCardClass("p-5")}>
-      <h3 className="text-sm font-semibold text-slate-950">
+    <section className="space-y-3 rounded-xl p-3.5 border border-border/50 bg-card/40">
+      <h3 className="text-sm font-semibold text-foreground">
         {t.appointments_title}
       </h3>
       {error ? (
@@ -3727,62 +3808,82 @@ function AppointmentOverviewSection({
     0,
     detail.recurring_lineage_history.length - 1,
   );
+  const patientInitials = detail.patient_name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("");
 
   return (
-    <section className={sectionCardClass("p-5")}>
-      <div className="flex flex-wrap items-center gap-2">
+    <section className="space-y-3 rounded-xl p-3.5 border border-border/50 bg-card/40">
+      <div className="flex items-start gap-3">
+        <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-[var(--brand)] text-[12px] font-semibold text-white">
+          {patientInitials || "AP"}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h2 className="truncate text-xl font-semibold tracking-tight text-foreground">
+              {detail.title}
+            </h2>
+            <span
+              className={cn(
+                "rounded-full border px-2.5 py-1 text-[10.5px] font-semibold uppercase tracking-[0.12em]",
+                statusBadgeClass(detail.status),
+              )}
+            >
+              {statusLabel(detail.status)}
+            </span>
+          </div>
+          <p className="mt-0.5 text-[12px] font-mono text-muted-foreground">
+            {detail.patient_pid} · {detail.patient_name}
+          </p>
+          <p className="text-[11px] font-mono text-muted-foreground/80">
+            {detail.id}
+          </p>
+        </div>
+      </div>
+      <div className="mt-4 flex flex-wrap items-center gap-2">
         <span
           className={cn(
-            "rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em]",
+            "rounded-full border px-2.5 py-1 text-[10.5px] font-semibold uppercase tracking-[0.12em]",
             typeBadgeClass(detail.type),
           )}
         >
           {appointmentTypeLabel(detail.type, tr)}
         </span>
         {detail.care_path_kind ? (
-          <span className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-violet-700">
+          <span className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-violet-700">
             {carePathKindLabel(detail.care_path_kind)}
           </span>
         ) : null}
-        <span
-          className={cn(
-            "rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em]",
-            statusBadgeClass(detail.status),
-          )}
-        >
-          {statusLabel(detail.status)}
-        </span>
         {detail.recurrence_frequency ? (
-          <span className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-sky-700">
+          <span className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-sky-700">
             {recurrenceFrequencyLabel(detail.recurrence_frequency)} series
           </span>
         ) : null}
         {detailLineageBadge ? (
-          <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-700">
+          <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-amber-700">
             {detailLineageBadge}
           </span>
         ) : null}
         {detail.interpreter_response ? (
-          <span className="rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+          <span className="rounded-full border border-border/60 bg-muted/25 px-2.5 py-1 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
             Interpreter {responseLabel(detail.interpreter_response)}
           </span>
         ) : null}
       </div>
-      <div className="mt-4 flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-        <div>
-          <h2 className="text-2xl font-semibold text-slate-950">
-            {detail.title}
-          </h2>
-          <p className="mt-2 text-sm text-slate-600">
-            {detail.patient_pid} · {detail.patient_name}
-          </p>
-        </div>
-        <div className="grid gap-2 text-sm text-slate-600">
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
+        <div className="rounded-xl border border-border/50 bg-muted/25 px-4 py-3 text-sm text-muted-foreground">
           <InfoLine icon={Clock3} label={slotLabel(detail)} />
+        </div>
+        <div className="rounded-xl border border-border/50 bg-muted/25 px-4 py-3 text-sm text-muted-foreground">
           <InfoLine
             icon={MapPin}
             label={detail.location || tr.common_not_set}
           />
+        </div>
+        <div className="rounded-xl border border-border/50 bg-muted/25 px-4 py-3 text-sm text-muted-foreground">
           <InfoLine
             icon={Stethoscope}
             label={detail.provider_name || tr.common_not_set}
@@ -3790,7 +3891,7 @@ function AppointmentOverviewSection({
         </div>
       </div>
       {detail.is_blocked ? (
-        <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+        <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
           Concierge view is intentionally limited for medical slots. Clinical
           notes and provider specifics stay hidden here.
         </div>
@@ -3981,22 +4082,28 @@ function AppointmentSnapshotSection({ detail }: { detail: AppointmentDetail }) {
   const tr = t as unknown as Record<string, string>;
 
   return (
-    <section className={sectionCardClass("p-5")}>
-      <h3 className="text-sm font-semibold text-slate-950">
-        {t.appointments_title}
-      </h3>
-      <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+    <section className="space-y-3 rounded-xl p-3.5 border border-border/50 bg-card/40">
+      <div className="flex items-center gap-2">
+        <div className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+        <h3 className="text-sm font-semibold text-foreground">
+          {t.appointments_title}
+        </h3>
+      </div>
+      <div className="mt-4 grid gap-x-8 gap-y-3 md:grid-cols-3">
         <ContextCard
+          variant="snapshot"
           label={t.orders_phase}
           value={detail.checklist_phase || tr.phase_discovery}
           meta={appointmentTypeLabel(detail.type, tr)}
         />
         <ContextCard
+          variant="snapshot"
           label={t.patients_assign_owner}
           value={detail.owner_name || tr.common_not_set}
           meta={detail.owner_role ? roleLabel(detail.owner_role) : tr.common_not_set}
         />
         <ContextCard
+          variant="snapshot"
           label={t.common_doctor}
           value={detail.interpreter_name || tr.common_not_set}
           meta={
@@ -4006,6 +4113,7 @@ function AppointmentSnapshotSection({ detail }: { detail: AppointmentDetail }) {
           }
         />
         <ContextCard
+          variant="snapshot"
           label={tr.providers_linked_patients}
           value={detail.order_id || tr.common_not_set}
           meta={detail.category || formatDateTimeLabel(detail.created_at)}
@@ -4025,13 +4133,16 @@ function AppointmentAttentionSection({
   const { t } = useLang();
 
   return (
-    <section className={sectionCardClass("p-5")}>
+    <section className="space-y-3 rounded-xl p-3.5 border border-border/50 bg-card/40">
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <div>
-          <h3 className="text-sm font-semibold text-slate-950">
-            {t.common_error}
-          </h3>
-          <p className="text-xs text-slate-500">
+          <div className="flex items-center gap-2">
+            <div className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+            <h3 className="text-sm font-semibold text-foreground">
+              {t.common_error}
+            </h3>
+          </div>
+          <p className="text-xs text-muted-foreground">
             This appointment still has unresolved operational follow-up.
           </p>
         </div>
@@ -4044,14 +4155,14 @@ function AppointmentAttentionSection({
         {attention.reasons.map((reason) => (
           <div
             key={reason}
-            className="rounded-2xl border border-rose-200/80 bg-rose-50/80 px-4 py-3 text-sm text-rose-800"
+            className="rounded-xl border border-rose-200/80 bg-rose-50/80 px-4 py-3 text-sm text-rose-800"
           >
             {reason}
           </div>
         ))}
       </div>
       {attention.next_due_at ? (
-        <p className="mt-4 text-xs text-slate-500">
+        <p className="mt-4 text-xs text-muted-foreground">
           Next due checkpoint: {formatDateTimeLabel(attention.next_due_at)}
         </p>
       ) : null}
@@ -4064,65 +4175,125 @@ const MemoizedAppointmentAttentionSection = memo(AppointmentAttentionSection);
 function AppointmentLinksSection({
   detail,
   staffGo,
+  onOpenPreview,
 }: {
   detail: AppointmentDetail;
   staffGo: (href: string) => void;
+  onOpenPreview: (kind: LinkedPreviewKind, label: string) => void;
 }) {
   const { t } = useLang();
+  const linkButtonClass =
+    "h-8 rounded-lg border-border/60 bg-card px-3 text-xs font-medium text-foreground transition-colors hover:border-border hover:bg-muted/60 hover:cursor-pointer";
+  const previewButtonClass =
+    "h-8 rounded-lg border-[var(--brand)]/35 bg-[color-mix(in_oklch,var(--brand)_10%,white)] px-3 text-xs font-medium text-foreground transition-colors hover:border-[var(--brand)]/60 hover:bg-[color-mix(in_oklch,var(--brand)_16%,white)] hover:cursor-pointer";
+  const patientLabel = appointmentText("Patient", "Пациент", "Patient");
+  const orderLabel = appointmentText("Auftrag", "Заказ", "Order");
+  const clinicLabel = appointmentText("Klinik", "Клиника", "Clinic");
+  const documentsLabel = appointmentText("Dokumente", "Документы", "Documents");
+  const casesLabel = appointmentText("Fälle", "Кейсы", "Cases");
 
   return (
-    <section className={sectionCardClass("p-5")}>
-      <h3 className="text-sm font-semibold text-slate-950">
-        {t.providers_linked_patients}
-      </h3>
-      <div className="mt-4 flex flex-wrap gap-2">
+    <section className="space-y-3 rounded-xl p-3.5 border border-border/50 bg-card/40">
+      <div className="flex items-center gap-2">
+        <div className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+        <h3 className="text-sm font-semibold text-foreground">
+          {t.providers_linked_patients}
+        </h3>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
         <Button
           type="button"
           variant="outline"
-          className="rounded-2xl"
+          className={linkButtonClass}
           onClick={() => staffGo(`/patients?patient=${detail.patient_id}`)}
         >
-          Patient
+          {patientLabel}
         </Button>
         {detail.order_id ? (
           <Button
             type="button"
             variant="outline"
-            className="rounded-2xl"
+            className={linkButtonClass}
             onClick={() => staffGo(`/orders?order=${detail.order_id}`)}
           >
-            Order
+            {orderLabel}
           </Button>
         ) : null}
         {detail.provider_id ? (
           <Button
             type="button"
             variant="outline"
-            className="rounded-2xl"
+            className={linkButtonClass}
             onClick={() => staffGo(`/providers?provider=${detail.provider_id}`)}
           >
-            Clinic
+            {clinicLabel}
           </Button>
         ) : null}
         <Button
           type="button"
           variant="outline"
-          className="rounded-2xl"
+          className={linkButtonClass}
           onClick={() =>
             staffGo(
               `/documents?appointment=${detail.id}&patient=${detail.patient_id}`,
             )
           }
         >
-          Documents
+          {documentsLabel}
         </Button>
         <Button
           type="button"
           variant="outline"
-          className="rounded-2xl"
+          className={linkButtonClass}
           onClick={() => staffGo(`/cases?patient=${detail.patient_id}`)}
         >
-          Cases
+          {casesLabel}
+        </Button>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          className={previewButtonClass}
+          onClick={() => onOpenPreview("patient", patientLabel)}
+        >
+          {patientLabel}
+        </Button>
+        {detail.order_id ? (
+          <Button
+            type="button"
+            variant="outline"
+            className={previewButtonClass}
+            onClick={() => onOpenPreview("order", orderLabel)}
+          >
+            {orderLabel}
+          </Button>
+        ) : null}
+        {detail.provider_id ? (
+          <Button
+            type="button"
+            variant="outline"
+            className={previewButtonClass}
+            onClick={() => onOpenPreview("provider", clinicLabel)}
+          >
+            {clinicLabel}
+          </Button>
+        ) : null}
+        <Button
+          type="button"
+          variant="outline"
+          className={previewButtonClass}
+          onClick={() => onOpenPreview("documents", documentsLabel)}
+        >
+          {documentsLabel}
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          className={previewButtonClass}
+          onClick={() => onOpenPreview("cases", casesLabel)}
+        >
+          {casesLabel}
         </Button>
       </div>
     </section>
@@ -9870,6 +10041,7 @@ function StaffAppointmentsPage() {
     searchParams.get("detailTab"),
   );
   const permissions = appointmentPermissions(user?.role);
+  const patientSheetPermissions = linkedPatientPermissions(user?.role);
   const isMobile = useIsMobile();
   const calendarRef = useRef<FullCalendar | null>(null);
   const [calendarView, setCalendarView] = useState<CalendarView>(() =>
@@ -9927,6 +10099,33 @@ function StaffAppointmentsPage() {
     AppointmentCommunicationEntry[]
   >([]);
   const [detailVersion, setDetailVersion] = useState(0);
+  const [linkedPreviewOpen, setLinkedPreviewOpen] = useState(false);
+  const [linkedPreviewKind, setLinkedPreviewKind] =
+    useState<LinkedPreviewKind | null>(null);
+  const [linkedPreviewLabel, setLinkedPreviewLabel] = useState("");
+  const [linkedPreviewLoading, setLinkedPreviewLoading] = useState(false);
+  const [linkedPreviewError, setLinkedPreviewError] = useState("");
+  const [linkedPreviewPayload, setLinkedPreviewPayload] =
+    useState<LinkedPreviewPayload | null>(null);
+  const [linkedPatientOpen, setLinkedPatientOpen] = useState(false);
+  const [linkedPatientId, setLinkedPatientId] = useState("");
+  const [linkedPatientDetailLoading, setLinkedPatientDetailLoading] =
+    useState(false);
+  const [linkedPatientDetailError, setLinkedPatientDetailError] = useState("");
+  const [linkedPatientDetail, setLinkedPatientDetail] =
+    useState<PatientSheetDetail | null>(null);
+  const [linkedPatientAssignments, setLinkedPatientAssignments] = useState<
+    PatientSheetAssignment[]
+  >([]);
+  const [linkedPatientAssignableStaff, setLinkedPatientAssignableStaff] =
+    useState<PatientSheetStaffOption[]>([]);
+  const [linkedPatientSelectedAssignee, setLinkedPatientSelectedAssignee] =
+    useState("");
+  const [linkedPatientAssignmentBusy, setLinkedPatientAssignmentBusy] =
+    useState(false);
+  const [linkedPatientAssignmentError, setLinkedPatientAssignmentError] =
+    useState("");
+  const [linkedPatientVersion, setLinkedPatientVersion] = useState(0);
 
   const [followUpAssigneeId, setFollowUpAssigneeId] = useState("");
   const [actionBusy, setActionBusy] = useState("");
@@ -10480,6 +10679,23 @@ function StaffAppointmentsPage() {
       setDetailReport(null);
       setFollowUpAssigneeId("");
       setActionBusy("");
+      setLinkedPreviewOpen(false);
+      setLinkedPreviewKind(null);
+      setLinkedPreviewLabel("");
+      setLinkedPreviewLoading(false);
+      setLinkedPreviewError("");
+      setLinkedPreviewPayload(null);
+      setLinkedPatientOpen(false);
+      setLinkedPatientId("");
+      setLinkedPatientDetailLoading(false);
+      setLinkedPatientDetailError("");
+      setLinkedPatientDetail(null);
+      setLinkedPatientAssignments([]);
+      setLinkedPatientAssignableStaff([]);
+      setLinkedPatientSelectedAssignee("");
+      setLinkedPatientAssignmentBusy(false);
+      setLinkedPatientAssignmentError("");
+      setLinkedPatientVersion(0);
       if (clearQuery) {
         syncQuery({
           appointment: null,
@@ -10788,6 +11004,129 @@ function StaffAppointmentsPage() {
     tr.phase_followup,
   ]);
 
+  useEffect(() => {
+    if (!linkedPreviewOpen || !linkedPreviewKind || !detail) return;
+    let active = true;
+
+    async function loadLinkedPreview() {
+      setLinkedPreviewLoading(true);
+      setLinkedPreviewError("");
+      setLinkedPreviewPayload(null);
+
+      try {
+        let endpoint = "";
+        if (linkedPreviewKind === "order") {
+          if (!detail.order_id) {
+            throw new Error(
+              appointmentText(
+                "Kein Auftrag mit diesem Termin verknupft.",
+                "No linked order for this appointment.",
+                "No linked order for this appointment.",
+              ),
+            );
+          }
+          endpoint = `/orders/${detail.order_id}`;
+        } else if (linkedPreviewKind === "provider") {
+          if (!detail.provider_id) {
+            throw new Error(
+              appointmentText(
+                "Keine Klinik mit diesem Termin verknupft.",
+                "No linked provider for this appointment.",
+                "No linked provider for this appointment.",
+              ),
+            );
+          }
+          endpoint = `/providers/${detail.provider_id}`;
+        } else if (linkedPreviewKind === "documents") {
+          endpoint = `/documents?appointment=${detail.id}&patient=${detail.patient_id}`;
+        } else {
+          endpoint = `/cases?patient=${detail.patient_id}`;
+        }
+
+        const payload = await apiFetch<unknown>(endpoint);
+        if (!active) return;
+        setLinkedPreviewPayload(normalizeLinkedPreviewPayload(payload));
+      } catch (error) {
+        if (!active) return;
+        setLinkedPreviewError(
+          error instanceof Error
+            ? error.message
+            : appointmentText(
+                "Verknupfte Daten konnten nicht geladen werden.",
+                "Failed to load linked records.",
+                "Failed to load linked records.",
+              ),
+        );
+      } finally {
+        if (active) {
+          setLinkedPreviewLoading(false);
+        }
+      }
+    }
+
+    void loadLinkedPreview();
+    return () => {
+      active = false;
+    };
+  }, [
+    detail,
+    linkedPreviewKind,
+    linkedPreviewOpen,
+  ]);
+
+  useEffect(() => {
+    if (!linkedPatientOpen || !linkedPatientId) return;
+    let active = true;
+    setLinkedPatientDetailLoading(true);
+    setLinkedPatientDetailError("");
+    setLinkedPatientAssignmentError("");
+
+    const detailRequest = apiFetch<PatientSheetDetail>(`/patients/${linkedPatientId}`);
+    const assignmentsRequest = patientSheetPermissions.canViewAssignments
+      ? apiFetch<PatientSheetAssignment[]>(`/patients/${linkedPatientId}/assignments`).catch(
+          () => [],
+        )
+      : Promise.resolve([] as PatientSheetAssignment[]);
+    const staffRequest = patientSheetPermissions.canManageAssignments
+      ? apiFetch<PatientSheetStaffOption[]>("/appointments/meta/staff").catch(
+          () => [],
+        )
+      : Promise.resolve([] as PatientSheetStaffOption[]);
+
+    void Promise.all([detailRequest, assignmentsRequest, staffRequest])
+      .then(([patientDetail, assignments, assignableStaff]) => {
+        if (!active) return;
+        setLinkedPatientDetail(patientDetail);
+        setLinkedPatientAssignments(assignments);
+        setLinkedPatientAssignableStaff(assignableStaff);
+      })
+      .catch((error) => {
+        if (!active) return;
+        setLinkedPatientDetail(null);
+        setLinkedPatientAssignments([]);
+        setLinkedPatientAssignableStaff([]);
+        setLinkedPatientDetailError(
+          error instanceof Error ? error.message : t.common_failed_load,
+        );
+      })
+      .finally(() => {
+        if (active) {
+          setLinkedPatientDetailLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [
+    linkedPatientId,
+    linkedPatientOpen,
+    linkedPatientVersion,
+    patientSheetPermissions.canManageAssignments,
+    patientSheetPermissions.canViewAssignments,
+    t.common_failed_load,
+  ]);
+
   const scopedAppointments = useMemo(
     () =>
       appointments.filter((item) =>
@@ -10891,6 +11230,10 @@ function StaffAppointmentsPage() {
       setDetailVersion((current) => current + 1);
       setAppointmentsVersion((current) => current + 1);
     });
+  }, []);
+
+  const refreshLinkedPatient = useCallback(() => {
+    setLinkedPatientVersion((current) => current + 1);
   }, []);
 
   const reportDetailError = useCallback((message: string) => {
@@ -11110,6 +11453,75 @@ function StaffAppointmentsPage() {
       detailTab: "overview",
     });
   }, [syncQuery]);
+
+  const openLinkedPreview = useCallback(
+    (kind: LinkedPreviewKind, label: string) => {
+      if (kind === "patient") {
+        const patientId = detail?.patient_id ?? "";
+        if (!patientId) return;
+        setLinkedPreviewOpen(false);
+        setLinkedPreviewKind(null);
+        setLinkedPreviewLabel("");
+        setLinkedPatientId(patientId);
+        setLinkedPatientVersion((current) => current + 1);
+        setLinkedPatientOpen(true);
+        return;
+      }
+      setLinkedPatientOpen(false);
+      setLinkedPatientId("");
+      setLinkedPreviewKind(kind);
+      setLinkedPreviewLabel(label);
+      setLinkedPreviewOpen(true);
+    },
+    [detail?.patient_id],
+  );
+
+  const handleLinkedPreviewOpenChange = useCallback((open: boolean) => {
+    setLinkedPreviewOpen(open);
+    if (!open) {
+      setLinkedPreviewKind(null);
+      setLinkedPreviewLabel("");
+      setLinkedPreviewLoading(false);
+      setLinkedPreviewError("");
+      setLinkedPreviewPayload(null);
+    }
+  }, []);
+
+  const handleLinkedPatientOpenChange = useCallback((open: boolean) => {
+    setLinkedPatientOpen(open);
+    if (!open) {
+      setLinkedPatientId("");
+      setLinkedPatientDetailLoading(false);
+      setLinkedPatientDetailError("");
+      setLinkedPatientDetail(null);
+      setLinkedPatientAssignments([]);
+      setLinkedPatientAssignableStaff([]);
+      setLinkedPatientSelectedAssignee("");
+      setLinkedPatientAssignmentBusy(false);
+      setLinkedPatientAssignmentError("");
+      setLinkedPatientVersion(0);
+    }
+  }, []);
+
+  const handleAssignLinkedPatient = useCallback(async () => {
+    if (!linkedPatientDetail || !linkedPatientSelectedAssignee) return;
+    setLinkedPatientAssignmentBusy(true);
+    setLinkedPatientAssignmentError("");
+    try {
+      await apiFetch(`/patients/${linkedPatientDetail.id}/assign`, {
+        method: "POST",
+        body: JSON.stringify({ user_id: linkedPatientSelectedAssignee }),
+      });
+      setLinkedPatientSelectedAssignee("");
+      refreshLinkedPatient();
+    } catch (error) {
+      setLinkedPatientAssignmentError(
+        error instanceof Error ? error.message : t.common_failed_assign,
+      );
+    } finally {
+      setLinkedPatientAssignmentBusy(false);
+    }
+  }, [linkedPatientDetail, linkedPatientSelectedAssignee, refreshLinkedPatient, t.common_failed_assign]);
 
   const handleFollowUpVisitCreated = useCallback(
     ({ id, notice }: { id?: string; notice: string }) => {
@@ -11377,6 +11789,206 @@ function StaffAppointmentsPage() {
     }
   }
 
+  function renderLinkedPreviewContent() {
+    if (linkedPreviewLoading) {
+      return (
+        <div className="flex items-center justify-center py-10 text-sm text-muted-foreground">
+          <LoaderCircle className="mr-2 size-4 animate-spin" />
+          {appointmentText(
+            "Verknupfte Daten werden geladen...",
+            "Loading linked records...",
+            "Loading linked records...",
+          )}
+        </div>
+      );
+    }
+
+    if (linkedPreviewError) {
+      return <Banner tone="error">{linkedPreviewError}</Banner>;
+    }
+
+    if (
+      !linkedPreviewPayload ||
+      (Array.isArray(linkedPreviewPayload) && linkedPreviewPayload.length === 0)
+    ) {
+      return (
+        <div className="rounded-xl border border-dashed border-border/70 px-4 py-8 text-center text-sm text-muted-foreground">
+          {appointmentText(
+            "Keine verknupften Daten gefunden.",
+            "No linked records found.",
+            "No linked records found.",
+          )}
+        </div>
+      );
+    }
+
+    if (!Array.isArray(linkedPreviewPayload)) {
+      const record = linkedPreviewPayload;
+      const fields: Array<{ label: string; value: string }> =
+        linkedPreviewKind === "patient"
+          ? [
+              {
+                label: appointmentText("Name", "Name", "Name"),
+                value: readLinkedPreviewValue(record, [
+                  "name",
+                  "full_name",
+                  "display_name",
+                ]),
+              },
+              {
+                label: "Patient ID",
+                value: readLinkedPreviewValue(record, ["patient_id", "id"]),
+              },
+              {
+                label: "PID",
+                value: readLinkedPreviewValue(record, ["pid"]),
+              },
+              {
+                label: appointmentText("Telefon", "Phone", "Phone"),
+                value: readLinkedPreviewValue(record, [
+                  "phone",
+                  "phone_number",
+                  "mobile",
+                ]),
+              },
+              {
+                label: "Email",
+                value: readLinkedPreviewValue(record, ["email"]),
+              },
+            ]
+          : linkedPreviewKind === "order"
+            ? [
+                {
+                  label: appointmentText("Auftrag", "Order", "Order"),
+                  value: readLinkedPreviewValue(record, [
+                    "order_number",
+                    "number",
+                    "id",
+                  ]),
+                },
+                {
+                  label: appointmentText("Status", "Status", "Status"),
+                  value: readLinkedPreviewValue(record, ["status"]),
+                },
+                {
+                  label: appointmentText("Typ", "Type", "Type"),
+                  value: readLinkedPreviewValue(record, ["order_type", "type"]),
+                },
+                {
+                  label: appointmentText("Patient", "Patient", "Patient"),
+                  value: readLinkedPreviewValue(record, [
+                    "patient_name",
+                    "patient_id",
+                  ]),
+                },
+                {
+                  label: appointmentText("Erstellt", "Created", "Created"),
+                  value: readLinkedPreviewValue(record, [
+                    "created_at",
+                    "updated_at",
+                  ]),
+                },
+              ]
+            : [
+                {
+                  label: appointmentText("Name", "Name", "Name"),
+                  value: readLinkedPreviewValue(record, ["name"]),
+                },
+                {
+                  label: appointmentText("Typ", "Type", "Type"),
+                  value: readLinkedPreviewValue(record, [
+                    "provider_type",
+                    "type",
+                  ]),
+                },
+                {
+                  label: appointmentText("Stadt", "City", "City"),
+                  value: readLinkedPreviewValue(record, [
+                    "address_city",
+                    "city",
+                  ]),
+                },
+                {
+                  label: appointmentText(
+                    "Fachbereich",
+                    "Specialty",
+                    "Specialty",
+                  ),
+                  value: readLinkedPreviewValue(record, ["fachbereich", "specialty"]),
+                },
+                {
+                  label: appointmentText("Adresse", "Address", "Address"),
+                  value: readLinkedPreviewValue(record, [
+                    "address",
+                    "address_line1",
+                  ]),
+                },
+              ];
+
+      return (
+        <div className="space-y-2.5">
+          {fields.map((field) => (
+            <div
+              key={field.label}
+              className="rounded-xl border border-border/60 bg-card px-3.5 py-3"
+            >
+              <p className="text-[11.5px] font-medium text-muted-foreground">
+                {field.label}
+              </p>
+              <p className="mt-1 text-sm text-foreground">{field.value}</p>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    const items = linkedPreviewPayload.slice(0, 20);
+    const hiddenCount = linkedPreviewPayload.length - items.length;
+    return (
+      <div className="space-y-2">
+        {items.map((item, index) => {
+          const title =
+            linkedPreviewKind === "documents"
+              ? readLinkedPreviewValue(item, [
+                  "filename",
+                  "title",
+                  "document_id",
+                  "id",
+                ])
+              : linkedPreviewKind === "cases"
+                ? readLinkedPreviewValue(item, [
+                    "case_id",
+                    "title",
+                    "hauptanfragegrund",
+                    "id",
+                  ])
+                : readLinkedPreviewValue(item, ["title", "name", "id"]);
+          const meta = [item.status, item.category, item.created_at]
+            .filter((part) => part !== undefined && part !== null && part !== "")
+            .map((part) => linkedPreviewText(part))
+            .join(" • ");
+
+          return (
+            <div
+              key={readLinkedPreviewValue(item, ["id"]) + String(index)}
+              className="rounded-xl border border-border/60 bg-card px-3.5 py-3"
+            >
+              <p className="text-sm font-medium text-foreground">{title}</p>
+              {meta ? (
+                <p className="mt-1 text-xs text-muted-foreground">{meta}</p>
+              ) : null}
+            </div>
+          );
+        })}
+        {hiddenCount > 0 ? (
+          <p className="pt-1 text-xs text-muted-foreground">
+            +{hiddenCount} more
+          </p>
+        ) : null}
+      </div>
+    );
+  }
+
   if (!permissions.canViewPage) {
     return (
       <div className={sectionCardClass("p-8 text-sm text-muted-foreground")}>
@@ -11474,7 +12086,11 @@ function StaffAppointmentsPage() {
             {detailAttention ? (
               <MemoizedAppointmentAttentionSection attention={detailAttention} />
             ) : null}
-            <MemoizedAppointmentLinksSection detail={detail} staffGo={staffGo} />
+            <MemoizedAppointmentLinksSection
+              detail={detail}
+              staffGo={staffGo}
+              onOpenPreview={openLinkedPreview}
+            />
           </>
         ) : null}
 
@@ -12722,6 +13338,80 @@ function StaffAppointmentsPage() {
         }}
       />
 
+      <MemoizedPatientDetailSheet
+        open={linkedPatientOpen}
+        detail={linkedPatientDetail}
+        detailBusy={linkedPatientDetailLoading}
+        detailError={linkedPatientDetailError}
+        hideFooterActions
+        dictionary={tr as unknown as PatientsDictionary}
+        canCreateEdit={patientSheetPermissions.canCreateEdit}
+        canViewAssignments={patientSheetPermissions.canViewAssignments}
+        canManageAssignments={patientSheetPermissions.canManageAssignments}
+        assignments={linkedPatientAssignments}
+        assignableStaff={linkedPatientAssignableStaff}
+        selectedAssignee={linkedPatientSelectedAssignee}
+        assignmentBusy={linkedPatientAssignmentBusy}
+        assignmentError={linkedPatientAssignmentError}
+        onAssigneeChange={setLinkedPatientSelectedAssignee}
+        onAssign={handleAssignLinkedPatient}
+        onOpenChange={handleLinkedPatientOpenChange}
+        onRefresh={refreshLinkedPatient}
+        onOpenCases={() =>
+          linkedPatientDetail
+            ? staffGo(`/cases?patient=${linkedPatientDetail.id}`)
+            : undefined
+        }
+        onOpenOrders={() =>
+          linkedPatientDetail
+            ? staffGo(`/orders?patient=${linkedPatientDetail.id}`)
+            : undefined
+        }
+        onOpenAppointments={() =>
+          linkedPatientDetail
+            ? staffGo(`/appointments?patient=${linkedPatientDetail.id}`)
+            : undefined
+        }
+        onOpenContracts={() =>
+          linkedPatientDetail
+            ? staffGo(`/contracts?patient=${linkedPatientDetail.id}`)
+            : undefined
+        }
+        onOpenDocuments={() =>
+          linkedPatientDetail
+            ? staffGo(`/documents?patient=${linkedPatientDetail.id}`)
+            : undefined
+        }
+      />
+
+      <Sheet
+        open={linkedPreviewOpen}
+        onOpenChange={handleLinkedPreviewOpenChange}
+      >
+        <SheetContent side="right" className="w-full sm:max-w-[540px] gap-0">
+          <SheetHeader className="border-b border-border/70 pb-4">
+            <SheetTitle>
+              {linkedPreviewLabel ||
+                appointmentText(
+                  "Verknupfte Daten",
+                  "Linked records",
+                  "Linked records",
+                )}
+            </SheetTitle>
+            <SheetDescription>
+              {appointmentText(
+                "Schneller Kontext ohne Seitenwechsel.",
+                "Quick context without leaving this appointment.",
+                "Quick context without leaving this appointment.",
+              )}
+            </SheetDescription>
+          </SheetHeader>
+          <div className="flex-1 overflow-y-auto px-4 pb-6 pt-4">
+            {renderLinkedPreviewContent()}
+          </div>
+        </SheetContent>
+      </Sheet>
+
       {isMobile ? (
       <Sheet
         open={detailOpen}
@@ -12767,6 +13457,7 @@ function StaffAppointmentsPage() {
                 <MemoizedAppointmentLinksSection
                   detail={detail}
                   staffGo={staffGo}
+                  onOpenPreview={openLinkedPreview}
                 />
                 <MemoizedAppointmentTimelineSection
                   key={`${detail.id}:${detailVersion}`}
@@ -13254,18 +13945,47 @@ function ContextCard({
   label,
   value,
   meta,
+  variant = "default",
 }: {
   label: string;
   value: string;
   meta: string;
+  variant?: "default" | "snapshot";
 }) {
+  const isSnapshot = variant === "snapshot";
   return (
-    <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
-      <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-500">
+    <div
+      className={cn(
+        isSnapshot ? "min-w-0" : "rounded-xl border border-border/50 bg-card px-4 py-3",
+      )}
+    >
+      <p
+        className={cn(
+          "font-medium text-muted-foreground",
+          isSnapshot ? "text-[11.5px] leading-tight" : "text-[11.5px] leading-tight",
+        )}
+      >
         {label}
       </p>
-      <p className="mt-3 text-sm font-semibold text-slate-950">{value}</p>
-      <p className="mt-1 text-xs text-slate-500">{meta}</p>
+      <p
+        className={cn(
+          "break-words",
+          isSnapshot
+            ? "mt-0.5 text-sm font-semibold text-slate-900 leading-tight"
+            : "mt-2 text-sm font-semibold text-foreground",
+        )}
+      >
+        {value}
+      </p>
+      <p
+        className={cn(
+          isSnapshot
+            ? "mt-0.5 text-sm text-slate-600 leading-tight"
+            : "mt-1 text-xs text-muted-foreground",
+        )}
+      >
+        {meta}
+      </p>
     </div>
   );
 }
@@ -13278,20 +13998,20 @@ function InfoLine({
   label: string;
 }) {
   return (
-    <div className="inline-flex items-center gap-2">
-      <Icon className="size-4 text-slate-400" />
-      <span>{label}</span>
+    <div className="inline-flex items-center gap-2 text-foreground">
+      <Icon className="size-4 text-muted-foreground" />
+      <span className="truncate">{label}</span>
     </div>
   );
 }
 
 function TextPanel({ title, text }: { title: string; text: string | null }) {
   return (
-    <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
-      <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-500">
+    <div className="rounded-xl border border-border/50 bg-card px-4 py-3">
+      <p className="text-[11.5px] font-medium text-muted-foreground leading-tight">
         {title}
       </p>
-      <p className="mt-3 text-sm leading-6 text-slate-700">
+      <p className="mt-2 text-sm leading-6 text-foreground">
         {text?.trim() || "No notes captured yet."}
       </p>
     </div>
