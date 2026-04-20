@@ -1,0 +1,58 @@
+# syntax=docker/dockerfile:1.7
+
+FROM rust:slim-bookworm AS builder
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        libssl-dev \
+        pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+ENV SQLX_OFFLINE=true
+
+COPY .cargo ./.cargo
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY crates ./crates
+COPY migrations ./migrations
+COPY .sqlx ./.sqlx
+
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/app/target \
+    cargo build --locked --release -p gmed-server --bin gmed-server \
+    && cp target/release/gmed-server /tmp/gmed-server
+
+FROM debian:bookworm-slim AS runtime
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        openssl \
+    && rm -rf /var/lib/apt/lists/* \
+    && addgroup --system gmed \
+    && adduser --system --ingroup gmed --home /app gmed
+
+WORKDIR /app
+
+RUN mkdir -p /app/uploads/chat /app/uploads/documents \
+    && chown -R gmed:gmed /app
+
+COPY --from=builder /tmp/gmed-server /usr/local/bin/gmed-server
+
+USER gmed:gmed
+
+ENV PORT=3000
+ENV RUST_LOG=info,gmed_server=debug
+
+EXPOSE 3000
+VOLUME ["/app/uploads"]
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD ["sh", "-c", "curl --fail --silent http://127.0.0.1:${PORT:-3000}/health > /dev/null || exit 1"]
+
+ENTRYPOINT ["gmed-server"]
+

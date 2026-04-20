@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useMemo, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Download, LoaderCircle, ShieldCheck } from "lucide-react";
 
@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { apiFetch, downloadApiFile } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
+import { localizeRequiredDocumentLabel } from "@/lib/required-document-labels";
 import {
   appointmentStatusTone,
   feedbackStatusTone,
@@ -51,7 +52,11 @@ export function PatientDashboardPage() {
   const [error, setError] = useState("");
   const [version, setVersion] = useState(0);
   const [exportBusy, setExportBusy] = useState(false);
-  const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
+  const l = useCallback(
+    (de: string, ru: string, en: string) =>
+      lang === "de" ? de : lang === "ru" ? ru : en,
+    [lang],
+  );
   const greeting = l("Hallo", "Здравствуйте", "Hello");
   const patientLabel = l("Patient", "Пациент", "Patient");
 
@@ -102,7 +107,7 @@ export function PatientDashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [loading, version]);
+  }, [loading, version, l]);
 
   const releasedDocuments = documents.length;
   const upcomingAppointments = useMemo(
@@ -292,7 +297,7 @@ export function PatientDashboardPage() {
                       variant="outline"
                       className="rounded-full border-amber-300 bg-white text-amber-800"
                     >
-                      {item.label}
+                      {localizeRequiredDocumentLabel(item.key, item.label, l)}
                     </Badge>
                   ))}
                 </div>

@@ -1,5 +1,6 @@
 import {
   startTransition,
+  useCallback,
   useDeferredValue,
   useEffect,
   useMemo,
@@ -276,8 +277,11 @@ export function FeedbackPage() {
 
 function PatientFeedbackWorkspace() {
   const { lang } = useLang();
-  const l = (de: string, ru: string, en: string) =>
-    lang === "de" ? de : lang === "ru" ? ru : en;
+  const l = useCallback(
+    (de: string, ru: string, en: string) =>
+      lang === "de" ? de : lang === "ru" ? ru : en,
+    [lang],
+  );
   const [feedback, setFeedback] = useState<PortalFeedbackItem[]>([]);
   const [appointments, setAppointments] = useState<PortalAppointmentItem[]>([]);
   const [form, setForm] = useState<FeedbackFormState>(blankFeedbackForm());
@@ -329,7 +333,7 @@ function PatientFeedbackWorkspace() {
     return () => {
       cancelled = true;
     };
-  }, [loading, version]);
+  }, [loading, version, l]);
 
   const ratedAppointmentIds = useMemo(
     () =>
@@ -663,8 +667,11 @@ function PatientFeedbackWorkspace() {
 function StaffFeedbackWorkspace() {
   const { user } = useAuth();
   const { lang } = useLang();
-  const l = (de: string, ru: string, en: string) =>
-    lang === "de" ? de : lang === "ru" ? ru : en;
+  const l = useCallback(
+    (de: string, ru: string, en: string) =>
+      lang === "de" ? de : lang === "ru" ? ru : en,
+    [lang],
+  );
   const canViewWorkspace = canViewStaffFeedback(user?.role);
   const [feedback, setFeedback] = useState<PortalFeedbackItem[]>([]);
   const [summary, setSummary] = useState<PortalFeedbackSummary | null>(null);
@@ -743,7 +750,7 @@ function StaffFeedbackWorkspace() {
     return () => {
       cancelled = true;
     };
-  }, [canViewWorkspace, loading, queryString, version]);
+  }, [canViewWorkspace, loading, queryString, version, l]);
 
   useEffect(() => {
     if (!canViewWorkspace || !canCapture) return;

@@ -356,6 +356,13 @@ export const de: Translations = {
     "Statusänderungen können auf diesen Termin, diesen und folgende oder die ganze aktive Serie angewendet werden.",
   appointments_scope_following_hint:
     "Dieser und folgende startet ab dem aktuellen Termin eine neue Serienverzweigung. Ganze Serie behält dieselbe Serienidentität und verschiebt alle aktiven Termine gemeinsam.",
+  appointments_repeat_this: "Diesen Termin wiederholen",
+  appointments_repeat_hint:
+    "Eine wiederkehrende Serie basierend auf dem aktuellen Datum und Zeitfenster erstellen.",
+  appointments_repeat_interval_error:
+    "Das Wiederholungsintervall muss eine positive Zahl sein.",
+  appointments_repeat_require_end_error:
+    "Gib entweder die Gesamtanzahl der Termine oder ein Wiederholen-bis-Datum an.",
   appointments_active_series_path: "Aktiver Serienpfad",
   appointments_current_occurrence: "Aktuell",
   appointments_open_checklist: "offene Checkliste",
@@ -1055,6 +1062,9 @@ export const de: Translations = {
   documents_uploading: "Lade hoch…",
   documents_loading_documents: "Dokumente werden geladen…",
   documents_confidence: "Konfidenz",
+  documents_confidence_low: "niedrig",
+  documents_confidence_medium: "mittel",
+  documents_confidence_high: "hoch",
   documents_unclassified: "Nicht klassifiziert",
   documents_upload_interpreter_hint:
     "Dolmetscher-Uploads werden als interne Entwurfsdokumente gespeichert und an die Teamlead-Prüfung weitergeleitet.",

@@ -26,6 +26,15 @@ import {
 } from "lucide-react";
 
 import { StaffLink } from "@/components/staff-link";
+import { localizeDocumentCode } from "@/lib/required-document-labels";
+import {
+  CountBadge,
+  EmptyCell,
+  ListItem,
+  PageHeader,
+  Section,
+  TabLoader,
+} from "@/components/ui-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -602,7 +611,7 @@ function statusBadge(status: string) {
   if (status === "active")
     return "border-emerald-200 bg-emerald-50 text-emerald-700";
   if (status === "archived")
-    return "border-slate-200 bg-slate-100 text-slate-600";
+    return "border-border/60 bg-muted/25 text-muted-foreground";
   return "border-amber-200 bg-amber-50 text-amber-700";
 }
 
@@ -612,7 +621,7 @@ function translationStatusBadge(status: string) {
   if (status === "in_progress")
     return "border-sky-200 bg-sky-50 text-sky-700";
   if (status === "cancelled")
-    return "border-slate-200 bg-slate-100 text-slate-600";
+    return "border-border/60 bg-muted/25 text-muted-foreground";
   return "border-amber-200 bg-amber-50 text-amber-700";
 }
 
@@ -622,7 +631,7 @@ function textExtractionStatusBadge(status: string) {
   if (status === "failed") return "border-rose-200 bg-rose-50 text-rose-700";
   if (status === "unsupported")
     return "border-amber-200 bg-amber-50 text-amber-700";
-  return "border-slate-200 bg-slate-100 text-slate-600";
+  return "border-border/60 bg-muted/25 text-muted-foreground";
 }
 
 function visibilityBadge(visibility: string) {
@@ -632,7 +641,7 @@ function visibilityBadge(visibility: string) {
     return "border-violet-200 bg-violet-50 text-violet-700";
   if (visibility === "patient_visible")
     return "border-emerald-200 bg-emerald-50 text-emerald-700";
-  return "border-slate-200 bg-slate-100 text-slate-700";
+  return "border-border/60 bg-muted/25 text-muted-foreground";
 }
 
 function sensitivityBadge(value: string) {
@@ -645,6 +654,39 @@ function sensitivityBadge(value: string) {
 
 function patientOptionLabel(patient: PatientOption) {
   return `${patient.patient_id} · ${[patient.first_name, patient.last_name].filter(Boolean).join(" ")}`;
+}
+
+function humanizeCode(value: string | null | undefined) {
+  if (!value) return "";
+  return value
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// Auto-name from backend is usually human-readable ("Passport scan"). But
+// some flows fall back to raw enum codes ("translated_summary"). Detect that
+// shape and humanize to keep the list readable.
+function displayAutoName(value: string | null | undefined) {
+  if (!value) return "";
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  if (/^[a-z0-9][a-z0-9_-]*$/.test(trimmed)) {
+    return humanizeCode(trimmed);
+  }
+  return trimmed;
+}
+
+function formatConfidenceLabel(
+  value: string,
+  tr: Record<string, string>,
+): string {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "high") return tr.documents_confidence_high ?? value;
+  if (normalized === "medium") return tr.documents_confidence_medium ?? value;
+  if (normalized === "low") return tr.documents_confidence_low ?? value;
+  return value;
 }
 
 function normalizeTemplateLanguage(value?: string | null) {
@@ -826,6 +868,8 @@ export function DocumentsPage() {
 function StaffDocumentsPage() {
   const { user } = useAuth();
   const { t, lang } = useLang();
+  const l = (de: string, ru: string, en: string) =>
+    lang === "de" ? de : lang === "ru" ? ru : en;
   const [searchParams, setSearchParams] = useSearchParams();
   const text =
     lang === "de"
@@ -853,6 +897,7 @@ function StaffDocumentsPage() {
           noAccessTitle: "Dokumentenbereich",
           noAccessText: "Diese Rolle hat keinen Zugriff auf Dokumenten-Workflows.",
           versionOf: (current: number, total: number) => `v${current} von ${total}`,
+          visibilityHeader: "Sichtbarkeit",
         }
       : {
           allPatients: "Все пациенты",
@@ -878,6 +923,7 @@ function StaffDocumentsPage() {
           noAccessTitle: "Раздел документов",
           noAccessText: "У этой роли нет доступа к документным workflow.",
           versionOf: (current: number, total: number) => `v${current} из ${total}`,
+          visibilityHeader: "Видимость",
         };
   const documentsFailedLoadDocumentsText = t.documents_failed_load_documents;
   const documentsFailedLoadIntakeQueueText = t.documents_failed_load_intake_queue;
@@ -2133,41 +2179,37 @@ function StaffDocumentsPage() {
 
   if (!canView) {
     return (
-      <section className="rounded-[2rem] border border-slate-200 bg-white p-8 shadow-sm">
-        <h1 className="text-3xl font-semibold tracking-tight text-slate-950">
+      <div className="rounded-xl border border-border/50 bg-card p-8">
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
           {text.noAccessTitle}
         </h1>
-        <p className="mt-3 text-sm text-slate-500">
+        <p className="mt-3 text-sm text-muted-foreground">
           {text.noAccessText}
         </p>
-      </section>
+      </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <section className="rounded-[2rem] border border-slate-200 bg-white p-8 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-700">
-              {t.documents_title}
-            </p>
-            <h1 className="mt-3 text-3xl font-semibold tracking-tight text-slate-950">
-              {t.documents_workspace_heading}
-            </h1>
-            <p className="mt-3 max-w-3xl text-sm text-slate-500">
-              {t.documents_workspace_intro}
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-3">
-            <Button variant="outline" className="rounded-2xl" onClick={refresh}>
-              <RefreshCw className="size-4" />
+    <div className="space-y-4">
+      <PageHeader
+        title={t.documents_workspace_heading}
+        actions={
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-lg gap-1.5"
+              onClick={refresh}
+            >
+              <RefreshCw className="size-3.5" />
               {t.documents_refresh}
             </Button>
             {canManage ? (
               <Button
                 variant="outline"
-                className="rounded-2xl"
+                size="sm"
+                className="h-8 rounded-lg gap-1.5"
                 onClick={() => {
                   setGenerateForm((current) => ({
                     ...current,
@@ -2176,67 +2218,65 @@ function StaffDocumentsPage() {
                   setTemplateOpen(true);
                 }}
               >
-                <FileText className="size-4" />
+                <FileText className="size-3.5" />
                 {t.documents_generate_from_template}
               </Button>
             ) : null}
             {canUpload ? (
               <Button
-                className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+                size="sm"
+                className="h-8 rounded-lg gap-1.5"
                 onClick={() => setUploadOpen(true)}
               >
-                <FolderPlus className="size-4" />
+                <FolderPlus className="size-3.5" />
                 {t.documents_upload}
               </Button>
             ) : null}
-          </div>
-        </div>
-      </section>
+          </>
+        }
+      />
 
       {error ? <Banner tone="error">{error}</Banner> : null}
       {notice ? <Banner tone="success">{notice}</Banner> : null}
 
       {canManageIntake &&
       (intakeBusy || intakeError || intakeQueue.length > 0) ? (
-        <section className="rounded-[2rem] border border-amber-200 bg-amber-50/70 p-6 shadow-sm">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-950">
-                {t.documents_intake_queue}
-              </h2>
-              <p className="mt-1 text-sm text-slate-600">
-                {user?.role === "teamlead_interpreter"
+        <Section
+          className="border-amber-200 bg-amber-50/40"
+          title={
+            <span>
+              {t.documents_intake_queue}
+              <span className="ml-2 font-normal text-muted-foreground">
+                · {user?.role === "teamlead_interpreter"
                   ? t.documents_intake_interpreter_hint
                   : t.documents_intake_general_hint}
-              </p>
-            </div>
-            <Badge className="rounded-full border-amber-200 bg-white text-amber-700">
+              </span>
+            </span>
+          }
+          accessory={
+            <Badge
+              variant="outline"
+              className="rounded-full border-amber-200 bg-amber-50 text-amber-700"
+            >
               {intakeQueue.length} {t.documents_pending}
             </Badge>
-          </div>
+          }
+        >
           {intakeError ? <Banner tone="error">{intakeError}</Banner> : null}
           {intakeBusy ? (
-            <div className="mt-4 flex items-center text-sm text-slate-600">
-              <LoaderCircle className="mr-2 size-4 animate-spin" />
-              {t.documents_loading_intake_queue}
-            </div>
+            <TabLoader />
           ) : intakeQueue.length === 0 ? (
-            <div className="mt-4 rounded-2xl border border-dashed border-amber-200 bg-white/70 px-4 py-4 text-sm text-slate-600">
-              {t.documents_no_intake_pending}
-            </div>
+            <EmptyCell>{t.documents_no_intake_pending}</EmptyCell>
           ) : (
-            <div className="mt-4 grid gap-3 xl:grid-cols-2">
+            <div className="grid gap-2 xl:grid-cols-2">
               {intakeQueue.map((item) => (
-                <div
-                  key={item.id}
-                  className="rounded-[1.5rem] border border-amber-200 bg-white px-4 py-4"
-                >
+                <ListItem key={item.id}>
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <p className="text-sm font-semibold text-slate-950">
-                        {item.auto_name}
+                      <p className="text-sm font-semibold text-foreground">
+                        {localizeDocumentCode(item.auto_name, l)}
                       </p>
-                      <p className="mt-1 text-xs text-slate-500">
+                      <p className="mt-1 text-xs text-muted-foreground">
                         {[item.original_filename, item.patient_pid, item.patient_name]
                           .filter(Boolean)
                           .join(" · ") || t.documents_unlinked_document}
@@ -2250,39 +2290,43 @@ function StaffDocumentsPage() {
                     </Badge>
                   </div>
                   {item.classification_suggestion ? (
-                    <div className="mt-3 rounded-2xl border border-sky-200 bg-sky-50 px-3 py-3 text-sm text-sky-900">
+                    <div className="mt-3 rounded-xl border border-sky-200 bg-sky-50/70 px-3 py-3 text-sm text-sky-900">
                       <p className="font-medium">
                         {text.suggested(
-                          item.classification_suggestion.art,
-                          item.classification_suggestion.category,
+                          localizeDocumentCode(item.classification_suggestion.art, l),
+                          localizeDocumentCode(item.classification_suggestion.category, l),
                         )}
                       </p>
                       <p className="mt-1 text-xs uppercase tracking-[0.14em] text-sky-700">
-                        {item.classification_suggestion.confidence}{" "}
-                        {t.documents_confidence}
+                        {t.documents_confidence}:{" "}
+                        {formatConfidenceLabel(
+                          item.classification_suggestion.confidence,
+                          t as unknown as Record<string, string>,
+                        )}
                       </p>
                       <p className="mt-2 text-sm text-sky-800/90">
                         {item.classification_suggestion.rationale}
                       </p>
                     </div>
                   ) : (
-                    <div className="mt-3 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-600">
+                    <div className="mt-3 rounded-xl border border-dashed border-border/60 bg-muted/25 px-3 py-3 text-sm text-muted-foreground">
                       {t.documents_no_auto_classification}
                     </div>
                   )}
-                  <div className="mt-4 flex flex-wrap gap-2">
+                  <div className="mt-3 flex flex-wrap gap-2">
                     {item.classification_suggestion ? (
                       <Button
                         type="button"
                         variant="outline"
-                        className="rounded-xl"
+                        size="sm"
+                        className="h-8 rounded-lg gap-1.5"
                         disabled={intakeActionId === item.id}
                         onClick={() =>
                           void handleApplyClassificationSuggestion(item)
                         }
                       >
                         {intakeActionId === item.id ? (
-                          <LoaderCircle className="size-4 animate-spin" />
+                          <LoaderCircle className="size-3.5 animate-spin" />
                         ) : null}
                         {item.ursprung === "interpreter_upload" &&
                         item.status === "draft"
@@ -2293,23 +2337,27 @@ function StaffDocumentsPage() {
                     <Button
                       type="button"
                       variant="outline"
-                      className="rounded-xl"
+                      size="sm"
+                      className="h-8 rounded-lg"
                       onClick={() => openDocument(item.id)}
                     >
                       {t.documents_open_document}
                     </Button>
                   </div>
-                </div>
+                </ListItem>
               ))}
             </div>
           )}
-        </section>
+        </Section>
       ) : null}
 
-      <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+      <Section
+        title={t.documents_title}
+        accessory={<CountBadge>{documents.length}</CountBadge>}
+      >
+        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-6">
           <div className="relative xl:col-span-2">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={filters.search}
               onChange={(event) =>
@@ -2318,7 +2366,7 @@ function StaffDocumentsPage() {
                   search: event.target.value,
                 }))
               }
-              className="h-10 rounded-xl border-slate-200 bg-slate-50 pl-9"
+              className="h-9 rounded-lg bg-card pl-9"
               placeholder={t.common_search}
             />
           </div>
@@ -2381,11 +2429,11 @@ function StaffDocumentsPage() {
               setFilters((current) => ({ ...current, art: event.target.value }))
             }
             list="documents-art-options"
-            className="h-10 rounded-xl border-slate-200 bg-slate-50"
+            className="h-9 rounded-lg bg-card"
             placeholder={t.documents_category}
           />
         </div>
-        <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
           <Input
             value={filters.orderId}
             onChange={(event) =>
@@ -2394,7 +2442,7 @@ function StaffDocumentsPage() {
                 orderId: event.target.value,
               }))
             }
-            className="h-10 rounded-xl border-slate-200 bg-slate-50"
+            className="h-9 rounded-lg bg-card"
             placeholder={t.orders_title}
           />
           <Input
@@ -2405,7 +2453,7 @@ function StaffDocumentsPage() {
                 appointmentId: event.target.value,
               }))
             }
-            className="h-10 rounded-xl border-slate-200 bg-slate-50"
+            className="h-9 rounded-lg bg-card"
             placeholder={t.appointments_title}
           />
           <Input
@@ -2418,7 +2466,7 @@ function StaffDocumentsPage() {
               }))
             }
             aria-label={t.documents_date_from}
-            className="h-10 rounded-xl border-slate-200 bg-slate-50"
+            className="h-9 rounded-lg bg-card"
           />
           <Input
             type="date"
@@ -2430,10 +2478,10 @@ function StaffDocumentsPage() {
               }))
             }
             aria-label={t.documents_date_to}
-            className="h-10 rounded-xl border-slate-200 bg-slate-50"
+            className="h-9 rounded-lg bg-card"
           />
         </div>
-        <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
           <select
             value={filters.category}
             onChange={(event) =>
@@ -2459,7 +2507,7 @@ function StaffDocumentsPage() {
                 klinik: event.target.value,
               }))
             }
-            className="h-10 rounded-xl border-slate-200 bg-slate-50"
+            className="h-9 rounded-lg bg-card"
             placeholder={t.documents_clinic}
           />
           <Input
@@ -2470,12 +2518,13 @@ function StaffDocumentsPage() {
                 ursprung: event.target.value,
               }))
             }
-            className="h-10 rounded-xl border-slate-200 bg-slate-50"
+            className="h-9 rounded-lg bg-card"
             placeholder={t.documents_source}
           />
           <Button
             variant="outline"
-            className="rounded-xl"
+            size="sm"
+            className="h-9 rounded-lg"
             onClick={() =>
               setFilters({
                 search: "",
@@ -2502,13 +2551,14 @@ function StaffDocumentsPage() {
           ))}
         </datalist>
         {selectedDocumentIds.length > 0 ? (
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border/50 bg-muted/25 px-4 py-3 text-sm text-foreground">
             <span>{text.selectedDocuments(selectedDocumentIds.length)}</span>
             <div className="flex gap-2">
               <Button
                 type="button"
                 variant="outline"
-                className="rounded-xl"
+                size="sm"
+                className="h-8 rounded-lg"
                 onClick={() =>
                   setSelectedDocumentIds(documents.map((item) => item.id))
                 }
@@ -2518,7 +2568,8 @@ function StaffDocumentsPage() {
               <Button
                 type="button"
                 variant="outline"
-                className="rounded-xl"
+                size="sm"
+                className="h-8 rounded-lg"
                 onClick={() => setSelectedDocumentIds([])}
               >
                 {t.documents_clear_selection}
@@ -2528,160 +2579,200 @@ function StaffDocumentsPage() {
         ) : null}
 
         {busy ? (
-          <div className="flex min-h-[260px] items-center justify-center text-sm text-slate-500">
-            <LoaderCircle className="mr-2 size-4 animate-spin" />
-            {t.documents_loading_documents}
-          </div>
+          <TabLoader />
         ) : documents.length === 0 ? (
-          <div className="mt-6 rounded-[1.6rem] border border-dashed border-slate-200 bg-slate-50 px-5 py-8 text-center text-sm text-slate-500">
-            {t.documents_no_documents_match}
-          </div>
+          <EmptyCell>{t.documents_no_documents_match}</EmptyCell>
         ) : (
-          <div className="mt-6 grid gap-4 xl:grid-cols-2">
-            {documents.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => openDocument(item.id)}
-                className={cn(
-                  "rounded-[1.6rem] border p-5 text-left transition hover:-translate-y-0.5 hover:shadow-[0_18px_48px_rgba(15,23,42,0.08)]",
-                  selectedId === item.id
-                    ? "border-sky-300 bg-sky-50/70"
-                    : "border-slate-200 bg-white",
-                )}
-              >
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <label
-                      className="mb-3 inline-flex items-center gap-2 text-xs font-medium text-slate-600"
-                      onClick={(event) => event.stopPropagation()}
-                    >
+          <div className="rounded-xl border border-border bg-card overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-[13px]">
+                <thead className="bg-muted/40">
+                  <tr className="text-left text-[11px] uppercase tracking-wider text-muted-foreground">
+                    <th className="w-10 px-3 py-2.5">
                       <input
                         type="checkbox"
-                        checked={selectedDocumentIds.includes(item.id)}
-                        onChange={(event) =>
-                          toggleDocumentSelection(item.id, event.target.checked)
+                        aria-label={t.documents_select_bulk_share}
+                        checked={
+                          documents.length > 0 &&
+                          documents.every((d) =>
+                            selectedDocumentIds.includes(d.id),
+                          )
                         }
-                        className="size-4 rounded border-slate-300"
+                        onChange={(event) =>
+                          setSelectedDocumentIds(
+                            event.target.checked
+                              ? documents.map((d) => d.id)
+                              : [],
+                          )
+                        }
+                        className="size-4 rounded border-input"
                       />
-                      {t.documents_select_bulk_share}
-                    </label>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span
-                        className={cn(
-                          "rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em]",
-                          statusBadge(item.status),
+                    </th>
+                    <th className="px-3 py-2.5 font-medium">{t.documents_filename}</th>
+                    <th className="px-3 py-2.5 font-medium">{t.orders_patient}</th>
+                    <th className="px-3 py-2.5 font-medium">{t.documents_category}</th>
+                    <th className="px-3 py-2.5 font-medium">{t.users_status}</th>
+                    <th className="px-3 py-2.5 font-medium">{text.visibilityHeader}</th>
+                    <th className="px-3 py-2.5 font-medium text-right">
+                      {t.documents_size}
+                    </th>
+                    <th className="px-3 py-2.5 font-medium">{t.documents_uploaded_by}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {documents.map((item) => (
+                    <tr
+                      key={item.id}
+                      className={cn(
+                        "group/row border-t border-border transition-colors hover:bg-muted/40 cursor-pointer",
+                        selectedId === item.id && "bg-sky-50/60",
+                      )}
+                      onClick={() => openDocument(item.id)}
+                    >
+                      <td
+                        className="w-10 px-3 py-2.5"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        <input
+                          type="checkbox"
+                          aria-label={t.documents_select_bulk_share}
+                          checked={selectedDocumentIds.includes(item.id)}
+                          onChange={(event) =>
+                            toggleDocumentSelection(item.id, event.target.checked)
+                          }
+                          className="size-4 rounded border-input"
+                        />
+                      </td>
+                      <td className="px-3 py-2.5 min-w-0">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="truncate font-medium text-foreground">
+                            {localizeDocumentCode(item.auto_name, l)}
+                          </span>
+                          {item.needs_categorization ? (
+                            <Badge
+                              variant="outline"
+                              className="rounded-full text-[10px] border-amber-200 bg-amber-50 text-amber-700 shrink-0"
+                            >
+                              {text.needsCategorization}
+                            </Badge>
+                          ) : null}
+                        </div>
+                        <div className="mt-0.5 flex flex-wrap items-center gap-x-1 text-xs text-muted-foreground">
+                          <span className="truncate">
+                            {item.original_filename ?? t.documents_unclassified}
+                          </span>
+                          <span className="text-muted-foreground/60">·</span>
+                          <span>v{item.version_number}</span>
+                          {item.is_latest_version ? (
+                            <>
+                              <span className="text-muted-foreground/60">·</span>
+                              <span>{text.current}</span>
+                            </>
+                          ) : null}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2.5">
+                        {item.patient_name ? (
+                          <div className="min-w-0">
+                            <span className="font-mono text-xs text-muted-foreground">
+                              {item.patient_pid ?? text.pidFallback}
+                            </span>
+                            <div className="truncate text-foreground">
+                              {item.patient_name}
+                            </div>
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground">
+                            {t.common_not_set}
+                          </span>
                         )}
-                      >
-                        {formatDocumentStatusLabel(item.status, t)}
-                      </span>
-                      <span
-                        className={cn(
-                          "rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em]",
-                          visibilityBadge(item.visibility),
+                      </td>
+                      <td className="px-3 py-2.5">
+                        {item.art || item.category ? (
+                          <div className="min-w-0">
+                            {item.art ? (
+                              <div className="truncate text-foreground">
+                                {localizeDocumentCode(item.art, l)}
+                              </div>
+                            ) : null}
+                            {item.category ? (
+                              <div className="truncate text-xs text-muted-foreground">
+                                {localizeDocumentCode(item.category, l)}
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground">
+                            {t.documents_unclassified}
+                          </span>
                         )}
-                      >
-                        {formatVisibilityLabel(item.visibility, t)}
-                      </span>
-                      <Badge
-                        variant="outline"
-                        className={cn(
-                          "rounded-full",
-                          sensitivityBadge(item.data_sensitivity),
-                        )}
-                      >
-                        {formatSensitivityLabel(item.data_sensitivity)}
-                      </Badge>
-                      <Badge
-                        variant="outline"
-                        className="rounded-full border-slate-200 bg-white text-slate-700"
-                      >
-                        v{item.version_number}
-                        {item.is_latest_version ? ` ${text.current}` : ""}
-                      </Badge>
-                      {item.needs_categorization ? (
+                      </td>
+                      <td className="px-3 py-2.5">
                         <Badge
                           variant="outline"
-                          className="rounded-full border-amber-200 bg-amber-50 text-amber-700"
+                          className={cn("rounded-full text-[10px]", statusBadge(item.status))}
                         >
-                          {text.needsCategorization}
+                          {formatDocumentStatusLabel(item.status, t)}
                         </Badge>
-                      ) : null}
-                    </div>
-                    <h3 className="mt-3 text-lg font-semibold text-slate-950">
-                      {item.auto_name}
-                    </h3>
-                      <p className="mt-1 text-sm text-slate-600">
-                        {[item.original_filename, item.art, item.category]
-                          .filter(Boolean)
-                          .join(" · ") || t.documents_unclassified}
-                      </p>
-                    {item.classification_suggestion ? (
-                      <p className="mt-2 text-xs text-sky-700">
-                        {text.suggested(
-                          item.classification_suggestion.art,
-                          item.classification_suggestion.category,
-                        )}
-                      </p>
-                    ) : null}
-                  </div>
-                  <Badge
-                    variant="outline"
-                    className="rounded-full border-slate-200 bg-white text-slate-700"
-                  >
-                    {formatFileSize(item.file_size)}
-                  </Badge>
-                </div>
-                <div className="mt-4 space-y-2 text-sm text-slate-600">
-                  <div>
-                    {item.patient_name
-                      ? `${item.patient_pid ?? text.pidFallback} · ${item.patient_name}`
-                      : t.common_not_set}
-                  </div>
-                  <div>
-                    {item.order_number ||
-                      item.appointment_title ||
-                      t.common_not_set}
-                  </div>
-                  <div>
-                    {item.uploaded_by_name || t.documents_unknown_uploader} ·{" "}
-                    {formatDateTime(item.updated_at)}
-                  </div>
-                </div>
-                <div className="mt-4 flex items-center justify-between text-xs text-slate-500">
-                  <span>
-                    {t.documents_shares_count.replace(
-                      "{count}",
-                      String(item.share_count),
-                    )}
-                  </span>
-                  <span>
-                    {item.shared_to_current
-                      ? t.documents_share
-                      : item.klinik || item.ursprung || t.common_not_set}
-                  </span>
-                </div>
-              </button>
-            ))}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <div className="flex flex-col items-start gap-1">
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "rounded-full text-[10px]",
+                              visibilityBadge(item.visibility),
+                            )}
+                          >
+                            {formatVisibilityLabel(item.visibility, t)}
+                          </Badge>
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "rounded-full text-[10px]",
+                              sensitivityBadge(item.data_sensitivity),
+                            )}
+                          >
+                            {formatSensitivityLabel(item.data_sensitivity)}
+                          </Badge>
+                        </div>
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">
+                        {formatFileSize(item.file_size)}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <div className="text-foreground truncate">
+                          {item.uploaded_by_name || t.documents_unknown_uploader}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {formatDateTime(item.updated_at)}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
-      </section>
+      </Section>
 
-      <Dialog open={templateOpen} onOpenChange={setTemplateOpen}>
-        <DialogContent className="max-w-4xl rounded-[1.75rem] p-0">
-          <DialogHeader className="border-b border-border/70 px-6 pt-6 pb-4">
-            <DialogTitle>{t.documents_generate_title}</DialogTitle>
-            <DialogDescription>{t.documents_generate_description}</DialogDescription>
-          </DialogHeader>
+      <Sheet open={templateOpen} onOpenChange={setTemplateOpen}>
+        <SheetContent side="right" className="w-full sm:max-w-[880px]">
           <form
             onSubmit={handleGenerateDocument}
-            className="space-y-5 px-6 py-5"
+            className="flex flex-col flex-1 min-h-0"
           >
+            <SheetHeader className="shrink-0 border-b border-border/60 px-4 pt-3 pb-3">
+              <SheetTitle>{t.documents_generate_title}</SheetTitle>
+              <SheetDescription>{t.documents_generate_description}</SheetDescription>
+            </SheetHeader>
+            <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
             {generateError ? (
               <Banner tone="error">{generateError}</Banner>
             ) : null}
             {selectedTemplate ? (
-              <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-4 text-sm text-sky-900">
+              <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-4 text-sm text-sky-900">
                 <p className="font-semibold">{selectedTemplate.label}</p>
                 <p className="mt-1 text-sky-800/80">
                   {selectedTemplate.description}
@@ -2689,7 +2780,7 @@ function StaffDocumentsPage() {
               </div>
             ) : null}
             {generateForm.replaceDocumentId && detail?.id === generateForm.replaceDocumentId ? (
-              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900">
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900">
                 {t.documents_generate_replace_warning}{" "}
                 {detail.version_number}.
               </div>
@@ -2743,7 +2834,7 @@ function StaffDocumentsPage() {
                       autoName: event.target.value,
                     }))
                   }
-                  className="h-10 rounded-xl border-slate-200 bg-slate-50"
+                  className="h-10 rounded-xl border-border/60 bg-muted/25"
                 />
               </Field>
               <Field label={t.orders_patient} required>
@@ -2862,7 +2953,7 @@ function StaffDocumentsPage() {
                       titleOverride: event.target.value,
                     }))
                   }
-                  className="h-10 rounded-xl border-slate-200 bg-slate-50"
+                  className="h-10 rounded-xl border-border/60 bg-muted/25"
                   placeholder={t.patients_notes}
                 />
               </Field>
@@ -2875,7 +2966,7 @@ function StaffDocumentsPage() {
                       klinik: event.target.value,
                     }))
                   }
-                  className="h-10 rounded-xl border-slate-200 bg-slate-50"
+                  className="h-10 rounded-xl border-border/60 bg-muted/25"
                   placeholder={t.common_provider}
                 />
               </Field>
@@ -2888,7 +2979,7 @@ function StaffDocumentsPage() {
                       ursprung: event.target.value,
                     }))
                   }
-                  className="h-10 rounded-xl border-slate-200 bg-slate-50"
+                  className="h-10 rounded-xl border-border/60 bg-muted/25"
                   placeholder={t.documents_default_template_source.replace(
                     "{id}",
                     selectedTemplate?.id ?? "{id}",
@@ -2897,12 +2988,12 @@ function StaffDocumentsPage() {
               </Field>
             </div>
             {availableTemplateBlocks.length > 0 ? (
-              <div className="space-y-3 rounded-[1.6rem] border border-slate-200 bg-slate-50/80 p-4">
+              <div className="space-y-3 rounded-xl border border-border/60 bg-muted/25 p-4">
                 <div>
-                  <p className="text-sm font-semibold text-slate-950">
+                  <p className="text-sm font-semibold text-foreground">
                     {t.documents_text_blocks}
                   </p>
-                  <p className="mt-1 text-xs text-slate-500">
+                  <p className="mt-1 text-xs text-muted-foreground">
                     {t.documents_text_blocks_hint}
                   </p>
                 </div>
@@ -2914,7 +3005,7 @@ function StaffDocumentsPage() {
                     return (
                       <label
                         key={block.key}
-                        className="flex gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700"
+                        className="flex gap-3 rounded-lg border border-border/60 bg-card px-4 py-3 text-sm text-foreground"
                       >
                         <input
                           type="checkbox"
@@ -2929,13 +3020,13 @@ function StaffDocumentsPage() {
                                   ),
                             }))
                           }
-                          className="mt-0.5 size-4 rounded border-slate-300"
+                          className="mt-0.5 size-4 rounded border-input"
                         />
                         <span>
-                          <span className="block font-medium text-slate-900">
+                          <span className="block font-medium text-foreground">
                             {block.label}
                           </span>
-                          <span className="mt-1 block text-xs text-slate-500">
+                          <span className="mt-1 block text-xs text-muted-foreground">
                             {block.description}
                           </span>
                         </span>
@@ -2986,18 +3077,19 @@ function StaffDocumentsPage() {
                 placeholder={t.patients_notes}
               />
             </Field>
-            <DialogFooter className="rounded-b-[1.75rem] border-slate-200 bg-slate-50/80 px-0">
+            </div>
+            <div className="shrink-0 flex justify-end gap-2 border-t border-border/60 px-4 py-3 bg-popover">
               <Button
                 type="button"
                 variant="outline"
-                className="rounded-2xl"
+                className="h-9 rounded-lg"
                 onClick={() => setTemplateOpen(false)}
               >
                 {t.common_cancel}
               </Button>
               <Button
                 type="submit"
-                className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+                className="h-9 rounded-lg gap-1.5"
                 disabled={generateBusy || templates.length === 0}
               >
                 {generateBusy ? (
@@ -3009,20 +3101,21 @@ function StaffDocumentsPage() {
                   ? t.documents_generating
                   : t.documents_generate_document}
               </Button>
-            </DialogFooter>
+            </div>
           </form>
-        </DialogContent>
-      </Dialog>
+        </SheetContent>
+      </Sheet>
 
-      <Dialog open={uploadOpen} onOpenChange={setUploadOpen}>
-        <DialogContent className="max-w-3xl rounded-[1.75rem] p-0">
-          <DialogHeader className="border-b border-border/70 px-6 pt-6 pb-4">
-            <DialogTitle>{t.documents_upload}</DialogTitle>
-            <DialogDescription>
-              {text.uploadDescription}
-            </DialogDescription>
-          </DialogHeader>
-          <form onSubmit={handleUpload} className="space-y-5 px-6 py-5">
+      <Sheet open={uploadOpen} onOpenChange={setUploadOpen}>
+        <SheetContent side="right" className="w-full sm:max-w-[760px]">
+          <form onSubmit={handleUpload} className="flex flex-col flex-1 min-h-0">
+            <SheetHeader className="shrink-0 border-b border-border/60 px-4 pt-3 pb-3">
+              <SheetTitle>{t.documents_upload}</SheetTitle>
+              <SheetDescription>
+                {text.uploadDescription}
+              </SheetDescription>
+            </SheetHeader>
+            <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
             {uploadError ? <Banner tone="error">{uploadError}</Banner> : null}
             {!canManage ? (
               <Banner tone="warning">
@@ -3036,7 +3129,7 @@ function StaffDocumentsPage() {
                 <Input
                   type="file"
                   onChange={handleUploadFileChange}
-                  className="h-10 rounded-xl border-slate-200 bg-slate-50"
+                  className="h-10 rounded-xl border-border/60 bg-muted/25"
                 />
               </Field>
               <Field label={t.documents_filename}>
@@ -3048,7 +3141,7 @@ function StaffDocumentsPage() {
                       autoName: event.target.value,
                     }))
                   }
-                  className="h-10 rounded-xl border-slate-200 bg-slate-50"
+                  className="h-10 rounded-xl border-border/60 bg-muted/25"
                 />
               </Field>
               <Field label={t.orders_patient}>
@@ -3125,7 +3218,7 @@ function StaffDocumentsPage() {
                     }))
                   }
                   list="documents-art-options"
-                  className="h-10 rounded-xl border-slate-200 bg-slate-50"
+                  className="h-10 rounded-xl border-border/60 bg-muted/25"
                   placeholder={t.documents_auto_classification_optional}
                 />
               </Field>
@@ -3197,7 +3290,7 @@ function StaffDocumentsPage() {
                       klinik: event.target.value,
                     }))
                   }
-                  className="h-10 rounded-xl border-slate-200 bg-slate-50"
+                  className="h-10 rounded-xl border-border/60 bg-muted/25"
                 />
               </Field>
               {canManage ? (
@@ -3210,12 +3303,12 @@ function StaffDocumentsPage() {
                         ursprung: event.target.value,
                       }))
                     }
-                    className="h-10 rounded-xl border-slate-200 bg-slate-50"
+                    className="h-10 rounded-xl border-border/60 bg-muted/25"
                   />
                 </Field>
               ) : null}
             </div>
-            <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+            <label className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground">
               <input
                 type="checkbox"
                 checked={uploadForm.isMedical}
@@ -3225,7 +3318,7 @@ function StaffDocumentsPage() {
                     isMedical: event.target.checked,
                   }))
                 }
-                className="size-4 rounded border-slate-300"
+                className="size-4 rounded border-input"
               />
               {t.documents_mark_medical_data}
             </label>
@@ -3241,18 +3334,19 @@ function StaffDocumentsPage() {
                 className={textareaClassName}
               />
             </Field>
-            <DialogFooter className="rounded-b-[1.75rem] border-slate-200 bg-slate-50/80 px-0">
+            </div>
+            <div className="shrink-0 flex justify-end gap-2 border-t border-border/60 px-4 py-3 bg-popover">
               <Button
                 type="button"
                 variant="outline"
-                className="rounded-2xl"
+                className="h-9 rounded-lg"
                 onClick={() => setUploadOpen(false)}
               >
                 {t.common_cancel}
               </Button>
               <Button
                 type="submit"
-                className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+                className="h-9 rounded-lg gap-1.5"
                 disabled={uploadBusy}
               >
                 {uploadBusy ? (
@@ -3262,10 +3356,10 @@ function StaffDocumentsPage() {
                 )}
                 {uploadBusy ? t.documents_uploading : t.documents_upload}
               </Button>
-            </DialogFooter>
+            </div>
           </form>
-        </DialogContent>
-      </Dialog>
+        </SheetContent>
+      </Sheet>
 
       <Dialog
         open={deleteOpen}
@@ -3277,7 +3371,7 @@ function StaffDocumentsPage() {
           }
         }}
       >
-        <DialogContent className="max-w-2xl rounded-[1.75rem] p-0">
+        <DialogContent className="max-w-2xl rounded-xl p-0">
           <DialogHeader className="border-b border-border/70 px-6 pt-6 pb-4">
             <DialogTitle>{t.documents_delete_file}</DialogTitle>
             <DialogDescription>
@@ -3301,11 +3395,11 @@ function StaffDocumentsPage() {
                 className={textareaClassName}
               />
             </Field>
-            <DialogFooter className="rounded-b-[1.75rem] border-slate-200 bg-slate-50/80 px-0">
+            <DialogFooter>
               <Button
                 type="button"
                 variant="outline"
-                className="rounded-2xl"
+                className="h-9 rounded-lg"
                 onClick={() => {
                   setDeleteOpen(false);
                   setDeleteError("");
@@ -3317,7 +3411,7 @@ function StaffDocumentsPage() {
               <Button
                 type="submit"
                 variant="destructive"
-                className="rounded-2xl"
+                className="h-9 rounded-lg gap-1.5"
                 disabled={deleteBusy}
               >
                 {deleteBusy ? (
@@ -3343,7 +3437,7 @@ function StaffDocumentsPage() {
           </SheetHeader>
           <div className="flex-1 overflow-y-auto px-4 pb-6">
             {detailBusy ? (
-              <div className="flex min-h-[280px] items-center justify-center text-sm text-slate-500">
+              <div className="flex min-h-[280px] items-center justify-center text-sm text-muted-foreground">
                 <LoaderCircle className="mr-2 size-4 animate-spin" />
                 {t.documents_loading_document}
               </div>
@@ -3353,7 +3447,7 @@ function StaffDocumentsPage() {
               </div>
             ) : detail ? (
               <div className="space-y-6 pt-5">
-                <section className="rounded-[1.6rem] border border-slate-200 bg-slate-50/70 p-5">
+                <section className="rounded-xl border border-border/60 bg-muted/25 p-5">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
@@ -3383,10 +3477,10 @@ function StaffDocumentsPage() {
                           {formatSensitivityLabel(detail.data_sensitivity)}
                         </Badge>
                       </div>
-                      <p className="mt-3 text-xl font-semibold text-slate-950">
-                        {detail.auto_name}
+                      <p className="mt-3 text-xl font-semibold text-foreground">
+                        {localizeDocumentCode(detail.auto_name, l)}
                       </p>
-                      <p className="mt-1 text-sm text-slate-600">
+                      <p className="mt-1 text-sm text-muted-foreground">
                         {[
                           detail.original_filename,
                           detail.mime_type,
@@ -3395,7 +3489,7 @@ function StaffDocumentsPage() {
                           .filter(Boolean)
                           .join(" · ")}
                       </p>
-                      <p className="mt-2 text-xs font-medium uppercase tracking-[0.18em] text-slate-500">
+                      <p className="mt-2 text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
                         {text.versionOf(detail.version_number, detail.version_count)}
                         {detail.is_latest_version
                           ? ` · ${text.current}`
@@ -3406,7 +3500,7 @@ function StaffDocumentsPage() {
                       {canManage && currentDetailTemplate ? (
                         <Button
                           variant="outline"
-                          className="rounded-2xl"
+                          className="rounded-lg"
                           onClick={() => openReplacementTemplate(detail)}
                         >
                           <FileText className="size-4" />
@@ -3418,7 +3512,7 @@ function StaffDocumentsPage() {
                         detail.mime_type?.startsWith("application/pdf")) ? (
                         <Button
                           variant="outline"
-                          className="rounded-2xl"
+                          className="rounded-lg"
                           onClick={() => void handleOpenPreview()}
                         >
                           <FileText className="size-4" />
@@ -3427,7 +3521,7 @@ function StaffDocumentsPage() {
                       ) : null}
                       <Button
                         variant="outline"
-                        className="rounded-2xl"
+                        className="rounded-lg"
                         disabled={!detail.has_stored_file}
                         onClick={() =>
                           void downloadDocument(
@@ -3442,7 +3536,7 @@ function StaffDocumentsPage() {
                       {canManage && detail.has_stored_file ? (
                         <Button
                           variant="destructive"
-                          className="rounded-2xl"
+                          className="rounded-lg"
                           onClick={() => {
                             setDeleteError("");
                             setDeleteReason("");
@@ -3456,7 +3550,7 @@ function StaffDocumentsPage() {
                       {detail.patient_id ? (
                         <StaffLink
                           to={`/patients?patient=${detail.patient_id}`}
-                          className="inline-flex h-10 items-center rounded-2xl border border-input bg-background px-4 text-sm font-medium text-slate-900 transition-colors hover:bg-accent hover:text-accent-foreground"
+                          className="inline-flex h-10 items-center rounded-lg border border-input bg-background px-4 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
                         >
                           {t.orders_patient}
                         </StaffLink>
@@ -3464,7 +3558,7 @@ function StaffDocumentsPage() {
                       {detail.order_id ? (
                         <StaffLink
                           to={`/orders?order=${detail.order_id}`}
-                          className="inline-flex h-10 items-center rounded-2xl border border-input bg-background px-4 text-sm font-medium text-slate-900 transition-colors hover:bg-accent hover:text-accent-foreground"
+                          className="inline-flex h-10 items-center rounded-lg border border-input bg-background px-4 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
                         >
                           {t.orders_title}
                         </StaffLink>
@@ -3472,7 +3566,7 @@ function StaffDocumentsPage() {
                       {detail.appointment_id ? (
                         <StaffLink
                           to={`/appointments?appointment=${detail.appointment_id}`}
-                          className="inline-flex h-10 items-center rounded-2xl border border-input bg-background px-4 text-sm font-medium text-slate-900 transition-colors hover:bg-accent hover:text-accent-foreground"
+                          className="inline-flex h-10 items-center rounded-lg border border-input bg-background px-4 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
                         >
                           {t.appointments_title}
                         </StaffLink>
@@ -3558,7 +3652,7 @@ function StaffDocumentsPage() {
                     />
                   </div>
                   {detail.notes ? (
-                    <div className="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+                    <div className="mt-4 rounded-lg border border-border/60 bg-card px-4 py-3 text-sm text-foreground">
                       {detail.notes}
                     </div>
                   ) : null}
@@ -3573,10 +3667,10 @@ function StaffDocumentsPage() {
                           type="button"
                           onClick={() => openDocument(version.id)}
                           className={cn(
-                            "w-full rounded-2xl border px-4 py-3 text-left transition",
+                            "w-full rounded-lg border px-4 py-3 text-left transition",
                             version.id === detail.id
                               ? "border-sky-300 bg-sky-50"
-                              : "border-slate-200 bg-white hover:border-slate-300",
+                              : "border-border/60 bg-card hover:border-input",
                           )}
                         >
                           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -3584,27 +3678,27 @@ function StaffDocumentsPage() {
                               <div className="flex flex-wrap items-center gap-2">
                                 <Badge
                                   variant="outline"
-                                  className="rounded-full border-slate-200 bg-white text-slate-700"
+                                  className="rounded-full border-border/60 bg-card text-foreground"
                                 >
                                   v{version.version_number}
                                 </Badge>
                                 {!version.is_latest_version ? (
                                   <Badge
                                     variant="outline"
-                                    className="rounded-full border-slate-200 bg-slate-100 text-slate-700"
+                                    className="rounded-full border-border/60 bg-muted text-foreground"
                                   >
                                     {t.documents_archived}
                                   </Badge>
                                 ) : null}
                               </div>
-                              <p className="mt-2 text-sm font-semibold text-slate-950">
+                              <p className="mt-2 text-sm font-semibold text-foreground">
                                 {version.auto_name}
                               </p>
-                              <p className="mt-1 text-xs text-slate-500">
+                              <p className="mt-1 text-xs text-muted-foreground">
                                 {formatDateTime(version.created_at)}
                               </p>
                             </div>
-                            <div className="text-xs text-slate-500">
+                            <div className="text-xs text-muted-foreground">
                               {version.original_filename || version.art}
                             </div>
                           </div>
@@ -3638,13 +3732,13 @@ function StaffDocumentsPage() {
                         {textExtraction?.method ? (
                           <Badge
                             variant="outline"
-                            className="rounded-full border-slate-200 bg-white text-slate-700"
+                            className="rounded-full border-border/60 bg-card text-foreground"
                           >
                             {formatExtractionMethodLabel(textExtraction.method)}
                           </Badge>
                         ) : null}
                       </div>
-                      <p className="mt-2 text-sm text-slate-600">
+                      <p className="mt-2 text-sm text-muted-foreground">
                         {textExtraction?.extracted_at
                           ? t.documents_last_processed.replace(
                               "{datetime}",
@@ -3674,13 +3768,13 @@ function StaffDocumentsPage() {
                     ) : null}
                   </div>
                   {textExtraction?.message ? (
-                    <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                    <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
                       {textExtraction.message}
                     </div>
                   ) : null}
                   {textExtraction?.extracted_text ? (
                     <div className="mt-4 space-y-2">
-                      <Label className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">
+                      <Label className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
                         {t.documents_extracted_text}
                       </Label>
                       <textarea
@@ -3690,7 +3784,7 @@ function StaffDocumentsPage() {
                       />
                     </div>
                   ) : (
-                    <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">
+                    <div className="mt-4 rounded-lg border border-dashed border-border/60 bg-muted/25 px-4 py-5 text-sm text-muted-foreground">
                       {t.documents_no_extracted_text}
                     </div>
                   )}
@@ -3726,7 +3820,7 @@ function StaffDocumentsPage() {
                           <div className="flex items-end">
                             <Button
                               type="submit"
-                              className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+                              className="rounded-lg"
                               disabled={translationBusy}
                             >
                               {translationBusy ? (
@@ -3754,7 +3848,7 @@ function StaffDocumentsPage() {
                       </form>
                     ) : null}
                     {translationRequests.length === 0 ? (
-                      <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
+                      <div className="rounded-lg border border-dashed border-border/60 bg-muted/25 px-4 py-6 text-sm text-muted-foreground">
                         {t.documents_no_translation_requests}
                       </div>
                     ) : (
@@ -3772,7 +3866,7 @@ function StaffDocumentsPage() {
                           return (
                             <div
                               key={request.id}
-                              className="rounded-2xl border border-slate-200 bg-white px-4 py-4"
+                              className="rounded-lg border border-border/60 bg-card px-4 py-4"
                             >
                               <div className="flex flex-wrap items-start justify-between gap-3">
                                 <div>
@@ -3791,16 +3885,16 @@ function StaffDocumentsPage() {
                                     </Badge>
                                     <Badge
                                       variant="outline"
-                                      className="rounded-full border-slate-200 bg-white text-slate-700"
+                                      className="rounded-full border-border/60 bg-card text-foreground"
                                     >
                                       {formatLanguageLabel(request.requested_language)}
                                     </Badge>
                                   </div>
-                                  <p className="mt-2 text-sm font-semibold text-slate-950">
+                                  <p className="mt-2 text-sm font-semibold text-foreground">
                                     {request.requested_by_name ||
                                       t.documents_unknown_requester}
                                   </p>
-                                  <p className="mt-1 text-xs text-slate-500">
+                                  <p className="mt-1 text-xs text-muted-foreground">
                                     {formatDateTime(request.requested_at)}
                                     {request.completed_at
                                       ? text.completedAt(
@@ -3955,22 +4049,22 @@ function StaffDocumentsPage() {
                               ) : (
                                 <div className="mt-4 space-y-3">
                                   {request.note ? (
-                                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                                    <div className="rounded-lg border border-border/60 bg-muted/25 px-3 py-2 text-sm text-foreground">
                                       {request.note}
                                     </div>
                                   ) : null}
                                   {request.source_text ? (
-                                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3">
-                                      <p className="text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
+                                    <div className="rounded-lg border border-border/60 bg-muted/25 px-3 py-3">
+                                      <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
                                         {t.documents_source_text}
                                       </p>
-                                      <p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">
+                                      <p className="mt-2 whitespace-pre-wrap text-sm text-foreground">
                                         {request.source_text}
                                       </p>
                                     </div>
                                   ) : null}
                                   {request.translated_text ? (
-                                    <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-3">
+                                    <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3">
                                       <p className="text-xs font-medium uppercase tracking-[0.16em] text-emerald-700">
                                         {t.documents_translated_text}
                                       </p>
@@ -3995,15 +4089,15 @@ function StaffDocumentsPage() {
                       <Banner tone="error">{saveError}</Banner>
                     ) : null}
                     <form onSubmit={handleSave} className="space-y-4">
-                      <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
                         {t.documents_interpreter_review_hint}
                       </div>
                       {detail.classification_suggestion ? (
-                        <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+                        <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
                           {text.suggestedClassification}{" "}
                           <span className="font-medium">
-                            {detail.classification_suggestion.art} ·{" "}
-                            {detail.classification_suggestion.category}
+                            {localizeDocumentCode(detail.classification_suggestion.art, l)} ·{" "}
+                            {localizeDocumentCode(detail.classification_suggestion.category, l)}
                           </span>
                         </div>
                       ) : null}
@@ -4019,7 +4113,7 @@ function StaffDocumentsPage() {
                               )
                             }
                             list="documents-art-options"
-                            className="h-10 rounded-xl border-slate-200 bg-slate-50"
+                            className="h-10 rounded-xl border-border/60 bg-muted/25"
                           />
                         </Field>
                         <Field label={t.documents_taxonomy_category}>
@@ -4043,7 +4137,7 @@ function StaffDocumentsPage() {
                           </select>
                         </Field>
                       </div>
-                      <label className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                      <label className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-muted/25 px-3 py-2 text-sm text-foreground">
                         <input
                           type="checkbox"
                           checked={editForm.isMedical}
@@ -4057,7 +4151,7 @@ function StaffDocumentsPage() {
                                 : current,
                             )
                           }
-                          className="size-4 rounded border-slate-300"
+                          className="size-4 rounded border-input"
                         />
                         {t.documents_mark_medical_data}
                       </label>
@@ -4071,11 +4165,11 @@ function StaffDocumentsPage() {
                                 : current,
                             )
                           }
-                          className="min-h-[120px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
+                          className="min-h-[120px] w-full rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
                           placeholder={t.documents_review_notes}
                         />
                       </Field>
-                      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-muted-foreground">
                         <span>{t.documents_release_internal_hint}</span>
                         <Button
                           type="submit"
@@ -4185,7 +4279,7 @@ function StaffDocumentsPage() {
                                   : current,
                               )
                             }
-                            className="h-10 rounded-xl border-slate-200 bg-slate-50"
+                            className="h-10 rounded-xl border-border/60 bg-muted/25"
                           />
                         </Field>
                         <Field label={t.documents_category} required>
@@ -4199,7 +4293,7 @@ function StaffDocumentsPage() {
                               )
                             }
                             list="documents-art-options"
-                            className="h-10 rounded-xl border-slate-200 bg-slate-50"
+                            className="h-10 rounded-xl border-border/60 bg-muted/25"
                           />
                         </Field>
                         <Field label={t.documents_category}>
@@ -4278,7 +4372,7 @@ function StaffDocumentsPage() {
                                   : current,
                               )
                             }
-                            className="h-10 rounded-xl border-slate-200 bg-slate-50"
+                            className="h-10 rounded-xl border-border/60 bg-muted/25"
                           />
                         </Field>
                         <Field label={t.documents_source}>
@@ -4291,11 +4385,11 @@ function StaffDocumentsPage() {
                                   : current,
                               )
                             }
-                            className="h-10 rounded-xl border-slate-200 bg-slate-50"
+                            className="h-10 rounded-xl border-border/60 bg-muted/25"
                           />
                         </Field>
                       </div>
-                      <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                      <label className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground">
                         <input
                           type="checkbox"
                           checked={editForm.isMedical}
@@ -4309,7 +4403,7 @@ function StaffDocumentsPage() {
                                 : current,
                             )
                           }
-                          className="size-4 rounded border-slate-300"
+                          className="size-4 rounded border-input"
                         />
                         {t.documents_mark_medical_data}
                       </label>
@@ -4329,7 +4423,7 @@ function StaffDocumentsPage() {
                       <div className="flex justify-end">
                         <Button
                           type="submit"
-                          className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+                          className="rounded-lg"
                           disabled={saveBusy}
                         >
                           {saveBusy ? (
@@ -4346,7 +4440,7 @@ function StaffDocumentsPage() {
 
                 <SectionCard title={t.documents_patient_portal}>
                   <div className="grid gap-4 md:grid-cols-[1.2fr_0.8fr]">
-                    <div className="rounded-[1.6rem] border border-slate-200 bg-slate-50/80 p-4">
+                    <div className="rounded-xl border border-border/60 bg-muted/25 p-4">
                       <div className="flex flex-wrap items-center gap-2">
                         <Badge
                           variant="outline"
@@ -4354,7 +4448,7 @@ function StaffDocumentsPage() {
                             "rounded-full",
                             detail.visibility === "patient_visible"
                               ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                              : "border-slate-200 bg-slate-100 text-slate-600",
+                              : "border-border/60 bg-muted text-muted-foreground",
                           )}
                         >
                           {detail.visibility === "patient_visible"
@@ -4369,7 +4463,7 @@ function StaffDocumentsPage() {
                           {t.documents_active_portal_releases}
                         </Badge>
                       </div>
-                      <p className="mt-3 text-sm text-slate-600">
+                      <p className="mt-3 text-sm text-muted-foreground">
                         {t.documents_portal_access_hint}
                       </p>
                       {!detail.patient_id ? (
@@ -4382,7 +4476,7 @@ function StaffDocumentsPage() {
                           {activePortalShares.map((share) => (
                             <div
                               key={share.id}
-                              className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700"
+                              className="rounded-lg border border-border/60 bg-card px-4 py-3 text-sm text-foreground"
                             >
                               <div className="flex flex-wrap items-center justify-between gap-2">
                                 <span>
@@ -4407,7 +4501,7 @@ function StaffDocumentsPage() {
                                       : t.documents_released}
                                 </Badge>
                               </div>
-                              <p className="mt-2 text-xs text-slate-500">
+                              <p className="mt-2 text-xs text-muted-foreground">
                                 {t.documents_portal_released_at.replace(
                                   "{datetime}",
                                   formatDateTime(share.shared_at),
@@ -4421,17 +4515,17 @@ function StaffDocumentsPage() {
                         </div>
                       ) : null}
                     </div>
-                    <div className="rounded-[1.6rem] border border-slate-200 bg-white p-4">
-                      <p className="text-sm font-semibold text-slate-950">
+                    <div className="rounded-xl border border-border/60 bg-card p-4">
+                      <p className="text-sm font-semibold text-foreground">
                         {t.documents_portal_controls}
                       </p>
-                      <p className="mt-2 text-sm text-slate-500">
+                      <p className="mt-2 text-sm text-muted-foreground">
                         {t.documents_portal_trail_hint}
                       </p>
                       <div className="mt-4 grid gap-3">
-                        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                        <div className="rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-muted-foreground">
                           {t.documents_confirmed_recipients}:{" "}
-                          <span className="font-semibold text-slate-950">
+                          <span className="font-semibold text-foreground">
                             {confirmedPortalShares}
                           </span>
                         </div>
@@ -4439,7 +4533,7 @@ function StaffDocumentsPage() {
                           <>
                             <Button
                               type="button"
-                              className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+                              className="rounded-lg"
                               disabled={portalBusy || !detail.patient_id}
                               onClick={() => void handleReleaseToPortal()}
                             >
@@ -4451,7 +4545,7 @@ function StaffDocumentsPage() {
                             <Button
                               type="button"
                               variant="outline"
-                              className="rounded-2xl"
+                              className="rounded-lg"
                               disabled={portalBusy || activePortalShares.length === 0}
                               onClick={() => void handleRevokePortalRelease()}
                             >
@@ -4460,7 +4554,7 @@ function StaffDocumentsPage() {
                             </Button>
                           </>
                         ) : (
-                          <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
+                          <div className="rounded-lg border border-dashed border-border/60 bg-muted/25 px-4 py-4 text-sm text-muted-foreground">
                             {t.documents_only_ceo_pm_portal}
                           </div>
                         )}
@@ -4476,7 +4570,7 @@ function StaffDocumentsPage() {
                   ) : null}
                   <div className="space-y-3">
                     {shares.length === 0 ? (
-                      <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
+                      <div className="rounded-lg border border-dashed border-border/60 bg-muted/25 px-4 py-6 text-sm text-muted-foreground">
                         {t.documents_no_shares_yet}
                       </div>
                     ) : (
@@ -4493,14 +4587,14 @@ function StaffDocumentsPage() {
                         return (
                           <div
                             key={share.id}
-                            className="rounded-2xl border border-slate-200 bg-white px-4 py-4"
+                            className="rounded-lg border border-border/60 bg-card px-4 py-4"
                           >
                             <div className="flex flex-wrap items-start justify-between gap-3">
                               <div>
-                                <p className="text-sm font-semibold text-slate-950">
+                                <p className="text-sm font-semibold text-foreground">
                                   {target}
                                 </p>
-                                <p className="mt-1 text-xs text-slate-500">
+                                <p className="mt-1 text-xs text-muted-foreground">
                                   {t.documents_shared_by.replace(
                                     "{name}",
                                     share.shared_by_name || t.common_unknown,
@@ -4508,12 +4602,12 @@ function StaffDocumentsPage() {
                                   · {formatDateTime(share.shared_at)}
                                 </p>
                                 {share.channel ? (
-                                  <p className="mt-1 text-xs text-slate-500">
+                                  <p className="mt-1 text-xs text-muted-foreground">
                                     {formatShareChannelLabel(share.channel)}
                                   </p>
                                 ) : null}
                                 {share.message ? (
-                                  <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                                  <div className="mt-3 rounded-lg border border-border/60 bg-muted/25 px-3 py-2 text-sm text-foreground">
                                     {share.message}
                                   </div>
                                 ) : null}
@@ -4522,7 +4616,7 @@ function StaffDocumentsPage() {
                                 {share.revoked_at ? (
                                   <Badge
                                     variant="outline"
-                                    className="rounded-full border-slate-200 bg-slate-100 text-slate-600"
+                                    className="rounded-full border-border/60 bg-muted text-muted-foreground"
                                   >
                                     {text.revokedBadge}
                                   </Badge>
@@ -4555,7 +4649,7 @@ function StaffDocumentsPage() {
                                 <Button
                                   type="button"
                                   size="sm"
-                                  className="rounded-xl bg-slate-950 text-white hover:bg-slate-800"
+                                  className="rounded-lg"
                                   onClick={() =>
                                     void handleConfirmShare(share.id)
                                   }
@@ -4585,10 +4679,10 @@ function StaffDocumentsPage() {
                   {canManage ? (
                     <form
                       onSubmit={handleCreateShare}
-                      className="mt-5 space-y-4 rounded-[1.6rem] border border-slate-200 bg-slate-50/70 p-4"
+                      className="mt-5 space-y-4 rounded-xl border border-border/60 bg-muted/25 p-4"
                     >
                       {selectedDocumentIds.length > 1 ? (
-                        <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+                        <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
                           {t.documents_sharing_selected.replace(
                             "{count}",
                             String(selectedDocumentIds.length),
@@ -4686,7 +4780,7 @@ function StaffDocumentsPage() {
                                 channel: event.target.value,
                               }))
                             }
-                            className="h-10 rounded-xl border-slate-200 bg-white"
+                            className="h-10 rounded-xl border-border/60 bg-card"
                           />
                         </Field>
                       </div>
@@ -4706,7 +4800,7 @@ function StaffDocumentsPage() {
                           className={textareaClassName}
                         />
                       </Field>
-                      <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+                      <label className="flex items-center gap-3 rounded-lg border border-border/60 bg-card px-4 py-3 text-sm text-foreground">
                         <input
                           type="checkbox"
                           checked={shareForm.requiresConfirmation}
@@ -4716,14 +4810,14 @@ function StaffDocumentsPage() {
                               requiresConfirmation: event.target.checked,
                             }))
                           }
-                          className="size-4 rounded border-slate-300"
+                          className="size-4 rounded border-input"
                         />
                         {t.documents_require_confirmation}
                       </label>
                       <div className="flex justify-end">
                         <Button
                           type="submit"
-                          className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+                          className="rounded-lg"
                           disabled={shareBusy}
                         >
                           {shareBusy ? (
@@ -4759,7 +4853,7 @@ function Banner({
       role={tone === "error" ? "alert" : "status"}
       aria-live={tone === "error" ? "assertive" : "polite"}
       className={cn(
-        "rounded-2xl border px-4 py-3 text-sm",
+        "rounded-lg border px-4 py-3 text-sm",
         tone === "error"
           ? "border-rose-200 bg-rose-50 text-rose-700"
           : tone === "warning"
@@ -4780,8 +4874,8 @@ function SectionCard({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-[1.75rem] border border-slate-200 bg-white p-5 shadow-sm">
-      <h2 className="mb-4 text-base font-semibold text-slate-950">{title}</h2>
+    <section className="rounded-xl border border-border/60 bg-card p-5 shadow-sm">
+      <h2 className="mb-4 text-base font-semibold text-foreground">{title}</h2>
       {children}
     </section>
   );
@@ -4789,11 +4883,11 @@ function SectionCard({
 
 function DetailField({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
-      <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500">
+    <div className="rounded-lg border border-border/60 bg-card px-4 py-3">
+      <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
         {label}
       </p>
-      <div className="mt-2 text-sm text-slate-900">{value}</div>
+      <div className="mt-2 text-sm text-foreground">{value}</div>
     </div>
   );
 }

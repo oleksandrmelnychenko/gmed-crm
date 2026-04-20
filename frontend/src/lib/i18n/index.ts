@@ -290,6 +290,10 @@ export interface Translations {
   appointments_scope_series: string;
   appointments_scope_bulk_status_hint: string;
   appointments_scope_following_hint: string;
+  appointments_repeat_this: string;
+  appointments_repeat_hint: string;
+  appointments_repeat_interval_error: string;
+  appointments_repeat_require_end_error: string;
   appointments_active_series_path: string;
   appointments_current_occurrence: string;
   appointments_open_checklist: string;
@@ -999,6 +1003,9 @@ export interface Translations {
   documents_uploading: string;
   documents_loading_documents: string;
   documents_confidence: string;
+  documents_confidence_low: string;
+  documents_confidence_medium: string;
+  documents_confidence_high: string;
   documents_unclassified: string;
   documents_upload_interpreter_hint: string;
   documents_upload_teamlead_hint: string;

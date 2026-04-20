@@ -1129,7 +1129,7 @@ export function OrdersPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const permissions = orderPermissions(user?.role);
   const locale = lang === "de" ? "de-DE" : "ru-RU";
-  const l = (de: string, ru: string) => (lang === "de" ? de : ru);
+  const l = useCallback((de: string, ru: string) => (lang === "de" ? de : ru), [lang]);
   const phaseLabels = useMemo(
     () => ({
       discovery: l("Bedarfsklärung", "Уточнение потребности"),
@@ -1138,14 +1138,14 @@ export function OrdersPage() {
       closure: l("Abschluss", "Закрытие"),
       followup: l("Nachsorge", "Наблюдение"),
     }),
-    [lang],
+    [l],
   );
   const workflowGroupLabels = useMemo(
     () => ({
       ...phaseLabels,
       custom: l("Individuell", "Individualno"),
     }),
-    [lang, phaseLabels],
+    [l, phaseLabels],
   );
   const orderStatusLabels = useMemo(
     () => ({
@@ -1154,7 +1154,7 @@ export function OrdersPage() {
       completed: l("Abgeschlossen", "Завершён"),
       cancelled: l("Storniert", "Отменён"),
     }),
-    [lang],
+    [l],
   );
   const debtStatusLabels = useMemo(
     () => ({
@@ -1165,7 +1165,7 @@ export function OrdersPage() {
       cleared: l("Geklärt", "Снято"),
       not_required: l("Nicht erforderlich", "Не требуется"),
     }),
-    [lang],
+    [l],
   );
   const billingReleaseLabels = useMemo(
     () => ({
@@ -1173,7 +1173,7 @@ export function OrdersPage() {
       granted: l("Freigegeben", "Разрешено"),
       denied: l("Abgelehnt", "Отклонено"),
     }),
-    [lang],
+    [l],
   );
   const packageCoverageLabels = useMemo(
     () => ({
@@ -1181,7 +1181,7 @@ export function OrdersPage() {
       covered: l("Abgedeckt", "Покрыто"),
       not_covered: l("Nicht abgedeckt", "Не покрыто"),
     }),
-    [lang],
+    [l],
   );
   const roleLabels = useMemo(
     () => ({
@@ -1195,7 +1195,7 @@ export function OrdersPage() {
       teamlead_interpreter: l("Dolmetscher-Teamlead", "Тимлид переводчиков"),
       debt_owner: l("Debt-Owner", "Ответственный по debt"),
     }),
-    [lang],
+    [l],
   );
   const labelFor = (value: string | null | undefined, labels: Record<string, string>) =>
     (value ? labels[value] : null) ?? value ?? l("Nicht festgelegt", "Не указано");
@@ -1637,6 +1637,7 @@ export function OrdersPage() {
     return items;
   }, [
     activeWorkflowAssignments,
+    l,
     orderDetail?.process_gates?.debt_management?.owner_name,
     orderDetail?.process_gates?.debt_management?.owner_user_id,
   ]);

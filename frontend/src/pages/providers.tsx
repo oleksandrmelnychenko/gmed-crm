@@ -9,13 +9,17 @@ import {
 } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
+  ArrowDown,
+  ArrowUp,
   Building2,
   CalendarClock,
   ChevronLeft,
   ChevronRight,
+  Filter,
   LoaderCircle,
   Mail,
   MapPin,
+  MoreHorizontal,
   Phone,
   Plus,
   RefreshCw,
@@ -47,6 +51,16 @@ import { useLang } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
+import {
+  ColumnFilterDateRangePopover,
+  ColumnFilterPopover,
+  ColumnFilterSelectPopover,
+  KpiInlineStat,
+  PaginationControls,
+  type ColumnFilterKind,
+  type SortDir,
+} from "@/components/data-table";
+import { PageHeader } from "@/components/ui-shell";
 
 type ProviderType = "medical" | "non_medical";
 
@@ -243,6 +257,214 @@ const DEFAULT_FILTERS: ProviderFilters = {
 
 const textareaClassName =
   "min-h-[104px] w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
+
+type ProviderColumnKey =
+  | "status"
+  | "no"
+  | "provider"
+  | "type"
+  | "location"
+  | "fachbereich"
+  | "doctors"
+  | "patients"
+  | "contract";
+
+const PROVIDER_COLUMN_META: Record<
+  ProviderColumnKey,
+  { labelKey: string; widthClass?: string; sortable?: boolean; filter: ColumnFilterKind }
+> = {
+  status: { labelKey: "patients_col_status", widthClass: "w-[110px]", sortable: true, filter: "select" },
+  no: { labelKey: "patients_col_no", widthClass: "w-[56px]", sortable: true, filter: "text" },
+  provider: { labelKey: "providers_title", sortable: true, filter: "text" },
+  type: { labelKey: "providers_type", widthClass: "w-[120px]", sortable: true, filter: "select" },
+  location: { labelKey: "providers_city", widthClass: "w-[160px]", sortable: true, filter: "text" },
+  fachbereich: { labelKey: "providers_fachbereich", widthClass: "w-[160px]", sortable: true, filter: "text" },
+  doctors: { labelKey: "providers_doctors", widthClass: "w-[90px]", sortable: true, filter: "text" },
+  patients: { labelKey: "providers_linked_patients", widthClass: "w-[90px]", sortable: true, filter: "text" },
+  contract: { labelKey: "providers_contract", widthClass: "w-[110px]", sortable: true, filter: "select" },
+};
+
+const DEFAULT_PROVIDER_COLUMN_ORDER: ProviderColumnKey[] = [
+  "status",
+  "no",
+  "provider",
+  "type",
+  "location",
+  "fachbereich",
+  "doctors",
+  "patients",
+  "contract",
+];
+
+function providerColumnText(
+  p: ProviderSummary,
+  key: ProviderColumnKey,
+  tr: Record<string, string>,
+): string {
+  switch (key) {
+    case "status":
+      return p.is_active ? (tr.common_active ?? "active") : (tr.common_inactive ?? "inactive");
+    case "no":
+      return "";
+    case "provider":
+      return [p.name, p.legal_name, p.tax_id].filter(Boolean).join(" ");
+    case "type":
+      return p.provider_type;
+    case "location":
+      return [p.address_city, p.address_country].filter(Boolean).join(" ");
+    case "fachbereich":
+      return p.fachbereich ?? "";
+    case "doctors":
+      return String(p.doctor_count);
+    case "patients":
+      return String(p.patient_count);
+    case "contract":
+      return p.has_contract ? "with" : "without";
+  }
+}
+
+function ProviderCell({
+  colKey,
+  provider,
+  rowNumber,
+  tr,
+  l,
+}: {
+  colKey: ProviderColumnKey;
+  provider: ProviderSummary;
+  rowNumber: number;
+  tr: Record<string, string>;
+  l: (de: string, ru: string, en: string) => string;
+}) {
+  switch (colKey) {
+    case "status":
+      return (
+        <td className="px-3 py-2.5">
+          <span
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[11.5px] font-medium",
+              provider.is_active ? "bg-emerald-50 text-emerald-700" : "bg-neutral-100 text-neutral-600",
+            )}
+          >
+            <span className={cn("size-1.5 rounded-full", provider.is_active ? "bg-emerald-500" : "bg-neutral-400")} />
+            {provider.is_active ? (tr.common_active ?? "active") : (tr.common_inactive ?? "inactive")}
+          </span>
+        </td>
+      );
+    case "no":
+      return (
+        <td className="px-3 py-2.5 text-muted-foreground font-mono text-[12px] tabular-nums">
+          {rowNumber}
+        </td>
+      );
+    case "provider":
+      return (
+        <td className="px-3 py-2.5">
+          <div className="flex items-center gap-2.5">
+            <div className="flex items-center justify-center size-7 rounded-full bg-muted text-[11px] font-medium text-foreground shrink-0">
+              {provider.name
+                .split(/\s+/)
+                .slice(0, 2)
+                .map((w) => w[0]?.toUpperCase() ?? "")
+                .join("")}
+            </div>
+            <div className="min-w-0">
+              <div className="font-medium text-foreground truncate">{provider.name}</div>
+              {provider.legal_name && provider.legal_name !== provider.name ? (
+                <div className="text-[11.5px] text-muted-foreground truncate">{provider.legal_name}</div>
+              ) : provider.tax_id ? (
+                <div className="text-[11.5px] text-muted-foreground truncate">
+                  {l("Steuer-ID", "Налоговый ID", "Tax ID")} {provider.tax_id}
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </td>
+      );
+    case "type":
+      return (
+        <td className="px-3 py-2.5">
+          <Badge
+            variant="outline"
+            className={cn(
+              "rounded-full text-[10px]",
+              provider.provider_type === "medical"
+                ? "border-sky-200 bg-sky-50 text-sky-700"
+                : "border-violet-200 bg-violet-50 text-violet-700",
+            )}
+          >
+            {provider.provider_type === "medical" ? tr.providers_type_medical : tr.providers_type_non_medical}
+          </Badge>
+        </td>
+      );
+    case "location":
+      return (
+        <td className="px-3 py-2.5 text-muted-foreground">
+          {[provider.address_city, provider.address_country].filter(Boolean).join(", ") || "—"}
+        </td>
+      );
+    case "fachbereich":
+      return (
+        <td className="px-3 py-2.5 text-muted-foreground truncate max-w-[200px]">
+          {provider.fachbereich ?? "—"}
+        </td>
+      );
+    case "doctors":
+      return (
+        <td className="px-3 py-2.5 text-foreground tabular-nums">
+          {provider.doctor_count}
+        </td>
+      );
+    case "patients":
+      return (
+        <td className="px-3 py-2.5 text-foreground tabular-nums">
+          {provider.patient_count}
+        </td>
+      );
+    case "contract":
+      return (
+        <td className="px-3 py-2.5">
+          {provider.has_contract ? (
+            <Badge variant="outline" className="rounded-full text-[10px] border-emerald-200 bg-emerald-50 text-emerald-700">
+              {tr.providers_contract_with}
+            </Badge>
+          ) : (
+            <span className="text-muted-foreground">—</span>
+          )}
+        </td>
+      );
+  }
+}
+
+function compareProvidersByColumn(
+  a: ProviderSummary,
+  b: ProviderSummary,
+  key: ProviderColumnKey,
+): number {
+  switch (key) {
+    case "status":
+      return Number(b.is_active) - Number(a.is_active);
+    case "no":
+      return 0;
+    case "provider":
+      return (a.name ?? "").localeCompare(b.name ?? "");
+    case "type":
+      return (a.provider_type ?? "").localeCompare(b.provider_type ?? "");
+    case "location": {
+      const al = `${a.address_city ?? ""} ${a.address_country ?? ""}`.trim().toLowerCase();
+      const bl = `${b.address_city ?? ""} ${b.address_country ?? ""}`.trim().toLowerCase();
+      return al.localeCompare(bl);
+    }
+    case "fachbereich":
+      return (a.fachbereich ?? "").localeCompare(b.fachbereich ?? "");
+    case "doctors":
+      return a.doctor_count - b.doctor_count;
+    case "patients":
+      return a.patient_count - b.patient_count;
+    case "contract":
+      return Number(b.has_contract) - Number(a.has_contract);
+  }
+}
 
 function providerPermissions(role?: string): ProviderPermissions {
   switch (role) {
@@ -642,7 +864,68 @@ function ProvidersPage() {
   const [listError, setListError] = useState("");
   const [listVersion, setListVersion] = useState(0);
   const [page, setPage] = useState(0);
-  const PAGE_SIZE = 20;
+  const [pageSize, setPageSize] = useState(20);
+
+  const [columnOrder, setColumnOrder] = useState<ProviderColumnKey[]>(
+    DEFAULT_PROVIDER_COLUMN_ORDER,
+  );
+  const [draggingKey, setDraggingKey] = useState<ProviderColumnKey | null>(null);
+  const [dropTargetKey, setDropTargetKey] = useState<ProviderColumnKey | null>(null);
+  const [sortBy, setSortBy] = useState<{ key: ProviderColumnKey; dir: SortDir } | null>(null);
+  const [columnFilters, setColumnFilters] = useState<Record<ProviderColumnKey, string>>({
+    status: "",
+    no: "",
+    provider: "",
+    type: "",
+    location: "",
+    fachbereich: "",
+    doctors: "",
+    patients: "",
+    contract: "",
+  });
+  const [filterOpen, setFilterOpen] = useState<ProviderColumnKey | null>(null);
+
+  function toggleSort(key: ProviderColumnKey) {
+    setSortBy((current) => {
+      if (!current || current.key !== key) return { key, dir: "asc" };
+      if (current.dir === "asc") return { key, dir: "desc" };
+      return null;
+    });
+  }
+
+  function setColumnFilter(key: ProviderColumnKey, value: string) {
+    setColumnFilters((current) => ({ ...current, [key]: value }));
+  }
+
+  function handleColumnDragStart(key: ProviderColumnKey) {
+    setDraggingKey(key);
+  }
+
+  function handleColumnDragOver(event: React.DragEvent, key: ProviderColumnKey) {
+    event.preventDefault();
+    if (draggingKey && key !== draggingKey) setDropTargetKey(key);
+  }
+
+  function handleColumnDrop(target: ProviderColumnKey) {
+    if (!draggingKey || draggingKey === target) {
+      setDraggingKey(null);
+      setDropTargetKey(null);
+      return;
+    }
+    setColumnOrder((current) => {
+      const next = current.filter((k) => k !== draggingKey);
+      const insertAt = next.indexOf(target);
+      next.splice(insertAt, 0, draggingKey);
+      return next;
+    });
+    setDraggingKey(null);
+    setDropTargetKey(null);
+  }
+
+  function handleColumnDragEnd() {
+    setDraggingKey(null);
+    setDropTargetKey(null);
+  }
 
   const [createOpen, setCreateOpen] = useState(false);
   const [createBusy, setCreateBusy] = useState(false);
@@ -707,12 +990,44 @@ function ProvidersPage() {
     );
   }, [providers]);
 
-  const totalPages = Math.max(1, Math.ceil(providers.length / PAGE_SIZE));
+  const sortedAndFilteredProviders = useMemo(() => {
+    const hasFilter = Object.values(columnFilters).some((v) => v.trim() !== "");
+    const filtered = hasFilter
+      ? providers.filter((p) => {
+          for (const key of columnOrder) {
+            const raw = columnFilters[key].trim();
+            if (!raw) continue;
+            if (key === "status") {
+              if (raw === "active" && !p.is_active) return false;
+              if (raw === "inactive" && p.is_active) return false;
+            } else if (key === "type") {
+              if (p.provider_type !== raw) return false;
+            } else if (key === "contract") {
+              if (raw === "with" && !p.has_contract) return false;
+              if (raw === "without" && p.has_contract) return false;
+            } else {
+              const haystack = providerColumnText(p, key, tr).toLowerCase();
+              if (!haystack.includes(raw.toLowerCase())) return false;
+            }
+          }
+          return true;
+        })
+      : providers;
+    if (!sortBy) return filtered;
+    const arr = [...filtered];
+    arr.sort((a, b) => {
+      const cmp = compareProvidersByColumn(a, b, sortBy.key);
+      return sortBy.dir === "asc" ? cmp : -cmp;
+    });
+    return arr;
+  }, [providers, columnFilters, columnOrder, sortBy, tr]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedAndFilteredProviders.length / pageSize));
   const paginatedProviders = useMemo(
-    () => providers.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE),
-    [providers, page]
+    () => sortedAndFilteredProviders.slice(page * pageSize, (page + 1) * pageSize),
+    [sortedAndFilteredProviders, page, pageSize]
   );
-  useEffect(() => { setPage(0); }, [providers.length]);
+  useEffect(() => { setPage(0); }, [providers.length, pageSize]);
 
   const selectedSummary = useMemo(
     () => providers.find((provider) => provider.id === selectedId) ?? null,
@@ -1033,38 +1348,16 @@ function ProvidersPage() {
 
   return (
     <>
-      <div className="space-y-6">
-        <section className="rounded-[2rem] border border-white/70 bg-[radial-gradient(circle_at_top_left,_rgba(125,211,252,0.28),_transparent_38%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(241,245,249,0.92))] p-6 shadow-[0_32px_80px_rgba(15,23,42,0.08)]">
-          <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
-            <div className="max-w-3xl">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge
-                  variant="outline"
-                  className="rounded-full border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-sky-700"
-                >
-                  {t.providers_title}
-                </Badge>
-                <Badge
-                  variant="outline"
-                  className="rounded-full border-slate-200 bg-white/80 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-600"
-                >
-                  {permissions.canManageRegistry ? t.patients_registry_control : t.patients_readonly_view}
-                </Badge>
-              </div>
-              <h1 className="mt-4 text-3xl font-semibold tracking-tight text-slate-950 md:text-4xl">
-                {t.providers_subtitle}
-              </h1>
-              <p className="mt-3 text-sm leading-7 text-slate-600 md:text-[15px]">
-                {t.providers_subtitle}
-                
-              </p>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-3">
+      <div className="space-y-4">
+        <PageHeader
+          title={t.providers_title}
+          actions={
+            <>
               <Button
                 type="button"
                 variant="outline"
-                className="rounded-2xl"
+                size="sm"
+                className="h-8 rounded-lg gap-1.5"
                 onClick={() => {
                   refreshList();
                   if (detailOpen && selectedId) {
@@ -1072,413 +1365,284 @@ function ProvidersPage() {
                   }
                 }}
               >
-                <RefreshCw className="size-4" />
+                <RefreshCw className="size-3.5" />
                 {l("Aktualisieren", "Обновить", "Refresh")}
               </Button>
               {permissions.canManageRegistry ? (
                 <Button
                   type="button"
-                  className="h-9 rounded-lg px-3.5"
+                  size="sm"
+                  className="h-8 rounded-lg gap-1.5"
                   onClick={openCreateSheet}
                 >
-                  <Plus className="size-4" />
+                  <Plus className="size-3.5" />
                   {t.providers_new}
                 </Button>
               ) : null}
-            </div>
-          </div>
+            </>
+          }
+        />
 
-          <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <MetricCard icon={Building2} label={t.providers_title} value={metrics.total.toString()} tone="sky" />
-            <MetricCard
-              icon={UsersRound}
-              label={permissions.forceNonMedical ? l("Services", "Сервисы", "Services") : t.providers_doctors}
-              value={(permissions.forceNonMedical ? metrics.services : metrics.doctors).toString()}
-              tone="emerald"
+        {/* KPI inline stats */}
+        <div className="flex flex-wrap items-center gap-x-8 gap-y-3 rounded-xl border border-border/50 bg-card px-4 py-3">
+          <KpiInlineStat icon={Building2} label={t.providers_title} value={metrics.total} tone="sky" />
+          <KpiInlineStat
+            icon={UsersRound}
+            label={permissions.forceNonMedical ? l("Services", "Сервисы", "Services") : t.providers_doctors}
+            value={permissions.forceNonMedical ? metrics.services : metrics.doctors}
+            tone="emerald"
+          />
+          <KpiInlineStat
+            icon={Stethoscope}
+            label={t.providers_linked_patients}
+            value={metrics.patients}
+            tone="amber"
+          />
+          <KpiInlineStat
+            icon={CalendarClock}
+            label={permissions.forceNonMedical ? l("Offene Anfragen", "Открытые запросы", "Open requests") : t.providers_appointments}
+            value={permissions.forceNonMedical ? metrics.openConciergeRequests : metrics.appointments}
+            tone="slate"
+          />
+        </div>
+
+        {/* Top search bar */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative flex-1 min-w-[260px]">
+            <Input
+              value={filters.search}
+              onChange={(event) => setFilters((current) => ({ ...current, search: event.target.value }))}
+              placeholder={t.common_search}
+              className="h-9 rounded-lg bg-card pl-3"
             />
-            <MetricCard icon={Stethoscope} label={t.providers_linked_patients} value={metrics.patients.toString()} tone="amber" />
-            <MetricCard
-              icon={CalendarClock}
-              label={permissions.forceNonMedical ? l("Offene Anfragen", "Открытые запросы", "Open requests") : t.providers_appointments}
-              value={(permissions.forceNonMedical ? metrics.openConciergeRequests : metrics.appointments).toString()}
-              tone="slate"
-            />
           </div>
-        </section>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-9 rounded-lg"
+            onClick={resetFilters}
+          >
+            {l("Zurücksetzen", "Сбросить", "Reset")}
+          </Button>
+        </div>
 
-        <div className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
-          <section className={cardClass("p-5")}>
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-sm font-semibold text-slate-950">{t.common_search}</h2>
-                <p className="mt-1 text-sm text-slate-600">
-                  {t.providers_subtitle}
-                </p>
-              </div>
-              <Button type="button" variant="ghost" size="sm" className="rounded-xl" onClick={resetFilters}>
-                {l("Zurücksetzen", "Сбросить", "Reset")}
-              </Button>
-            </div>
+        {/* Error banner */}
+        {listError ? <Banner tone="error">{listError}</Banner> : null}
 
-            <div className="mt-5 space-y-4">
-              <Field label={t.common_search}>
-                <Input
-                  value={filters.search}
-                  onChange={(event) =>
-                    setFilters((current) => ({ ...current, search: event.target.value }))
-                  }
-                  placeholder={t.common_search}
-                  className="h-10 rounded-xl bg-slate-50"
-                />
-              </Field>
-
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-1">
-                <Field label={t.providers_type}>
-                  <ShadSelect value={permissions.forceNonMedical ? "non_medical" : filters.providerType} onValueChange={(v) => setFilters((current) => ({ ...current, providerType: v ?? "" }))} disabled={permissions.forceNonMedical}>
-                    <SelectTrigger className="w-full h-10 rounded-xl bg-slate-50">
-                      <SelectValue>
-                        {(() => {
-                          const v = permissions.forceNonMedical ? "non_medical" : filters.providerType;
-                          if (v === "medical") return t.providers_type_medical;
-                          if (v === "non_medical") return t.providers_type_non_medical;
-                          return t.providers_all;
-                        })()}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="">{t.providers_all}</SelectItem>
-                      <SelectItem value="medical">{t.providers_type_medical}</SelectItem>
-                      <SelectItem value="non_medical">{t.providers_type_non_medical}</SelectItem>
-                    </SelectContent>
-                  </ShadSelect>
-                </Field>
-
-                <Field label={t.common_activity}>
-                  <ShadSelect value={filters.activeOnly} onValueChange={(v) => setFilters((current) => ({ ...current, activeOnly: v ?? "" }))}>
-                    <SelectTrigger className="w-full h-10 rounded-xl bg-slate-50">
-                      <SelectValue>
-                        {filters.activeOnly === "true" ? t.common_active
-                          : filters.activeOnly === "false" ? t.common_inactive
-                          : t.providers_all}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="">{t.providers_all}</SelectItem>
-                      <SelectItem value="true">{t.common_active}</SelectItem>
-                      <SelectItem value="false">{t.common_inactive}</SelectItem>
-                    </SelectContent>
-                  </ShadSelect>
-                </Field>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-1">
-                <Field label={t.providers_city}>
-                  <Input
-                    value={filters.city}
-                    onChange={(event) =>
-                      setFilters((current) => ({ ...current, city: event.target.value }))
-                    }
-                    className="h-10 rounded-xl bg-slate-50"
-                  />
-                </Field>
-
-                <Field label={t.providers_country}>
-                  <Input
-                    value={filters.country}
-                    onChange={(event) =>
-                      setFilters((current) => ({ ...current, country: event.target.value }))
-                    }
-                    className="h-10 rounded-xl bg-slate-50"
-                  />
-                </Field>
-              </div>
-
-              <Field label={t.providers_fachbereich}>
-                <Input
-                  value={filters.fachbereich}
-                  onChange={(event) =>
-                    setFilters((current) => ({ ...current, fachbereich: event.target.value }))
-                  }
-                  placeholder={t.providers_fachbereich}
-                  className="h-10 rounded-xl bg-slate-50"
-                />
-              </Field>
-
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-1">
-                <Field label={t.common_doctor}>
-                  <Input
-                    value={filters.doctorName}
-                    onChange={(event) =>
-                      setFilters((current) => ({ ...current, doctorName: event.target.value }))
-                    }
-                    placeholder={t.common_doctor}
-                    className="h-10 rounded-xl bg-slate-50"
-                  />
-                </Field>
-
-                <Field label={t.providers_fachbereich}>
-                  <Input
-                    value={filters.doctorFachbereich}
-                    onChange={(event) =>
-                      setFilters((current) => ({
-                        ...current,
-                        doctorFachbereich: event.target.value,
-                      }))
-                    }
-                    className="h-10 rounded-xl bg-slate-50"
-                  />
-                </Field>
-              </div>
-
-              <Field label={t.providers_services}>
-                <Input
-                  value={filters.serviceName}
-                  onChange={(event) =>
-                    setFilters((current) => ({ ...current, serviceName: event.target.value }))
-                  }
-                  placeholder={t.providers_services}
-                  className="h-10 rounded-xl bg-slate-50"
-                />
-              </Field>
-
-              <Field label={t.providers_min_rating}>
-                <ShadSelect
-                  value={filters.ratingGte}
-                  onValueChange={(value) =>
-                    setFilters((current) => ({ ...current, ratingGte: value ?? "" }))
-                  }
-                >
-                  <SelectTrigger className="w-full h-10 rounded-xl bg-slate-50">
-                    <SelectValue placeholder={t.providers_all} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="">{t.providers_all}</SelectItem>
-                    <SelectItem value="3.5">3.5+</SelectItem>
-                    <SelectItem value="4">4.0+</SelectItem>
-                    <SelectItem value="4.5">4.5+</SelectItem>
-                  </SelectContent>
-                </ShadSelect>
-              </Field>
-
-              <Field label={t.providers_contract}>
-                <ShadSelect value={filters.hasContract} onValueChange={(v) => setFilters((current) => ({ ...current, hasContract: v ?? "" }))}>
-                  <SelectTrigger className="w-full h-10 rounded-xl bg-slate-50">
-                    <SelectValue>
-                      {filters.hasContract === "true" ? t.providers_contract_with
-                        : filters.hasContract === "false" ? t.providers_contract_without
-                        : t.providers_all}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="">{t.providers_all}</SelectItem>
-                    <SelectItem value="true">{t.providers_contract_with}</SelectItem>
-                    <SelectItem value="false">{t.providers_contract_without}</SelectItem>
-                  </SelectContent>
-                </ShadSelect>
-              </Field>
-
-              {permissions.forceNonMedical ? (
-                <Banner tone="warning">
-                  {t.providers_select_hint}
-                </Banner>
-              ) : null}
-            </div>
-          </section>
-
-          <section className={cardClass("p-5")}>
-            <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-              <div>
-                <h2 className="text-sm font-semibold text-slate-950">{t.providers_title}</h2>
-                <p className="mt-1 text-sm text-slate-600">
-                  {t.providers_subtitle}
-                </p>
-              </div>
-              <div className="text-xs uppercase tracking-[0.14em] text-slate-500">
-                {listBusy ? t.patients_syncing : `${providers.length} ${t.patients_records}`}
-              </div>
-            </div>
-
-            {listError ? (
-              <div className="mt-5">
-                <Banner tone="error">{listError}</Banner>
-              </div>
-            ) : null}
-
-            {listBusy ? (
-              <div className="flex min-h-[320px] items-center justify-center text-sm text-slate-500">
-                <LoaderCircle className="mr-2 size-4 animate-spin" />
-                {t.common_loading}
-              </div>
-            ) : providers.length === 0 ? (
-              <div className="mt-5">
-                <EmptyPanel
-                  title={t.patients_no_match}
-                  text={t.patients_no_match}
-                />
-              </div>
-            ) : (
-              <>
-                <div className="mt-5 grid gap-4 xl:grid-cols-2">
-                {paginatedProviders.map((provider) => (
-                  <button
-                    key={provider.id}
-                    type="button"
-                    onClick={() => openProvider(provider.id)}
-                    className={cn(
-                      "rounded-[1.6rem] border p-5 text-left transition hover:-translate-y-0.5 hover:shadow-[0_18px_48px_rgba(15,23,42,0.08)]",
-                      selectedId === provider.id
-                        ? "border-sky-300 bg-sky-50/70 shadow-[0_18px_48px_rgba(14,165,233,0.12)]"
-                        : "border-slate-200 bg-white"
-                    )}
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span
+        {/* Table card */}
+        <div className="rounded-xl border border-border bg-card overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-[13px]">
+              <thead className="bg-muted/40">
+                <tr className="text-left text-[11px] uppercase tracking-wider text-muted-foreground">
+                  {columnOrder.map((key) => {
+                    const meta = PROVIDER_COLUMN_META[key];
+                    const isDragging = draggingKey === key;
+                    const isDropTarget = dropTargetKey === key && draggingKey && dropTargetKey !== draggingKey;
+                    const isSorted = sortBy?.key === key;
+                    const SortIcon = isSorted ? (sortBy?.dir === "asc" ? ArrowUp : ArrowDown) : null;
+                    const filterValue = columnFilters[key];
+                    const filterActive = filterValue.trim() !== "";
+                    const isFilterOpen = filterOpen === key;
+                    return (
+                      <th
+                        key={key}
+                        draggable
+                        onDragStart={() => handleColumnDragStart(key)}
+                        onDragOver={(e) => handleColumnDragOver(e, key)}
+                        onDrop={() => handleColumnDrop(key)}
+                        onDragEnd={handleColumnDragEnd}
+                        className={cn(
+                          "px-3 py-2.5 font-medium select-none relative",
+                          meta.widthClass,
+                          isSorted && "text-foreground",
+                          isDragging && "opacity-50",
+                          isDropTarget && "before:absolute before:left-0 before:top-0 before:bottom-0 before:w-[2px] before:bg-[var(--brand)]"
+                        )}
+                      >
+                        <div className="flex items-center justify-between gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (meta.sortable && !draggingKey) toggleSort(key);
+                            }}
+                            disabled={!meta.sortable}
                             className={cn(
-                              "rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em]",
-                              providerTypeBadge(provider.provider_type)
+                              "flex items-center gap-1 min-w-0 text-left",
+                              meta.sortable && "cursor-pointer hover:text-foreground"
                             )}
+                            title={meta.sortable ? (tr[meta.labelKey] ?? meta.labelKey) : ""}
                           >
-                            {providerTypeLabel(provider.provider_type, tr)}
-                          </span>
-                          <span
-                            className={cn(
-                              "rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em]",
-                              statusBadge(provider.is_active)
-                            )}
-                          >
-                            {provider.is_active ? t.common_active : t.common_inactive}
-                          </span>
-                          {provider.has_contract ? (
-                            <Badge variant="outline" className="rounded-full border-slate-200 bg-white text-slate-700">
-                              {l("Vertrag", "Договор", "Contract")}
-                            </Badge>
+                            <span className="truncate">{tr[meta.labelKey] ?? meta.labelKey}</span>
+                            {SortIcon ? <SortIcon className="size-3 text-[var(--brand)] shrink-0" /> : null}
+                          </button>
+                          {meta.filter !== "none" ? (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setFilterOpen(isFilterOpen ? null : key);
+                              }}
+                              title={t.common_search}
+                              className={cn(
+                                "inline-flex items-center justify-center size-5 rounded transition-colors shrink-0",
+                                filterActive
+                                  ? "text-[var(--brand)] hover:bg-[var(--brand-soft)]"
+                                  : "text-muted-foreground/60 hover:text-foreground hover:bg-muted"
+                              )}
+                            >
+                              <Filter className="size-3" />
+                            </button>
                           ) : null}
                         </div>
-                        <h3 className="mt-3 text-lg font-semibold text-slate-950">
-                          {provider.name}
-                        </h3>
-                        {provider.legal_name && provider.legal_name !== provider.name ? (
-                          <p className="mt-1 text-sm text-slate-700">{provider.legal_name}</p>
+                        {isFilterOpen && meta.filter === "text" ? (
+                          <ColumnFilterPopover
+                            value={filterValue}
+                            onChange={(v) => setColumnFilter(key, v)}
+                            onClear={() => setColumnFilter(key, "")}
+                            onClose={() => setFilterOpen(null)}
+                            placeholder={tr[meta.labelKey] ?? meta.labelKey}
+                            tr={tr}
+                          />
                         ) : null}
-                        <p className="mt-1 text-sm text-slate-600">
-                          {provider.tax_id
-                            ? `${l("Steuer-ID", "Налоговый ID", "Tax ID")} ${provider.tax_id}`
-                            : provider.fachbereich || t.common_not_set}
-                        </p>
-                      </div>
-                      <Button type="button" variant="ghost" size="sm" className="rounded-xl">
-                        {l("Öffnen", "Открыть", "Open")}
-                      </Button>
-                    </div>
-
-                    <div className="mt-4 space-y-2">
-                      <InlineInfo icon={MapPin}>
-                        {providerMeta(provider) || t.common_not_set}
-                      </InlineInfo>
-                      <InlineInfo icon={Phone}>{provider.phone || t.common_not_set}</InlineInfo>
-                      <InlineInfo icon={Mail}>{provider.email || t.common_not_set}</InlineInfo>
-                      {provider.rating_count > 0 ? (
-                        <InlineInfo icon={Star}>
-                          {formatRating(provider.avg_rating)} / 5 · {provider.rating_count} {l("Bewertungen", "оценок", "ratings")}
-                        </InlineInfo>
-                      ) : null}
-                    </div>
-
-                    <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-4">
-                      <div className="rounded-2xl bg-slate-50 px-3 py-3">
-                        <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">
-                          {provider.provider_type === "non_medical" ? l("Kontakte", "Контакты", "Contacts") : t.providers_doctors}
-                        </p>
-                        <p className="mt-2 text-xl font-semibold text-slate-950">
-                          {provider.doctor_count}
-                        </p>
-                      </div>
-                      <div className="rounded-2xl bg-slate-50 px-3 py-3">
-                        <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">
-                          {l("Patienten", "Пациенты", "Patients")}
-                        </p>
-                        <p className="mt-2 text-xl font-semibold text-slate-950">
-                          {provider.patient_count}
-                        </p>
-                      </div>
-                      <div className="rounded-2xl bg-slate-50 px-3 py-3">
-                        <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">
-                          {l("Services", "Сервисы", "Services")}
-                        </p>
-                        <p className="mt-2 text-xl font-semibold text-slate-950">
-                          {provider.service_count}
-                        </p>
-                      </div>
-                      <div className="rounded-2xl bg-slate-50 px-3 py-3">
-                        <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">
-                          {provider.provider_type === "non_medical" ? l("Offene Anfragen", "Открытые запросы", "Open requests") : l("Slots", "Слоты", "Slots")}
-                        </p>
-                        <p className="mt-2 text-xl font-semibold text-slate-950">
-                          {provider.provider_type === "non_medical"
-                            ? provider.open_concierge_service_count
-                            : provider.appointment_count}
-                        </p>
-                      </div>
-                    </div>
-                    {provider.provider_type === "non_medical" ? (
-                      <p className="mt-4 text-sm text-slate-500">
-                        {provider.concierge_service_count} {l("erfasste Concierge-Anfragen", "запросов concierge в учете", "concierge requests tracked")}
-                        {provider.last_interaction_at ? ` · Last activity ${compactDateTime(provider.last_interaction_at)}` : ""}
-                      </p>
-                    ) : provider.last_interaction_at ? (
-                      <p className="mt-4 text-sm text-slate-500">
-                        Last activity {compactDateTime(provider.last_interaction_at)}
-                      </p>
-                    ) : null}
-                  </button>
-                ))}
-                </div>
-
-                {totalPages > 1 && (
-                  <div className="mt-5 flex items-center justify-between">
-                  <span className="text-xs text-slate-500">
-                    {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, providers.length)} / {providers.length}
-                  </span>
-                  <div className="flex items-center gap-1">
-                    <Button type="button" variant="outline" size="xs" className="rounded-lg" disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>
-                      <ChevronLeft className="size-3.5" />
-                    </Button>
-                    {Array.from({ length: totalPages }, (_, i) => (
-                      <Button key={i} type="button" variant={i === page ? "default" : "outline"} size="xs" className="rounded-lg min-w-[28px]" onClick={() => setPage(i)}>
-                        {i + 1}
-                      </Button>
-                    ))}
-                    <Button type="button" variant="outline" size="xs" className="rounded-lg" disabled={page >= totalPages - 1} onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}>
-                      <ChevronRight className="size-3.5" />
-                    </Button>
-                  </div>
-                  </div>
+                        {isFilterOpen && meta.filter === "select" ? (
+                          <ColumnFilterSelectPopover
+                            value={filterValue}
+                            onChange={(v) => setColumnFilter(key, v)}
+                            onClear={() => setColumnFilter(key, "")}
+                            onClose={() => setFilterOpen(null)}
+                            options={
+                              key === "status"
+                                ? [
+                                    { value: "", label: t.providers_all },
+                                    { value: "active", label: t.common_active },
+                                    { value: "inactive", label: t.common_inactive },
+                                  ]
+                                : key === "type"
+                                  ? [
+                                      { value: "", label: t.providers_all },
+                                      { value: "medical", label: t.providers_type_medical },
+                                      { value: "non_medical", label: t.providers_type_non_medical },
+                                    ]
+                                  : [
+                                      { value: "", label: t.providers_all },
+                                      { value: "with", label: t.providers_contract_with },
+                                      { value: "without", label: t.providers_contract_without },
+                                    ]
+                            }
+                            tr={tr}
+                          />
+                        ) : null}
+                        {isFilterOpen && meta.filter === "daterange" ? (
+                          <ColumnFilterDateRangePopover
+                            value={filterValue}
+                            onChange={(v) => setColumnFilter(key, v)}
+                            onClear={() => setColumnFilter(key, "")}
+                            onClose={() => setFilterOpen(null)}
+                            tr={tr}
+                          />
+                        ) : null}
+                      </th>
+                    );
+                  })}
+                  <th className="w-8 px-2 py-2.5"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {listBusy ? (
+                  <tr>
+                    <td colSpan={columnOrder.length + 1} className="py-16 text-center text-muted-foreground">
+                      <LoaderCircle className="inline-block mr-2 size-4 animate-spin align-text-bottom" />
+                      {t.common_loading}
+                    </td>
+                  </tr>
+                ) : paginatedProviders.length === 0 ? (
+                  <tr>
+                    <td colSpan={columnOrder.length + 1} className="py-16 text-center text-muted-foreground text-[13px]">
+                      {t.patients_no_match}
+                    </td>
+                  </tr>
+                ) : (
+                  paginatedProviders.map((provider, idx) => {
+                    const rowNumber = page * pageSize + idx + 1;
+                    return (
+                      <tr
+                        key={provider.id}
+                        className="group/row border-t border-border transition-colors hover:bg-muted/40 cursor-pointer relative"
+                        onClick={() => openProvider(provider.id)}
+                      >
+                        {columnOrder.map((colKey) => (
+                          <ProviderCell
+                            key={colKey}
+                            colKey={colKey}
+                            provider={provider}
+                            rowNumber={rowNumber}
+                            tr={tr}
+                            l={l}
+                          />
+                        ))}
+                        <td className="w-8 px-2 py-2.5" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            className="size-7 rounded-md inline-flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors opacity-0 group-hover/row:opacity-100"
+                          >
+                            <MoreHorizontal className="size-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
-              </>
-            )}
-          </section>
+              </tbody>
+            </table>
+          </div>
+
+          {/* Pagination */}
+          <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-t border-border text-[12.5px] flex-wrap">
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <span>{t.pagination_per_page}</span>
+              <ShadSelect value={String(pageSize)} onValueChange={(v) => setPageSize(Number(v))}>
+                <SelectTrigger size="sm" className="h-7 w-[70px] text-[12.5px]">
+                  <SelectValue>{pageSize}</SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="10">10</SelectItem>
+                  <SelectItem value="20">20</SelectItem>
+                  <SelectItem value="50">50</SelectItem>
+                  <SelectItem value="100">100</SelectItem>
+                </SelectContent>
+              </ShadSelect>
+            </div>
+
+            <PaginationControls page={page} totalPages={totalPages} onPage={setPage} />
+
+            <div className="text-muted-foreground">
+              {sortedAndFilteredProviders.length === 0
+                ? "0"
+                : `${page * pageSize + 1}–${Math.min((page + 1) * pageSize, sortedAndFilteredProviders.length)}`}
+              {" / "}
+              {sortedAndFilteredProviders.length}
+            </div>
+          </div>
         </div>
       </div>
 
       <Sheet open={createOpen} onOpenChange={setCreateOpen}>
         <SheetContent side="right" className="w-full sm:max-w-[760px]">
-          <SheetHeader className="border-b border-border/70 pb-4">
-            <SheetTitle>{l("Anbieter anlegen", "Создать провайдера", "Create provider")}</SheetTitle>
-            <SheetDescription>
-              {l(
-                "Legen Sie die nächste Klinik oder den nächsten Servicepartner direkt mit Vertragsnotizen, Kontaktdaten und Fachkontext an.",
-                "Добавьте следующую клинику или сервисного партнера сразу с примечаниями по договору, контактами и профильным контекстом.",
-                "Add the next clinic or service partner with contract notes, contact data and specialty context from the start.",
-              )}
-            </SheetDescription>
-          </SheetHeader>
-
-          <div className="flex-1 overflow-y-auto px-4 pb-6">
-            <form onSubmit={handleCreateProvider} className="space-y-6 pt-5">
+          <form onSubmit={handleCreateProvider} className="flex flex-col flex-1 min-h-0">
+            <SheetHeader className="shrink-0 border-b border-border/60 px-4 pt-3 pb-3">
+              <SheetTitle>{l("Anbieter anlegen", "Создать провайдера", "Create provider")}</SheetTitle>
+              <SheetDescription>
+                {l(
+                  "Legen Sie die nächste Klinik oder den nächsten Servicepartner direkt mit Vertragsnotizen, Kontaktdaten und Fachkontext an.",
+                  "Добавьте следующую клинику или сервисного партнера сразу с примечаниями по договору, контактами и профильным контекстом.",
+                  "Add the next clinic or service partner with contract notes, contact data and specialty context from the start.",
+                )}
+              </SheetDescription>
+            </SheetHeader>
+            <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
               {createError ? <Banner tone="error">{createError}</Banner> : null}
-
               <ProviderFormFields
                 form={createForm}
                 onChange={(field, value) =>
@@ -1486,27 +1650,30 @@ function ProvidersPage() {
                 }
                 forceNonMedical={permissions.forceNonMedical}
               />
-
-              <div className="flex justify-end gap-3 border-t border-border/70 pt-4">
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="rounded-2xl"
-                  onClick={() => setCreateOpen(false)}
-                >
-                  {l("Abbrechen", "Отмена", "Cancel")}
-                </Button>
-                <Button
-                  type="submit"
-                  className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
-                  disabled={createBusy}
-                >
-                  {createBusy ? <LoaderCircle className="size-4 animate-spin" /> : <Plus className="size-4" />}
-                  {createBusy ? t.patients_creating : t.providers_new}
-                </Button>
-              </div>
-            </form>
-          </div>
+            </div>
+            <div className="shrink-0 flex justify-end gap-2 border-t border-border/60 px-4 py-3 bg-popover">
+              <Button
+                type="button"
+                variant="outline"
+                className="h-9 rounded-lg"
+                onClick={() => setCreateOpen(false)}
+              >
+                {l("Abbrechen", "Отмена", "Cancel")}
+              </Button>
+              <Button
+                type="submit"
+                className="h-9 rounded-lg gap-1.5"
+                disabled={createBusy}
+              >
+                {createBusy ? (
+                  <LoaderCircle className="size-4 animate-spin" />
+                ) : (
+                  <Plus className="size-4" />
+                )}
+                {createBusy ? t.patients_creating : t.providers_new}
+              </Button>
+            </div>
+          </form>
         </SheetContent>
       </Sheet>
 
@@ -1527,46 +1694,56 @@ function ProvidersPage() {
         }}
       >
         <SheetContent side="right" className="w-full sm:max-w-[880px]">
-          <SheetHeader className="border-b border-border/70 pb-4">
-            <SheetTitle>{detail?.name || selectedSummary?.name || t.providers_detail}</SheetTitle>
-            <SheetDescription>
-              {l(
-                "Prüfen Sie das Klinikprofil, halten Sie Arzt- und Serviceverzeichnisse synchron und verfolgen Sie die patientenseitigen Aktivitäten dieses Partners.",
-                "Просматривайте профиль клиники, синхронизируйте реестры врачей и сервисов и отслеживайте активность, связанную с этим партнером.",
-                "Review the clinic profile, keep doctor and service registries in sync and trace the patient-facing activity tied to this partner.",
-              )}
-            </SheetDescription>
-          </SheetHeader>
+          {detailBusy ? (
+            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+              <LoaderCircle className="mr-2 size-4 animate-spin" />
+              {l("Anbieter wird geladen", "Загрузка провайдера", "Loading provider")}
+            </div>
+          ) : detail ? (
+            <form onSubmit={handleUpdateProvider} className="flex flex-col flex-1 min-h-0">
+              <SheetHeader className="shrink-0 border-b border-border/60 px-4 pt-3 pb-3">
+                <SheetTitle>{detail.name || t.providers_detail}</SheetTitle>
+              </SheetHeader>
 
-          <div className="flex-1 overflow-y-auto px-4 pb-6">
-            {detailBusy ? (
-              <div className="flex min-h-[320px] items-center justify-center text-sm text-slate-500">
-                <LoaderCircle className="mr-2 size-4 animate-spin" />
-                {l("Anbieter wird geladen", "Загрузка провайдера", "Loading provider")}
-              </div>
-            ) : detailError ? (
-              <div className="pt-5">
-                <Banner tone="error">{detailError}</Banner>
-              </div>
-            ) : detail ? (
-              <div className="space-y-6 pt-5">
+              <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+                {detailError ? <Banner tone="error">{detailError}</Banner> : null}
+                {providerError ? <Banner tone="error">{providerError}</Banner> : null}
+
                 <ProviderOverviewSection
                   detail={detail}
-                  providerForm={providerForm}
-                  providerError={providerError}
-                  providerBusy={providerBusy}
                   providerActionBusy={providerActionBusy}
                   permissions={permissions}
-                  onFormChange={(field, value) =>
-                    setProviderForm((current) => ({ ...current, [field]: value }))
-                  }
-                  onSubmit={handleUpdateProvider}
                   onActivate={() => handleToggleProvider(true)}
                   onDeactivate={() => handleToggleProvider(false)}
                   onDelete={handleDeleteProvider}
                   onOpenPatients={() => staffGo(`/patients?provider=${detail.id}`)}
                   onOpenAppointments={() => staffGo(`/appointments?provider=${detail.id}`)}
                 />
+
+                {permissions.canManageRegistry || permissions.canViewPage ? (
+                  <section className="rounded-xl border border-border/50 bg-card/40 p-4 space-y-3">
+                    <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
+                      {l("Anbieterprofil", "Профиль провайдера", "Provider profile")}
+                    </h3>
+                    <ProviderFormFields
+                      form={providerForm}
+                      onChange={(field, value) =>
+                        setProviderForm((current) => ({ ...current, [field]: value }))
+                      }
+                      forceNonMedical={permissions.forceNonMedical}
+                      disabled={!permissions.canManageRegistry}
+                    />
+                    {!permissions.canManageRegistry ? (
+                      <p className="text-[12px] text-muted-foreground italic">
+                        {l(
+                          "Registeränderungen sind für Ihre Rolle gesperrt.",
+                          "Изменения в реестре для вашей роли ограничены.",
+                          "Registry edits are restricted for your role.",
+                        )}
+                      </p>
+                    ) : null}
+                  </section>
+                ) : null}
 
                 <DoctorSection
                   detail={detail}
@@ -1623,11 +1800,37 @@ function ProvidersPage() {
                   onOpenOrder={(orderId) => staffGo(`/orders?order=${orderId}`)}
                 />
               </div>
-            ) : (
-              <div className="flex min-h-[320px] items-center justify-center text-sm text-slate-500">
-                {l("Wählen Sie einen Anbieter aus, um den Registerbereich zu öffnen.", "Выберите провайдера, чтобы открыть реестровое рабочее пространство.", "Select a provider to open the registry workspace.")}
+
+              <div className="shrink-0 flex justify-end gap-2 border-t border-border/60 px-4 py-3 bg-popover">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-9 rounded-lg"
+                  onClick={() => setDetailOpen(false)}
+                >
+                  {t.common_cancel}
+                </Button>
+                {permissions.canManageRegistry ? (
+                  <Button
+                    type="submit"
+                    className="h-9 rounded-lg gap-1.5"
+                    disabled={providerBusy}
+                  >
+                    {providerBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                    {providerBusy ? t.patients_saving : t.common_save}
+                  </Button>
+                ) : null}
               </div>
-            )}
+            </form>
+          ) : detailError ? (
+            <div className="p-4">
+              <Banner tone="error">{detailError}</Banner>
+            </div>
+          ) : (
+            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+              {l("Wählen Sie einen Anbieter aus, um den Registerbereich zu öffnen.", "Выберите провайдера, чтобы открыть реестровое рабочее пространство.", "Select a provider to open the registry workspace.")}
+            </div>
+          )}
           </div>
         </SheetContent>
       </Sheet>
@@ -1637,13 +1840,8 @@ function ProvidersPage() {
 
 function ProviderOverviewSection({
   detail,
-  providerForm,
-  providerError,
-  providerBusy,
   providerActionBusy,
   permissions,
-  onFormChange,
-  onSubmit,
   onActivate,
   onDeactivate,
   onDelete,
@@ -1651,13 +1849,8 @@ function ProviderOverviewSection({
   onOpenAppointments,
 }: {
   detail: ProviderDetail;
-  providerForm: ProviderFormState;
-  providerError: string;
-  providerBusy: boolean;
   providerActionBusy: string | null;
   permissions: ProviderPermissions;
-  onFormChange: (field: keyof ProviderFormState, value: string) => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onActivate: () => void;
   onDeactivate: () => void;
   onDelete: () => void;
@@ -1666,184 +1859,165 @@ function ProviderOverviewSection({
 }) {
   const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
-  const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
+  const l = (de: string, ru: string, en: string) =>
+    lang === "de" ? de : lang === "ru" ? ru : en;
+
   return (
-    <>
-      <section className={cardClass("p-5")}>
-        <div className="flex flex-wrap items-center gap-2">
-          <span
-            className={cn(
-              "rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em]",
-              providerTypeBadge(detail.provider_type)
-            )}
-          >
-            {providerTypeLabel(detail.provider_type, tr)}
-          </span>
-          <span
-            className={cn(
-              "rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em]",
-              statusBadge(detail.is_active)
-            )}
-          >
-            {detail.is_active ? t.common_active : t.common_inactive}
-          </span>
-          {detail.kooperationsvertrag ? (
-            <Badge variant="outline" className="rounded-full border-slate-200 bg-white text-slate-700">
-              {l("Vertrag verknüpft", "Договор привязан", "Contract linked")}
+    <section className="rounded-xl border border-border/50 bg-card/40 p-4 space-y-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge
+              variant="outline"
+              className={cn(
+                "rounded-full text-[10px]",
+                detail.provider_type === "medical"
+                  ? "border-sky-200 bg-sky-50 text-sky-700"
+                  : "border-violet-200 bg-violet-50 text-violet-700",
+              )}
+            >
+              {providerTypeLabel(detail.provider_type, tr)}
             </Badge>
+            <Badge
+              variant="outline"
+              className={cn(
+                "rounded-full text-[10px]",
+                detail.is_active
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                  : "border-border/60 bg-muted/25 text-muted-foreground",
+              )}
+            >
+              {detail.is_active ? t.common_active : t.common_inactive}
+            </Badge>
+            {detail.kooperationsvertrag ? (
+              <Badge variant="outline" className="rounded-full text-[10px] border-border/60 bg-muted/25 text-foreground">
+                {l("Vertrag verknüpft", "Договор привязан", "Contract linked")}
+              </Badge>
+            ) : null}
+          </div>
+          <h2 className="mt-3 text-xl font-semibold text-foreground">{detail.name}</h2>
+          {detail.legal_name && detail.legal_name !== detail.name ? (
+            <p className="mt-1 text-sm text-muted-foreground">{detail.legal_name}</p>
           ) : null}
         </div>
+      </div>
 
-        <div className="mt-4 flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-          <div>
-            <h2 className="text-2xl font-semibold text-slate-950">{detail.name}</h2>
-            {detail.legal_name && detail.legal_name !== detail.name ? (
-              <p className="mt-1 text-sm font-medium text-slate-700">{detail.legal_name}</p>
-            ) : null}
-            <p className="mt-2 text-sm text-slate-600">
-              {detail.tax_id ? `${l("Steuer-ID", "Налоговый ID", "Tax ID")} ${detail.tax_id}` : detail.fachbereich || t.common_not_set}
-            </p>
-          </div>
-
-          <div className="grid gap-2 text-sm text-slate-600">
-            <InlineInfo icon={MapPin}>{providerMeta(detail) || t.common_not_set}</InlineInfo>
-            <InlineInfo icon={Phone}>{detail.phone || t.common_not_set}</InlineInfo>
-            <InlineInfo icon={Mail}>{detail.email || t.common_not_set}</InlineInfo>
-          </div>
-        </div>
-
-        <div className="mt-5 grid gap-3 md:grid-cols-4">
-          <div className="rounded-2xl bg-slate-50 px-4 py-4">
-            <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">
-              {detail.provider_type === "non_medical" ? l("Kontakte", "Контакты", "Contacts") : t.providers_doctors}
-            </p>
-            <p className="mt-2 text-2xl font-semibold text-slate-950">{detail.doctors.length}</p>
-          </div>
-          <div className="rounded-2xl bg-slate-50 px-4 py-4">
-            <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{l("Services", "Сервисы", "Services")}</p>
-            <p className="mt-2 text-2xl font-semibold text-slate-950">{detail.services.length}</p>
-          </div>
-          <div className="rounded-2xl bg-slate-50 px-4 py-4">
-            <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">
-              {l("Verknüpfte Patienten", "Связанные пациенты", "Linked patients")}
-            </p>
-            <p className="mt-2 text-2xl font-semibold text-slate-950">
-              {detail.linked_patients.length}
-            </p>
-          </div>
-          <div className="rounded-2xl bg-slate-50 px-4 py-4">
-            <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{l("Aktivität", "Активность", "Activity items")}</p>
-            <p className="mt-2 text-2xl font-semibold text-slate-950">
-              {detail.interactions.length}
-            </p>
-          </div>
-        </div>
-
-        <div className="mt-5 flex flex-wrap gap-2">
-          <Button type="button" variant="outline" className="rounded-2xl" onClick={onOpenPatients}>
-            {l("Patientenlinks", "Связи с пациентами", "Patient links")}
-          </Button>
-          <Button type="button" variant="outline" className="rounded-2xl" onClick={onOpenAppointments}>
-            {l("Termine", "Записи", "Appointments")}
-          </Button>
-        </div>
-      </section>
-
-      <section className={cardClass("p-5")}>
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h3 className="text-sm font-semibold text-slate-950">{l("Anbieterprofil", "Профиль провайдера", "Provider profile")}</h3>
-            <p className="mt-1 text-sm text-slate-600">
-              {l(
-                "Halten Sie die kanonischen Klinikdaten mit Terminen, Services und Registerfiltern synchron.",
-                "Поддерживайте канонические данные клиники синхронизированными с записями, сервисами и фильтрами реестра.",
-                "Keep the canonical clinic data aligned with appointments, services and registry filters.",
-              )}
-            </p>
-          </div>
-          <div className="text-xs uppercase tracking-[0.12em] text-slate-500">
-            {l("Aktualisiert", "Обновлено", "Updated")} {compactDateTime(detail.updated_at, t.common_not_set)}
-          </div>
-        </div>
-
-        {providerError ? (
-          <div className="mt-4">
-            <Banner tone="error">{providerError}</Banner>
-          </div>
+      <div className="grid gap-2 text-sm text-muted-foreground">
+        <InlineInfo icon={MapPin}>{providerMeta(detail) || t.common_not_set}</InlineInfo>
+        <InlineInfo icon={Phone}>{detail.phone || t.common_not_set}</InlineInfo>
+        <InlineInfo icon={Mail}>{detail.email || t.common_not_set}</InlineInfo>
+        {detail.tax_id ? (
+          <p className="text-xs text-muted-foreground/80">
+            {l("Steuer-ID", "Налоговый ID", "Tax ID")} · {detail.tax_id}
+          </p>
         ) : null}
+        {detail.fachbereich ? (
+          <p className="text-xs text-muted-foreground/80">
+            {tr.providers_fachbereich} · {detail.fachbereich}
+          </p>
+        ) : null}
+      </div>
 
-        <form onSubmit={onSubmit} className="mt-5 space-y-5">
-          <ProviderFormFields
-            form={providerForm}
-            onChange={onFormChange}
-            forceNonMedical={permissions.forceNonMedical}
-            disabled={!permissions.canManageRegistry}
-          />
+      <div className="grid gap-3 md:grid-cols-4">
+        <div className="rounded-xl border border-border/50 bg-card px-4 py-3">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/80">
+            {detail.provider_type === "non_medical"
+              ? l("Kontakte", "Контакты", "Contacts")
+              : t.providers_doctors}
+          </p>
+          <p className="mt-2 text-2xl font-semibold text-foreground">{detail.doctors.length}</p>
+        </div>
+        <div className="rounded-xl border border-border/50 bg-card px-4 py-3">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/80">
+            {l("Services", "Сервисы", "Services")}
+          </p>
+          <p className="mt-2 text-2xl font-semibold text-foreground">{detail.services.length}</p>
+        </div>
+        <div className="rounded-xl border border-border/50 bg-card px-4 py-3">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/80">
+            {l("Verknüpfte Patienten", "Связанные пациенты", "Linked patients")}
+          </p>
+          <p className="mt-2 text-2xl font-semibold text-foreground">{detail.linked_patients.length}</p>
+        </div>
+        <div className="rounded-xl border border-border/50 bg-card px-4 py-3">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/80">
+            {l("Aktivität", "Активность", "Activity items")}
+          </p>
+          <p className="mt-2 text-2xl font-semibold text-foreground">{detail.interactions.length}</p>
+        </div>
+      </div>
 
-          {permissions.canManageRegistry ? (
-            <div className="flex flex-wrap justify-between gap-3 border-t border-border/70 pt-4">
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="rounded-2xl"
-                  disabled={providerActionBusy === "activate"}
-                  onClick={onActivate}
-                >
-                  {providerActionBusy === "activate" ? (
-                    <LoaderCircle className="size-4 animate-spin" />
-                  ) : null}
-                  {l("Aktivieren", "Активировать", "Activate")}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="rounded-2xl"
-                  disabled={providerActionBusy === "deactivate"}
-                  onClick={onDeactivate}
-                >
-                  {providerActionBusy === "deactivate" ? (
-                    <LoaderCircle className="size-4 animate-spin" />
-                  ) : null}
-                  {l("Deaktivieren", "Деактивировать", "Deactivate")}
-                </Button>
-                <Button
-                  type="button"
-                  variant="destructive"
-                  className="rounded-2xl"
-                  disabled={providerActionBusy === "delete"}
-                  onClick={onDelete}
-                >
-                  {providerActionBusy === "delete" ? (
-                    <LoaderCircle className="size-4 animate-spin" />
-                  ) : (
-                    <Trash2 className="size-4" />
-                  )}
-                  {l("Löschen", "Удалить", "Delete")}
-                </Button>
-              </div>
-
-              <Button
-                type="submit"
-                className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
-                disabled={providerBusy}
-              >
-                {providerBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                {providerBusy ? t.patients_saving : t.common_save}
-              </Button>
-            </div>
-          ) : (
-            <div className="border-t border-border/70 pt-4 text-sm text-slate-500">
-              {l(
-                "Registeränderungen sind für Ihre Rolle gesperrt. Dieses Blatt bleibt im Lesemodus mit der Live-Aktivität von Anbieter, Ärzten und Patienten verbunden.",
-                "Изменения в реестре для вашей роли ограничены. Этот лист остается связанным с живой активностью провайдера, врачей и пациентов в режиме только чтения.",
-                "Registry edits are restricted for your role. This sheet stays connected to live provider, doctor and patient activity in read-only mode.",
+      <div className="flex flex-wrap gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-8 rounded-lg"
+          onClick={onOpenPatients}
+        >
+          {l("Patientenlinks", "Связи с пациентами", "Patient links")}
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-8 rounded-lg"
+          onClick={onOpenAppointments}
+        >
+          {l("Termine", "Записи", "Appointments")}
+        </Button>
+        {permissions.canManageRegistry ? (
+          <>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-lg gap-1.5"
+              disabled={providerActionBusy === "activate" || detail.is_active}
+              onClick={onActivate}
+            >
+              {providerActionBusy === "activate" ? (
+                <LoaderCircle className="size-3.5 animate-spin" />
+              ) : null}
+              {l("Aktivieren", "Активировать", "Activate")}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-lg gap-1.5"
+              disabled={providerActionBusy === "deactivate" || !detail.is_active}
+              onClick={onDeactivate}
+            >
+              {providerActionBusy === "deactivate" ? (
+                <LoaderCircle className="size-3.5 animate-spin" />
+              ) : null}
+              {l("Deaktivieren", "Деактивировать", "Deactivate")}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-lg gap-1.5 border-rose-200 text-rose-700 hover:bg-rose-50"
+              disabled={providerActionBusy === "delete"}
+              onClick={onDelete}
+            >
+              {providerActionBusy === "delete" ? (
+                <LoaderCircle className="size-3.5 animate-spin" />
+              ) : (
+                <Trash2 className="size-3.5" />
               )}
-            </div>
-          )}
-        </form>
-      </section>
-    </>
+              {l("Löschen", "Удалить", "Delete")}
+            </Button>
+          </>
+        ) : null}
+      </div>
+
+      <p className="text-xs text-muted-foreground/80">
+        {l("Aktualisiert", "Обновлено", "Updated")}{" "}
+        {compactDateTime(detail.updated_at, t.common_not_set)}
+      </p>
+    </section>
   );
 }
 

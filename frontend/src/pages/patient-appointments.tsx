@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { CalendarClock, LoaderCircle, RefreshCw, Send, Stethoscope } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -67,7 +67,11 @@ export function PatientAppointmentsPage() {
   const [requestError, setRequestError] = useState("");
   const [requestForm, setRequestForm] = useState<RequestFormState>(blankRequestForm());
   const [version, setVersion] = useState(0);
-  const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
+  const l = useCallback(
+    (de: string, ru: string, en: string) =>
+      lang === "de" ? de : lang === "ru" ? ru : en,
+    [lang],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -108,7 +112,7 @@ export function PatientAppointmentsPage() {
     return () => {
       cancelled = true;
     };
-  }, [loading, version]);
+  }, [loading, version, l]);
 
   const upcomingAppointments = useMemo(
     () => appointments.filter((item) => item.date >= new Date().toISOString().slice(0, 10)),

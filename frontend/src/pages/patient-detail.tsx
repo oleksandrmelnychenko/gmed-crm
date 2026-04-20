@@ -1,4 +1,5 @@
 import {
+  memo,
   useDeferredValue,
   useCallback,
   useEffect,
@@ -6,6 +7,7 @@ import {
   useState,
   type ChangeEvent,
   type FormEvent,
+  type ReactNode,
 } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import {
@@ -35,16 +37,51 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import {
-  Field as FormField,
-  FormSection,
   FunctionalLabelChips,
-  formInputClassName,
   humanizeFunctionalLabel,
   parseFunctionalLabels,
-  textareaClassName as formTextareaClassName,
 } from "@/components/patient-form-primitives";
+import {
+  CountBadge,
+  EmptyCell,
+  Field as FormField,
+  Section as FormSection,
+  StatCard,
+  TabLoader,
+  inputClass as formInputClassName,
+  textareaClass as formTextareaClassName,
+} from "@/components/ui-shell";
 import { StatusActionPill } from "@/components/status-action-pill";
 import { Input } from "@/components/ui/input";
+import { toast } from "@/components/ui/toast";
+import { PatientCardEntrySheet } from "@/components/patient-card-entry-sheet";
+import { PatientMedicalOrderSheet } from "@/components/patient-medical-order-sheet";
+import { PatientRiskScoreSheet } from "@/components/patient-risk-score-sheet";
+import {
+  PatientDocumentsPreviewSheet,
+  PatientContractsPreviewSheet,
+  PatientInvoicesPreviewSheet,
+} from "@/components/patient-legal-preview-sheets";
+import { PatientLegalStatusSheet } from "@/components/patient-legal-status-sheet";
+import { PatientVitalsSheet } from "@/components/patient-vitals-sheet";
+import { PatientCaveNotesSheet } from "@/components/patient-cave-notes-sheet";
+import { PatientNotesSheet } from "@/components/patient-notes-sheet";
+import { PatientAppointmentSheet } from "@/components/patient-appointment-sheet";
+import { PatientCasePreviewSheet } from "@/components/patient-case-preview-sheet";
+import {
+  localizeDocumentCode,
+  localizeRequiredDocumentLabel,
+} from "@/lib/required-document-labels";
+import {
+  localizeWorkflowGroupLabel,
+  localizeWorkflowItemText,
+} from "@/lib/workflow-labels";
+import {
+  localizeTimelineCategory,
+  localizeTimelineEntityType,
+  localizeTimelineSource,
+  timelineEntityTypeBadgeClass,
+} from "@/lib/timeline-labels";
 import { Label } from "@/components/ui/label";
 import {
   Select as ShadSelect,
@@ -643,6 +680,76 @@ function roleLbl(v: string | null | undefined, tr: Record<string, string>) {
   return tr[`role_${v}`] ?? v.replaceAll("_", " ");
 }
 
+function relationTypeLabel(value: string) {
+  switch (value) {
+    case "spouse":
+      return patientDetailText("Ehepartner", "Супруг(а)", "Spouse");
+    case "parent":
+      return patientDetailText("Elternteil", "Родитель", "Parent");
+    case "child":
+      return patientDetailText("Kind", "Ребёнок", "Child");
+    case "sibling":
+      return patientDetailText("Geschwister", "Брат/сестра", "Sibling");
+    case "relative":
+      return patientDetailText("Verwandter", "Родственник", "Relative");
+    case "guardian":
+      return patientDetailText("Vormund", "Опекун", "Guardian");
+    case "caregiver":
+      return patientDetailText("Betreuung", "Опекун/сиделка", "Caregiver");
+    case "friend":
+      return patientDetailText("Freund", "Друг", "Friend");
+    case "other":
+      return patientDetailText("Sonstiges", "Другое", "Other");
+    default:
+      return value.replaceAll("_", " ");
+  }
+}
+
+function orderPhaseLabel(value: string) {
+  switch (value) {
+    case "discovery":
+      return patientDetailText("Discovery", "Диагностика потребности", "Discovery");
+    case "intake":
+      return patientDetailText("Aufnahme", "Интейк", "Intake");
+    case "execution":
+      return patientDetailText("Ausführung", "Исполнение", "Execution");
+    case "closure":
+      return patientDetailText("Abschluss", "Закрытие", "Closure");
+    case "followup":
+      return patientDetailText("Nachbetreuung", "Наблюдение", "Follow-up");
+    default:
+      return value.replaceAll("_", " ");
+  }
+}
+
+function appointmentTypeLabel(value: string) {
+  switch (value) {
+    case "consultation":
+      return patientDetailText("Konsultation", "Консультация", "Consultation");
+    case "followup":
+      return patientDetailText("Nachsorgetermin", "Повторный приём", "Follow-up");
+    case "diagnostics":
+      return patientDetailText("Diagnostik", "Диагностика", "Diagnostics");
+    case "procedure":
+      return patientDetailText("Eingriff", "Процедура", "Procedure");
+    default:
+      return value.replaceAll("_", " ");
+  }
+}
+
+function invoiceTypeLabel(value: string) {
+  switch (value) {
+    case "advance":
+      return patientDetailText("Vorauszahlung", "Аванс", "Advance");
+    case "interim":
+      return patientDetailText("Zwischenrechnung", "Промежуточный счёт", "Interim");
+    case "final":
+      return patientDetailText("Abschlussrechnung", "Финальный счёт", "Final");
+    default:
+      return value.replaceAll("_", " ");
+  }
+}
+
 function canAssignTarget(managerRole: string | undefined, targetRole: string) {
   switch (managerRole) {
     case "ceo": return ["patient_manager", "teamlead_interpreter", "interpreter", "concierge"].includes(targetRole);
@@ -652,12 +759,9 @@ function canAssignTarget(managerRole: string | undefined, targetRole: string) {
   }
 }
 
-function card(extra?: string) {
-  return cn("rounded-[1.75rem] border border-border/70 bg-card shadow-[0_20px_60px_rgba(15,23,42,0.05)]", extra);
-}
-
 const selectClassName =
-  "h-10 w-full rounded-xl border border-input bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
+  "h-9 w-full rounded-lg border border-input bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
+
 const textareaClassName =
   "min-h-[104px] w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
 
@@ -807,6 +911,25 @@ function patientCardEntryCategoryLabel(category: string) {
       return patientDetailText("Sonstiges", "Другое", "Other");
     default:
       return category.replaceAll("_", " ");
+  }
+}
+
+function patientCardEntryCategoryBadgeClass(category: string) {
+  switch (category) {
+    case "medical_update":
+      return "border-amber-200 bg-amber-50 text-amber-700";
+    case "patient_report":
+      return "border-sky-200 bg-sky-50 text-sky-700";
+    case "provider_report":
+      return "border-teal-200 bg-teal-50 text-teal-700";
+    case "treatment_note":
+      return "border-emerald-200 bg-emerald-50 text-emerald-700";
+    case "followup_note":
+      return "border-violet-200 bg-violet-50 text-violet-700";
+    case "warning":
+      return "border-rose-200 bg-rose-50 text-rose-700";
+    default:
+      return "border-slate-200 bg-slate-50 text-slate-700";
   }
 }
 
@@ -966,6 +1089,55 @@ function timelineRangeOptions(
   ];
 }
 
+function normalizeTimelineRangeFilterValue(
+  value: string | null | undefined,
+): PatientTimelineRangeFilter {
+  switch (value) {
+    case "30d":
+    case "90d":
+    case "180d":
+    case "365d":
+      return value;
+    default:
+      return "all";
+  }
+}
+
+function normalizeTimelineQueryValue(value: string | null | undefined) {
+  const normalized = (value ?? "").trim();
+  return normalized || "all";
+}
+
+function normalizeTimelineSearchValue(value: string | null | undefined) {
+  return (value ?? "").trim();
+}
+
+function normalizeTimelineOffsetValue(value: string | null | undefined) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return 0;
+  return Math.floor(numeric);
+}
+
+function moneyValueNumber(value?: string | null) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function isContractExpiringSoon(
+  contract: Pick<ContractItem, "valid_to" | "status">,
+  now = new Date(),
+) {
+  if (!contract.valid_to) return false;
+  if (contract.status === "expired" || contract.status === "terminated" || contract.status === "cancelled") {
+    return false;
+  }
+  const validTo = new Date(contract.valid_to);
+  if (Number.isNaN(validTo.getTime())) return false;
+  const threshold = new Date(now);
+  threshold.setDate(threshold.getDate() + 30);
+  return validTo >= now && validTo <= threshold;
+}
+
 function priorityBadgeClass(priority: string) {
   switch (priority) {
     case "urgent":
@@ -977,6 +1149,93 @@ function priorityBadgeClass(priority: string) {
     default:
       return "border-sky-200 bg-sky-50 text-sky-700";
   }
+}
+
+function timelineEntityDotClass(entityType: string) {
+  switch (entityType) {
+    case "case":
+      return "bg-sky-500";
+    case "order":
+      return "bg-amber-500";
+    case "appointment":
+      return "bg-violet-500";
+    case "document":
+      return "bg-emerald-500";
+    case "contract":
+      return "bg-cyan-500";
+    case "invoice":
+      return "bg-rose-500";
+    case "compliance":
+      return "bg-slate-500";
+    default:
+      return "bg-[var(--brand)]";
+  }
+}
+
+function timelineItemSurfaceClass(status: string) {
+  switch (status) {
+    case "open":
+    case "in_progress":
+    case "planned":
+    case "confirmed":
+      return "border-sky-200/80 bg-sky-50/40";
+    case "completed":
+    case "closed":
+    case "paid":
+    case "signed":
+    case "archived":
+      return "border-emerald-200/80 bg-emerald-50/35";
+    case "overdue":
+    case "cancelled":
+    case "expired":
+    case "terminated":
+      return "border-rose-200/80 bg-rose-50/40";
+    default:
+      return "border-border/50 bg-background";
+  }
+}
+
+function timelineDateGroupKey(value?: string | null) {
+  if (!value) return "unknown";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "unknown";
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function timelineDateGroupLabel(value: string | null | undefined, lang: string) {
+  const key = timelineDateGroupKey(value);
+  if (key === "unknown") {
+    if (lang === "de") return "Unbekanntes Datum";
+    if (lang === "ru") return "Дата не указана";
+    return "Unknown date";
+  }
+
+  const date = new Date(value!);
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+
+  const sameDay = (left: Date, right: Date) =>
+    left.getFullYear() === right.getFullYear() &&
+    left.getMonth() === right.getMonth() &&
+    left.getDate() === right.getDate();
+
+  if (sameDay(date, today)) {
+    if (lang === "de") return "Heute";
+    if (lang === "ru") return "Сегодня";
+    return "Today";
+  }
+
+  if (sameDay(date, yesterday)) {
+    if (lang === "de") return "Gestern";
+    if (lang === "ru") return "Вчера";
+    return "Yesterday";
+  }
+
+  return fmtDate(value, key);
 }
 
 function nextDunningLevel(events: DunningEvent[]): DunningLevel | null {
@@ -1069,10 +1328,35 @@ function InfoRow({ label, value, onEdit }: { label: string; value: string; onEdi
       <Lbl>{label}</Lbl>
       <span className="text-sm text-slate-900">{value}</span>
       {onEdit && (
-        <button type="button" onClick={onEdit} className="absolute top-0 right-0 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg p-1 hover:bg-slate-100">
+        <button
+          type="button"
+          onClick={onEdit}
+          aria-label={`${patientDetailText("Bearbeiten", "Редактировать", "Edit")} ${label}`}
+          className="absolute top-0 right-0 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg p-1 hover:bg-slate-100"
+        >
           <Pencil className="size-3 text-slate-400" />
         </button>
       )}
+    </div>
+  );
+}
+
+function WorkspaceSectionIntro({
+  title,
+  description,
+  accessory,
+}: {
+  title: ReactNode;
+  description: ReactNode;
+  accessory?: ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-3 rounded-2xl border border-border/60 bg-muted/20 px-4 py-4 sm:flex-row sm:items-start sm:justify-between">
+      <div className="space-y-1">
+        <h2 className="text-sm font-semibold text-foreground">{title}</h2>
+        <p className="max-w-3xl text-xs text-muted-foreground">{description}</p>
+      </div>
+      {accessory ? <div className="shrink-0">{accessory}</div> : null}
     </div>
   );
 }
@@ -1115,6 +1399,937 @@ const STATUS_BADGE_CLASSES: Record<string, string> = {
   cancelled: "border-rose-200 bg-rose-50 text-rose-700",
 };
 
+type PatientDetailDictionary = Record<string, string>;
+
+type PatientProfileEditorSheetProps = {
+  open: boolean;
+  patientId: string | undefined;
+  detail: PatientDetail | null;
+  dictionary: PatientDetailDictionary;
+  lang: string;
+  onOpenChange: (open: boolean) => void;
+  onSaved: () => void;
+  onError: (message: string) => void;
+};
+
+function PatientProfileEditorSheet({
+  open,
+  patientId,
+  detail,
+  dictionary,
+  lang,
+  onOpenChange,
+  onSaved,
+  onError,
+}: PatientProfileEditorSheetProps) {
+  const [form, setForm] = useState<PatientEditFormState | null>(null);
+  const [busy, setBusy] = useState(false);
+  const l = (de: string, ru: string, en: string) =>
+    lang === "de" ? de : lang === "ru" ? ru : en;
+
+  useEffect(() => {
+    if (!open) {
+      setForm(null);
+      setBusy(false);
+    }
+  }, [open]);
+
+  useEffect(() => {
+    if (open && detail && form === null) {
+      setForm(patientToEditForm(detail));
+    }
+  }, [detail, form, open]);
+
+  function updateField<K extends keyof PatientEditFormState>(
+    field: K,
+    value: PatientEditFormState[K]
+  ) {
+    setForm((current) => (current ? { ...current, [field]: value } : current));
+  }
+
+  function updateLegalStatusField<K extends keyof PatientLegalStatus>(
+    field: K,
+    value: PatientLegalStatus[K]
+  ) {
+    setForm((current) =>
+      current
+        ? {
+            ...current,
+            legalStatus: { ...current.legalStatus, [field]: value },
+          }
+        : current
+    );
+  }
+
+  const handleSubmit = useCallback(
+    async (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      if (!patientId || !form) return;
+      setBusy(true);
+      onError("");
+      try {
+        await apiFetch(`/patients/${patientId}/update`, {
+          method: "POST",
+          body: JSON.stringify({
+            title: form.title,
+            first_name: form.firstName,
+            last_name: form.lastName,
+            phone_primary: form.phonePrimary,
+            phone_secondary: form.phoneSecondary,
+            email: form.email,
+            nationality: form.nationality,
+            residence_country: form.residenceCountry,
+            languages: form.languages
+              .split(",")
+              .map((value) => value.trim())
+              .filter(Boolean),
+            functional_labels: parseFunctionalLabels(form.functionalLabels),
+            address_street: form.addressStreet,
+            address_city: form.addressCity,
+            address_zip: form.addressZip,
+            address_country: form.addressCountry,
+            insurance_provider: form.insuranceProvider,
+            insurance_number: form.insuranceNumber,
+            insurance_type: form.insuranceType,
+            emergency_contact_name: form.emergencyContactName,
+            emergency_contact_phone: form.emergencyContactPhone,
+            emergency_contact_relation: form.emergencyContactRelation,
+            legal_status: serializePatientLegalStatus(form.legalStatus),
+            clinical_warnings: form.clinicalWarnings,
+            notes: form.notes,
+          }),
+        });
+        toast.success(dictionary.common_active);
+        onOpenChange(false);
+        onSaved();
+      } catch (error) {
+        onError(
+          error instanceof Error ? error.message : dictionary.common_failed_update
+        );
+      } finally {
+        setBusy(false);
+      }
+    },
+    [dictionary.common_active, dictionary.common_failed_update, form, onError, onOpenChange, onSaved, patientId]
+  );
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent side="right" className="w-full sm:max-w-[860px]">
+        {form ? (
+          <form className="flex flex-col flex-1 min-h-0" onSubmit={handleSubmit}>
+            <SheetHeader className="shrink-0 px-4 pt-3 pb-1">
+              <SheetTitle>{l("Patientenprofil bearbeiten", "Редактировать профиль пациента", "Edit patient profile")}</SheetTitle>
+            </SheetHeader>
+
+            <div className="flex-1 overflow-y-auto px-4 py-2 space-y-3">
+              <FormSection title={l("Persönliche Daten", "Личные данные", "Personal data")}>
+                <div className="grid gap-3 md:grid-cols-3">
+                  <FormField label={l("Titel", "Обращение", "Title")}>
+                    <Input value={form.title} onChange={(event) => updateField("title", event.target.value)} className={formInputClassName} />
+                  </FormField>
+                  <FormField label={l("Vorname", "Имя", "First name")}>
+                    <Input value={form.firstName} onChange={(event) => updateField("firstName", event.target.value)} required className={formInputClassName} />
+                  </FormField>
+                  <FormField label={l("Nachname", "Фамилия", "Last name")}>
+                    <Input value={form.lastName} onChange={(event) => updateField("lastName", event.target.value)} required className={formInputClassName} />
+                  </FormField>
+                </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <FormField label={l("Nationalität", "Гражданство", "Nationality")}>
+                    <Input value={form.nationality} onChange={(event) => updateField("nationality", event.target.value)} className={formInputClassName} />
+                  </FormField>
+                  <FormField label={l("Wohnsitzland", "Страна проживания", "Residence country")}>
+                    <Input value={form.residenceCountry} onChange={(event) => updateField("residenceCountry", event.target.value)} className={formInputClassName} />
+                  </FormField>
+                </div>
+                <FormField label={l("Sprachen", "Языки", "Languages")}>
+                  <Input value={form.languages} onChange={(event) => updateField("languages", event.target.value)} placeholder="de, uk, en" className={formInputClassName} />
+                </FormField>
+                <FormField label={l("Funktionale Labels", "Функциональные метки", "Functional labels")}>
+                  <FunctionalLabelChips
+                    value={form.functionalLabels}
+                    onChange={(next) => updateField("functionalLabels", next)}
+                  />
+                </FormField>
+              </FormSection>
+
+              <FormSection title={l("Kontakt", "Контакты", "Contact")}>
+                <div className="grid gap-3 md:grid-cols-3">
+                  <FormField label={l("Primäre Telefonnummer", "Основной телефон", "Primary phone")}>
+                    <Input value={form.phonePrimary} onChange={(event) => updateField("phonePrimary", event.target.value)} className={formInputClassName} />
+                  </FormField>
+                  <FormField label={l("Sekundäre Telefonnummer", "Доп. телефон", "Secondary phone")}>
+                    <Input value={form.phoneSecondary} onChange={(event) => updateField("phoneSecondary", event.target.value)} className={formInputClassName} />
+                  </FormField>
+                  <FormField label={l("E-Mail", "Эл. почта", "Email")}>
+                    <Input type="email" value={form.email} onChange={(event) => updateField("email", event.target.value)} className={formInputClassName} />
+                  </FormField>
+                </div>
+              </FormSection>
+
+              <FormSection title={l("Adresse", "Адрес", "Address")}>
+                <FormField label={l("Straße", "Улица", "Street")}>
+                  <Input value={form.addressStreet} onChange={(event) => updateField("addressStreet", event.target.value)} className={formInputClassName} />
+                </FormField>
+                <div className="grid gap-3 md:grid-cols-3">
+                  <FormField label={l("Stadt", "Город", "City")}>
+                    <Input value={form.addressCity} onChange={(event) => updateField("addressCity", event.target.value)} className={formInputClassName} />
+                  </FormField>
+                  <FormField label={l("PLZ", "Индекс", "ZIP")}>
+                    <Input value={form.addressZip} onChange={(event) => updateField("addressZip", event.target.value)} className={formInputClassName} />
+                  </FormField>
+                  <FormField label={l("Adressland", "Страна адреса", "Address country")}>
+                    <Input value={form.addressCountry} onChange={(event) => updateField("addressCountry", event.target.value)} className={formInputClassName} />
+                  </FormField>
+                </div>
+              </FormSection>
+
+              <FormSection title={l("Versicherung", "Страхование", "Insurance")}>
+                <div className="grid gap-3 md:grid-cols-3">
+                  <FormField label={l("Versicherer", "Страховая компания", "Insurance provider")}>
+                    <Input value={form.insuranceProvider} onChange={(event) => updateField("insuranceProvider", event.target.value)} className={formInputClassName} />
+                  </FormField>
+                  <FormField label={l("Versicherungsnummer", "Номер полиса", "Insurance number")}>
+                    <Input value={form.insuranceNumber} onChange={(event) => updateField("insuranceNumber", event.target.value)} className={formInputClassName} />
+                  </FormField>
+                  <FormField label={l("Versicherungstyp", "Тип страхования", "Insurance type")}>
+                    <ShadSelect
+                      value={form.insuranceType || "__unset__"}
+                      onValueChange={(value) => updateField("insuranceType", value === "__unset__" ? "" : value ?? "")}
+                    >
+                      <SelectTrigger className={cn("w-full", formInputClassName)}>
+                        <SelectValue>
+                          {(() => {
+                            switch (form.insuranceType) {
+                              case "private": return l("Privat", "Частная", "Private");
+                              case "public": return l("Gesetzlich", "Государственная", "Public");
+                              case "self_pay": return l("Selbstzahler", "Самооплата", "Self pay");
+                              case "foreign": return l("Ausland", "Иностранная", "Foreign");
+                              default: return dictionary.common_not_set;
+                            }
+                          })()}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__unset__">{dictionary.common_not_set}</SelectItem>
+                        <SelectItem value="private">{l("Privat", "Частная", "Private")}</SelectItem>
+                        <SelectItem value="public">{l("Gesetzlich", "Государственная", "Public")}</SelectItem>
+                        <SelectItem value="self_pay">{l("Selbstzahler", "Самооплата", "Self pay")}</SelectItem>
+                        <SelectItem value="foreign">{l("Ausland", "Иностранная", "Foreign")}</SelectItem>
+                      </SelectContent>
+                    </ShadSelect>
+                  </FormField>
+                </div>
+              </FormSection>
+
+              <FormSection title={l("Notfallkontakt", "Экстренный контакт", "Emergency contact")}>
+                <div className="grid gap-3 md:grid-cols-3">
+                  <FormField label={l("Notfallkontakt", "Контакт", "Contact")}>
+                    <Input value={form.emergencyContactName} onChange={(event) => updateField("emergencyContactName", event.target.value)} className={formInputClassName} />
+                  </FormField>
+                  <FormField label={l("Notfalltelefon", "Телефон", "Phone")}>
+                    <Input value={form.emergencyContactPhone} onChange={(event) => updateField("emergencyContactPhone", event.target.value)} className={formInputClassName} />
+                  </FormField>
+                  <FormField label={l("Beziehung", "Связь", "Relation")}>
+                    <Input value={form.emergencyContactRelation} onChange={(event) => updateField("emergencyContactRelation", event.target.value)} className={formInputClassName} />
+                  </FormField>
+                </div>
+              </FormSection>
+
+              <FormSection
+                title={dictionary.patients_legal_status}
+                accessory={<LegalStatusPill status={form.legalStatus} />}
+              >
+                <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                  {[
+                    { key: "dsgvoSigned", label: l("DSGVO unterschrieben", "DSGVO подписано", "DSGVO signed") },
+                    { key: "confidentialityReleaseSigned", label: l("Schweigepflicht freigegeben", "Снятие врачебной тайны", "Confidentiality released") },
+                    { key: "identityVerified", label: l("Identität bestätigt", "Личность подтверждена", "Identity verified") },
+                    { key: "documentPackComplete", label: l("Dokumentenpaket vollständig", "Пакет документов собран", "Document pack complete") },
+                    { key: "complianceCompleted", label: l("Bereit bestätigt", "Готовность подтверждена", "Readiness confirmed") },
+                  ].map((item) => {
+                    const key = item.key as keyof PatientLegalStatus;
+                    return (
+                      <label
+                        key={item.key}
+                        className="flex items-center gap-2 rounded-lg border border-border/50 bg-card px-2.5 py-2 text-[12.5px] text-foreground cursor-pointer hover:bg-muted/40 transition-colors"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={Boolean(form.legalStatus[key])}
+                          onChange={(event) => updateLegalStatusField(key, event.target.checked as PatientLegalStatus[typeof key])}
+                          className="size-3.5 accent-[var(--brand)] cursor-pointer"
+                        />
+                        {item.label}
+                      </label>
+                    );
+                  })}
+                </div>
+                <FormField label={l("Vertragsstatus", "Статус договора", "Contract status")}>
+                  <ShadSelect
+                    value={form.legalStatus.contractStatus}
+                    onValueChange={(value) => updateLegalStatusField("contractStatus", value ?? "")}
+                  >
+                    <SelectTrigger className={cn("w-full", formInputClassName)}>
+                      <SelectValue>
+                        {patientDetailStatusLabel(form.legalStatus.contractStatus)}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PATIENT_CONTRACT_STATUS_OPTIONS.map((status) => (
+                        <SelectItem key={status} value={status}>
+                          {patientDetailStatusLabel(status)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </ShadSelect>
+                </FormField>
+                <FormField label={l("Notizen", "Заметки", "Notes")}>
+                  <textarea
+                    className={formTextareaClassName}
+                    value={form.legalStatus.notes}
+                    onChange={(event) => updateLegalStatusField("notes", event.target.value)}
+                    placeholder={l(
+                      "Ausstehende Unterschriften, fehlende IDs, offene Compliance-Fragen",
+                      "Ожидающие подписи, отсутствующие ID, открытые вопросы compliance",
+                      "Pending signatures, missing IDs, open compliance questions",
+                    )}
+                  />
+                </FormField>
+              </FormSection>
+
+              <FormSection title={l("CAVE-Hinweise", "Предупреждения CAVE", "CAVE warnings")}>
+                <textarea
+                  className={formTextareaClassName}
+                  value={form.clinicalWarnings}
+                  onChange={(event) => updateField("clinicalWarnings", event.target.value)}
+                  placeholder={l(
+                    "Dauerhafte klinische Warnhinweise oder Sicherheitshinweise",
+                    "Постоянные клинические предупреждения или сигналы безопасности",
+                    "Persistent clinical warnings or safety alerts",
+                  )}
+                />
+              </FormSection>
+
+              <FormSection title={l("Notizen", "Заметки", "Notes")}>
+                <textarea
+                  className={formTextareaClassName}
+                  value={form.notes}
+                  onChange={(event) => updateField("notes", event.target.value)}
+                />
+              </FormSection>
+            </div>
+
+            <div className="shrink-0 flex justify-end gap-2 px-4 py-3 bg-popover">
+              <Button type="button" variant="outline" className="h-9 rounded-lg" onClick={() => onOpenChange(false)}>
+                {l("Abbrechen", "Отмена", "Cancel")}
+              </Button>
+              <Button type="submit" className="h-9 rounded-lg gap-1.5 px-3.5" disabled={busy}>
+                {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                {l("Patient speichern", "Сохранить пациента", "Save patient")}
+              </Button>
+            </div>
+          </form>
+        ) : null}
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+const MemoizedPatientProfileEditorSheet = memo(PatientProfileEditorSheet);
+
+type PatientRelationEditorSheetProps = {
+  open: boolean;
+  patientId: string | undefined;
+  selfPatientId: string;
+  canManageRelations: boolean;
+  editingRelation: RelationItem | null;
+  dictionary: PatientDetailDictionary;
+  lang: string;
+  onOpenChange: (open: boolean) => void;
+  onSaved: () => void;
+  onError: (message: string) => void;
+};
+
+function PatientRelationEditorSheet({
+  open,
+  patientId,
+  selfPatientId,
+  canManageRelations,
+  editingRelation,
+  dictionary,
+  lang,
+  onOpenChange,
+  onSaved,
+  onError,
+}: PatientRelationEditorSheetProps) {
+  const [form, setForm] = useState<RelationFormState>(blankRelationForm);
+  const [busy, setBusy] = useState(false);
+  const [patientOptions, setPatientOptions] = useState<PatientLookupItem[]>([]);
+  const [patientSearch, setPatientSearch] = useState("");
+  const [optionsLoading, setOptionsLoading] = useState(false);
+  const deferredPatientSearch = useDeferredValue(patientSearch);
+  const l = (de: string, ru: string, en: string) =>
+    lang === "de" ? de : lang === "ru" ? ru : en;
+
+  useEffect(() => {
+    if (!open) {
+      setForm(blankRelationForm());
+      setBusy(false);
+      setPatientOptions([]);
+      setPatientSearch("");
+      setOptionsLoading(false);
+      return;
+    }
+
+    setForm(editingRelation ? relationToForm(editingRelation) : blankRelationForm());
+    setPatientSearch(editingRelation?.related_display_name || editingRelation?.related_name || "");
+  }, [editingRelation, open]);
+
+  useEffect(() => {
+    if (!open || !canManageRelations) return;
+    let cancelled = false;
+    setOptionsLoading(true);
+
+    apiFetch<PatientLookupItem[]>("/patients?active_only=true")
+      .then((items) => {
+        if (!cancelled) {
+          setPatientOptions(items);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPatientOptions([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setOptionsLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [canManageRelations, open]);
+
+  const filteredPatientOptions = useMemo(() => {
+    const normalizedSearch = deferredPatientSearch.trim().toLowerCase();
+
+    return patientOptions.filter((option) => {
+      if (option.id === selfPatientId) {
+        return false;
+      }
+
+      if (!normalizedSearch) {
+        return true;
+      }
+
+      return formatRelatedPatientOption(option).toLowerCase().includes(normalizedSearch);
+    });
+  }, [deferredPatientSearch, patientOptions, selfPatientId]);
+
+  const selectedRelatedPatient = useMemo(
+    () => patientOptions.find((option) => option.id === form.relatedPatientId) ?? null,
+    [form.relatedPatientId, patientOptions]
+  );
+
+  const handleSubmit = useCallback(
+    async (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      if (!patientId || (!form.relatedPatientId && !form.relatedName.trim())) {
+        onError(dictionary.common_failed_create);
+        return;
+      }
+
+      setBusy(true);
+      onError("");
+      try {
+        const selectedPatientName = selectedRelatedPatient
+          ? formatRelatedPatientName(selectedRelatedPatient)
+          : null;
+        const payload = {
+          related_patient_id: form.relatedPatientId || undefined,
+          related_name: (selectedPatientName ?? form.relatedName).trim(),
+          relation_type: form.relationType,
+          is_emergency_contact: form.isEmergencyContact,
+          phone: toOptional(form.phone),
+          notes: toOptional(form.notes),
+        };
+        if (editingRelation) {
+          await apiFetch(`/patients/${patientId}/relations/${editingRelation.id}/update`, {
+            method: "POST",
+            body: JSON.stringify(payload),
+          });
+        } else {
+          await apiFetch(`/patients/${patientId}/relations`, {
+            method: "POST",
+            body: JSON.stringify(payload),
+          });
+        }
+        toast.success(dictionary.common_active);
+        onOpenChange(false);
+        onSaved();
+      } catch (error) {
+        onError(
+          error instanceof Error ? error.message : dictionary.common_failed_update
+        );
+      } finally {
+        setBusy(false);
+      }
+    },
+    [
+      dictionary.common_active,
+      dictionary.common_failed_create,
+      dictionary.common_failed_update,
+      editingRelation,
+      form,
+      onError,
+      onOpenChange,
+      onSaved,
+      patientId,
+      selectedRelatedPatient,
+    ]
+  );
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent side="right" className="w-full sm:max-w-[560px] gap-0">
+        <SheetHeader className="px-4 py-3">
+          <SheetTitle>
+            {editingRelation
+              ? l("Beziehung bearbeiten", "Редактировать связь", "Edit relation")
+              : l("Beziehung hinzufügen", "Добавить связь", "Add relation")}
+          </SheetTitle>
+        </SheetHeader>
+        <form className="flex flex-col flex-1 min-h-0" onSubmit={handleSubmit}>
+          <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+            <div className="flex flex-col gap-1.5">
+              <Label
+                className="text-[11.5px] font-medium text-muted-foreground leading-tight"
+                htmlFor="relation-patient-search"
+              >
+                {l("Bestehenden Patienten suchen", "Поиск существующего пациента", "Search existing patient")}
+              </Label>
+              <Input
+                id="relation-patient-search"
+                value={patientSearch}
+                onChange={(event) => setPatientSearch(event.target.value)}
+                placeholder={l("PID oder Patientenname", "PID или имя пациента", "PID or patient name")}
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label
+                className="text-[11.5px] font-medium text-muted-foreground leading-tight"
+                htmlFor="relation-linked-patient"
+              >
+                {l("Patient im System verknüpfen", "Связать пациента в системе", "Link patient in system")}
+              </Label>
+              <select
+                id="relation-linked-patient"
+                className={selectClassName}
+                value={form.relatedPatientId}
+                onChange={(event) => {
+                  const nextPatientId = event.target.value;
+                  const selectedPatient =
+                    patientOptions.find((option) => option.id === nextPatientId) ?? null;
+                  setPatientSearch(
+                    selectedPatient ? formatRelatedPatientOption(selectedPatient) : ""
+                  );
+                  setForm((current) => ({
+                    ...current,
+                    relatedPatientId: nextPatientId,
+                    relatedName: selectedPatient
+                      ? formatRelatedPatientName(selectedPatient)
+                      : current.relatedName,
+                  }));
+                }}
+                disabled={optionsLoading}
+              >
+                <option value="">{l("Eigenständiger Kontakt", "Самостоятельный контакт", "Standalone contact")}</option>
+                {filteredPatientOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {formatRelatedPatientOption(option)}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[11.5px] text-muted-foreground leading-tight">
+                {optionsLoading
+                  ? l("Patientenverzeichnis wird geladen...", "Загрузка справочника пациентов...", "Loading patient directory...")
+                  : selectedRelatedPatient
+                    ? l("Verknüpfte Beziehungen bleiben mit einem bestehenden Patientendatensatz synchronisiert.", "Связанные отношения синхронизируются с существующим пациентом.", "Linked relations stay synced to an existing patient record.")
+                    : l("Leer lassen für Angehörige oder Betreuer, die keine Patienten im System sind.", "Оставьте пустым для родственников или опекунов, которые не являются пациентами в системе.", "Keep this empty for relatives or caregivers who are not patients in the system.")}
+              </p>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="flex flex-col gap-1.5">
+                <Label
+                  className="text-[11.5px] font-medium text-muted-foreground leading-tight"
+                  htmlFor="relation-name"
+                >
+                  {l("Name", "Имя", "Name")}
+                </Label>
+                <Input
+                  id="relation-name"
+                  value={form.relatedName}
+                  onChange={(event) => setForm((current) => ({ ...current, relatedName: event.target.value }))}
+                  placeholder={l("Name eines Angehörigen oder Betreuers", "Имя родственника или опекуна", "Relative or caregiver name")}
+                  disabled={Boolean(form.relatedPatientId)}
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label
+                  className="text-[11.5px] font-medium text-muted-foreground leading-tight"
+                  htmlFor="relation-type"
+                >
+                  {l("Beziehungstyp", "Тип связи", "Relation type")}
+                </Label>
+                <select
+                  id="relation-type"
+                  className={selectClassName}
+                  value={form.relationType}
+                  onChange={(event) => setForm((current) => ({ ...current, relationType: event.target.value }))}
+                >
+                  {RELATION_TYPE_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label
+                  className="text-[11.5px] font-medium text-muted-foreground leading-tight"
+                  htmlFor="relation-phone"
+                >
+                  {l("Telefon", "Телефон", "Phone")}
+                </Label>
+                <Input
+                  id="relation-phone"
+                  value={form.phone}
+                  onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))}
+                  placeholder="+49 ..."
+                />
+              </div>
+              <label className="flex items-center gap-2 rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground">
+                <input
+                  type="checkbox"
+                  checked={form.isEmergencyContact}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      isEmergencyContact: event.target.checked,
+                    }))
+                  }
+                />
+                {l("Notfallkontakt", "Экстренный контакт", "Emergency contact")}
+              </label>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label
+                className="text-[11.5px] font-medium text-muted-foreground leading-tight"
+                htmlFor="relation-notes"
+              >
+                {l("Notizen", "Заметки", "Notes")}
+              </Label>
+              <textarea
+                id="relation-notes"
+                className={textareaClassName}
+                value={form.notes}
+                onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
+                placeholder={l(
+                  "Erreichbarkeit, Kontakthinweise oder besondere Anweisungen",
+                  "Доступность, заметки по контакту или особые инструкции",
+                  "Availability, contact notes or special instructions",
+                )}
+              />
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 px-4 py-3">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-lg"
+              onClick={() => onOpenChange(false)}
+            >
+              {dictionary.common_cancel}
+            </Button>
+            <Button type="submit" size="sm" className="h-8 rounded-lg gap-1.5" disabled={busy}>
+              {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
+              {dictionary.common_save}
+            </Button>
+          </div>
+        </form>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+const MemoizedPatientRelationEditorSheet = memo(PatientRelationEditorSheet);
+
+type PatientDocumentUploadDialogProps = {
+  open: boolean;
+  patientId: string | undefined;
+  orders: OrderItem[];
+  appointments: AppointmentItem[];
+  dictionary: PatientDetailDictionary;
+  lang: string;
+  onOpenChange: (open: boolean) => void;
+  onSaved: () => void;
+  onError: (message: string) => void;
+};
+
+function PatientDocumentUploadDialog({
+  open,
+  patientId,
+  orders,
+  appointments,
+  dictionary,
+  lang,
+  onOpenChange,
+  onSaved,
+  onError,
+}: PatientDocumentUploadDialogProps) {
+  const [form, setForm] = useState<DocumentUploadFormState>(blankDocumentUploadForm);
+  const [busy, setBusy] = useState(false);
+  const l = (de: string, ru: string, en: string) =>
+    lang === "de" ? de : lang === "ru" ? ru : en;
+
+  useEffect(() => {
+    if (!open) {
+      setForm(blankDocumentUploadForm());
+      setBusy(false);
+    }
+  }, [open]);
+
+  function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
+    setForm((current) => ({
+      ...current,
+      file: event.target.files?.[0] ?? null,
+    }));
+  }
+
+  const handleSubmit = useCallback(
+    async (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      if (!patientId || !form.file || !form.art.trim()) {
+        onError(dictionary.common_failed_create);
+        return;
+      }
+
+      setBusy(true);
+      onError("");
+      try {
+        const formData = new FormData();
+        formData.append("file", form.file);
+        formData.append("patient_id", patientId);
+        if (form.orderId) formData.append("order_id", form.orderId);
+        if (form.appointmentId) formData.append("appointment_id", form.appointmentId);
+        if (form.autoName.trim()) formData.append("auto_name", form.autoName.trim());
+        formData.append("art", form.art.trim());
+        if (form.category.trim()) formData.append("category", form.category.trim());
+        formData.append("status", form.status);
+        formData.append("visibility", form.visibility);
+        if (form.isMedical) formData.append("is_medical", "true");
+        if (form.notes.trim()) formData.append("notes", form.notes.trim());
+        await apiFetch("/documents/upload", {
+          method: "POST",
+          body: formData,
+        });
+        toast.success(dictionary.common_active);
+        onOpenChange(false);
+        onSaved();
+      } catch (error) {
+        onError(
+          error instanceof Error ? error.message : dictionary.common_failed_create
+        );
+      } finally {
+        setBusy(false);
+      }
+    },
+    [
+      dictionary.common_active,
+      dictionary.common_failed_create,
+      form,
+      onError,
+      onOpenChange,
+      onSaved,
+      patientId,
+    ]
+  );
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>{l("Patientendokument hochladen", "Загрузить документ пациента", "Upload patient document")}</DialogTitle>
+          <DialogDescription>
+            {l(
+              "Hier hochgeladene Dateien werden direkt mit diesem Patienten verknüpft und können auch einem Auftrag oder Termin zugeordnet werden.",
+              "Загруженные здесь файлы привязываются напрямую к пациенту и также могут быть связаны с заказом или приёмом.",
+              "Files uploaded here are linked directly to this patient and can also be attached to an order or appointment.",
+            )}
+          </DialogDescription>
+        </DialogHeader>
+        <form className="space-y-4" onSubmit={handleSubmit}>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="document-file">{l("Datei", "Файл", "File")}</Label>
+              <Input id="document-file" type="file" onChange={handleFileChange} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="document-name">{l("Anzeigename", "Отображаемое имя", "Display name")}</Label>
+              <Input
+                id="document-name"
+                value={form.autoName}
+                onChange={(event) => setForm((current) => ({ ...current, autoName: event.target.value }))}
+                placeholder={l("Optionaler sichtbarer Name für den Patienten", "Необязательное имя для отображения пациенту", "Optional patient-facing name")}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="document-art">{l("Typ", "Тип", "Type")}</Label>
+              <Input
+                id="document-art"
+                value={form.art}
+                onChange={(event) => setForm((current) => ({ ...current, art: event.target.value }))}
+                placeholder="report"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="document-category">{l("Kategorie", "Категория", "Category")}</Label>
+              <Input
+                id="document-category"
+                value={form.category}
+                onChange={(event) => setForm((current) => ({ ...current, category: event.target.value }))}
+                placeholder="medical"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="document-status">{l("Status", "Статус", "Status")}</Label>
+              <select
+                id="document-status"
+                className={selectClassName}
+                value={form.status}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    status: event.target.value as DocumentStatus,
+                  }))
+                }
+              >
+                {DOCUMENT_STATUS_OPTIONS.map((status) => (
+                  <option key={status} value={status}>
+                    {patientDetailStatusLabel(status)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="document-visibility">{l("Sichtbarkeit", "Видимость", "Visibility")}</Label>
+              <select
+                id="document-visibility"
+                className={selectClassName}
+                value={form.visibility}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    visibility: event.target.value as DocumentVisibility,
+                  }))
+                }
+              >
+                {DOCUMENT_VISIBILITY_OPTIONS.map((visibility) => (
+                  <option key={visibility} value={visibility}>
+                    {visibility === "internal"
+                      ? l("Intern", "Внутреннее", "Internal")
+                      : visibility === "released_internal"
+                        ? l("Intern freigegeben", "Внутренне опубликовано", "Released internal")
+                        : visibility === "released_external"
+                          ? l("Extern freigegeben", "Внешне опубликовано", "Released external")
+                          : l("Für Patienten sichtbar", "Видно пациенту", "Patient visible")}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="document-order">{l("Auftrag", "Заказ", "Order")}</Label>
+              <select
+                id="document-order"
+                className={selectClassName}
+                value={form.orderId}
+                onChange={(event) => setForm((current) => ({ ...current, orderId: event.target.value }))}
+              >
+                <option value="">{l("Keine Auftragsverknüpfung", "Без привязки к заказу", "No order link")}</option>
+                {orders.map((order) => (
+                  <option key={order.id} value={order.id}>
+                    {order.order_number}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="document-appointment">{l("Termin", "Приём", "Appointment")}</Label>
+              <select
+                id="document-appointment"
+                className={selectClassName}
+                value={form.appointmentId}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    appointmentId: event.target.value,
+                  }))
+                }
+              >
+                <option value="">{l("Keine Terminverknüpfung", "Без привязки к приёму", "No appointment link")}</option>
+                {appointments.map((appointment) => (
+                  <option key={appointment.id} value={appointment.id}>
+                    {appointment.title} · {fmtDate(appointment.date)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={form.isMedical}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    isMedical: event.target.checked,
+                  }))
+                }
+              />
+              {l("Medizinisches Dokument", "Медицинский документ", "Medical document")}
+            </label>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="document-notes">{l("Notizen", "Заметки", "Notes")}</Label>
+            <textarea
+              id="document-notes"
+              className={textareaClassName}
+              value={form.notes}
+              onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
+              placeholder={l("Optionale Verarbeitungs- oder Sichtbarkeitsnotizen", "Необязательные заметки по обработке или видимости", "Optional processing or visibility notes")}
+            />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" className="rounded-xl" onClick={() => onOpenChange(false)}>
+              {l("Abbrechen", "Отмена", "Cancel")}
+            </Button>
+            <Button type="submit" className="rounded-xl bg-slate-950 text-white hover:bg-slate-800" disabled={busy}>
+              {busy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
+              {l("Dokument hochladen", "Загрузить документ", "Upload document")}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+const MemoizedPatientDocumentUploadDialog = memo(PatientDocumentUploadDialog);
+
 export function PatientDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -1153,35 +2368,26 @@ export function PatientDetailPage() {
   const [activeTab, setActiveTab] = useState(searchParams.get("tab") || "profile");
   const [version, setVersion] = useState(0);
   const [tabVersion, setTabVersion] = useState(0);
-  const [notice, setNotice] = useState("");
   const [tabActionError, setTabActionError] = useState("");
   const [profileEditorOpen, setProfileEditorOpen] = useState(false);
-  const [profileEditorBusy, setProfileEditorBusy] = useState(false);
-  const [profileEditForm, setProfileEditForm] = useState<PatientEditFormState | null>(null);
-  const [vitalsBusy, setVitalsBusy] = useState(false);
-  const [vitalsForm, setVitalsForm] = useState<PatientVitalFormState>(blankPatientVitalForm);
-  const [cardEntriesBusy, setCardEntriesBusy] = useState(false);
-  const [cardEntryForm, setCardEntryForm] = useState<PatientCardEntryFormState>(blankPatientCardEntryForm);
   const [cardEntrySheetOpen, setCardEntrySheetOpen] = useState(false);
-  const [medicalOrdersBusy, setMedicalOrdersBusy] = useState(false);
+  const [docsPreviewOpen, setDocsPreviewOpen] = useState(false);
+  const [contractsPreviewOpen, setContractsPreviewOpen] = useState(false);
+  const [invoicesPreviewOpen, setInvoicesPreviewOpen] = useState(false);
+  const [legalStatusSheetOpen, setLegalStatusSheetOpen] = useState(false);
+  const [vitalsSheetOpen, setVitalsSheetOpen] = useState(false);
+  const [caveSheetOpen, setCaveSheetOpen] = useState(false);
+  const [notesSheetOpen, setNotesSheetOpen] = useState(false);
   const [medicalOrderActionId, setMedicalOrderActionId] = useState("");
-  const [medicalOrderForm, setMedicalOrderForm] = useState<PatientMedicalOrderFormState>(blankPatientMedicalOrderForm);
   const [medicalOrderSheetOpen, setMedicalOrderSheetOpen] = useState(false);
-  const [riskScoresBusy, setRiskScoresBusy] = useState(false);
-  const [riskScoreForm, setRiskScoreForm] = useState<PatientRiskScoreFormState>(blankPatientRiskScoreForm);
   const [riskScoreSheetOpen, setRiskScoreSheetOpen] = useState(false);
+  const [appointmentSheetOpen, setAppointmentSheetOpen] = useState(false);
+  const [casePreviewId, setCasePreviewId] = useState<string | null>(null);
 
   const [relationEditorOpen, setRelationEditorOpen] = useState(false);
   const [editingRelation, setEditingRelation] = useState<RelationItem | null>(null);
-  const [relationForm, setRelationForm] = useState<RelationFormState>(blankRelationForm);
-  const [relationBusy, setRelationBusy] = useState(false);
-  const [relationPatientOptions, setRelationPatientOptions] = useState<PatientLookupItem[]>([]);
-  const [relationPatientSearch, setRelationPatientSearch] = useState("");
-  const [relationPatientOptionsLoading, setRelationPatientOptionsLoading] = useState(false);
 
   const [documentUploadOpen, setDocumentUploadOpen] = useState(false);
-  const [documentUploadForm, setDocumentUploadForm] = useState<DocumentUploadFormState>(blankDocumentUploadForm);
-  const [documentUploadBusy, setDocumentUploadBusy] = useState(false);
 
   const [contractCreateOpen, setContractCreateOpen] = useState(false);
   const [contractCreateForm, setContractCreateForm] = useState<ContractFormState>(blankContractForm);
@@ -1208,13 +2414,27 @@ export function PatientDetailPage() {
   const [workflowForm, setWorkflowForm] = useState<WorkflowChecklistFormState>(
     blankWorkflowChecklistForm
   );
-  const [timelineEntityFilter, setTimelineEntityFilter] = useState("all");
-  const [timelineCategoryFilter, setTimelineCategoryFilter] = useState("all");
-  const [timelineSourceFilter, setTimelineSourceFilter] = useState("all");
-  const [timelineRangeFilter, setTimelineRangeFilter] = useState<PatientTimelineRangeFilter>("all");
-  const [timelineSearch, setTimelineSearch] = useState("");
+  const [documentStatusFilter, setDocumentStatusFilter] = useState("all");
+  const [documentCategoryFilter, setDocumentCategoryFilter] = useState("all");
+  const [timelineEntityFilter, setTimelineEntityFilter] = useState(() =>
+    normalizeTimelineQueryValue(searchParams.get("entity_type"))
+  );
+  const [timelineCategoryFilter, setTimelineCategoryFilter] = useState(() =>
+    normalizeTimelineQueryValue(searchParams.get("category"))
+  );
+  const [timelineSourceFilter, setTimelineSourceFilter] = useState(() =>
+    normalizeTimelineQueryValue(searchParams.get("source"))
+  );
+  const [timelineRangeFilter, setTimelineRangeFilter] = useState<PatientTimelineRangeFilter>(() =>
+    normalizeTimelineRangeFilterValue(searchParams.get("range"))
+  );
+  const [timelineSearch, setTimelineSearch] = useState(() =>
+    normalizeTimelineSearchValue(searchParams.get("search"))
+  );
   const [timelineTotal, setTimelineTotal] = useState(0);
-  const [timelineOffset, setTimelineOffset] = useState(0);
+  const [timelineOffset, setTimelineOffset] = useState(() =>
+    normalizeTimelineOffsetValue(searchParams.get("offset"))
+  );
   const timelineLimit = 50;
 
   const canManage = user?.role === "ceo" || user?.role === "patient_manager" || user?.role === "teamlead_interpreter";
@@ -1307,7 +2527,6 @@ export function PatientDetailPage() {
         }
       : null,
   ].filter((item): item is { key: string; label: string } => Boolean(item));
-  const deferredRelationPatientSearch = useDeferredValue(relationPatientSearch);
   const deferredTimelineSearch = useDeferredValue(timelineSearch);
   const activeWorkflowAssignees = useMemo(
     () =>
@@ -1315,28 +2534,6 @@ export function PatientDetailPage() {
         (item) => !item.revoked_at && item.user_active
       ),
     [assignments]
-  );
-
-  const relationPatientOptionsFiltered = useMemo(() => {
-    const normalizedSearch = deferredRelationPatientSearch.trim().toLowerCase();
-
-    return relationPatientOptions.filter((option) => {
-      if (option.id === id) {
-        return false;
-      }
-
-      if (!normalizedSearch) {
-        return true;
-      }
-
-      return formatRelatedPatientOption(option).toLowerCase().includes(normalizedSearch);
-    });
-  }, [deferredRelationPatientSearch, id, relationPatientOptions]);
-
-  const selectedRelatedPatient = useMemo(
-    () =>
-      relationPatientOptions.find((option) => option.id === relationForm.relatedPatientId) ?? null,
-    [relationForm.relatedPatientId, relationPatientOptions]
   );
   const timelineCategoryOptions = useMemo(
     () =>
@@ -1369,6 +2566,34 @@ export function PatientDetailPage() {
       timelineSourceFilter,
     ]
   );
+  const groupedTimeline = useMemo(() => {
+    const groups: Array<{
+      key: string;
+      label: string;
+      items: TimelineItem[];
+    }> = [];
+    let currentGroup:
+      | {
+          key: string;
+          label: string;
+          items: TimelineItem[];
+        }
+      | null = null;
+
+    for (const item of filteredTimeline) {
+      const key = timelineDateGroupKey(item.happened_at);
+      const label = timelineDateGroupLabel(item.happened_at, lang);
+
+      if (!currentGroup || currentGroup.key !== key) {
+        currentGroup = { key, label, items: [item] };
+        groups.push(currentGroup);
+      } else {
+        currentGroup.items.push(item);
+      }
+    }
+
+    return groups;
+  }, [filteredTimeline, lang]);
 
   const timelineSummary = useMemo(() => buildPatientTimelineSummary(timeline), [timeline]);
   const localizedTimelineRangeOptions = useMemo(() => timelineRangeOptions(lang), [lang]);
@@ -1383,10 +2608,11 @@ export function PatientDetailPage() {
     }
     return Array.from(grouped.entries()).map(([key, groupItems]) => ({
       key,
-      label: workflowChecklistLabel(key),
+      label: localizeWorkflowGroupLabel(key, workflowChecklistLabel(key), l),
       items: groupItems,
     }));
-  }, [workflowChecklist]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workflowChecklist, lang]);
   const legalStatus = useMemo(
     () => normalizePatientLegalStatus(detail?.legal_status),
     [detail?.legal_status]
@@ -1399,31 +2625,86 @@ export function PatientDetailPage() {
     () => getPatientLegalStatusCompletion(legalStatus),
     [legalStatus]
   );
+  const documentStatusOptions = useMemo(
+    () =>
+      [...new Set(documents.map((item) => item.status ?? "").filter((value) => Boolean(value.trim())))]
+        .toSorted((left, right) => left.localeCompare(right)),
+    [documents]
+  );
+  const documentCategoryOptions = useMemo(
+    () =>
+      [...new Set(documents.map((item) => item.category ?? "").filter((value) => Boolean(value.trim())))]
+        .toSorted((left, right) => left.localeCompare(right)),
+    [documents]
+  );
+  const filteredDocuments = useMemo(
+    () =>
+      documents.filter((item) => {
+        if (documentStatusFilter !== "all" && (item.status ?? "") !== documentStatusFilter) return false;
+        if (documentCategoryFilter !== "all" && (item.category ?? "") !== documentCategoryFilter) return false;
+        return true;
+      }),
+    [documentCategoryFilter, documentStatusFilter, documents]
+  );
+  const hasDocumentFilters =
+    documentStatusFilter !== "all" || documentCategoryFilter !== "all";
+  const requiredDocumentFulfilledCount =
+    documentAlerts?.required_documents.filter((item) => item.fulfilled).length ?? 0;
+  const contractSignedCount = useMemo(
+    () => contracts.filter((item) => item.status === "signed" || item.status === "active").length,
+    [contracts]
+  );
+  const contractPendingCount = useMemo(
+    () => contracts.filter((item) => item.status === "draft" || item.status === "sent").length,
+    [contracts]
+  );
+  const contractExpiringSoonCount = useMemo(() => {
+    const now = new Date();
+    return contracts.filter((item) => isContractExpiringSoon(item, now)).length;
+  }, [contracts]);
+  const invoiceOutstandingAmount = useMemo(
+    () => invoices.reduce((sum, item) => sum + moneyValueNumber(item.balance_due), 0),
+    [invoices]
+  );
+  const invoicePaidAmountTotal = useMemo(
+    () => invoices.reduce((sum, item) => sum + moneyValueNumber(item.paid_amount), 0),
+    [invoices]
+  );
+  const invoiceOpenCount = useMemo(
+    () => invoices.filter((item) => moneyValueNumber(item.balance_due) > 0).length,
+    [invoices]
+  );
+  const invoiceOverdueCount = useMemo(() => {
+    const now = new Date();
+    return invoices.filter((item) => {
+      if (item.status === "overdue") return true;
+      if (moneyValueNumber(item.balance_due) <= 0 || !item.due_date) return false;
+      const dueDate = new Date(item.due_date);
+      return !Number.isNaN(dueDate.getTime()) && dueDate < now;
+    }).length;
+  }, [invoices]);
   const hasTimelineFilters =
     timelineEntityFilter !== "all" ||
     timelineCategoryFilter !== "all" ||
     timelineSourceFilter !== "all" ||
     timelineRangeFilter !== "all" ||
     deferredTimelineSearch.trim().length > 0;
-  const latestVitalMeasurement = vitalsHistory[0] ?? null;
-  const bmiPreview = useMemo(
-    () => computeVitalBmi(vitalsForm.weightKg, vitalsForm.heightCm),
-    [vitalsForm.heightCm, vitalsForm.weightKg]
-  );
 
-  useEffect(() => {
-    setTimelineOffset(0);
-  }, [
-    timelineEntityFilter,
-    timelineCategoryFilter,
-    timelineSourceFilter,
-    timelineRangeFilter,
-    deferredTimelineSearch,
-  ]);
-
-  const reload = useCallback(() => setVersion((v) => v + 1), []);
+  const reload = useCallback(() => {
+    setVersion((v) => v + 1);
+    setTabVersion((v) => v + 1);
+  }, []);
   const reloadTab = useCallback(() => setTabVersion((v) => v + 1), []);
   void reloadTab;
+  void blankPatientCardEntryForm;
+  void blankPatientMedicalOrderForm;
+  void blankPatientRiskScoreForm;
+  void blankPatientVitalForm;
+  void parseOptionalIntegerInput;
+  void computeVitalBmi;
+  void CountBadge;
+  void EmptyCell;
+  void TabLoader;
 
   const handleTabChange = useCallback(
     (nextTab: string) => {
@@ -1438,6 +2719,65 @@ export function PatientDetailPage() {
     },
     [searchParams, setSearchParams]
   );
+
+  useEffect(() => {
+    const nextEntityFilter = normalizeTimelineQueryValue(searchParams.get("entity_type"));
+    const nextCategoryFilter = normalizeTimelineQueryValue(searchParams.get("category"));
+    const nextSourceFilter = normalizeTimelineQueryValue(searchParams.get("source"));
+    const nextRangeFilter = normalizeTimelineRangeFilterValue(searchParams.get("range"));
+    const nextSearch = normalizeTimelineSearchValue(searchParams.get("search"));
+    const nextOffset = normalizeTimelineOffsetValue(searchParams.get("offset"));
+
+    if (timelineEntityFilter !== nextEntityFilter) setTimelineEntityFilter(nextEntityFilter);
+    if (timelineCategoryFilter !== nextCategoryFilter) setTimelineCategoryFilter(nextCategoryFilter);
+    if (timelineSourceFilter !== nextSourceFilter) setTimelineSourceFilter(nextSourceFilter);
+    if (timelineRangeFilter !== nextRangeFilter) setTimelineRangeFilter(nextRangeFilter);
+    if (timelineSearch !== nextSearch) setTimelineSearch(nextSearch);
+    if (timelineOffset !== nextOffset) setTimelineOffset(nextOffset);
+  }, [
+    searchParams,
+    timelineCategoryFilter,
+    timelineEntityFilter,
+    timelineOffset,
+    timelineRangeFilter,
+    timelineSearch,
+    timelineSourceFilter,
+  ]);
+
+  useEffect(() => {
+    const nextParams = new URLSearchParams(searchParams);
+
+    if (timelineEntityFilter === "all") nextParams.delete("entity_type");
+    else nextParams.set("entity_type", timelineEntityFilter);
+
+    if (timelineCategoryFilter === "all") nextParams.delete("category");
+    else nextParams.set("category", timelineCategoryFilter);
+
+    if (timelineSourceFilter === "all") nextParams.delete("source");
+    else nextParams.set("source", timelineSourceFilter);
+
+    if (timelineRangeFilter === "all") nextParams.delete("range");
+    else nextParams.set("range", timelineRangeFilter);
+
+    if (!timelineSearch.trim()) nextParams.delete("search");
+    else nextParams.set("search", timelineSearch.trim());
+
+    if (timelineOffset <= 0) nextParams.delete("offset");
+    else nextParams.set("offset", String(timelineOffset));
+
+    if (nextParams.toString() !== searchParams.toString()) {
+      setSearchParams(nextParams, { replace: true });
+    }
+  }, [
+    searchParams,
+    setSearchParams,
+    timelineCategoryFilter,
+    timelineEntityFilter,
+    timelineOffset,
+    timelineRangeFilter,
+    timelineSearch,
+    timelineSourceFilter,
+  ]);
 
   useEffect(() => {
     if (workflowForm.ownerUserId) return;
@@ -1542,7 +2882,6 @@ export function PatientDetailPage() {
   ]);
 
   useEffect(() => {
-    setNotice("");
     setTabActionError("");
   }, [activeTab]);
 
@@ -1698,38 +3037,6 @@ export function PatientDetailPage() {
     };
   }, [invoiceManageId]);
 
-  useEffect(() => {
-    if (!relationEditorOpen || !canManageRelations) {
-      return;
-    }
-
-    let cancelled = false;
-    setRelationPatientOptionsLoading(true);
-
-    apiFetch<PatientLookupItem[]>("/patients?active_only=true")
-      .then((items) => {
-        if (cancelled) {
-          return;
-        }
-        setRelationPatientOptions(items);
-      })
-      .catch(() => {
-        if (cancelled) {
-          return;
-        }
-        setRelationPatientOptions([]);
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setRelationPatientOptionsLoading(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [canManageRelations, relationEditorOpen]);
-
   const handleAssign = async () => {
     if (!id || !selectedAssignee) return;
     setAssignBusy(true);
@@ -1763,7 +3070,7 @@ export function PatientDetailPage() {
             : null,
         }),
       });
-      setNotice(t.common_active);
+      toast.success(t.common_active);
       setWorkflowForm((current) => ({
         ...blankWorkflowChecklistForm(),
         ownerUserId: current.ownerUserId,
@@ -1784,7 +3091,7 @@ export function PatientDetailPage() {
       await apiFetch(`/patients/${id}/workflow-checklist/${itemId}/complete`, {
         method: "POST",
       });
-      setNotice(t.common_active);
+      toast.success(t.common_active);
       reload();
     } catch (error) {
       setTabActionError(error instanceof Error ? error.message : t.common_failed_update);
@@ -1793,70 +3100,34 @@ export function PatientDetailPage() {
     }
   }
 
+  const handleProfileEditorOpenChange = useCallback((open: boolean) => {
+    setProfileEditorOpen(open);
+  }, []);
+
+  const handleRelationEditorOpenChange = useCallback((open: boolean) => {
+    setRelationEditorOpen(open);
+    if (!open) {
+      setEditingRelation(null);
+    }
+  }, []);
+
+  const handleDocumentUploadOpenChange = useCallback((open: boolean) => {
+    setDocumentUploadOpen(open);
+  }, []);
+
+  const openProfileEditor = useCallback(() => {
+    if (!detail) return;
+    setProfileEditorOpen(true);
+  }, [detail]);
+
   function openCreateRelation() {
     setEditingRelation(null);
-    setRelationForm(blankRelationForm());
-    setRelationPatientSearch("");
     setRelationEditorOpen(true);
   }
 
   function openEditRelation(relation: RelationItem) {
     setEditingRelation(relation);
-    setRelationForm(relationToForm(relation));
-    setRelationPatientSearch(relation.related_display_name || relation.related_name);
     setRelationEditorOpen(true);
-  }
-
-  function handleDocumentFileChange(event: ChangeEvent<HTMLInputElement>) {
-    setDocumentUploadForm((current) => ({
-      ...current,
-      file: event.target.files?.[0] ?? null,
-    }));
-  }
-
-  async function handleSaveRelation(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!id || (!relationForm.relatedPatientId && !relationForm.relatedName.trim())) {
-      setTabActionError(t.common_failed_create);
-      return;
-    }
-    setRelationBusy(true);
-    setTabActionError("");
-    try {
-      const selectedPatientName = selectedRelatedPatient
-        ? formatRelatedPatientName(selectedRelatedPatient)
-        : null;
-      const payload = {
-        related_patient_id: relationForm.relatedPatientId || undefined,
-        related_name: (selectedPatientName ?? relationForm.relatedName).trim(),
-        relation_type: relationForm.relationType,
-        is_emergency_contact: relationForm.isEmergencyContact,
-        phone: toOptional(relationForm.phone),
-        notes: toOptional(relationForm.notes),
-      };
-      if (editingRelation) {
-        await apiFetch(`/patients/${id}/relations/${editingRelation.id}/update`, {
-          method: "POST",
-          body: JSON.stringify(payload),
-        });
-        setNotice(t.common_active);
-      } else {
-        await apiFetch(`/patients/${id}/relations`, {
-          method: "POST",
-          body: JSON.stringify(payload),
-        });
-        setNotice(t.common_active);
-      }
-      setRelationEditorOpen(false);
-      setEditingRelation(null);
-      setRelationForm(blankRelationForm());
-      setRelationPatientSearch("");
-      reload();
-    } catch (error) {
-      setTabActionError(error instanceof Error ? error.message : t.common_failed_update);
-    } finally {
-      setRelationBusy(false);
-    }
   }
 
   async function handleDeleteRelation(relationId: string) {
@@ -1866,46 +3137,10 @@ export function PatientDetailPage() {
       await apiFetch(`/patients/${id}/relations/${relationId}/delete`, {
         method: "POST",
       });
-      setNotice(t.common_active);
+      toast.success(t.common_active);
       reload();
     } catch (error) {
       setTabActionError(error instanceof Error ? error.message : t.common_failed_update);
-    }
-  }
-
-  async function handleUploadDocument(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!id || !documentUploadForm.file || !documentUploadForm.art.trim()) {
-      setTabActionError(t.common_failed_create);
-      return;
-    }
-    setDocumentUploadBusy(true);
-    setTabActionError("");
-    try {
-      const formData = new FormData();
-      formData.append("file", documentUploadForm.file);
-      formData.append("patient_id", id);
-      if (documentUploadForm.orderId) formData.append("order_id", documentUploadForm.orderId);
-      if (documentUploadForm.appointmentId) formData.append("appointment_id", documentUploadForm.appointmentId);
-      if (documentUploadForm.autoName.trim()) formData.append("auto_name", documentUploadForm.autoName.trim());
-      formData.append("art", documentUploadForm.art.trim());
-      if (documentUploadForm.category.trim()) formData.append("category", documentUploadForm.category.trim());
-      formData.append("status", documentUploadForm.status);
-      formData.append("visibility", documentUploadForm.visibility);
-      if (documentUploadForm.isMedical) formData.append("is_medical", "true");
-      if (documentUploadForm.notes.trim()) formData.append("notes", documentUploadForm.notes.trim());
-      await apiFetch("/documents/upload", {
-        method: "POST",
-        body: formData,
-      });
-      setNotice(t.common_active);
-      setDocumentUploadOpen(false);
-      setDocumentUploadForm(blankDocumentUploadForm());
-      reload();
-    } catch (error) {
-      setTabActionError(error instanceof Error ? error.message : t.common_failed_create);
-    } finally {
-      setDocumentUploadBusy(false);
     }
   }
 
@@ -1927,7 +3162,7 @@ export function PatientDetailPage() {
             : null,
         }),
       });
-      setNotice(t.common_active);
+      toast.success(t.common_active);
       setContractCreateOpen(false);
       setContractCreateForm(blankContractForm());
       reload();
@@ -1960,7 +3195,7 @@ export function PatientDetailPage() {
             : null,
         }),
       });
-      setNotice(t.common_active);
+      toast.success(t.common_active);
       setContractStatusId("");
       setContractStatusForm(blankContractForm());
       reload();
@@ -1994,7 +3229,7 @@ export function PatientDetailPage() {
           notes: toOptional(invoiceStatusForm.notes),
         }),
       });
-      setNotice(t.common_active);
+      toast.success(t.common_active);
       reload();
     } catch (error) {
       setTabActionError(error instanceof Error ? error.message : t.common_failed_update);
@@ -2018,7 +3253,7 @@ export function PatientDetailPage() {
       });
       setDunningEvents((current) => [...current, created]);
       setDunningNote("");
-      setNotice(t.common_active);
+      toast.success(t.common_active);
       reload();
     } catch (error) {
       setTabActionError(error instanceof Error ? error.message : t.common_failed_create);
@@ -2037,13 +3272,7 @@ export function PatientDetailPage() {
         `/admin/compliance/patient/${id}/export?format=zip`,
         `${detail?.patient_id ?? "patient"}-dsgvo-export.zip`,
       );
-      setNotice(
-        l(
-          "DSGVO-Export wurde heruntergeladen.",
-          "Экспорт DSGVO загружен.",
-          "DSGVO export downloaded.",
-        ),
-      );
+      toast.success(l("DSGVO-Export geladen.", "Экспорт DSGVO загружен.", "DSGVO export downloaded."));
     } catch (error) {
       setTabActionError(
         error instanceof Error ? error.message : t.common_failed_create
@@ -2053,8 +3282,9 @@ export function PatientDetailPage() {
     }
   }
 
-  async function handlePrintPatientLabel() {
+  async function handlePrintPatientLabel(format?: PatientLabelFormatId) {
     if (!id) return;
+    const chosenFormat = format ?? patientLabelFormat;
 
     const printWindow = window.open("", "_blank", "noopener,noreferrer");
     if (!printWindow) {
@@ -2067,12 +3297,12 @@ export function PatientDetailPage() {
 
     try {
       const payload = await apiFetch<PatientLabelPayload>(
-        `/patients/${id}/label?format=${encodeURIComponent(patientLabelFormat)}`
+        `/patients/${id}/label?format=${encodeURIComponent(chosenFormat)}`
       );
       printWindow.document.open();
       printWindow.document.write(buildPatientLabelPrintHtml(payload));
       printWindow.document.close();
-      setNotice("Patient label opened for print.");
+      toast.info(l("Etikett geöffnet.", "Наклейка открыта.", "Label opened."));
     } catch (error) {
       printWindow.close();
       setTabActionError(
@@ -2080,201 +3310,6 @@ export function PatientDetailPage() {
       );
     } finally {
       setPatientLabelBusy(false);
-    }
-  }
-
-  function openProfileEditor() {
-    if (!detail) return;
-    setProfileEditForm(patientToEditForm(detail));
-    setProfileEditorOpen(true);
-  }
-
-  async function handleSavePatientProfile(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!id || !profileEditForm) return;
-    setProfileEditorBusy(true);
-    setTabActionError("");
-    try {
-      await apiFetch(`/patients/${id}/update`, {
-        method: "POST",
-        body: JSON.stringify({
-          title: profileEditForm.title,
-          first_name: profileEditForm.firstName,
-          last_name: profileEditForm.lastName,
-          phone_primary: profileEditForm.phonePrimary,
-          phone_secondary: profileEditForm.phoneSecondary,
-          email: profileEditForm.email,
-          nationality: profileEditForm.nationality,
-          residence_country: profileEditForm.residenceCountry,
-          languages: profileEditForm.languages
-            .split(",")
-            .map((value) => value.trim())
-            .filter(Boolean),
-          functional_labels: parseFunctionalLabels(profileEditForm.functionalLabels),
-          address_street: profileEditForm.addressStreet,
-          address_city: profileEditForm.addressCity,
-          address_zip: profileEditForm.addressZip,
-          address_country: profileEditForm.addressCountry,
-          insurance_provider: profileEditForm.insuranceProvider,
-          insurance_number: profileEditForm.insuranceNumber,
-          insurance_type: profileEditForm.insuranceType,
-          emergency_contact_name: profileEditForm.emergencyContactName,
-          emergency_contact_phone: profileEditForm.emergencyContactPhone,
-          emergency_contact_relation: profileEditForm.emergencyContactRelation,
-          legal_status: serializePatientLegalStatus(profileEditForm.legalStatus),
-          clinical_warnings: profileEditForm.clinicalWarnings,
-          notes: profileEditForm.notes,
-        }),
-      });
-      setNotice(t.common_active);
-      setProfileEditorOpen(false);
-      reload();
-    } catch (error) {
-      setTabActionError(error instanceof Error ? error.message : t.common_failed_update);
-    } finally {
-      setProfileEditorBusy(false);
-    }
-  }
-
-  async function handleCreateVitalMeasurement(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!id) return;
-
-    let payload: Record<string, unknown>;
-    try {
-      const measuredAt = new Date(vitalsForm.measuredAt);
-      if (Number.isNaN(measuredAt.getTime())) {
-        throw new Error("Select a valid measurement timestamp");
-      }
-      const bmiValue =
-        parseOptionalNumberInput(vitalsForm.bmi) ??
-        computeVitalBmi(vitalsForm.weightKg, vitalsForm.heightCm) ??
-        undefined;
-
-      payload = {
-        measured_at: measuredAt.toISOString(),
-        bp_systolic: parseOptionalNumberInput(vitalsForm.bpSystolic),
-        bp_diastolic: parseOptionalNumberInput(vitalsForm.bpDiastolic),
-        heart_rate: parseOptionalIntegerInput(vitalsForm.heartRate),
-        weight_kg: parseOptionalNumberInput(vitalsForm.weightKg),
-        height_cm: parseOptionalNumberInput(vitalsForm.heightCm),
-        bmi: bmiValue,
-        notes: toOptional(vitalsForm.notes),
-      };
-    } catch (error) {
-      setTabActionError(error instanceof Error ? error.message : t.common_failed_create);
-      return;
-    }
-
-    setVitalsBusy(true);
-    setTabActionError("");
-    try {
-      await apiFetch(`/patients/${id}/vitals`, {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
-      const result = await apiFetch<{ items: PatientVitalMeasurement[] }>(`/patients/${id}/vitals`);
-      setVitalsHistory(result.items ?? []);
-      setVitalsForm(blankPatientVitalForm());
-      setNotice("Vital measurement saved.");
-      reload();
-    } catch (error) {
-      setTabActionError(error instanceof Error ? error.message : t.common_failed_create);
-    } finally {
-      setVitalsBusy(false);
-    }
-  }
-
-  async function handleCreatePatientCardEntry(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!id) return;
-
-    let payload: Record<string, unknown>;
-    try {
-      const entryDate = new Date(cardEntryForm.entryDate);
-      if (Number.isNaN(entryDate.getTime())) {
-        throw new Error("Select a valid entry timestamp");
-      }
-      if (!cardEntryForm.content.trim()) {
-        throw new Error("Clinical entry content is required");
-      }
-
-      payload = {
-        entry_date: entryDate.toISOString(),
-        category: cardEntryForm.category,
-        source: toOptional(cardEntryForm.source),
-        content: cardEntryForm.content.trim(),
-      };
-    } catch (error) {
-      setTabActionError(error instanceof Error ? error.message : t.common_failed_create);
-      return;
-    }
-
-    setCardEntriesBusy(true);
-    setTabActionError("");
-    try {
-      await apiFetch(`/patients/${id}/card-entries`, {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
-      const result = await apiFetch<{ items: PatientCardEntry[] }>(`/patients/${id}/card-entries`);
-      setCardEntries(result.items ?? []);
-      setCardEntryForm(blankPatientCardEntryForm());
-      setNotice("Clinical card entry saved.");
-      reload();
-    } catch (error) {
-      setTabActionError(error instanceof Error ? error.message : t.common_failed_create);
-    } finally {
-      setCardEntriesBusy(false);
-    }
-  }
-
-  async function handleCreatePatientMedicalOrder(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!id) return;
-
-    let payload: Record<string, unknown>;
-    try {
-      const orderDate = new Date(medicalOrderForm.orderDate);
-      if (Number.isNaN(orderDate.getTime())) {
-        throw new Error("Select a valid medical order timestamp");
-      }
-      if (!medicalOrderForm.title.trim()) {
-        throw new Error("Medical order title is required");
-      }
-      if (!medicalOrderForm.instructions.trim()) {
-        throw new Error("Medical order instructions are required");
-      }
-
-      payload = {
-        order_date: orderDate.toISOString(),
-        order_type: medicalOrderForm.orderType,
-        title: medicalOrderForm.title.trim(),
-        instructions: medicalOrderForm.instructions.trim(),
-        due_date: toOptional(medicalOrderForm.dueDate),
-        source: toOptional(medicalOrderForm.source),
-      };
-    } catch (error) {
-      setTabActionError(error instanceof Error ? error.message : t.common_failed_create);
-      return;
-    }
-
-    setMedicalOrdersBusy(true);
-    setTabActionError("");
-    try {
-      await apiFetch(`/patients/${id}/medical-orders`, {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
-      const result = await apiFetch<{ items: PatientMedicalOrder[] }>(`/patients/${id}/medical-orders`);
-      setMedicalOrders(result.items ?? []);
-      setMedicalOrderForm(blankPatientMedicalOrderForm());
-      setNotice("Medical order saved.");
-      reload();
-    } catch (error) {
-      setTabActionError(error instanceof Error ? error.message : t.common_failed_create);
-    } finally {
-      setMedicalOrdersBusy(false);
     }
   }
 
@@ -2293,75 +3328,14 @@ export function PatientDetailPage() {
       });
       const result = await apiFetch<{ items: PatientMedicalOrder[] }>(`/patients/${id}/medical-orders`);
       setMedicalOrders(result.items ?? []);
-      setNotice(status === "completed" ? "Medical order completed." : "Medical order cancelled.");
+      toast.success(status === "completed"
+        ? l("Anordnung abgeschlossen.", "Назначение завершено.", "Order completed.")
+        : l("Anordnung storniert.", "Назначение отменено.", "Order cancelled."));
       reload();
     } catch (error) {
       setTabActionError(error instanceof Error ? error.message : t.common_failed_update);
     } finally {
       setMedicalOrderActionId("");
-    }
-  }
-
-  async function handleCreatePatientRiskScore(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!id) return;
-
-    let payload: Record<string, unknown>;
-    try {
-      const computedAt = new Date(riskScoreForm.computedAt);
-      if (Number.isNaN(computedAt.getTime())) {
-        throw new Error("Select a valid risk score timestamp");
-      }
-      const scoreValue = parseOptionalNumberInput(riskScoreForm.scoreValue);
-      if (scoreValue == null) {
-        throw new Error("Risk score value is required");
-      }
-      const scaleMax = parseOptionalNumberInput(riskScoreForm.scaleMax);
-      let inputs: Record<string, unknown> | undefined;
-      if (riskScoreForm.inputsJson.trim()) {
-        const parsed = JSON.parse(riskScoreForm.inputsJson);
-        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-          throw new Error(
-            l(
-              "Strukturierte Eingaben müssen ein JSON-Objekt sein",
-              "Структурированные входные данные должны быть JSON-объектом",
-              "Structured inputs must be a JSON object",
-            ),
-          );
-        }
-        inputs = parsed as Record<string, unknown>;
-      }
-
-      payload = {
-        computed_at: computedAt.toISOString(),
-        score_type: riskScoreForm.scoreType,
-        score_value: scoreValue,
-        scale_max: scaleMax,
-        interpretation: toOptional(riskScoreForm.interpretation),
-        source: toOptional(riskScoreForm.source),
-        inputs,
-      };
-    } catch (error) {
-      setTabActionError(error instanceof Error ? error.message : t.common_failed_create);
-      return;
-    }
-
-    setRiskScoresBusy(true);
-    setTabActionError("");
-    try {
-      await apiFetch(`/patients/${id}/risk-scores`, {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
-      const result = await apiFetch<{ items: PatientRiskScore[] }>(`/patients/${id}/risk-scores`);
-      setRiskScores(result.items ?? []);
-      setRiskScoreForm(blankPatientRiskScoreForm());
-      setNotice("Risk score saved.");
-      reload();
-    } catch (error) {
-      setTabActionError(error instanceof Error ? error.message : t.common_failed_create);
-    } finally {
-      setRiskScoresBusy(false);
     }
   }
 
@@ -2387,6 +3361,20 @@ export function PatientDetailPage() {
   }
 
   const initials = patientName(detail).split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("");
+  const hasClinicalSurface =
+    canManagePatientVitals ||
+    Boolean(detail.clinical_warnings) ||
+    vitalsHistory.length > 0 ||
+    cardEntries.length > 0 ||
+    medicalOrders.length > 0 ||
+    riskScores.length > 0;
+  const clinicalSurfaceItemCount =
+    vitalsHistory.length +
+    cardEntries.length +
+    medicalOrders.length +
+    riskScores.length +
+    (detail.clinical_warnings ? 1 : 0);
+  const workflowItemCount = workflowChecklist?.items.length ?? 0;
 
   return (
     <div className="space-y-4">
@@ -2426,6 +3414,34 @@ export function PatientDetailPage() {
           </div>
           <p className="mt-0.5 text-[12px] font-mono text-muted-foreground">{detail.patient_id}</p>
         </div>
+        {canPrintPatientLabel ? (
+          <ShadSelect
+            value=""
+            onValueChange={(value) => {
+              if (!value) return;
+              const nextFormat = value as PatientLabelFormatId;
+              setPatientLabelFormat(nextFormat);
+              void handlePrintPatientLabel(nextFormat);
+            }}
+            disabled={patientLabelBusy}
+          >
+            <SelectTrigger className="h-9 rounded-lg bg-card text-[13px] gap-1.5 w-auto">
+              {patientLabelBusy ? (
+                <LoaderCircle className="size-3.5 animate-spin" />
+              ) : (
+                <Printer className="size-3.5" />
+              )}
+              <span>{l("Etikett drucken", "Печать наклейки", "Print sticker")}</span>
+            </SelectTrigger>
+            <SelectContent align="end">
+              {PATIENT_LABEL_FORMAT_OPTIONS.map((option) => (
+                <SelectItem key={option.id} value={option.id}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </ShadSelect>
+        ) : null}
         {canEditPatientProfile ? (
           <Button
             size="sm"
@@ -2435,47 +3451,6 @@ export function PatientDetailPage() {
             <SquarePen className="size-3.5" />
             {l("Profil bearbeiten", "Редактировать профиль", "Edit profile")}
           </Button>
-        ) : null}
-      </div>
-
-      {/* Quick action row */}
-      <div className="flex flex-wrap items-center gap-1.5">
-        {canPrintPatientLabel ? (
-          <div className="flex items-center gap-1.5 ml-auto">
-            <ShadSelect
-              value={patientLabelFormat}
-              onValueChange={(value) =>
-                setPatientLabelFormat(
-                  (value as PatientLabelFormatId) ?? DEFAULT_PATIENT_LABEL_FORMAT_ID
-                )
-              }
-            >
-              <SelectTrigger className="h-10 w-[280px] rounded-lg bg-card text-[13px]">
-                <SelectValue placeholder={l("Etikettenformat", "Формат наклейки", "Label format")} />
-              </SelectTrigger>
-              <SelectContent>
-                {PATIENT_LABEL_FORMAT_OPTIONS.map((option) => (
-                  <SelectItem key={option.id} value={option.id}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </ShadSelect>
-            <Button
-              type="button"
-              variant="outline"
-              className="h-10 rounded-lg gap-1.5"
-              disabled={patientLabelBusy}
-              onClick={() => void handlePrintPatientLabel()}
-            >
-              {patientLabelBusy ? (
-                <LoaderCircle className="size-3.5 animate-spin" />
-              ) : (
-                <Printer className="size-3.5" />
-              )}
-              {l("Etikett drucken", "Печать наклейки", "Print sticker")}
-            </Button>
-          </div>
         ) : null}
       </div>
 
@@ -2491,12 +3466,6 @@ export function PatientDetailPage() {
           </TabsList>
         </div>
 
-        {notice ? (
-          <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-            {notice}
-          </div>
-        ) : null}
-
         {tabActionError ? (
           <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
             {tabActionError}
@@ -2505,23 +3474,41 @@ export function PatientDetailPage() {
 
         {/* Profile tab */}
         <TabsContent value="profile" className="space-y-6 mt-4 min-h-[400px]">
-          {/* Contact & Demographics */}
-          <FormSection title={t.patients_profile}>
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              <InfoRow label={t.patients_birth_date} value={fmtDate(detail.birth_date, t.common_not_set)} />
-              <InfoRow label={t.patients_gender} value={genderLbl(detail.gender, tr)} />
-              <InfoRow label={t.patients_nationality} value={fieldVal(detail.nationality, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
-              <InfoRow label={t.patients_residence_country} value={fieldVal(detail.residence_country, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
-              <InfoRow label={t.patients_phone_primary} value={fieldVal(detail.phone_primary, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
-              <InfoRow label={t.patients_phone_secondary} value={fieldVal(detail.phone_secondary, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
-              <InfoRow label={t.patients_email} value={fieldVal(detail.email, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
-              <InfoRow label={t.patients_languages} value={fieldVal(detail.languages, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
-              <InfoRow label={l("Funktionale Labels", "Функциональные метки", "Functional labels")} value={fieldVal(detail.functional_labels, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
-              <InfoRow label={t.patients_insurance_type} value={insuranceLbl(detail.insurance_type, tr)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
-              <InfoRow label={t.patients_insurance_provider} value={fieldVal(detail.insurance_provider, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
-              <InfoRow label={t.patients_insurance_number} value={fieldVal(detail.insurance_number, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
-            </div>
-          </FormSection>
+          <WorkspaceSectionIntro
+            title={l("Identität und Kommunikation", "Идентификация и коммуникация", "Identity and communication")}
+            description={l(
+              "Stammdaten, Kontaktkanäle, Adresse, Versicherung und Notfallkontakt sind hier als klarer Intake-Bereich gebündelt.",
+              "Базовые данные, каналы связи, адрес, страхование и экстренный контакт собраны здесь в понятный intake-блок.",
+              "Core identity, contact channels, address, insurance and emergency contact are grouped here as one clear intake block.",
+            )}
+          />
+          <div className="grid gap-4 xl:grid-cols-2">
+            <FormSection title={l("Persönliche Daten", "Личные данные", "Personal data")}>
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                <InfoRow label={t.patients_birth_date} value={fmtDate(detail.birth_date, t.common_not_set)} />
+                <InfoRow label={t.patients_gender} value={genderLbl(detail.gender, tr)} />
+                <InfoRow label={t.patients_nationality} value={fieldVal(detail.nationality, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
+                <InfoRow label={t.patients_residence_country} value={fieldVal(detail.residence_country, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
+                <InfoRow label={t.patients_languages} value={fieldVal(detail.languages, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
+                <InfoRow label={l("Funktionale Labels", "Функциональные метки", "Functional labels")} value={fieldVal(detail.functional_labels, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
+              </div>
+            </FormSection>
+
+            <FormSection title={l("Kontakt", "Контакты", "Contact")}>
+              <div className="grid gap-4 md:grid-cols-2">
+                <InfoRow label={t.patients_phone_primary} value={fieldVal(detail.phone_primary, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
+                <InfoRow label={t.patients_phone_secondary} value={fieldVal(detail.phone_secondary, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
+                <InfoRow label={t.patients_email} value={fieldVal(detail.email, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
+              </div>
+            </FormSection>
+
+            <FormSection title={l("Versicherung und Kostenträger", "Страхование и плательщик", "Insurance and payer")}>
+              <div className="grid gap-4 md:grid-cols-2">
+                <InfoRow label={t.patients_insurance_type} value={insuranceLbl(detail.insurance_type, tr)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
+                <InfoRow label={t.patients_insurance_provider} value={fieldVal(detail.insurance_provider, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
+                <InfoRow label={t.patients_insurance_number} value={fieldVal(detail.insurance_number, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
+              </div>
+            </FormSection>
 
           {/* Address */}
           <FormSection title={l("Adresse", "Адрес", "Address")}>
@@ -2541,42 +3528,53 @@ export function PatientDetailPage() {
               <InfoRow label={t.patients_emergency_relation} value={fieldVal(detail.emergency_contact_relation, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
             </div>
           </FormSection>
+          </div>
 
+          <WorkspaceSectionIntro
+            title={l("Compliance und Rechtsstatus", "Комплаенс и правовой статус", "Compliance and legal status")}
+            description={l(
+              "Vertragsbereitschaft, Pflichtbestätigungen und patientenbezogene Rechtsnotizen mit direkten Verknüpfungen in die zugehörigen Bereiche.",
+              "Готовность по договорам, обязательные подтверждения и правовые заметки пациента с прямыми переходами в связанные разделы.",
+              "Contract readiness, required confirmations and patient legal notes with direct links into the related workspaces.",
+            )}
+          />
           <FormSection
-            title={t.patients_legal_status}
-            accessory={
-              <div className="flex items-center gap-2">
+            title={
+              <span className="inline-flex items-center gap-2">
+                {t.patients_legal_status}
                 <LegalStatusPill status={legalStatus} />
-                {canEditPatientProfile ? (
-                  <Button type="button" variant="outline" size="sm" className="h-9 rounded-lg gap-1.5" onClick={openProfileEditor}>
-                    <Pencil className="size-3.5" />
-                    {l("Status aktualisieren", "Обновить статус", "Update status")}
-                  </Button>
-                ) : null}
-              </div>
+              </span>
+            }
+            accessory={
+              canEditPatientProfile ? (
+                <Button type="button" size="sm" className="h-8 rounded-lg gap-1.5" onClick={() => setLegalStatusSheetOpen(true)}>
+                  <Pencil className="size-3.5" />
+                  {l("Status aktualisieren", "Обновить статус", "Update status")}
+                </Button>
+              ) : null
             }
           >
             <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
-              <div className="rounded-xl border border-border/50 bg-muted/25 px-4 py-3 xl:col-span-2">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/80">
+              <div className="flex flex-col gap-1.5 rounded-xl border border-border/50 bg-muted/25 px-4 py-3 xl:col-span-2">
+                <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
                   {l("Vertragsstatus", "Статус договора", "Contract status")}
-                </p>
-                <p className="mt-3 text-lg font-semibold text-foreground">
+                </span>
+                <p className="text-base font-semibold text-foreground">
                   {patientDetailStatusLabel(legalStatus.contractStatus)}
                 </p>
-                <p className="mt-1 text-xs text-muted-foreground">
+                <p className="text-xs text-muted-foreground">
                   {legalStatusCompletion.completed}/{legalStatusCompletion.total} {l("erledigt", "выполнено", "done")}
                 </p>
               </div>
               {legalStatusChecklist.map((item) => (
-                <div key={item.key} className="rounded-xl border border-border/50 bg-card px-4 py-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/80">
+                <div key={item.key} className="flex flex-col gap-1.5 rounded-xl border border-border/50 bg-card px-4 py-3">
+                  <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
                     {item.label}
-                  </p>
+                  </span>
                   <Badge
                     variant="outline"
                     className={cn(
-                      "mt-3 rounded-full text-[10px]",
+                      "rounded-full text-[10px] w-fit",
                       item.done
                         ? "border-emerald-200 bg-emerald-50 text-emerald-700"
                         : "border-amber-200 bg-amber-50 text-amber-700"
@@ -2589,117 +3587,158 @@ export function PatientDetailPage() {
             </div>
 
             {legalStatus.notes ? (
-              <div className="rounded-xl border border-border/50 bg-muted/25 px-4 py-3">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/80">
+              <div className="flex flex-col gap-1.5 rounded-xl border border-border/50 bg-muted/25 px-4 py-3">
+                <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
                   {l("Notizen", "Заметки", "Notes")}
-                </p>
-                <p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{legalStatus.notes}</p>
+                </span>
+                <p className="whitespace-pre-wrap text-sm text-foreground">{legalStatus.notes}</p>
               </div>
             ) : null}
 
-            <div className="grid gap-3 lg:grid-cols-[1.5fr_1fr]">
-              <div className="rounded-xl border border-border/50 bg-muted/25 px-4 py-4">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/80">
-                  {l("Compliance-Handoff", "Передача compliance", "Compliance handoff")}
-                </p>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  {l(
-                    "Nutzen Sie das Patientenprofil als operative Quelle für die DSGVO-Bereitschaft und führen Sie Einwilligungen, Löschungen und Einschränkungen anschließend im dedizierten Compliance-Bereich weiter.",
-                    "Используйте профиль пациента как операционный источник для готовности по DSGVO, а согласия, удаление и ограничения продолжайте в отдельном разделе compliance.",
-                    "Use the patient profile as the operational source for DSGVO readiness, then continue consent, erasure and restriction handling in the dedicated compliance workspace.",
-                  )}
-                </p>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {canExportPatientCompliance ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-9 rounded-lg"
-                      disabled={complianceExportBusy}
-                      onClick={() => void handleExportPatientCompliance()}
-                    >
-                      {complianceExportBusy ? (
-                        <LoaderCircle className="mr-2 size-4 animate-spin" />
-                      ) : null}
-                      {l("DSGVO-Export", "Экспорт DSGVO", "DSGVO export")}
-                    </Button>
+            <div className="flex flex-wrap gap-2">
+              {canExportPatientCompliance ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 rounded-lg gap-1.5"
+                  disabled={complianceExportBusy}
+                  onClick={() => void handleExportPatientCompliance()}
+                >
+                  {complianceExportBusy ? (
+                    <LoaderCircle className="size-3.5 animate-spin" />
                   ) : null}
-                  {canOpenComplianceWorkspace ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-9 rounded-lg"
-                      onClick={() => staffGo(`/admin/compliance?patient=${id}`)}
-                    >
-                      {l("DSGVO-Bereich öffnen", "Открыть раздел DSGVO", "Open DSGVO workspace")}
-                    </Button>
-                  ) : null}
-                  {canOpenDocumentsWorkspace ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-9 rounded-lg"
-                      onClick={() => staffGo(`/documents?patient=${id}`)}
-                    >
-                      {l("Dokumente öffnen", "Открыть документы", "Open documents")}
-                    </Button>
-                  ) : null}
-                  {canViewContracts ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-9 rounded-lg"
-                      onClick={() => staffGo(`/contracts?patient=${id}`)}
-                    >
-                      {l("Verträge öffnen", "Открыть договоры", "Open contracts")}
-                    </Button>
-                  ) : null}
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-border/50 bg-card px-4 py-4">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/80">
-                  {l("Operative Grenze", "Операционная граница", "Operational boundary")}
-                </p>
-                <ul className="mt-3 space-y-2 text-sm text-muted-foreground">
-                  <li>{l("Die rechtliche Freigabe ist hier patientengebunden.", "Юридическая готовность здесь привязана к пациенту.", "Legal readiness is patient-bound here.")}</li>
-                  <li>{l("Das Einwilligungsregister bleibt im DSGVO-Adminbereich.", "Реестр согласий по-прежнему находится в админ-разделе DSGVO.", "Consent register still lives in the DSGVO admin workspace.")}</li>
-                  <li>{l("Die Ausführung sollte erst nach abgeschlossener Compliance starten.", "Исполнение не должно начинаться до завершения compliance.", "Execution should not start before compliance is complete.")}</li>
-                </ul>
-              </div>
+                  {l("DSGVO-Export", "Экспорт DSGVO", "DSGVO export")}
+                </Button>
+              ) : null}
+              {canOpenComplianceWorkspace ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 rounded-lg"
+                  onClick={() => staffGo(`/admin/compliance?patient=${id}`)}
+                >
+                  {l("DSGVO-Bereich öffnen", "Открыть раздел DSGVO", "Open DSGVO workspace")}
+                </Button>
+              ) : null}
+              {canViewDocuments ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 rounded-lg"
+                  onClick={() => setDocsPreviewOpen(true)}
+                >
+                  {l("Dokumente öffnen", "Открыть документы", "Open documents")}
+                </Button>
+              ) : null}
+              {canViewContracts ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 rounded-lg"
+                  onClick={() => setContractsPreviewOpen(true)}
+                >
+                  {l("Verträge öffnen", "Открыть договоры", "Open contracts")}
+                </Button>
+              ) : null}
+              {canViewInvoices ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 rounded-lg"
+                  onClick={() => setInvoicesPreviewOpen(true)}
+                >
+                  {l("Rechnungen öffnen", "Открыть счета", "Open invoices")}
+                </Button>
+              ) : null}
             </div>
           </FormSection>
 
+          {id && canViewDocuments ? (
+            <PatientDocumentsPreviewSheet
+              key={`documents:${id}:${docsPreviewOpen ? "open" : "closed"}`}
+              patientId={id}
+              open={docsPreviewOpen}
+              onOpenChange={setDocsPreviewOpen}
+            />
+          ) : null}
+          {id && canViewContracts ? (
+            <PatientContractsPreviewSheet
+              key={`contracts:${id}:${contractsPreviewOpen ? "open" : "closed"}`}
+              patientId={id}
+              open={contractsPreviewOpen}
+              onOpenChange={setContractsPreviewOpen}
+            />
+          ) : null}
+          {id && canViewInvoices ? (
+            <PatientInvoicesPreviewSheet
+              key={`invoices:${id}:${invoicesPreviewOpen ? "open" : "closed"}`}
+              patientId={id}
+              open={invoicesPreviewOpen}
+              onOpenChange={setInvoicesPreviewOpen}
+            />
+          ) : null}
+          {id && canEditPatientProfile ? (
+            <PatientLegalStatusSheet
+              patientId={id}
+              initial={legalStatus}
+              open={legalStatusSheetOpen}
+              onOpenChange={setLegalStatusSheetOpen}
+              onSaved={reload}
+            />
+          ) : null}
+          {id && canManagePatientVitals ? (
+            <PatientVitalsSheet
+              patientId={id}
+              open={vitalsSheetOpen}
+              onOpenChange={setVitalsSheetOpen}
+              onSaved={reload}
+            />
+          ) : null}
+          {id && canEditPatientProfile ? (
+            <PatientCaveNotesSheet
+              patientId={id}
+              initial={detail.clinical_warnings ?? ""}
+              open={caveSheetOpen}
+              onOpenChange={setCaveSheetOpen}
+              onSaved={reload}
+            />
+          ) : null}
+
+          {hasClinicalSurface ? (
+            <WorkspaceSectionIntro
+              title={l("Klinische Oberfläche", "Клинический блок", "Clinical surface")}
+              description={l(
+                "Warnhinweise, Vitalverlauf, Kliniklog, Anordnungen und Risikobewertungen für das operative Behandlungsteam.",
+                "Предупреждения, динамика показателей, клинический журнал, назначения и риск-оценки для операционной команды.",
+                "Warnings, vitals, clinical log, orders and risk assessments for the operational care team.",
+              )}
+              accessory={<CountBadge>{clinicalSurfaceItemCount}</CountBadge>}
+            />
+          ) : null}
+
           {(canManagePatientVitals || detail.clinical_warnings || vitalsHistory.length > 0) ? (
-            <div className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
+            <div className="space-y-6">
               <FormSection
                 title={l("CAVE-Hinweise", "Заметки CAVE", "Cave notes")}
                 accessory={
                   canEditPatientProfile ? (
                     <Button
                       type="button"
-                      variant="outline"
                       size="sm"
-                      className="h-9 rounded-lg border-rose-200 bg-white text-rose-700 hover:bg-rose-50"
-                      onClick={openProfileEditor}
+                      className="h-8 rounded-lg gap-1.5"
+                      onClick={() => setCaveSheetOpen(true)}
                     >
-                      <Pencil className="mr-2 size-3.5" />
+                      <Pencil className="size-3.5" />
                       {l("Aktualisieren", "Обновить", "Update")}
                     </Button>
                   ) : null
                 }
               >
-                <p className="text-sm text-muted-foreground">
-                  {l(
-                    "Dauerhafte klinische Warnhinweise, die vor Beginn von Koordination oder Behandlung sichtbar bleiben sollen.",
-                    "Постоянные клинические предупреждения, которые должны оставаться видимыми до начала координации или лечения.",
-                    "Persistent clinical warnings that should stay visible before coordination or treatment starts.",
-                  )}
-                </p>
                 <div className="rounded-xl border border-rose-200 bg-rose-50/70 px-4 py-4">
                   {detail.clinical_warnings ? (
                     <p className="whitespace-pre-wrap text-sm text-rose-900">{detail.clinical_warnings}</p>
@@ -2712,69 +3751,28 @@ export function PatientDetailPage() {
               <FormSection
                 title={l("Vitalwerte-Verlauf", "История показателей", "Vitals history")}
                 accessory={
-                  <Badge variant="outline" className="rounded-full border-border/60 bg-muted/25 text-foreground">
-                    {l(`${vitalsHistory.length} Einträge`, `${vitalsHistory.length} записей`, `${vitalsHistory.length} entries`)}
-                  </Badge>
-                }
-              >
-                <p className="text-sm text-muted-foreground">
-                  {l(
-                    "Blutdruck-, Herzfrequenz- und Gewichtsstände mit zeitgestempeltem klinischem Kontext.",
-                    "Снимки давления, пульса и веса с клиническим контекстом по времени.",
-                    "Blood pressure, heart rate and weight snapshots with timestamped clinical context.",
-                  )}
-                </p>
-
-                {latestVitalMeasurement ? (
-                  <div className="rounded-xl border border-border/50 bg-muted/25 px-4 py-4">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/80">
-                          {l("Letzte Messung", "Последнее измерение", "Latest measurement")}
-                        </p>
-                        <p className="mt-2 text-sm font-medium text-foreground">
-                          {fmtDateTime(latestVitalMeasurement.measured_at, t.common_not_set)}
-                        </p>
-                      </div>
-                      <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                        {latestVitalMeasurement.bp_systolic != null && latestVitalMeasurement.bp_diastolic != null ? (
-                          <Badge variant="outline" className="rounded-full bg-card">
-                            RR {formatVitalNumber(latestVitalMeasurement.bp_systolic, { maximumFractionDigits: 0 })}/
-                            {formatVitalNumber(latestVitalMeasurement.bp_diastolic, { maximumFractionDigits: 0 })} mmHg
-                          </Badge>
-                        ) : null}
-                        {latestVitalMeasurement.heart_rate != null ? (
-                          <Badge variant="outline" className="rounded-full bg-card">
-                            HF {formatVitalNumber(latestVitalMeasurement.heart_rate, { maximumFractionDigits: 0 })} bpm
-                          </Badge>
-                        ) : null}
-                        {latestVitalMeasurement.weight_kg != null ? (
-                          <Badge variant="outline" className="rounded-full bg-card">
-                            {l("Gewicht", "Вес", "Weight")} {formatVitalNumber(latestVitalMeasurement.weight_kg)} kg
-                          </Badge>
-                        ) : null}
-                        {latestVitalMeasurement.bmi != null ? (
-                          <Badge variant="outline" className="rounded-full bg-card">
-                            BMI {formatVitalNumber(latestVitalMeasurement.bmi)}
-                          </Badge>
-                        ) : null}
-                      </div>
-                    </div>
-                    {latestVitalMeasurement.notes ? (
-                      <p className="mt-3 whitespace-pre-wrap text-sm text-muted-foreground">
-                        {latestVitalMeasurement.notes}
-                      </p>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="rounded-full border-border/60 bg-muted/25 text-foreground">
+                      {l(`${vitalsHistory.length} Einträge`, `${vitalsHistory.length} записей`, `${vitalsHistory.length} entries`)}
+                    </Badge>
+                    {canManagePatientVitals ? (
+                      <Button size="sm" className="h-8 rounded-lg gap-1.5" onClick={() => setVitalsSheetOpen(true)}>
+                        <Plus className="size-3.5" />
+                        {l("Hinzufügen", "Добавить", "Add")}
+                      </Button>
                     ) : null}
                   </div>
-                ) : (
+                }
+              >
+                {vitalsHistory.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-border/60 bg-muted/25 px-4 py-6 text-sm text-muted-foreground">
-                    {l("Noch keine Vitalwerte erfasst.", "Показатели пока не зафиксированы.", "No vital measurements recorded yet.")}
+                    {l("Für diesen Patienten wurden noch keine Vitalwerte dokumentiert.", "Для этого пациента пока не зафиксированы показатели.", "No vitals have been recorded for this patient yet.")}
                   </div>
-                )}
+                ) : null}
 
                 {vitalsHistory.length > 0 ? (
-                  <div className="space-y-3">
-                    {vitalsHistory.slice(0, 6).map((item) => (
+                  <div className="space-y-3 max-h-[540px] overflow-y-auto pr-1">
+                    {vitalsHistory.map((item) => (
                       <div key={item.id} className="rounded-xl border border-border/50 bg-card px-4 py-3">
                         <div className="flex flex-wrap items-center justify-between gap-3">
                           <div>
@@ -2785,7 +3783,7 @@ export function PatientDetailPage() {
                               {l("Erfasst von", "Записал", "Recorded by")} {item.recorded_by_name ?? t.common_unknown}
                             </p>
                           </div>
-                          <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                          <div className="flex flex-col items-end gap-0.5 text-xs text-muted-foreground">
                             {item.bp_systolic != null && item.bp_diastolic != null ? (
                               <span>RR {formatVitalNumber(item.bp_systolic, { maximumFractionDigits: 0 })}/{formatVitalNumber(item.bp_diastolic, { maximumFractionDigits: 0 })}</span>
                             ) : null}
@@ -2808,362 +3806,163 @@ export function PatientDetailPage() {
             </div>
           ) : null}
 
-          {canManagePatientVitals ? (
-            <form onSubmit={handleCreateVitalMeasurement}>
-              <FormSection
-                title={l("Vitalwert hinzufügen", "Добавить показатель", "Add vital measurement")}
-                accessory={
-                  bmiPreview != null ? (
-                    <Badge variant="outline" className="rounded-full border-sky-200 bg-sky-50 text-sky-700">
-                      {l("BMI-Vorschau", "Предпросмотр BMI", "BMI preview")} {formatVitalNumber(bmiPreview)}
-                    </Badge>
-                  ) : null
-                }
-              >
-                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                <div className="space-y-2 xl:col-span-2">
-                  <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-vitals-measured-at">{l("Gemessen am", "Измерено", "Measured at")}</Label>
-                  <Input
-                    id="patient-vitals-measured-at"
-                    type="datetime-local"
-                    className={formInputClassName}
-                    value={vitalsForm.measuredAt}
-                    onChange={(event) =>
-                      setVitalsForm((current) => ({ ...current, measuredAt: event.target.value }))
-                    }
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-vitals-bp-systolic">{l("RR systolisch", "Систолическое АД", "BP systolic")}</Label>
-                  <Input
-                    id="patient-vitals-bp-systolic"
-                    inputMode="decimal"
-                    className={formInputClassName}
-                    value={vitalsForm.bpSystolic}
-                    onChange={(event) =>
-                      setVitalsForm((current) => ({ ...current, bpSystolic: event.target.value }))
-                    }
-                    placeholder="120"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-vitals-bp-diastolic">{l("RR diastolisch", "Диастолическое АД", "BP diastolic")}</Label>
-                  <Input
-                    id="patient-vitals-bp-diastolic"
-                    inputMode="decimal"
-                    className={formInputClassName}
-                    value={vitalsForm.bpDiastolic}
-                    onChange={(event) =>
-                      setVitalsForm((current) => ({ ...current, bpDiastolic: event.target.value }))
-                    }
-                    placeholder="80"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-vitals-heart-rate">{l("Herzfrequenz", "Пульс", "Heart rate")}</Label>
-                  <Input
-                    id="patient-vitals-heart-rate"
-                    inputMode="numeric"
-                    className={formInputClassName}
-                    value={vitalsForm.heartRate}
-                    onChange={(event) =>
-                      setVitalsForm((current) => ({ ...current, heartRate: event.target.value }))
-                    }
-                    placeholder="72"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-vitals-weight">{l("Gewicht (kg)", "Вес (кг)", "Weight (kg)")}</Label>
-                  <Input
-                    id="patient-vitals-weight"
-                    inputMode="decimal"
-                    className={formInputClassName}
-                    value={vitalsForm.weightKg}
-                    onChange={(event) =>
-                      setVitalsForm((current) => ({ ...current, weightKg: event.target.value }))
-                    }
-                    placeholder="70.5"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-vitals-height">{l("Größe (cm)", "Рост (см)", "Height (cm)")}</Label>
-                  <Input
-                    id="patient-vitals-height"
-                    inputMode="decimal"
-                    className={formInputClassName}
-                    value={vitalsForm.heightCm}
-                    onChange={(event) =>
-                      setVitalsForm((current) => ({ ...current, heightCm: event.target.value }))
-                    }
-                    placeholder="172"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-vitals-bmi">BMI</Label>
-                  <Input
-                    id="patient-vitals-bmi"
-                    inputMode="decimal"
-                    className={formInputClassName}
-                    value={vitalsForm.bmi}
-                    onChange={(event) =>
-                      setVitalsForm((current) => ({ ...current, bmi: event.target.value }))
-                    }
-                    placeholder={bmiPreview != null ? `${bmiPreview}` : l("auto", "авто", "auto")}
-                  />
-                </div>
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-vitals-notes">{l("Messnotizen", "Заметки к измерению", "Measurement notes")}</Label>
-                  <textarea
-                    id="patient-vitals-notes"
-                    className={textareaClassName}
-                    value={vitalsForm.notes}
-                    onChange={(event) =>
-                      setVitalsForm((current) => ({ ...current, notes: event.target.value }))
-                    }
-                    placeholder={l(
-                      "Kontext, Symptome oder Messbedingungen",
-                      "Контекст, симптомы или условия измерения",
-                      "Context, symptoms or measurement conditions",
-                    )}
-                  />
-                </div>
-                <div className="flex justify-end">
-                  <Button
-                    type="submit"
-                    className="h-9 rounded-lg bg-slate-950 text-white hover:bg-slate-800"
-                    disabled={vitalsBusy}
-                  >
-                    {vitalsBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
-                    {l("Vitalwert speichern", "Сохранить показатель", "Save vital measurement")}
-                  </Button>
-                </div>
-              </FormSection>
-            </form>
-          ) : null}
 
           {(canManagePatientCardEntries || cardEntries.length > 0) ? (
-              <div className={card("p-6")}>
-                <div className="mb-4 flex items-center justify-between gap-3">
-                  <div>
-                    <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground before:content-[''] before:h-2 before:w-2 before:shrink-0 before:rounded-full before:bg-[var(--brand)]">{l("Klinisches Kartenprotokoll", "Журнал клинической карты", "Clinical card log")}</h2>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
-                      {l(`${cardEntries.length} Einträge`, `${cardEntries.length} записей`, `${cardEntries.length} entries`)}
-                    </Badge>
-                    {canManagePatientCardEntries ? (
-                      <Button size="sm" className="h-8 rounded-lg gap-1.5" onClick={() => setCardEntrySheetOpen(true)}>
-                        <Plus className="size-3.5" />
-                        {l("Hinzufügen", "Добавить", "Add")}
-                      </Button>
-                    ) : null}
-                  </div>
+            <FormSection
+              title={l("Klinisches Kartenprotokoll", "Журнал клинической карты", "Clinical card log")}
+              accessory={
+                <div className="flex items-center gap-2">
+                  <CountBadge>
+                    {l(`${cardEntries.length} Einträge`, `${cardEntries.length} записей`, `${cardEntries.length} entries`)}
+                  </CountBadge>
+                  {canManagePatientCardEntries ? (
+                    <Button size="sm" className="h-8 rounded-lg gap-1.5" onClick={() => setCardEntrySheetOpen(true)}>
+                      <Plus className="size-3.5" />
+                      {l("Hinzufügen", "Добавить", "Add")}
+                    </Button>
+                  ) : null}
                 </div>
-
-                {cardEntries.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
-                    {l("Noch keine Einträge in der klinischen Karte.", "Записей в клинической карте пока нет.", "No clinical card entries recorded yet.")}
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {cardEntries.slice(0, 6).map((entry) => (
-                      <div key={entry.id} className="rounded-xl border border-slate-200 bg-white px-4 py-3">
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div>
-                            <p className="text-sm font-medium text-slate-950">
-                              {fmtDateTime(entry.entry_date, t.common_not_set)}
-                            </p>
-                            <p className="mt-1 text-xs text-slate-500">
-                              {entry.author_name ?? t.common_unknown}
-                              {entry.source ? ` · ${entry.source}` : ""}
-                            </p>
-                          </div>
-                          <Badge variant="outline" className="rounded-full">
-                            {patientCardEntryCategoryLabel(entry.category)}
-                          </Badge>
-                        </div>
-                        <p className="mt-3 whitespace-pre-wrap text-sm text-slate-600">{entry.content}</p>
+              }
+            >
+              {cardEntries.length === 0 ? (
+                <EmptyCell>{l("Für diesen Patienten wurden noch keine klinischen Karteneinträge erfasst.", "Для этого пациента пока нет записей клинической карты.", "No clinical card log entries have been recorded for this patient yet.")}</EmptyCell>
+              ) : (
+                <div className="space-y-2">
+                  {cardEntries.slice(0, 6).map((entry) => (
+                    <div key={entry.id} className="rounded-xl border border-border/50 bg-card px-4 py-3 space-y-2.5">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <p className="text-[13px] text-foreground">
+                          <span className="font-medium">{fmtDateTime(entry.entry_date, t.common_not_set)}</span>
+                          <span className="text-muted-foreground"> · {entry.author_name ?? t.common_unknown}</span>
+                        </p>
+                        <Badge variant="outline" className={cn("rounded-full", patientCardEntryCategoryBadgeClass(entry.category))}>
+                          {patientCardEntryCategoryLabel(entry.category)}
+                        </Badge>
                       </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+                      {entry.source ? (
+                        <div className="flex flex-col gap-1">
+                          <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
+                            {l("Quelle", "Источник", "Source")}
+                          </span>
+                          <p className="text-[13px] text-foreground">{entry.source}</p>
+                        </div>
+                      ) : null}
+                      <div className="flex flex-col gap-1">
+                        <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
+                          {l("Inhalt", "Содержание", "Content")}
+                        </span>
+                        <p className="whitespace-pre-wrap text-[13px] text-foreground">
+                          {entry.content}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </FormSection>
           ) : null}
 
-          {canManagePatientCardEntries ? (
-            <Sheet open={cardEntrySheetOpen} onOpenChange={setCardEntrySheetOpen}>
-              <SheetContent side="right" className="w-full sm:max-w-[540px] gap-0">
-                <SheetHeader className="px-4 py-3">
-                  <SheetTitle>{l("Karteneintrag hinzufügen", "Добавить запись в карту", "Add card entry")}</SheetTitle>
-                </SheetHeader>
-                <form className="flex flex-col flex-1 min-h-0" onSubmit={async (event) => { await handleCreatePatientCardEntry(event); setCardEntrySheetOpen(false); }}>
-                  <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
-                  <div className="mt-4 grid gap-4 md:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-card-entry-date">{l("Eintragsdatum", "Дата записи", "Entry date")}</Label>
-                      <Input
-                        id="patient-card-entry-date"
-                        type="datetime-local"
-                        value={cardEntryForm.entryDate}
-                        onChange={(event) =>
-                          setCardEntryForm((current) => ({ ...current, entryDate: event.target.value }))
-                        }
-                        required
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-card-entry-category">{l("Kategorie", "Категория", "Category")}</Label>
-                      <ShadSelect
-                        value={cardEntryForm.category}
-                        onValueChange={(value) =>
-                          setCardEntryForm((current) => ({
-                            ...current,
-                            category: value ?? PATIENT_CARD_ENTRY_CATEGORY_OPTIONS[0].value,
-                          }))
-                        }
-                      >
-                        <SelectTrigger id="patient-card-entry-category" className="w-full">
-                          <SelectValue placeholder={l("Kategorie wählen", "Выберите категорию", "Select category")}>
-                            {cardEntryForm.category
-                              ? patientCardEntryCategoryLabel(cardEntryForm.category)
-                              : null}
-                          </SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                          {PATIENT_CARD_ENTRY_CATEGORY_OPTIONS.map((option) => (
-                            <SelectItem key={option.value} value={option.value}>
-                              {patientCardEntryCategoryLabel(option.value)}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </ShadSelect>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 space-y-2">
-                    <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-card-entry-source">{l("Quelle", "Источник", "Source")}</Label>
-                    <Input
-                      id="patient-card-entry-source"
-                      value={cardEntryForm.source}
-                      onChange={(event) =>
-                        setCardEntryForm((current) => ({ ...current, source: event.target.value }))
-                      }
-                      placeholder={l(
-                        "Patient, Klinik, Arzt, telefonische Nachverfolgung",
-                        "Пациент, клиника, врач, follow-up по телефону",
-                        "Patient, clinic, doctor, phone follow-up",
-                      )}
-                    />
-                  </div>
-
-                  <div className="mt-4 space-y-2">
-                    <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-card-entry-content">{l("Inhalt", "Содержание", "Entry content")}</Label>
-                    <textarea
-                      id="patient-card-entry-content"
-                      className={textareaClassName}
-                      value={cardEntryForm.content}
-                      onChange={(event) =>
-                        setCardEntryForm((current) => ({ ...current, content: event.target.value }))
-                      }
-                      placeholder={l(
-                        "Neue medizinische Informationen, patientenberichtete Änderungen oder Nachverfolgung der Klinik dokumentieren",
-                        "Опишите новую медицинскую информацию, изменения со слов пациента или follow-up провайдера",
-                        "Document new medical information, patient-reported changes or provider follow-up",
-                      )}
-                      required
-                    />
-                  </div>
-
-                  </div>
-                  <div className="flex justify-end gap-2 px-4 py-3">
-                    <Button type="button" variant="outline" size="sm" className="h-8 rounded-lg" onClick={() => setCardEntrySheetOpen(false)}>
-                      {t.common_cancel}
-                    </Button>
-                    <Button type="submit" size="sm" className="h-8 rounded-lg gap-1.5" disabled={cardEntriesBusy}>
-                      {cardEntriesBusy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
-                      {t.common_save}
-                    </Button>
-                  </div>
-                </form>
-              </SheetContent>
-            </Sheet>
+          {canManagePatientCardEntries && id ? (
+            <PatientCardEntrySheet
+              patientId={id}
+              open={cardEntrySheetOpen}
+              onOpenChange={setCardEntrySheetOpen}
+              onSaved={reload}
+            />
           ) : null}
 
           {(canManagePatientMedicalOrders || medicalOrders.length > 0) ? (
-              <div className={card("p-6")}>
-                <div className="mb-4 flex items-center justify-between gap-3">
-                  <div>
-                    <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground before:content-[''] before:h-2 before:w-2 before:shrink-0 before:rounded-full before:bg-[var(--brand)]">{l("Medizinische Anordnungen", "Медицинские назначения", "Medical orders")}</h2>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
-                      {l(`${medicalOrders.length} назначений`, `${medicalOrders.length} назначений`, `${medicalOrders.length} orders`)}
-                    </Badge>
-                    {canManagePatientMedicalOrders ? (
-                      <Button size="sm" className="h-8 rounded-lg gap-1.5" onClick={() => setMedicalOrderSheetOpen(true)}>
-                        <Plus className="size-3.5" />
-                        {l("Hinzufügen", "Добавить", "Add")}
-                      </Button>
-                    ) : null}
-                  </div>
+            <FormSection
+              title={l("Medizinische Anordnungen", "Медицинские назначения", "Medical orders")}
+              accessory={
+                <div className="flex items-center gap-2">
+                  <CountBadge>
+                    {l(`${medicalOrders.length} назначений`, `${medicalOrders.length} назначений`, `${medicalOrders.length} orders`)}
+                  </CountBadge>
+                  {canManagePatientMedicalOrders ? (
+                    <Button size="sm" className="h-8 rounded-lg gap-1.5" onClick={() => setMedicalOrderSheetOpen(true)}>
+                      <Plus className="size-3.5" />
+                      {l("Hinzufügen", "Добавить", "Add")}
+                    </Button>
+                  ) : null}
                 </div>
-
-                {medicalOrders.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
-                    {l("Noch keine medizinischen Anordnungen erfasst.", "Медицинские назначения пока не зафиксированы.", "No medical orders recorded yet.")}
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {medicalOrders.slice(0, 6).map((order) => (
-                      <div key={order.id} className="rounded-xl border border-slate-200 bg-white px-4 py-3">
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div>
-                            <p className="text-sm font-medium text-slate-950">{order.title}</p>
-                            <p className="mt-1 text-xs text-slate-500">
-                              {fmtDateTime(order.order_date, t.common_not_set)} · {patientMedicalOrderTypeLabel(order.order_type)}
-                              {order.source ? ` · ${order.source}` : ""}
-                            </p>
-                            <p className="mt-1 text-xs text-slate-500">
-                              {l("Angeordnet von", "Назначил", "Ordered by")} {order.ordered_by_name ?? t.common_unknown}
-                              {order.due_date ? ` · ${l("Срок", "Срок", "Due")} ${order.due_date}` : ""}
-                            </p>
-                          </div>
-                          <Badge
-                            variant="outline"
-                            className={cn(
-                              "rounded-full",
-                              STATUS_BADGE_CLASSES[order.status] ?? "border-slate-200 bg-slate-50 text-slate-700"
-                            )}
-                          >
-                            {patientDetailStatusLabel(order.status)}
-                          </Badge>
+              }
+            >
+              {medicalOrders.length === 0 ? (
+                <EmptyCell>{l("Für diesen Patienten wurden noch keine medizinischen Anordnungen erfasst.", "Для этого пациента пока нет медицинских назначений.", "No medical orders have been recorded for this patient yet.")}</EmptyCell>
+              ) : (
+                <div className="space-y-2">
+                  {medicalOrders.map((order) => (
+                    <div key={order.id} className="rounded-xl border border-border/50 bg-card px-4 py-3 space-y-2.5">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <p className="text-[13px] text-foreground">
+                          <span className="font-medium">{fmtDateTime(order.order_date, t.common_not_set)}</span>
+                          <span className="text-muted-foreground"> · {l("Angeordnet von", "Назначил", "Ordered by")} {order.ordered_by_name ?? t.common_unknown}</span>
+                        </p>
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            "rounded-full",
+                            STATUS_BADGE_CLASSES[order.status] ?? "border-border/60 bg-muted/25 text-muted-foreground"
+                          )}
+                        >
+                          {patientDetailStatusLabel(order.status)}
+                        </Badge>
+                      </div>
+                        <div className="flex flex-col gap-1">
+                          <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
+                            {l("Titel", "Название", "Title")}
+                          </span>
+                          <p className="text-[13px] text-foreground">{order.title}</p>
                         </div>
-                        <p className="mt-3 whitespace-pre-wrap text-sm text-slate-600">{order.instructions}</p>
+                        <div className="flex flex-col gap-1">
+                          <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
+                            {l("Typ", "Тип", "Type")}
+                          </span>
+                          <p className="text-[13px] text-foreground">
+                            {patientMedicalOrderTypeLabel(order.order_type)}
+                            {order.due_date ? ` · ${l("Fällig", "Срок", "Due")} ${order.due_date}` : ""}
+                          </p>
+                        </div>
+                        {order.source ? (
+                          <div className="flex flex-col gap-1">
+                            <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
+                              {l("Quelle", "Источник", "Source")}
+                            </span>
+                            <p className="text-[13px] text-foreground">{order.source}</p>
+                          </div>
+                        ) : null}
+                        <div className="flex flex-col gap-1">
+                          <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
+                            {l("Anweisungen", "Инструкции", "Instructions")}
+                          </span>
+                          <p className="whitespace-pre-wrap text-[13px] text-foreground">{order.instructions}</p>
+                        </div>
                         {canManagePatientMedicalOrders && order.status === "active" ? (
-                          <div className="mt-4 flex flex-wrap justify-end gap-2">
+                          <div className="flex flex-wrap justify-end gap-2 pt-1">
                             <Button
                               type="button"
                               variant="outline"
-                              className="rounded-xl"
+                              size="sm"
+                              className="h-8 rounded-lg gap-1.5"
                               disabled={medicalOrderActionId === order.id}
                               onClick={() => void handleUpdatePatientMedicalOrderStatus(order.id, "completed")}
                             >
                               {medicalOrderActionId === order.id ? (
-                                <LoaderCircle className="mr-2 size-4 animate-spin" />
+                                <LoaderCircle className="size-3.5 animate-spin" />
                               ) : null}
-                              {l("Als abgeschlossen markieren", "Отметить как завершённое", "Mark completed")}
+                              {l("Abschließen", "Завершить", "Complete")}
                             </Button>
                             <Button
                               type="button"
                               variant="outline"
-                              className="rounded-xl border-rose-200 text-rose-700 hover:bg-rose-50"
+                              size="sm"
+                              className="h-8 rounded-lg gap-1.5 border-rose-200 text-rose-700 hover:bg-rose-50"
                               disabled={medicalOrderActionId === order.id}
                               onClick={() => void handleUpdatePatientMedicalOrderStatus(order.id, "cancelled")}
                             >
                               {medicalOrderActionId === order.id ? (
-                                <LoaderCircle className="mr-2 size-4 animate-spin" />
+                                <LoaderCircle className="size-3.5 animate-spin" />
                               ) : null}
                               {l("Stornieren", "Отменить", "Cancel")}
                             </Button>
@@ -3173,196 +3972,80 @@ export function PatientDetailPage() {
                     ))}
                   </div>
                 )}
-              </div>
+            </FormSection>
           ) : null}
 
-          {canManagePatientMedicalOrders ? (
-            <Sheet open={medicalOrderSheetOpen} onOpenChange={setMedicalOrderSheetOpen}>
-              <SheetContent side="right" className="w-full sm:max-w-[540px] gap-0">
-                <SheetHeader className="px-4 py-3">
-                  <SheetTitle>{l("Medizinische Anordnung hinzufügen", "Добавить медицинское назначение", "Add medical order")}</SheetTitle>
-                </SheetHeader>
-                <form className="flex flex-col flex-1 min-h-0" onSubmit={async (event) => { await handleCreatePatientMedicalOrder(event); setMedicalOrderSheetOpen(false); }}>
-                  <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
-                  <div className="hidden">
-                    <div>
-                      <h2 className="sr-only">{l("Medizinische Anordnung hinzufügen", "Добавить медицинское назначение", "Add medical order")}</h2>
-                      <p className="mt-1 text-sm text-slate-500">
-                        {l(
-                          "Therapiepläne, Nachkontrollen und Behandlungsanweisungen strukturiert erfassen.",
-                          "Структурированно фиксируйте планы терапии, повторные проверки и инструкции по лечению.",
-                          "Register therapy plans, rechecks and treatment instructions in a structured way.",
-                        )}
-                      </p>
-                    </div>
-                    <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
-                      {l("Strukturierte Anordnung", "Структурированное назначение", "Structured order")}
-                    </Badge>
-                  </div>
-
-                  <div className="mt-4 grid gap-4 md:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-medical-order-date">{l("Anordnungsdatum", "Дата назначения", "Order date")}</Label>
-                      <Input
-                        id="patient-medical-order-date"
-                        type="datetime-local"
-                        value={medicalOrderForm.orderDate}
-                        onChange={(event) =>
-                          setMedicalOrderForm((current) => ({ ...current, orderDate: event.target.value }))
-                        }
-                        required
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-medical-order-type">{l("Anordnungstyp", "Тип назначения", "Order type")}</Label>
-                      <ShadSelect
-                        value={medicalOrderForm.orderType}
-                        onValueChange={(value) =>
-                          setMedicalOrderForm((current) => ({
-                            ...current,
-                            orderType: value ?? PATIENT_MEDICAL_ORDER_TYPE_OPTIONS[0].value,
-                          }))
-                        }
-                      >
-                        <SelectTrigger id="patient-medical-order-type" className="w-full">
-                          <SelectValue placeholder={l("Typ wählen", "Выберите тип", "Select order type")}>
-                            {medicalOrderForm.orderType
-                              ? patientMedicalOrderTypeLabel(medicalOrderForm.orderType)
-                              : null}
-                          </SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                          {PATIENT_MEDICAL_ORDER_TYPE_OPTIONS.map((option) => (
-                            <SelectItem key={option.value} value={option.value}>
-                              {patientMedicalOrderTypeLabel(option.value)}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </ShadSelect>
-                    </div>
-                    <div className="space-y-2 md:col-span-2">
-                      <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-medical-order-title">{l("Titel", "Название", "Title")}</Label>
-                      <Input
-                        id="patient-medical-order-title"
-                        value={medicalOrderForm.title}
-                        onChange={(event) =>
-                          setMedicalOrderForm((current) => ({ ...current, title: event.target.value }))
-                        }
-                        placeholder={l("Physiotherapie 2x pro Woche", "Физиотерапия 2 раза в неделю", "Physiotherapy 2x per week")}
-                        required
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-medical-order-due-date">{l("Fälligkeitsdatum", "Срок", "Due date")}</Label>
-                      <Input
-                        id="patient-medical-order-due-date"
-                        type="date"
-                        value={medicalOrderForm.dueDate}
-                        onChange={(event) =>
-                          setMedicalOrderForm((current) => ({ ...current, dueDate: event.target.value }))
-                        }
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-medical-order-source">{l("Quelle", "Источник", "Source")}</Label>
-                      <Input
-                        id="patient-medical-order-source"
-                        value={medicalOrderForm.source}
-                        onChange={(event) =>
-                          setMedicalOrderForm((current) => ({ ...current, source: event.target.value }))
-                        }
-                        placeholder={l("Arzt, Klinik, Entlassungsbericht", "Врач, клиника, выписка", "Doctor, clinic, discharge note")}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="mt-4 space-y-2">
-                    <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-medical-order-instructions">{l("Anweisungen", "Инструкции", "Instructions")}</Label>
-                    <textarea
-                      id="patient-medical-order-instructions"
-                      className={textareaClassName}
-                      value={medicalOrderForm.instructions}
-                      onChange={(event) =>
-                        setMedicalOrderForm((current) => ({ ...current, instructions: event.target.value }))
-                      }
-                      placeholder={l(
-                        "Therapieanordnung, Taktung, Nachkontrolle oder Vorbereitungsdetails erläutern",
-                        "Опишите назначение, частоту, follow-up или детали подготовки",
-                        "Explain the therapeutic order, cadence, follow-up or preparation details",
-                      )}
-                      required
-                    />
-                  </div>
-
-                  </div>
-                  <div className="flex justify-end gap-2 px-4 py-3">
-                    <Button type="button" variant="outline" size="sm" className="h-8 rounded-lg" onClick={() => setMedicalOrderSheetOpen(false)}>
-                      {t.common_cancel}
-                    </Button>
-                    <Button type="submit" size="sm" className="h-8 rounded-lg gap-1.5" disabled={medicalOrdersBusy}>
-                      {medicalOrdersBusy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
-                      {t.common_save}
-                    </Button>
-                  </div>
-                </form>
-              </SheetContent>
-            </Sheet>
+          {canManagePatientMedicalOrders && id ? (
+            <PatientMedicalOrderSheet
+              patientId={id}
+              open={medicalOrderSheetOpen}
+              onOpenChange={setMedicalOrderSheetOpen}
+              onSaved={reload}
+            />
           ) : null}
+
 
           {(canManagePatientRiskScores || riskScores.length > 0) ? (
-              <div className={card("p-6")}>
-                <div className="mb-4 flex items-center justify-between gap-3">
-                  <div>
-                    <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground before:content-[''] before:h-2 before:w-2 before:shrink-0 before:rounded-full before:bg-[var(--brand)]">{l("Risikoscores", "Риск-скоры", "Risk scores")}</h2>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
-                      {l(`${riskScores.length} Scores`, `${riskScores.length} скоров`, `${riskScores.length} scores`)}
-                    </Badge>
-                    {canManagePatientRiskScores ? (
-                      <Button size="sm" className="h-8 rounded-lg gap-1.5" onClick={() => setRiskScoreSheetOpen(true)}>
-                        <Plus className="size-3.5" />
-                        {l("Hinzufügen", "Добавить", "Add")}
-                      </Button>
-                    ) : null}
-                  </div>
+            <FormSection
+              title={l("Risikoscores", "Риск-скоры", "Risk scores")}
+              accessory={
+                <div className="flex items-center gap-2">
+                  <CountBadge>
+                    {l(`${riskScores.length} Scores`, `${riskScores.length} скоров`, `${riskScores.length} scores`)}
+                  </CountBadge>
+                  {canManagePatientRiskScores ? (
+                    <Button size="sm" className="h-8 rounded-lg gap-1.5" onClick={() => setRiskScoreSheetOpen(true)}>
+                      <Plus className="size-3.5" />
+                      {l("Hinzufügen", "Добавить", "Add")}
+                    </Button>
+                  ) : null}
                 </div>
-
-                {riskScores.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
-                    {l("Noch keine Risikoscores erfasst.", "Риск-скоры пока не зафиксированы.", "No risk scores recorded yet.")}
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {riskScores.slice(0, 6).map((score) => (
-                      <div key={score.id} className="rounded-xl border border-slate-200 bg-white px-4 py-3">
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div>
-                            <p className="text-sm font-medium text-slate-950">
-                              {patientRiskScoreTypeLabel(score.score_type)}
-                            </p>
-                            <p className="mt-1 text-xs text-slate-500">
-                              {fmtDateTime(score.computed_at, t.common_not_set)}
-                              {score.source ? ` · ${score.source}` : ""}
-                            </p>
-                            <p className="mt-1 text-xs text-slate-500">
-                              {l("Erfasst von", "Записал", "Recorded by")} {score.recorded_by_name ?? t.common_unknown}
-                            </p>
-                          </div>
+              }
+            >
+              {riskScores.length === 0 ? (
+                <EmptyCell>{l("Für diesen Patienten wurden noch keine Risikoscores erfasst.", "Для этого пациента пока нет риск-скоров.", "No risk scores have been recorded for this patient yet.")}</EmptyCell>
+              ) : (
+                <div className="space-y-2">
+                  {riskScores.map((score) => (
+                    <div key={score.id} className="rounded-xl border border-border/50 bg-card px-4 py-3 space-y-2.5">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <p className="text-[13px] text-foreground">
+                            <span className="font-medium">{fmtDateTime(score.computed_at, t.common_not_set)}</span>
+                            <span className="text-muted-foreground"> · {l("Erfasst von", "Записал", "Recorded by")} {score.recorded_by_name ?? t.common_unknown}</span>
+                          </p>
                           <Badge variant="outline" className="rounded-full">
                             {formatVitalNumber(score.score_value)}
                             {score.scale_max != null ? ` / ${formatVitalNumber(score.scale_max)}` : ""}
                           </Badge>
                         </div>
+                        <div className="flex flex-col gap-1">
+                          <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
+                            {l("Typ", "Тип", "Type")}
+                          </span>
+                          <p className="text-[13px] text-foreground">{patientRiskScoreTypeLabel(score.score_type)}</p>
+                        </div>
+                        {score.source ? (
+                          <div className="flex flex-col gap-1">
+                            <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
+                              {l("Quelle", "Источник", "Source")}
+                            </span>
+                            <p className="text-[13px] text-foreground">{score.source}</p>
+                          </div>
+                        ) : null}
                         {score.interpretation ? (
-                          <p className="mt-3 whitespace-pre-wrap text-sm text-slate-600">
-                            {score.interpretation}
-                          </p>
+                          <div className="flex flex-col gap-1">
+                            <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
+                              {l("Interpretation", "Интерпретация", "Interpretation")}
+                            </span>
+                            <p className="whitespace-pre-wrap text-[13px] text-foreground">{score.interpretation}</p>
+                          </div>
                         ) : null}
                         {score.inputs ? (
-                          <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-600">
-                            <p className="font-medium text-slate-700">{l("Strukturierte Eingaben", "Структурированные входные данные", "Structured inputs")}</p>
-                            <pre className="mt-2 overflow-x-auto whitespace-pre-wrap">
+                          <div className="flex flex-col gap-1">
+                            <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
+                              {l("Eingaben", "Входные данные", "Inputs")}
+                            </span>
+                            <pre className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-[12px] text-foreground overflow-x-auto whitespace-pre-wrap">
                               {JSON.stringify(score.inputs, null, 2)}
                             </pre>
                           </div>
@@ -3371,219 +4054,123 @@ export function PatientDetailPage() {
                     ))}
                   </div>
                 )}
-              </div>
-          ) : null}
-
-          {canManagePatientRiskScores ? (
-            <Sheet open={riskScoreSheetOpen} onOpenChange={setRiskScoreSheetOpen}>
-              <SheetContent side="right" className="w-full sm:max-w-[540px] gap-0">
-                <SheetHeader className="px-4 py-3">
-                  <SheetTitle>{l("Risikoscore hinzufügen", "Добавить риск-скор", "Add risk score")}</SheetTitle>
-                </SheetHeader>
-                <form className="flex flex-col flex-1 min-h-0" onSubmit={async (event) => { await handleCreatePatientRiskScore(event); setRiskScoreSheetOpen(false); }}>
-                  <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
-                  <div className="hidden">
-                    <div>
-                      <h2 className="sr-only">{l("Risikoscore hinzufügen", "Добавить риск-скор", "Add risk score")}</h2>
-                      <p className="mt-1 text-sm text-slate-500">
-                        {l(
-                          "Strukturiertes Risikoscoring auf Patientenebene mit optionalen JSON-Eingaben erfassen.",
-                          "Фиксируйте структурированные риск-скоры на уровне пациента с опциональными JSON-входами.",
-                          "Capture structured patient-level risk scoring with optional JSON inputs.",
-                        )}
-                      </p>
-                    </div>
-                    <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
-                      {l("Nur ergänzender Verlauf", "История только на добавление", "Append-only history")}
-                    </Badge>
-                  </div>
-
-                  <div className="mt-4 grid gap-4 md:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-risk-score-computed-at">{l("Berechnet am", "Рассчитано", "Computed at")}</Label>
-                      <Input
-                        id="patient-risk-score-computed-at"
-                        type="datetime-local"
-                        value={riskScoreForm.computedAt}
-                        onChange={(event) =>
-                          setRiskScoreForm((current) => ({ ...current, computedAt: event.target.value }))
-                        }
-                        required
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-risk-score-type">{l("Score-Typ", "Тип скора", "Score type")}</Label>
-                      <ShadSelect
-                        value={riskScoreForm.scoreType}
-                        onValueChange={(value) =>
-                          setRiskScoreForm((current) => ({
-                            ...current,
-                            scoreType: value ?? PATIENT_RISK_SCORE_TYPE_OPTIONS[0].value,
-                          }))
-                        }
-                      >
-                        <SelectTrigger id="patient-risk-score-type" className="w-full">
-                          <SelectValue placeholder={l("Typ wählen", "Выберите тип", "Select score type")}>
-                            {riskScoreForm.scoreType
-                              ? patientRiskScoreTypeLabel(riskScoreForm.scoreType)
-                              : null}
-                          </SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                          {PATIENT_RISK_SCORE_TYPE_OPTIONS.map((option) => (
-                            <SelectItem key={option.value} value={option.value}>
-                              {patientRiskScoreTypeLabel(option.value)}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </ShadSelect>
-                    </div>
-                    <div className="space-y-2">
-                      <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-risk-score-value">{l("Wert", "Значение", "Score value")}</Label>
-                      <Input
-                        id="patient-risk-score-value"
-                        inputMode="decimal"
-                        value={riskScoreForm.scoreValue}
-                        onChange={(event) =>
-                          setRiskScoreForm((current) => ({ ...current, scoreValue: event.target.value }))
-                        }
-                        placeholder="4"
-                        required
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-risk-score-scale">{l("Skalenmaximum", "Максимум шкалы", "Scale max")}</Label>
-                      <Input
-                        id="patient-risk-score-scale"
-                        inputMode="decimal"
-                        value={riskScoreForm.scaleMax}
-                        onChange={(event) =>
-                          setRiskScoreForm((current) => ({ ...current, scaleMax: event.target.value }))
-                        }
-                        placeholder="9"
-                      />
-                    </div>
-                    <div className="space-y-2 md:col-span-2">
-                      <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-risk-score-source">{l("Quelle", "Источник", "Source")}</Label>
-                      <Input
-                        id="patient-risk-score-source"
-                        value={riskScoreForm.source}
-                        onChange={(event) =>
-                          setRiskScoreForm((current) => ({ ...current, source: event.target.value }))
-                        }
-                        placeholder={l(
-                          "Ärztliche Einschätzung, Entlassungsbericht, Intake-Prüfung",
-                          "Оценка врача, выписка, проверка intake",
-                          "Doctor assessment, discharge note, intake review",
-                        )}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="mt-4 space-y-2">
-                    <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-risk-score-interpretation">{l("Interpretation", "Интерпретация", "Interpretation")}</Label>
-                    <textarea
-                      id="patient-risk-score-interpretation"
-                      className={textareaClassName}
-                      value={riskScoreForm.interpretation}
-                      onChange={(event) =>
-                        setRiskScoreForm((current) => ({ ...current, interpretation: event.target.value }))
-                      }
-                      placeholder={l(
-                        "Klinische Bedeutung, Eskalationsschwelle oder Nachverfolgungsimplikation erläutern",
-                        "Опишите клиническое значение, порог эскалации или влияние на follow-up",
-                        "Explain clinical meaning, escalation threshold or follow-up implication",
-                      )}
-                    />
-                  </div>
-
-                  <div className="mt-4 space-y-2">
-                    <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-risk-score-inputs">{l("Strukturierte Eingaben (JSON-Objekt)", "Структурированные входные данные (JSON-объект)", "Structured inputs (JSON object)")}</Label>
-                    <textarea
-                      id="patient-risk-score-inputs"
-                      className={textareaClassName}
-                      value={riskScoreForm.inputsJson}
-                      onChange={(event) =>
-                        setRiskScoreForm((current) => ({ ...current, inputsJson: event.target.value }))
-                      }
-                      placeholder='{"age": 68, "hypertension": true, "prior_stroke": false}'
-                    />
-                  </div>
-
-                  </div>
-                  <div className="flex justify-end gap-2 px-4 py-3">
-                    <Button type="button" variant="outline" size="sm" className="h-8 rounded-lg" onClick={() => setRiskScoreSheetOpen(false)}>
-                      {t.common_cancel}
-                    </Button>
-                    <Button type="submit" size="sm" className="h-8 rounded-lg gap-1.5" disabled={riskScoresBusy}>
-                      {riskScoresBusy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
-                      {t.common_save}
-                    </Button>
-                  </div>
-                </form>
-              </SheetContent>
-            </Sheet>
-          ) : null}
-
-          {/* Notes */}
-          {detail.notes && (
-            <FormSection
-              title={t.patients_notes}
-              accessory={
-                canEditPatientProfile ? (
-                  <Button type="button" variant="outline" size="sm" className="h-9 rounded-lg gap-1.5" onClick={openProfileEditor}>
-                    <Pencil className="size-3.5" />
-                    {l("Bearbeiten", "Редактировать", "Edit")}
-                  </Button>
-                ) : null
-              }
-            >
-              <div className="rounded-xl border border-border/50 bg-muted/25 px-4 py-4">
-                <p className="text-sm text-muted-foreground whitespace-pre-wrap">{detail.notes}</p>
-              </div>
             </FormSection>
-          )}
+          ) : null}
+
+          {canManagePatientRiskScores && id ? (
+            <PatientRiskScoreSheet
+              patientId={id}
+              open={riskScoreSheetOpen}
+              onOpenChange={setRiskScoreSheetOpen}
+              onSaved={reload}
+            />
+          ) : null}
+
+          <WorkspaceSectionIntro
+            title={l("Notizen und Kontext", "Заметки и контекст", "Notes and context")}
+            description={l(
+              "Freitext für operative Hinweise, die weder in klinische Anordnungen noch in den Rechtsstatus gehören.",
+              "Свободный текст для операционных заметок, которые не относятся ни к клиническим назначениям, ни к правовому статусу.",
+              "Free-form context for operational notes that do not belong in clinical orders or legal status.",
+            )}
+          />
+
+          <FormSection
+            title={t.patients_notes}
+            accessory={
+              canEditPatientProfile ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-8 rounded-lg gap-1.5"
+                  onClick={() => setNotesSheetOpen(true)}
+                >
+                  {detail.notes ? <Pencil className="size-3.5" /> : <Plus className="size-3.5" />}
+                  {detail.notes
+                    ? l("Bearbeiten", "Редактировать", "Edit")
+                    : l("Hinzufügen", "Добавить", "Add")}
+                </Button>
+              ) : null
+            }
+          >
+            <div className="rounded-xl border border-border/50 bg-muted/25 px-4 py-4">
+              {detail.notes ? (
+                <p className="text-sm text-foreground whitespace-pre-wrap">{detail.notes}</p>
+              ) : (
+                <p className="text-sm text-muted-foreground italic">
+                  {l("Keine Notizen erfasst.", "Заметок пока нет.", "No notes yet.")}
+                </p>
+              )}
+            </div>
+          </FormSection>
+          {id && canEditPatientProfile ? (
+            <PatientNotesSheet
+              patientId={id}
+              initial={detail.notes ?? ""}
+              open={notesSheetOpen}
+              onOpenChange={setNotesSheetOpen}
+              onSaved={reload}
+            />
+          ) : null}
 
         </TabsContent>
 
-        <TabsContent value="curators" className="mt-4 min-h-[400px]">
-          <div className={card("p-6")}>
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground before:content-[''] before:h-2 before:w-2 before:shrink-0 before:rounded-full before:bg-[var(--brand)]">{t.patients_assign_owner}</h2>
-              <span className="text-xs text-slate-400">{assignments.length} {t.patients_records}</span>
-            </div>
-
+        <TabsContent value="curators" className="space-y-4 mt-4 min-h-[400px]">
+          <FormSection
+            title={t.patients_assign_owner}
+            accessory={<CountBadge>{assignments.length} {t.patients_records}</CountBadge>}
+          >
             {assignments.length === 0 ? (
-              <p className="text-sm text-slate-500 py-4 text-center">{t.patients_no_assignments}</p>
+              <EmptyCell>{t.patients_no_assignments}</EmptyCell>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-2">
                 {assignments.map((item) => (
-                  <div key={`${item.user_id}-${item.assigned_at}`} className="flex items-center gap-4 rounded-xl border border-slate-100 bg-white p-4">
-                    <div className="flex items-center justify-center size-10 shrink-0 rounded-full bg-slate-100 text-[11px] font-semibold text-slate-600">
+                  <div
+                    key={`${item.user_id}-${item.assigned_at}`}
+                    className="flex items-center gap-4 rounded-xl border border-border/50 bg-card px-4 py-3"
+                  >
+                    <div className="flex items-center justify-center size-10 shrink-0 rounded-full bg-muted text-[11px] font-semibold text-muted-foreground">
                       {item.user_name.split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase()).join("")}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium text-slate-900">{item.user_name}</span>
-                        <Badge className={cn("text-[10px]", ROLE_COLORS[item.user_role] ?? "bg-slate-100 text-slate-700")}>
+                        <span className="text-sm font-medium text-foreground">{item.user_name}</span>
+                        <Badge className={cn("text-[10px]", ROLE_COLORS[item.user_role] ?? "bg-muted text-muted-foreground")}>
                           {roleLbl(item.user_role, tr)}
                         </Badge>
                       </div>
-                      <div className="flex items-center gap-3 mt-1 text-xs text-slate-500">
+                      <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
                         <span>{fmtDateTime(item.assigned_at)}</span>
                         <span>{t.patients_assigned_by} {item.assigned_by_name || t.common_unknown}</span>
                       </div>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
-                      <Badge variant="outline" className={cn("rounded-full", item.revoked_at ? "border-red-200 bg-red-50 text-red-600" : "border-emerald-200 bg-emerald-50 text-emerald-700")}>
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "rounded-full",
+                          item.revoked_at
+                            ? "border-rose-200 bg-rose-50 text-rose-700"
+                            : "border-emerald-200 bg-emerald-50 text-emerald-700"
+                        )}
+                      >
                         {item.revoked_at ? t.patients_revoked : t.common_active}
                       </Badge>
                       {canManage && !item.revoked_at && (
                         <Button
                           variant="ghost"
                           size="icon-xs"
-                          className="rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50"
+                          aria-label={l("Zuordnung widerrufen", "Отозвать назначение", "Revoke assignment")}
+                          className="rounded-lg text-muted-foreground hover:text-rose-600 hover:bg-rose-50"
                           onClick={async () => {
+                            const confirmed = window.confirm(
+                              l(
+                                `Zuordnung für ${item.user_name} widerrufen?`,
+                                `Отозвать назначение для ${item.user_name}?`,
+                                `Revoke assignment for ${item.user_name}?`,
+                              )
+                            );
+                            if (!confirmed) return;
                             await apiFetch(`/patients/${id}/revoke`, {
                               method: "POST",
                               body: JSON.stringify({ user_id: item.user_id }),
@@ -3601,207 +4188,340 @@ export function PatientDetailPage() {
             )}
 
             {canManage && (
-              <div className="mt-4 pt-4 border-t border-slate-100 flex gap-3">
-                <ShadSelect value={selectedAssignee} onValueChange={(v) => setSelectedAssignee(v ?? "")}>
-                  <SelectTrigger className="h-10 rounded-xl bg-slate-50 flex-1">
-                    <SelectValue>
-                      {selectedAssignee
-                        ? (() => { const s = assignableStaff.find((i) => i.id === selectedAssignee); return s ? `${s.name} · ${roleLbl(s.role, tr)}` : selectedAssignee; })()
-                        : t.patients_assign_owner}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {assignableStaff.map((s) => (
-                      <SelectItem key={s.id} value={s.id}>{s.name} · {roleLbl(s.role, tr)}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </ShadSelect>
-                <Button className="rounded-xl bg-slate-950 text-white hover:bg-slate-800 h-10 px-5" disabled={assignBusy || !selectedAssignee} onClick={handleAssign}>
-                  {assignBusy ? <LoaderCircle className="size-4 animate-spin" /> : t.patients_assign_owner}
-                </Button>
+              <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto]">
+                <div className="space-y-1.5">
+                  <Label
+                    htmlFor="patient-curator-assign"
+                    className="text-[11.5px] font-medium text-muted-foreground leading-tight"
+                  >
+                    {l("Verantwortliche Person", "Ответственный сотрудник", "Assigned staff member")}
+                  </Label>
+                  <ShadSelect value={selectedAssignee} onValueChange={(v) => setSelectedAssignee(v ?? "")}>
+                    <SelectTrigger id="patient-curator-assign" className={cn("w-full", formInputClassName)}>
+                      <SelectValue>
+                        {selectedAssignee
+                          ? (() => { const s = assignableStaff.find((i) => i.id === selectedAssignee); return s ? `${s.name} · ${roleLbl(s.role, tr)}` : selectedAssignee; })()
+                          : t.patients_assign_owner}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {assignableStaff.map((s) => (
+                        <SelectItem key={s.id} value={s.id}>{s.name} · {roleLbl(s.role, tr)}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </ShadSelect>
+                </div>
+                <div className="flex items-end">
+                  <Button
+                    size="sm"
+                    className="h-9 rounded-lg gap-1.5"
+                    disabled={assignBusy || !selectedAssignee}
+                    onClick={handleAssign}
+                  >
+                    {assignBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                    {t.patients_assign_owner}
+                  </Button>
+                </div>
               </div>
             )}
-          </div>
+          </FormSection>
         </TabsContent>
 
         <TabsContent value="relations" className="mt-4 min-h-[400px]">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{l("Patientenkette", "Цепочка пациента", "Patient chain")}</p>
-              <h3 className="mt-1 text-sm font-semibold text-slate-950">{l("Beziehungen und Notfallkontakte", "Связи и экстренные контакты", "Relations and emergency contacts")}</h3>
-            </div>
-            {canManageRelations ? (
-              <Button type="button" className="rounded-xl bg-slate-950 text-white hover:bg-slate-800" onClick={openCreateRelation}>
-                <Plus className="mr-2 size-4" />
-                {l("Neue Beziehung", "Новая связь", "New relation")}
-              </Button>
-            ) : null}
-          </div>
-          {tabLoading ? (
-            <div className="flex items-center justify-center py-16"><LoaderCircle className="size-5 animate-spin text-slate-400" /></div>
-          ) : relations.length === 0 ? (
-            <div className={card("p-8 text-center")}><p className="text-sm text-slate-500">{l("Noch keine verknüpften Beziehungen.", "Связи пока не добавлены.", "No linked relations yet.")}</p></div>
-          ) : (
-            <div className="grid gap-3 md:grid-cols-2">
-              {relations.map((relation) => (
-                <div key={relation.id} className={card("p-5")}>
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-sm font-semibold text-slate-950">{relation.related_display_name || relation.related_name}</p>
-                    <div className="flex items-center gap-2">
-                      <Badge variant="outline" className="rounded-full text-[10px]">{relation.relation_type}</Badge>
-                      {relation.is_emergency_contact ? <Badge className="rounded-full bg-rose-100 text-rose-700">{l("Notfall", "Экстренно", "Emergency")}</Badge> : null}
+          <FormSection
+            title={l("Beziehungen und Notfallkontakte", "Связи и экстренные контакты", "Relations and emergency contacts")}
+            accessory={
+              canManageRelations ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-8 rounded-lg gap-1.5"
+                  onClick={openCreateRelation}
+                >
+                  <Plus className="size-3.5" />
+                  {l("Neue Beziehung", "Новая связь", "New relation")}
+                </Button>
+              ) : null
+            }
+          >
+            {tabLoading ? (
+              <TabLoader />
+            ) : relations.length === 0 ? (
+              <EmptyCell>{l("Noch nicht erfasst.", "Не зафиксировано.", "Not recorded yet.")}</EmptyCell>
+            ) : (
+              <div className="grid gap-2 md:grid-cols-2">
+                {relations.map((relation) => (
+                  <div key={relation.id} className="rounded-xl border border-border/50 bg-card px-4 py-3 space-y-2.5">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-semibold text-foreground">{relation.related_display_name || relation.related_name}</p>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline" className="rounded-full text-[10px]">{relationTypeLabel(relation.relation_type)}</Badge>
+                        {relation.is_emergency_contact ? (
+                          <Badge variant="outline" className="rounded-full bg-rose-50 border-rose-200 text-rose-700 text-[10px]">
+                            {l("Notfall", "Экстренно", "Emergency")}
+                          </Badge>
+                        ) : null}
+                      </div>
                     </div>
-                  </div>
-                  <div className="mt-3 space-y-1 text-sm text-slate-600">
-                    {relation.related_patient_pid ? <p className="font-mono text-xs text-slate-400">{relation.related_patient_pid}</p> : null}
-                    {relation.phone ? <p>{relation.phone}</p> : null}
-                    {relation.notes ? <p>{relation.notes}</p> : null}
-                    <p className="text-xs text-slate-400">{fmtDateTime(relation.created_at)}</p>
-                  </div>
-                  {canManageRelations || relation.related_patient_id ? (
-                    <div className="mt-4 flex gap-2">
-                      {relation.related_patient_id ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="rounded-xl"
-                          onClick={() => staffGo(`/patients/${relation.related_patient_id}`)}
-                        >
-                          {l("Patient öffnen", "Открыть пациента", "Open patient")}
-                        </Button>
-                      ) : null}
-                      {canManageRelations ? (
-                        <>
-                          <Button type="button" variant="outline" className="rounded-xl" onClick={() => openEditRelation(relation)}>
-                            {l("Bearbeiten", "Редактировать", "Edit")}
-                          </Button>
-                          <Button type="button" variant="outline" className="rounded-xl border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => void handleDeleteRelation(relation.id)}>
-                            {l("Löschen", "Удалить", "Delete")}
-                          </Button>
-                        </>
-                      ) : null}
+                    <div className="space-y-0.5 text-sm text-muted-foreground">
+                      {relation.related_patient_pid ? <p className="font-mono text-xs text-muted-foreground/80">{relation.related_patient_pid}</p> : null}
+                      {relation.phone ? <p>{relation.phone}</p> : null}
+                      {relation.notes ? <p className="text-foreground">{relation.notes}</p> : null}
+                      <p className="text-xs text-muted-foreground/80">{fmtDateTime(relation.created_at)}</p>
                     </div>
-                  ) : null}
-                </div>
-              ))}
-            </div>
-          )}
+                    {canManageRelations || relation.related_patient_id ? (
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        {relation.related_patient_id ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-8 rounded-lg"
+                            onClick={() => staffGo(`/patients/${relation.related_patient_id}`)}
+                          >
+                            {l("Patient öffnen", "Открыть пациента", "Open patient")}
+                          </Button>
+                        ) : null}
+                        {canManageRelations ? (
+                          <>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-8 rounded-lg"
+                              onClick={() => openEditRelation(relation)}
+                            >
+                              {l("Bearbeiten", "Редактировать", "Edit")}
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-8 rounded-lg border-rose-200 text-rose-700 hover:bg-rose-50"
+                              onClick={() => void handleDeleteRelation(relation.id)}
+                            >
+                              {l("Löschen", "Удалить", "Delete")}
+                            </Button>
+                          </>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            )}
+          </FormSection>
         </TabsContent>
 
         {/* Cases tab */}
-        <TabsContent value="cases" className="mt-4 min-h-[400px]">
-          {tabLoading ? (
-            <div className="flex items-center justify-center py-16"><LoaderCircle className="size-5 animate-spin text-slate-400" /></div>
-          ) : cases.length === 0 ? (
-            <div className={card("p-8 text-center")}><p className="text-sm text-slate-500">{t.cases_no_match}</p></div>
-          ) : (
-            <div className="grid gap-3 md:grid-cols-2">
-              {cases.map((c) => (
-                <button key={c.id} type="button" onClick={() => staffGo(`/cases?case=${c.id}`)} className={card("p-5 text-left hover:-translate-y-0.5 hover:shadow-lg transition")}>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-mono text-slate-400">{c.case_id}</span>
-                    <Badge variant="outline" className={cn("rounded-full text-[10px]", STATUS_COLORS[c.status] ?? "")}>{tr[`cases_${c.status}`] ?? c.status}</Badge>
-                  </div>
-                  <p className="mt-2 text-sm font-medium text-slate-900">{c.hauptanfragegrund || t.common_not_set}</p>
-                  <p className="mt-1 text-xs text-slate-400">{fmtDate(c.created_at)}</p>
-                </button>
-              ))}
-            </div>
-          )}
+        <TabsContent value="cases" className="space-y-4 mt-4 min-h-[400px]">
+          <FormSection
+            title={l("Fälle", "Кейсы", "Cases")}
+            accessory={<CountBadge>{cases.length}</CountBadge>}
+          >
+            {tabLoading ? (
+              <TabLoader />
+            ) : cases.length === 0 ? (
+              <EmptyCell>{t.cases_no_match}</EmptyCell>
+            ) : (
+              <div className="grid gap-2 md:grid-cols-2">
+                {cases.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => setCasePreviewId(c.id)}
+                    className="rounded-xl border border-border/50 bg-card px-4 py-3 text-left transition-colors hover:border-border hover:bg-muted/30"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="font-mono text-xs text-muted-foreground">{c.case_id}</span>
+                      <Badge variant="outline" className={cn("rounded-full text-[10px]", STATUS_COLORS[c.status] ?? "")}>
+                        {tr[`cases_${c.status}`] ?? c.status}
+                      </Badge>
+                    </div>
+                    <p className="mt-2 text-sm font-medium text-foreground">{c.hauptanfragegrund || t.common_not_set}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">{fmtDate(c.created_at)}</p>
+                  </button>
+                ))}
+              </div>
+            )}
+          </FormSection>
+          <PatientCasePreviewSheet
+            caseId={casePreviewId}
+            open={Boolean(casePreviewId)}
+            onOpenChange={(value) => { if (!value) setCasePreviewId(null); }}
+          />
         </TabsContent>
 
         {/* Orders tab */}
-        <TabsContent value="orders" className="mt-4 min-h-[400px]">
-          {tabLoading ? (
-            <div className="flex items-center justify-center py-16"><LoaderCircle className="size-5 animate-spin text-slate-400" /></div>
-          ) : orders.length === 0 ? (
-            <div className={card("p-8 text-center")}><p className="text-sm text-slate-500">{t.common_not_set}</p></div>
-          ) : (
-            <div className="grid gap-3 md:grid-cols-2">
-              {orders.map((o) => (
-                <button key={o.id} type="button" onClick={() => staffGo(`/orders?order=${o.id}`)} className={card("p-5 text-left hover:-translate-y-0.5 hover:shadow-lg transition")}>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-mono text-slate-400">{o.order_number}</span>
-                    <Badge variant="outline" className={cn("rounded-full text-[10px]", STATUS_COLORS[o.status] ?? "")}>{o.status}</Badge>
-                  </div>
-                  <p className="mt-2 text-sm font-medium text-slate-900">{o.needs_description || o.order_number}</p>
-                  <div className="flex gap-2 mt-1 text-xs text-slate-400">
-                    <span>{o.phase}</span>
-                    <span>{fmtDate(o.created_at)}</span>
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
+        <TabsContent value="orders" className="space-y-4 mt-4 min-h-[400px]">
+          <FormSection
+            title={l("Aufträge", "Заказы", "Orders")}
+            accessory={<CountBadge>{orders.length}</CountBadge>}
+          >
+            {tabLoading ? (
+              <TabLoader />
+            ) : orders.length === 0 ? (
+              <EmptyCell>
+                {l("Für diesen Patienten gibt es noch keine Aufträge.", "Для этого пациента пока нет заказов.", "No orders have been recorded for this patient yet.")}
+              </EmptyCell>
+            ) : (
+              <div className="grid gap-2 md:grid-cols-2">
+                {orders.map((o) => (
+                  <button
+                    key={o.id}
+                    type="button"
+                    onClick={() => staffGo(`/orders?order=${o.id}`)}
+                    className="rounded-xl border border-border/50 bg-card px-4 py-3 text-left transition-colors hover:border-border hover:bg-muted/30"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="font-mono text-xs text-muted-foreground">{o.order_number}</span>
+                      <Badge variant="outline" className={cn("rounded-full text-[10px]", STATUS_COLORS[o.status] ?? "")}>
+                        {patientDetailStatusLabel(o.status)}
+                      </Badge>
+                    </div>
+                    <p className="mt-2 text-sm font-medium text-foreground">{o.needs_description || o.order_number}</p>
+                    <div className="mt-1 flex gap-2 text-xs text-muted-foreground">
+                      <span>{orderPhaseLabel(o.phase)}</span>
+                      <span>{fmtDate(o.created_at)}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </FormSection>
         </TabsContent>
 
         {/* Appointments tab */}
-        <TabsContent value="appointments" className="mt-4 min-h-[400px]">
-          {tabLoading ? (
-            <div className="flex items-center justify-center py-16"><LoaderCircle className="size-5 animate-spin text-slate-400" /></div>
-          ) : appointments.length === 0 ? (
-            <div className={card("p-8 text-center")}><p className="text-sm text-slate-500">{t.common_not_set}</p></div>
-          ) : (
-            <div className="grid gap-3 md:grid-cols-2">
-              {appointments.map((a) => (
-                <button key={a.id} type="button" onClick={() => staffGo(`/appointments?appointment=${a.id}`)} className={card("p-5 text-left hover:-translate-y-0.5 hover:shadow-lg transition")}>
-                  <div className="flex items-center justify-between">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-xs text-slate-400">{a.apt_type}</span>
-                      <Badge variant="outline" className="rounded-full text-[10px] border-violet-200 bg-violet-50 text-violet-700">
-                        {appointmentCarePathKindLabel(a.care_path_kind)}
+        <TabsContent value="appointments" className="space-y-4 mt-4 min-h-[400px]">
+          <FormSection
+            title={l("Termine", "Приёмы", "Appointments")}
+            accessory={
+              <div className="flex flex-wrap items-center gap-2">
+                <CountBadge>{appointments.length}</CountBadge>
+                {canManage ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-8 rounded-lg gap-1.5"
+                    onClick={() => setAppointmentSheetOpen(true)}
+                  >
+                    <Plus className="size-3.5" />
+                    {t.appointments_new}
+                  </Button>
+                ) : null}
+              </div>
+            }
+          >
+            {tabLoading ? (
+              <TabLoader />
+            ) : appointments.length === 0 ? (
+              <EmptyCell>
+                {l("Für diesen Patienten sind noch keine Termine geplant.", "Для этого пациента пока нет приёмов.", "No appointments are scheduled for this patient yet.")}
+              </EmptyCell>
+            ) : (
+              <div className="grid gap-2 md:grid-cols-2">
+                {appointments.map((a) => (
+                  <button
+                    key={a.id}
+                    type="button"
+                    onClick={() => staffGo(`/appointments?appointment=${a.id}`)}
+                    className="rounded-xl border border-border/50 bg-card px-4 py-3 text-left transition-colors hover:border-border hover:bg-muted/30"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-xs text-muted-foreground">{appointmentTypeLabel(a.apt_type)}</span>
+                        <Badge variant="outline" className="rounded-full text-[10px] border-violet-200 bg-violet-50 text-violet-700">
+                          {appointmentCarePathKindLabel(a.care_path_kind)}
+                        </Badge>
+                      </div>
+                      <Badge variant="outline" className={cn("rounded-full text-[10px]", STATUS_COLORS[a.status] ?? "")}>
+                        {patientDetailStatusLabel(a.status)}
                       </Badge>
                     </div>
-                    <Badge variant="outline" className={cn("rounded-full text-[10px]", STATUS_COLORS[a.status] ?? "")}>{a.status}</Badge>
-                  </div>
-                  <p className="mt-2 text-sm font-medium text-slate-900">{a.title}</p>
-                  <div className="flex gap-2 mt-1 text-xs text-slate-400">
-                    <span>{fmtDate(a.date)}</span>
-                    {a.time_start && <span>{a.time_start}</span>}
-                    {a.provider_name && <span>· {a.provider_name}</span>}
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
+                    <p className="mt-2 text-sm font-medium text-foreground">{a.title}</p>
+                    <div className="mt-1 flex gap-2 text-xs text-muted-foreground">
+                      <span>{fmtDate(a.date)}</span>
+                      {a.time_start && <span>{a.time_start}</span>}
+                      {a.provider_name && <span>· {a.provider_name}</span>}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </FormSection>
+          {id && canManage ? (
+            <PatientAppointmentSheet
+              patientId={id}
+              open={appointmentSheetOpen}
+              onOpenChange={setAppointmentSheetOpen}
+              onSaved={reload}
+            />
+          ) : null}
         </TabsContent>
 
         {/* Documents tab */}
-        <TabsContent value="documents" className="mt-4 min-h-[400px]">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{l("Patientenakten", "Файлы пациента", "Patient files")}</p>
-              <h3 className="mt-1 text-sm font-semibold text-slate-950">{l("Dokumente zu diesem Patienten", "Документы этого пациента", "Documents linked to this patient")}</h3>
+        <TabsContent value="documents" className="space-y-4 mt-4 min-h-[400px]">
+          <WorkspaceSectionIntro
+            title={l("Dokumenten-Cockpit", "Панель документов", "Documents cockpit")}
+            description={l(
+              "Pflichtdokumente, Uploads und Sichtbarkeit für diesen Patienten in einer eigenen Dokumentenzone.",
+              "Обязательные документы, загрузки и видимость по этому пациенту в отдельной зоне документов.",
+              "Required documents, uploads and visibility for this patient in a dedicated document zone.",
+            )}
+            accessory={<CountBadge>{filteredDocuments.length}</CountBadge>}
+          />
+
+          <FormSection
+            title={l("Überblick", "Обзор", "Overview")}
+            accessory={<CountBadge>{documents.length} {l("Dateien", "файлов", "files")}</CountBadge>}
+          >
+            <div className="grid gap-3 md:grid-cols-3">
+              <StatCard
+                label={l("Dokumente gesamt", "Всего документов", "Total documents")}
+                value={documents.length}
+                description={l(
+                  "Alle Dateien, die direkt mit diesem Patienten verknüpft sind.",
+                  "Все файлы, напрямую связанные с этим пациентом.",
+                  "All files linked directly to this patient.",
+                )}
+              />
+              <StatCard
+                label={l("Pflichtdokumente erfüllt", "Обязательные документы выполнены", "Required docs fulfilled")}
+                value={
+                  documentAlerts?.configured_rule_count
+                    ? `${requiredDocumentFulfilledCount}/${documentAlerts.configured_rule_count}`
+                    : requiredDocumentFulfilledCount
+                }
+                description={l(
+                  "Abdeckung des minimalen Dokumentenpakets für Aufnahme und Compliance.",
+                  "Покрытие минимального пакета документов для intake и compliance.",
+                  "Coverage of the minimum document pack for intake and compliance.",
+                )}
+              />
+              <StatCard
+                label={l("Dokumentarten", "Типы документов", "Document types")}
+                value={documentCategoryOptions.length}
+                description={l(
+                  "Wie viele Kategorien aktuell im Profil dieses Patienten vorkommen.",
+                  "Сколько категорий документов сейчас присутствует в профиле пациента.",
+                  "How many document categories currently appear in this patient profile.",
+                )}
+              />
             </div>
-            <div className="flex flex-wrap gap-2">
-              {canOpenDocumentsWorkspace ? (
-                <Button type="button" variant="outline" className="rounded-xl" onClick={() => staffGo(`/documents?patient=${id}`)}>
-                  {l("Bereich öffnen", "Открыть раздел", "Open workspace")}
-                </Button>
-              ) : null}
-              {canManageDocuments ? (
-                <Button type="button" className="rounded-xl bg-slate-950 text-white hover:bg-slate-800" onClick={() => setDocumentUploadOpen(true)}>
-                  <Plus className="mr-2 size-4" />
-                  {l("Dokument hochladen", "Загрузить документ", "Upload document")}
-                </Button>
-              ) : null}
-            </div>
-          </div>
+          </FormSection>
+
           {!tabLoading && documentAlerts && documentAlerts.configured_rule_count > 0 ? (
             <div
               className={cn(
-                "mb-4 rounded-[1.6rem] border px-5 py-4",
+                "rounded-xl border px-4 py-3",
                 documentAlerts.document_pack_complete
-                  ? "border-emerald-200 bg-emerald-50"
-                  : "border-amber-200 bg-amber-50"
+                  ? "border-emerald-200 bg-emerald-50/70"
+                  : "border-amber-200 bg-amber-50/70"
               )}
             >
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                    {l("Erforderliche Dokumente", "Обязательные документы", "Required documents")}
-                  </p>
-                  <h4 className="mt-1 text-sm font-semibold text-slate-950">
+                  <h4 className="text-sm font-semibold text-foreground">
                     {documentAlerts.document_pack_complete
                       ? l("Das minimale Dokumentenpaket ist vollständig", "Минимальный пакет документов собран", "Minimum document pack is complete")
                       : l(
@@ -3830,15 +4550,15 @@ export function PatientDetailPage() {
                     <Badge
                       key={item.key}
                       variant="outline"
-                      className="rounded-full border-amber-300 bg-white text-amber-800"
+                      className="rounded-full border-amber-300 bg-card text-amber-800"
                     >
-                      {item.label}
+                      {localizeRequiredDocumentLabel(item.key, item.label, l)}
                     </Badge>
                   ))}
                 </div>
               ) : null}
               {documentAlerts.out_of_sync ? (
-                <p className="mt-3 text-xs text-slate-600">
+                <p className="mt-3 text-xs text-muted-foreground">
                   {l(
                     "Das gespeicherte Compliance-Flag für „Dokumentenpaket vollständig“ stimmt nicht mit dem aktuellen Dokumentbestand überein.",
                     "Сохранённый флаг compliance для «пакет документов собран» не совпадает с текущим составом документов.",
@@ -3848,472 +4568,794 @@ export function PatientDetailPage() {
               ) : null}
             </div>
           ) : null}
-          {tabLoading ? (
-            <div className="flex items-center justify-center py-16"><LoaderCircle className="size-5 animate-spin text-slate-400" /></div>
-          ) : documents.length === 0 ? (
-            <div className={card("p-8 text-center")}><p className="text-sm text-slate-500">{t.common_not_set}</p></div>
-          ) : (
-            <div className={card("overflow-hidden")}>
-              <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr] gap-3 px-5 py-3 border-b bg-slate-900">
-                {[t.documents_filename, t.appointments_type, t.users_status, t.patients_assigned_by, t.users_created].map((h) => (
-                  <span key={h} className="text-[11px] font-semibold uppercase tracking-wider text-white/80">{h}</span>
-                ))}
-              </div>
-              {documents.map((doc, idx) => (
-                <div
-                  key={doc.id}
-                  className={cn(
-                    "grid grid-cols-[2fr_1fr_1fr_1fr_1fr] gap-3 items-center px-5 py-3 hover:bg-slate-50/60 transition-colors cursor-pointer",
-                    idx < documents.length - 1 && "border-b border-border/30"
-                  )}
-                  onClick={() => window.open(buildApiUrl(`/documents/${doc.id}/download`), "_blank")}
-                >
-                  <span className="text-sm font-medium text-slate-900 truncate">{doc.filename}</span>
-                  <span className="text-xs text-slate-500">{doc.category ?? t.common_not_set}</span>
-                  <Badge variant="outline" className={cn("rounded-full text-[10px] w-fit", STATUS_COLORS[doc.status ?? ""] ?? "border-slate-200 bg-slate-50 text-slate-600")}>
-                    {doc.status ? patientDetailStatusLabel(doc.status) : t.common_not_set}
-                  </Badge>
-                  <span className="text-xs text-slate-500">{doc.uploaded_by_name ?? t.common_unknown}</span>
-                  <span className="text-xs text-slate-400">{fmtDate(doc.created_at)}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </TabsContent>
 
-        {canViewContracts ? <TabsContent value="contracts" className="mt-4 min-h-[400px]">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{l("Rahmenabrechnung", "Рамочное биллинг-сопровождение", "Framework billing")}</p>
-              <h3 className="mt-1 text-sm font-semibold text-slate-950">{l("Verträge dieses Patienten", "Договоры этого пациента", "Contracts for this patient")}</h3>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="outline" className="rounded-xl" onClick={() => staffGo(`/contracts?patient=${id}`)}>
-                {l("Bereich öffnen", "Открыть раздел", "Open workspace")}
-              </Button>
-              {canManageContracts ? (
-                <Button type="button" className="rounded-xl bg-slate-950 text-white hover:bg-slate-800" onClick={() => setContractCreateOpen(true)}>
-                  <Plus className="mr-2 size-4" />
-                  {l("Neuer Vertrag", "Новый договор", "New contract")}
-                </Button>
-              ) : null}
-            </div>
-          </div>
-          {tabLoading ? (
-            <div className="flex items-center justify-center py-16"><LoaderCircle className="size-5 animate-spin text-slate-400" /></div>
-          ) : contracts.length === 0 ? (
-            <div className={card("p-8 text-center")}><p className="text-sm text-slate-500">{l("Noch keine Rahmenverträge.", "Рамочных договоров пока нет.", "No framework contracts yet.")}</p></div>
-          ) : (
-            <div className="grid gap-3 md:grid-cols-2">
-              {contracts.map((contract) => (
-                <div
-                  key={contract.id}
-                  className={card("p-5")}
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-xs font-mono text-slate-400">{contract.contract_number}</span>
-                    <Badge variant="outline" className={cn("rounded-full text-[10px]", STATUS_COLORS[contract.status] ?? "")}>
-                      {patientDetailStatusLabel(contract.status)}
-                    </Badge>
-                  </div>
-                  <div className="mt-3 grid gap-2 text-sm text-slate-600">
-                    <p>{l("Unterzeichnet", "Подписано", "Signed")}: {fmtDateTime(contract.signed_at, t.common_not_set)}</p>
-                    <p>{l("Gültig ab", "Действует с", "Valid from")}: {fmtDate(contract.valid_from, t.common_not_set)}</p>
-                    <p>{l("Gültig bis", "Действует до", "Valid to")}: {fmtDate(contract.valid_to, t.common_not_set)}</p>
-                  </div>
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <Button type="button" variant="outline" className="rounded-xl" onClick={() => staffGo(`/contracts?contract=${contract.id}`)}>
-                      {l("Öffnen", "Открыть", "Open")}
-                    </Button>
-                    {canManageContracts ? (
-                      <Button type="button" variant="outline" className="rounded-xl" onClick={() => openContractStatusEditor(contract)}>
-                        {l("Status aktualisieren", "Обновить статус", "Update status")}
-                      </Button>
-                    ) : null}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </TabsContent> : null}
-
-        {canViewInvoices ? <TabsContent value="invoices" className="mt-4 min-h-[400px]">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{l("Patientenabrechnung", "Биллинг пациента", "Patient billing")}</p>
-              <h3 className="mt-1 text-sm font-semibold text-slate-950">{l("Rechnungen und Zahlungsnachverfolgung", "Счета и контроль оплат", "Invoices and payment follow-up")}</h3>
-            </div>
-            <Button type="button" variant="outline" className="rounded-xl" onClick={() => staffGo(`/invoices?patient=${id}`)}>
-              {l("Bereich öffnen", "Открыть раздел", "Open workspace")}
-            </Button>
-          </div>
-          {tabLoading ? (
-            <div className="flex items-center justify-center py-16"><LoaderCircle className="size-5 animate-spin text-slate-400" /></div>
-          ) : invoices.length === 0 ? (
-            <div className={card("p-8 text-center")}><p className="text-sm text-slate-500">{l("Noch keine Rechnungen.", "Счетов пока нет.", "No invoices yet.")}</p></div>
-          ) : (
-            <div className="space-y-3">
-              {invoices.map((invoice) => (
-                <div
-                  key={invoice.id}
-                  className={card("w-full p-5 text-left")}
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-xs font-mono text-slate-400">{invoice.invoice_number}</span>
-                      <Badge variant="outline" className={cn("rounded-full text-[10px]", STATUS_COLORS[invoice.status] ?? "")}>
-                        {patientDetailStatusLabel(invoice.status)}
-                      </Badge>
-                    </div>
-                    <p className="text-xs text-slate-400">{fmtDateTime(invoice.issued_at)}</p>
-                  </div>
-                  <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4 text-sm text-slate-600">
-                    <p>{l("Typ", "Тип", "Type")}: {invoice.invoice_type}</p>
-                    <p>{l("Gesamt", "Итого", "Total")}: {fmtMoney(invoice.total_gross)}</p>
-                    <p>{l("Bezahlt", "Оплачено", "Paid")}: {fmtMoney(invoice.paid_amount)}</p>
-                    <p>{l("Offen", "Остаток", "Open")}: {fmtMoney(invoice.balance_due)}</p>
-                    <p>{l("Fällig", "Срок", "Due")}: {fmtDate(invoice.due_date, t.common_not_set)}</p>
-                    <p>{l("Auftrag", "Заказ", "Order")}: {invoice.order_number ?? t.common_not_set}</p>
-                    <p>{l("Angebot", "Смета", "Quote")}: {invoice.quote_number ?? t.common_not_set}</p>
-                  </div>
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <Button type="button" variant="outline" className="rounded-xl" onClick={() => staffGo(`/invoices?invoice=${invoice.id}`)}>
-                      {l("Öffnen", "Открыть", "Open")}
-                    </Button>
-                    {canManageInvoices ? (
-                      <Button type="button" variant="outline" className="rounded-xl" onClick={() => openInvoiceManager(invoice)}>
-                        {l("Billing verwalten", "Управлять биллингом", "Manage billing")}
-                      </Button>
-                    ) : null}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </TabsContent> : null}
-
-        <TabsContent value="workflow" className="mt-4 min-h-[400px]">
-          {tabLoading ? (
-            <div className="flex items-center justify-center py-16">
-              <LoaderCircle className="size-5 animate-spin text-slate-400" />
-            </div>
-          ) : !workflowChecklist || workflowChecklist.items.length === 0 ? (
-            <div className={card("p-8 text-center")}>
-              <p className="text-sm text-slate-500">
-                No patient workflow checklist yet.
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <div className="grid gap-3 md:grid-cols-3">
-                <div className={card("p-4")}>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
-                    Open items
-                  </p>
-                  <p className="mt-3 text-2xl font-semibold text-slate-950">
-                    {workflowChecklist.open_count}
-                  </p>
-                  <p className="mt-1 text-xs text-slate-500">
-                    Live patient-bound workflow tasks.
-                  </p>
-                </div>
-                <div className={card("p-4")}>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
-                    Completed
-                  </p>
-                  <p className="mt-3 text-2xl font-semibold text-slate-950">
-                    {workflowChecklist.completed_count}
-                  </p>
-                  <p className="mt-1 text-xs text-slate-500">
-                    Checklist steps already closed.
-                  </p>
-                </div>
-                <div className={card("p-4")}>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
-                    Groups
-                  </p>
-                  <p className="mt-3 text-2xl font-semibold text-slate-950">
-                    {workflowChecklistGroups.length}
-                  </p>
-                  <p className="mt-1 text-xs text-slate-500">
-                    Patient intake plus custom workstreams.
-                  </p>
-                </div>
-              </div>
-
-              {workflowChecklistGroups.map((group) => (
-                <div key={group.key} className={card("p-5")}>
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                        {group.label}
-                      </p>
-                      <h3 className="mt-1 text-sm font-semibold text-slate-950">
-                        {group.items.filter((item) => !item.is_completed).length} open /{" "}
-                        {group.items.length} total
-                      </h3>
-                    </div>
-                    <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
-                      {group.items.length} items
-                    </Badge>
-                  </div>
-                  <div className="mt-4 space-y-3">
-                    {group.items.map((item) => (
-                      <div
-                        key={item.id}
-                        className={cn(
-                          "rounded-2xl border px-4 py-4",
-                          item.is_completed
-                            ? "border-emerald-200 bg-emerald-50/60"
-                            : "border-slate-200 bg-white"
-                        )}
-                      >
-                        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <p className="text-sm font-medium text-slate-950">
-                                {item.item_text}
-                              </p>
-                              <Badge
-                                variant="outline"
-                                className={cn(
-                                  "rounded-full text-[10px]",
-                                  priorityBadgeClass(item.priority)
-                                )}
-                              >
-                                {priorityLabel(item.priority)}
-                              </Badge>
-                              <Badge
-                                variant="outline"
-                                className={cn(
-                                  "rounded-full text-[10px]",
-                                  item.is_completed
-                                    ? "border-emerald-200 bg-emerald-100 text-emerald-800"
-                                    : STATUS_COLORS[item.linked_task_status ?? "open"] ??
-                                        "border-slate-200 bg-slate-50 text-slate-600"
-                                )}
-                              >
-                                {item.is_completed
-                                  ? patientDetailStatusLabel("completed")
-                                  : patientDetailStatusLabel(item.linked_task_status ?? "open")}
-                              </Badge>
-                            </div>
-                            <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-500">
-                              <span>
-                                {l("Verantwortlich", "Ответственный", "Owner")}:{" "}
-                                {item.owner_name
-                                  ? `${item.owner_name} · ${roleLbl(
-                                      item.owner_user_role ?? item.owner_role,
-                                      tr
-                                    )}`
-                                  : roleLbl(item.owner_role, tr)}
-                              </span>
-                              <span>
-                                {l("Fällig", "Срок", "Due")}: {fmtDateTime(item.due_date, t.common_not_set)}
-                              </span>
-                              <span>
-                                {l("Erstellt", "Создано", "Created")}: {fmtDateTime(item.created_at, t.common_not_set)}
-                              </span>
-                              {item.completed_at ? (
-                                <span>
-                                  {l("Abgeschlossen", "Завершено", "Completed")}: {fmtDateTime(item.completed_at, t.common_not_set)}
-                                </span>
-                              ) : null}
-                            </div>
-                          </div>
-                          {!item.is_completed ? (
-                            <Button
-                              type="button"
-                              variant="outline"
-                              className="rounded-xl"
-                              disabled={workflowBusy}
-                              onClick={() => void handleCompleteWorkflowItem(item.id)}
-                            >
-                              {l("Abschließen", "Завершить", "Complete")}
-                            </Button>
-                          ) : null}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {canManageWorkflowChecklist ? (
-            <form onSubmit={handleAddWorkflowItem} className={cn(card("mt-4 p-5"), "space-y-4")}>
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                  {l("Workflow-Element hinzufügen", "Добавить элемент workflow", "Add workflow item")}
-                </p>
-                <h3 className="mt-1 text-sm font-semibold text-slate-950">
-                  {l(
-                    "Erweitern Sie die Checkliste des Patienten, ohne das Profil zu verlassen.",
-                    "Расширяйте чеклист пациента, не покидая профиль.",
-                    "Extend the patient checklist without leaving the profile.",
-                  )}
-                </h3>
-              </div>
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2 md:col-span-2">
-                  <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-workflow-item-text">{l("Checklistenpunkt", "Пункт чеклиста", "Checklist item")}</Label>
-                  <Input
-                    id="patient-workflow-item-text"
-                    value={workflowForm.itemText}
-                    onChange={(event) =>
-                      setWorkflowForm((current) => ({
-                        ...current,
-                        itemText: event.target.value,
-                      }))
-                    }
-                    className="h-10 rounded-xl bg-slate-50"
-                    placeholder={l(
-                      "Nachverfolgung, PM-Anruf, Concierge-Handoff dokumentieren...",
-                      "Документируйте follow-up, звонок PM, передачу concierge...",
-                      "Document follow-up, PM call, concierge handoff...",
-                    )}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-workflow-owner">{l("Verantwortlich", "Ответственный", "Owner")}</Label>
-                  <select
-                    id="patient-workflow-owner"
-                    className={selectClassName}
-                    value={workflowForm.ownerUserId}
-                    onChange={(event) =>
-                      setWorkflowForm((current) => ({
-                        ...current,
-                        ownerUserId: event.target.value,
-                      }))
-                    }
+          <FormSection
+            title={l("Dokumente zu diesem Patienten", "Документы этого пациента", "Documents linked to this patient")}
+            accessory={
+              <div className="flex flex-wrap items-center gap-2">
+                <CountBadge>{documents.length}</CountBadge>
+                {canManageDocuments ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-8 rounded-lg gap-1.5"
+                    onClick={() => setDocumentUploadOpen(true)}
                   >
-                    <option value="">{l("Aktueller Benutzer", "Текущий пользователь", "Current user")}</option>
-                    {activeWorkflowAssignees.map((item) => (
-                      <option key={item.user_id} value={item.user_id}>
-                        {item.user_name} · {roleLbl(item.user_role, tr)}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-workflow-priority">{l("Priorität", "Приоритет", "Priority")}</Label>
-                  <select
-                    id="patient-workflow-priority"
-                    className={selectClassName}
-                    value={workflowForm.priority}
-                    onChange={(event) =>
-                      setWorkflowForm((current) => ({
-                        ...current,
-                        priority: event.target.value,
-                      }))
-                    }
-                  >
-                    {["low", "normal", "high", "urgent"].map((priority) => (
-                      <option key={priority} value={priority}>
-                        {priorityLabel(priority)}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-workflow-due">{l("Fällig am", "Срок до", "Due at")}</Label>
-                  <Input
-                    id="patient-workflow-due"
-                    type="datetime-local"
-                    value={workflowForm.dueDate}
-                    onChange={(event) =>
-                      setWorkflowForm((current) => ({
-                        ...current,
-                        dueDate: event.target.value,
-                      }))
-                    }
-                    className="h-10 rounded-xl bg-slate-50"
-                  />
-                </div>
+                    <Plus className="size-3.5" />
+                    {l("Dokument hochladen", "Загрузить документ", "Upload document")}
+                  </Button>
+                ) : null}
               </div>
-              <div className="flex justify-end">
-                <Button
-                  type="submit"
-                  className="rounded-xl bg-slate-950 text-white hover:bg-slate-800"
-                  disabled={workflowBusy || !workflowForm.itemText.trim()}
-                >
-                  {workflowBusy ? (
-                    <LoaderCircle className="mr-2 size-4 animate-spin" />
-                  ) : null}
-                  {l("Workflow-Element hinzufügen", "Добавить элемент workflow", "Add workflow item")}
-                </Button>
-              </div>
-            </form>
-          ) : null}
-        </TabsContent>
-
-        <TabsContent value="timeline" className="mt-4 min-h-[400px]">
-          {tabLoading ? (
-            <div className="flex items-center justify-center py-16"><LoaderCircle className="size-5 animate-spin text-slate-400" /></div>
-          ) : timeline.length === 0 ? (
-            <div className={card("p-8 text-center")}><p className="text-sm text-slate-500">{l("Noch keine Zeitachsen-Ereignisse.", "Событий таймлайна пока нет.", "No timeline events yet.")}</p></div>
-          ) : (
-            <div className="space-y-4">
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                <div className={card("p-4")}>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">{l("Ereignisse gesamt", "Всего событий", "Total events")}</p>
-                  <p className="mt-3 text-2xl font-semibold text-slate-950">{timelineSummary.total}</p>
-                  <p className="mt-1 text-xs text-slate-500">{l("Alle erfassten Touchpoints im Patienten-Workflow.", "Все зафиксированные точки касания в workflow пациента.", "All recorded patient workflow touchpoints.")}</p>
-                </div>
-                <div className={card("p-4")}>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">{l("Offene Punkte", "Открытые пункты", "Open items")}</p>
-                  <p className="mt-3 text-2xl font-semibold text-slate-950">{timelineSummary.open}</p>
-                  <p className="mt-1 text-xs text-slate-500">{l("Ereignisse, die noch operative Nachverfolgung erfordern.", "События, которые всё ещё требуют операционного follow-up.", "Events that still require operational follow-through.")}</p>
-                </div>
-                <div className={card("p-4")}>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">{l("Letzte 30 Tage", "Последние 30 дней", "Last 30 days")}</p>
-                  <p className="mt-3 text-2xl font-semibold text-slate-950">{timelineSummary.recent}</p>
-                  <p className="mt-1 text-xs text-slate-500">{l("Aktuelle Bewegung über Behandlung, Billing und Dokumente.", "Недавняя активность по лечению, billing и документам.", "Recent movement across care, billing and documents.")}</p>
-                </div>
-                <div className={card("p-4")}>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">{l("Aktive Bereiche", "Активные домены", "Domains active")}</p>
-                  <p className="mt-3 text-2xl font-semibold text-slate-950">{timelineSummary.entityCounts.length}</p>
-                  <p className="mt-1 text-xs text-slate-500">{l("Eindeutige Workstreams, die diesen Patienten bereits berühren.", "Уникальные потоки работы, которые уже затрагивают этого пациента.", "Unique workstreams already touching this patient.")}</p>
-                </div>
-              </div>
-
-              <div className={card("p-4")}>
+            }
+          >
+            {documents.length > 0 ? (
+              <FormSection
+                title={l("Filter", "Фильтры", "Filters")}
+                accessory={
+                  hasDocumentFilters ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 rounded-lg"
+                      onClick={() => {
+                        setDocumentStatusFilter("all");
+                        setDocumentCategoryFilter("all");
+                      }}
+                    >
+                      {l("Filter zurücksetzen", "Сбросить фильтры", "Reset filters")}
+                    </Button>
+                  ) : null
+                }
+              >
                 <div className="flex flex-wrap gap-2">
                   <Button
                     type="button"
-                    variant={timelineEntityFilter === "all" ? "default" : "outline"}
-                    className={cn(
-                      "rounded-full",
-                      timelineEntityFilter === "all"
-                        ? "bg-slate-950 text-white hover:bg-slate-800"
-                        : ""
-                    )}
-                    onClick={() => setTimelineEntityFilter("all")}
+                    size="sm"
+                    variant={documentStatusFilter === "all" ? "default" : "outline"}
+                    className="h-8 rounded-full"
+                    onClick={() => setDocumentStatusFilter("all")}
                   >
-                    {l("Alle", "Все", "All")} · {timelineTotal}
+                    {l("Alle Status", "Все статусы", "All statuses")} · {documents.length}
+                  </Button>
+                  {documentStatusOptions.map((status) => {
+                    const count = documents.filter((item) => (item.status ?? "") === status).length;
+                    return (
+                      <Button
+                        key={status}
+                        type="button"
+                        size="sm"
+                        variant={documentStatusFilter === status ? "default" : "outline"}
+                        className="h-8 rounded-full"
+                        onClick={() => setDocumentStatusFilter(status)}
+                      >
+                        {patientDetailStatusLabel(status)} · {count}
+                      </Button>
+                    );
+                  })}
+                </div>
+                <div className="grid gap-3 md:grid-cols-[minmax(0,260px)_auto]">
+                  <ShadSelect value={documentCategoryFilter} onValueChange={(value) => setDocumentCategoryFilter(value ?? "all")}>
+                    <SelectTrigger className={cn("w-full", formInputClassName)}>
+                      <SelectValue>
+                        {documentCategoryFilter === "all"
+                          ? l("Alle Dokumentarten", "Все типы документов", "All document types")
+                          : localizeDocumentCode(documentCategoryFilter, l)}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">{l("Alle Dokumentarten", "Все типы документов", "All document types")}</SelectItem>
+                      {documentCategoryOptions.map((category) => (
+                        <SelectItem key={category} value={category}>
+                          {localizeDocumentCode(category, l)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </ShadSelect>
+                  <div className="flex items-center text-xs text-muted-foreground">
+                    {l("Angezeigt", "Показано", "Showing")} {filteredDocuments.length} {l("von", "из", "of")} {documents.length}
+                  </div>
+                </div>
+              </FormSection>
+            ) : null}
+
+            {tabLoading ? (
+              <TabLoader />
+            ) : documents.length === 0 ? (
+              <EmptyCell>
+                {l("Zu diesem Patienten wurden noch keine Dokumente hochgeladen.", "Для этого пациента пока не загружены документы.", "No documents have been uploaded for this patient yet.")}
+              </EmptyCell>
+            ) : filteredDocuments.length === 0 ? (
+              <EmptyCell>
+                {l("Kein Dokument entspricht den aktuellen Filtern.", "Текущим фильтрам не соответствует ни один документ.", "No document matches the current filters.")}
+              </EmptyCell>
+            ) : (
+              <>
+                <div className="space-y-2 md:hidden">
+                  {filteredDocuments.map((doc) => (
+                    <a
+                      key={doc.id}
+                      href={buildApiUrl(`/documents/${doc.id}/download`)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block rounded-xl border border-border/50 bg-card px-4 py-3 transition-colors hover:border-border hover:bg-muted/30"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium text-foreground">{doc.filename}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">{doc.category ? localizeDocumentCode(doc.category, l) : t.common_not_set}</p>
+                        </div>
+                        <Badge variant="outline" className={cn("shrink-0 rounded-full text-[10px]", STATUS_COLORS[doc.status ?? ""] ?? "border-border/60 bg-muted/25 text-muted-foreground")}>
+                          {doc.status ? patientDetailStatusLabel(doc.status) : t.common_not_set}
+                        </Badge>
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                        <span>{doc.uploaded_by_name ?? t.common_unknown}</span>
+                        <span>· {fmtDate(doc.created_at)}</span>
+                      </div>
+                    </a>
+                  ))}
+                </div>
+                <div className="hidden overflow-hidden rounded-xl border border-border/50 bg-card md:block">
+                  <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr] gap-3 border-b border-border/60 bg-muted/40 px-4 py-2.5">
+                    {[t.documents_filename, t.appointments_type, t.users_status, t.patients_assigned_by, t.users_created].map((h) => (
+                      <span key={h} className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">{h}</span>
+                    ))}
+                  </div>
+                  {filteredDocuments.map((doc, idx) => (
+                    <a
+                      key={doc.id}
+                      href={buildApiUrl(`/documents/${doc.id}/download`)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className={cn(
+                        "grid grid-cols-[2fr_1fr_1fr_1fr_1fr] gap-3 items-center px-4 py-2.5 transition-colors hover:bg-muted/40",
+                        idx < filteredDocuments.length - 1 && "border-b border-border/40"
+                      )}
+                    >
+                      <span className="min-w-0 truncate text-sm font-medium text-foreground">{doc.filename}</span>
+                      <span className="text-xs text-muted-foreground">{doc.category ? localizeDocumentCode(doc.category, l) : t.common_not_set}</span>
+                      <Badge variant="outline" className={cn("rounded-full text-[10px] w-fit", STATUS_COLORS[doc.status ?? ""] ?? "border-border/60 bg-muted/25 text-muted-foreground")}>
+                        {doc.status ? patientDetailStatusLabel(doc.status) : t.common_not_set}
+                      </Badge>
+                      <span className="text-xs text-muted-foreground">{doc.uploaded_by_name ?? t.common_unknown}</span>
+                      <span className="text-xs text-muted-foreground/80">{fmtDate(doc.created_at)}</span>
+                    </a>
+                  ))}
+                </div>
+              </>
+            )}
+          </FormSection>
+        </TabsContent>
+
+        {canViewContracts ? <TabsContent value="contracts" className="space-y-4 mt-4 min-h-[400px]">
+          <WorkspaceSectionIntro
+            title={l("Vertrags-Cockpit", "Панель договоров", "Contracts cockpit")}
+            description={l(
+              "Lifecycle, Gültigkeit und unmittelbare Pflege von Verträgen, ohne das Patientenprofil zu verlassen.",
+              "Жизненный цикл, сроки действия и быстрое управление договорами без выхода из профиля пациента.",
+              "Lifecycle, validity and direct contract management without leaving the patient profile.",
+            )}
+            accessory={<CountBadge>{contracts.length}</CountBadge>}
+          />
+
+          <FormSection
+            title={l("Portfolio-Überblick", "Обзор портфеля", "Portfolio overview")}
+            accessory={<CountBadge>{contracts.length} {l("Verträge", "договоров", "contracts")}</CountBadge>}
+          >
+            <div className="grid gap-3 md:grid-cols-3">
+              <StatCard
+                label={l("Aktiv oder unterzeichnet", "Активные или подписанные", "Active or signed")}
+                value={contractSignedCount}
+                description={l(
+                  "Verträge, die bereits wirksam sind oder unterzeichnet wurden.",
+                  "Договоры, которые уже вступили в силу или были подписаны.",
+                  "Contracts that are already effective or have been signed.",
+                )}
+              />
+              <StatCard
+                label={l("In Vorbereitung", "В подготовке", "In preparation")}
+                value={contractPendingCount}
+                description={l(
+                  "Entwürfe oder versandte Verträge, die noch nicht finalisiert wurden.",
+                  "Черновики или отправленные договоры, которые ещё не финализированы.",
+                  "Draft or sent contracts that still need to be finalized.",
+                )}
+              />
+              <StatCard
+                label={l("Laufen bald ab", "Скоро истекают", "Expiring soon")}
+                value={contractExpiringSoonCount}
+                description={l(
+                  "Verträge mit Enddatum innerhalb der nächsten 30 Tage.",
+                  "Договоры, у которых срок действия заканчивается в ближайшие 30 дней.",
+                  "Contracts with an end date in the next 30 days.",
+                )}
+              />
+            </div>
+          </FormSection>
+
+          <FormSection
+            title={l("Verträge dieses Patienten", "Договоры этого пациента", "Contracts for this patient")}
+            accessory={
+              <div className="flex flex-wrap items-center gap-2">
+                <CountBadge>{contracts.length}</CountBadge>
+                {canManageContracts ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-8 rounded-lg gap-1.5"
+                    onClick={() => setContractCreateOpen(true)}
+                  >
+                    <Plus className="size-3.5" />
+                    {l("Neuer Vertrag", "Новый договор", "New contract")}
+                  </Button>
+                ) : null}
+              </div>
+            }
+          >
+            {tabLoading ? (
+              <TabLoader />
+            ) : contracts.length === 0 ? (
+              <EmptyCell>{l("Für diesen Patienten wurde noch kein Vertrag angelegt.", "Для этого пациента пока не создано ни одного договора.", "No contract has been created for this patient yet.")}</EmptyCell>
+            ) : (
+              <div className="grid gap-2 md:grid-cols-2">
+                {contracts.map((contract) => (
+                  <div
+                    key={contract.id}
+                    className="rounded-xl border border-border/50 bg-card px-4 py-3 space-y-2.5"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="font-mono text-xs text-muted-foreground">{contract.contract_number}</span>
+                      <Badge variant="outline" className={cn("rounded-full text-[10px]", STATUS_COLORS[contract.status] ?? "")}>
+                        {patientDetailStatusLabel(contract.status)}
+                      </Badge>
+                    </div>
+                    <div className="grid gap-1 text-sm text-muted-foreground">
+                      <p>{l("Unterzeichnet", "Подписано", "Signed")}: {fmtDateTime(contract.signed_at, t.common_not_set)}</p>
+                      <p>{l("Gültig ab", "Действует с", "Valid from")}: {fmtDate(contract.valid_from, t.common_not_set)}</p>
+                      <p>{l("Gültig bis", "Действует до", "Valid to")}: {fmtDate(contract.valid_to, t.common_not_set)}</p>
+                    </div>
+                    {contract.valid_to ? (
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "rounded-full text-[10px] w-fit",
+                          isContractExpiringSoon(contract)
+                            ? "border-amber-200 bg-amber-50 text-amber-700"
+                            : "border-border/60 bg-muted/25 text-muted-foreground"
+                        )}
+                      >
+                        {isContractExpiringSoon(contract)
+                          ? l("Läuft bald ab", "Скоро истекает", "Expiring soon")
+                          : l("Gültigkeitsfenster gesetzt", "Срок действия задан", "Validity window set")}
+                      </Badge>
+                    ) : null}
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 rounded-lg"
+                        onClick={() => staffGo(`/contracts?contract=${contract.id}`)}
+                      >
+                        {l("Öffnen", "Открыть", "Open")}
+                      </Button>
+                      {canManageContracts ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 rounded-lg"
+                          onClick={() => openContractStatusEditor(contract)}
+                        >
+                          {l("Status aktualisieren", "Обновить статус", "Update status")}
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </FormSection>
+        </TabsContent> : null}
+
+        {canViewInvoices ? <TabsContent value="invoices" className="space-y-4 mt-4 min-h-[400px]">
+          <WorkspaceSectionIntro
+            title={l("Billing-Cockpit", "Панель биллинга", "Billing cockpit")}
+            description={l(
+              "Zahlungsstatus, offene Beträge und Eskalation direkt im Kontext des Patienten.",
+              "Статусы оплат, открытые суммы и эскалация прямо в контексте пациента.",
+              "Payment status, outstanding balances and escalation directly in patient context.",
+            )}
+            accessory={<CountBadge>{invoices.length}</CountBadge>}
+          />
+
+          <FormSection
+            title={l("Finanzüberblick", "Финансовый обзор", "Financial overview")}
+            accessory={<CountBadge>{invoices.length} {l("Rechnungen", "счетов", "invoices")}</CountBadge>}
+          >
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <StatCard
+                label={l("Offene Rechnungen", "Открытые счета", "Open invoices")}
+                value={invoiceOpenCount}
+                description={l(
+                  "Rechnungen mit verbleibendem Saldo.",
+                  "Счета, по которым ещё остаётся остаток.",
+                  "Invoices with a remaining balance.",
+                )}
+              />
+              <StatCard
+                label={l("Überfällig", "Просрочено", "Overdue")}
+                value={invoiceOverdueCount}
+                description={l(
+                  "Rechnungen, die sofortige Nachverfolgung erfordern.",
+                  "Счета, требующие немедленного follow-up.",
+                  "Invoices that require immediate follow-up.",
+                )}
+              />
+              <StatCard
+                label={l("Offener Betrag", "Открытая сумма", "Outstanding amount")}
+                value={fmtMoney(String(invoiceOutstandingAmount))}
+                description={l(
+                  "Noch nicht bezahlte Gesamtsumme in diesem Patientenprofil.",
+                  "Общая сумма, которая ещё не оплачена по этому профилю пациента.",
+                  "Total amount still unpaid in this patient profile.",
+                )}
+              />
+              <StatCard
+                label={l("Bezahlt", "Оплачено", "Paid")}
+                value={fmtMoney(String(invoicePaidAmountTotal))}
+                description={l(
+                  "Bereits vereinnahmter Betrag über alle Rechnungen.",
+                  "Сумма, уже оплаченная по всем счетам.",
+                  "Amount already collected across all invoices.",
+                )}
+              />
+            </div>
+          </FormSection>
+
+          <FormSection
+            title={l("Rechnungen und Zahlungsnachverfolgung", "Счета и контроль оплат", "Invoices and payment follow-up")}
+            accessory={<CountBadge>{invoices.length}</CountBadge>}
+          >
+            {tabLoading ? (
+              <TabLoader />
+            ) : invoices.length === 0 ? (
+              <EmptyCell>
+                {l("Für diesen Patienten wurden noch keine Rechnungen erstellt.", "Для этого пациента пока не создано ни одного счёта.", "No invoices have been issued for this patient yet.")}
+              </EmptyCell>
+            ) : (
+              <div className="space-y-2">
+                {invoices.map((invoice) => (
+                  <div
+                    key={invoice.id}
+                    className="rounded-xl border border-border/50 bg-card px-4 py-3 space-y-2.5"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-mono text-xs text-muted-foreground">{invoice.invoice_number}</span>
+                        <Badge variant="outline" className={cn("rounded-full text-[10px]", STATUS_COLORS[invoice.status] ?? "")}>
+                          {patientDetailStatusLabel(invoice.status)}
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground/80">{fmtDateTime(invoice.issued_at)}</p>
+                    </div>
+                    <div className="grid gap-1 md:grid-cols-2 xl:grid-cols-4 text-sm text-muted-foreground">
+                      <p>{l("Typ", "Тип", "Type")}: {invoiceTypeLabel(invoice.invoice_type)}</p>
+                      <p>{l("Gesamt", "Итого", "Total")}: {fmtMoney(invoice.total_gross)}</p>
+                      <p>{l("Bezahlt", "Оплачено", "Paid")}: {fmtMoney(invoice.paid_amount)}</p>
+                      <p>{l("Offen", "Остаток", "Open")}: {fmtMoney(invoice.balance_due)}</p>
+                      <p>{l("Fällig", "Срок", "Due")}: {fmtDate(invoice.due_date, t.common_not_set)}</p>
+                      <p>{l("Auftrag", "Заказ", "Order")}: {invoice.order_number ?? t.common_not_set}</p>
+                      <p>{l("Angebot", "Смета", "Quote")}: {invoice.quote_number ?? t.common_not_set}</p>
+                    </div>
+                    {moneyValueNumber(invoice.balance_due) > 0 ? (
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "rounded-full text-[10px] w-fit",
+                          invoice.status === "overdue"
+                            ? "border-rose-200 bg-rose-50 text-rose-700"
+                            : "border-amber-200 bg-amber-50 text-amber-700"
+                        )}
+                      >
+                        {invoice.status === "overdue"
+                          ? l("Sofort nachverfolgen", "Требует срочного follow-up", "Needs urgent follow-up")
+                          : l("Saldo offen", "Есть остаток", "Balance outstanding")}
+                      </Badge>
+                    ) : null}
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 rounded-lg"
+                        onClick={() => staffGo(`/invoices?invoice=${invoice.id}`)}
+                      >
+                        {l("Öffnen", "Открыть", "Open")}
+                      </Button>
+                      {canManageInvoices ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 rounded-lg"
+                          onClick={() => openInvoiceManager(invoice)}
+                        >
+                          {l("Billing verwalten", "Управлять биллингом", "Manage billing")}
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </FormSection>
+        </TabsContent> : null}
+
+        <TabsContent value="workflow" className="space-y-6 mt-4 min-h-[400px]">
+          {tabLoading ? (
+            <TabLoader />
+          ) : (
+            <>
+              <WorkspaceSectionIntro
+                title={l("Workflow-Cockpit", "Панель workflow", "Workflow cockpit")}
+                description={l(
+                  "Operative Nachverfolgung, Eigentümerschaft und patientenbezogene To-dos in einer eigenen Oberfläche.",
+                  "Операционное сопровождение, зоны ответственности и задачи по пациенту в отдельной рабочей зоне.",
+                  "Operational follow-through, ownership and patient-bound tasks in a dedicated workspace.",
+                )}
+                accessory={<CountBadge>{workflowItemCount}</CountBadge>}
+              />
+
+              {!workflowChecklist || workflowChecklist.items.length === 0 ? (
+                <EmptyCell>{l("Noch keine Workflow-Checkliste für diesen Patienten.", "Чек-лист workflow для этого пациента ещё пуст.", "No patient workflow checklist yet.")}</EmptyCell>
+              ) : (
+                <>
+                  <FormSection
+                    title={l("Operativer Überblick", "Операционный обзор", "Operational overview")}
+                    accessory={<CountBadge>{workflowChecklistGroups.length} {l("Gruppen", "групп", "groups")}</CountBadge>}
+                  >
+                    <div className="grid gap-3 md:grid-cols-3">
+                      <StatCard
+                        label={l("Offene Punkte", "Открытые пункты", "Open items")}
+                        value={workflowChecklist.open_count}
+                        description={l("Aktive patientenbezogene Workflow-Aufgaben.", "Активные рабочие задачи по пациенту.", "Live patient-bound workflow tasks.")}
+                      />
+                      <StatCard
+                        label={l("Abgeschlossen", "Завершено", "Completed")}
+                        value={workflowChecklist.completed_count}
+                        description={l("Bereits erledigte Checklistenpunkte.", "Уже закрытые пункты чек-листа.", "Checklist steps already closed.")}
+                      />
+                      <StatCard
+                        label={l("Gruppen", "Группы", "Groups")}
+                        value={workflowChecklistGroups.length}
+                        description={l("Patientenaufnahme plus eigene Workstreams.", "Приём пациента плюс пользовательские workstreams.", "Patient intake plus custom workstreams.")}
+                      />
+                    </div>
+                  </FormSection>
+
+                  <WorkspaceSectionIntro
+                    title={l("Live-Checkliste", "Живой чек-лист", "Live checklist")}
+                    description={l(
+                      "Alle aktiven und erledigten Punkte, gruppiert nach Intake- und operativen Workstreams.",
+                      "Все активные и завершённые пункты, сгруппированные по этапу intake и операционным потокам.",
+                      "All active and completed items grouped by intake and operational streams.",
+                    )}
+                  />
+
+                  {workflowChecklistGroups.map((group) => (
+                    <FormSection
+                      key={group.key}
+                      title={
+                        <span>
+                          {group.label}
+                          <span className="ml-2 text-muted-foreground font-normal">
+                            · {group.items.filter((item) => !item.is_completed).length} {l("offen", "открыто", "open")} / {group.items.length} {l("gesamt", "всего", "total")}
+                          </span>
+                        </span>
+                      }
+                      accessory={<CountBadge>{group.items.length} {l("Einträge", "записей", "items")}</CountBadge>}
+                    >
+                      <div className="space-y-2">
+                        {group.items.map((item) => (
+                          <div
+                            key={item.id}
+                            className={cn(
+                              "rounded-xl border px-4 py-3",
+                              item.is_completed
+                                ? "border-emerald-200 bg-emerald-50/60"
+                                : "border-border/50 bg-card"
+                            )}
+                          >
+                            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <p className="text-sm font-medium text-foreground">
+                                    {localizeWorkflowItemText(item.item_key, item.item_text, l)}
+                                  </p>
+                                  <Badge
+                                    variant="outline"
+                                    className={cn(
+                                      "rounded-full text-[10px]",
+                                      priorityBadgeClass(item.priority)
+                                    )}
+                                  >
+                                    {priorityLabel(item.priority)}
+                                  </Badge>
+                                  <Badge
+                                    variant="outline"
+                                    className={cn(
+                                      "rounded-full text-[10px]",
+                                      item.is_completed
+                                        ? "border-emerald-200 bg-emerald-100 text-emerald-800"
+                                        : STATUS_COLORS[item.linked_task_status ?? "open"] ??
+                                            "border-border/60 bg-muted/25 text-muted-foreground"
+                                    )}
+                                  >
+                                    {item.is_completed
+                                      ? patientDetailStatusLabel("completed")
+                                      : patientDetailStatusLabel(item.linked_task_status ?? "open")}
+                                  </Badge>
+                                </div>
+                                <div className="mt-2 flex flex-wrap gap-3 text-xs text-muted-foreground">
+                                  <span>
+                                    {l("Verantwortlich", "Ответственный", "Owner")}:{" "}
+                                    {item.owner_name
+                                      ? `${item.owner_name} · ${roleLbl(
+                                          item.owner_user_role ?? item.owner_role,
+                                          tr
+                                        )}`
+                                      : roleLbl(item.owner_role, tr)}
+                                  </span>
+                                  <span>
+                                    {l("Fällig", "Срок", "Due")}: {fmtDateTime(item.due_date, t.common_not_set)}
+                                  </span>
+                                  <span>
+                                    {l("Erstellt", "Создано", "Created")}: {fmtDateTime(item.created_at, t.common_not_set)}
+                                  </span>
+                                  {item.completed_at ? (
+                                    <span>
+                                      {l("Abgeschlossen", "Завершено", "Completed")}: {fmtDateTime(item.completed_at, t.common_not_set)}
+                                    </span>
+                                  ) : null}
+                                </div>
+                              </div>
+                              {!item.is_completed ? (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-8 rounded-lg"
+                                  disabled={workflowBusy}
+                                  onClick={() => void handleCompleteWorkflowItem(item.id)}
+                                >
+                                  {l("Abschließen", "Завершить", "Complete")}
+                                </Button>
+                              ) : null}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </FormSection>
+                  ))}
+                </>
+              )}
+
+              {canManageWorkflowChecklist ? (
+                <>
+                  <WorkspaceSectionIntro
+                    title={l("Manuelles Workflow-Element", "Ручной элемент workflow", "Manual workflow item")}
+                    description={l(
+                      "Ergänze einen operativen Schritt, wenn der Standard-Workflow für diesen Patienten nicht ausreicht.",
+                      "Добавь ручной операционный шаг, если стандартного workflow для этого пациента недостаточно.",
+                      "Add an operational step when the default workflow is not enough for this patient.",
+                    )}
+                  />
+
+                  <form onSubmit={handleAddWorkflowItem}>
+                    <FormSection
+                      title={l("Workflow-Element hinzufügen", "Добавить элемент процесса", "Add workflow item")}
+                    >
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <div className="space-y-1.5 md:col-span-2">
+                          <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-workflow-item-text">{l("Checklistenpunkt", "Пункт чеклиста", "Checklist item")}</Label>
+                          <Input
+                            id="patient-workflow-item-text"
+                            value={workflowForm.itemText}
+                            onChange={(event) =>
+                              setWorkflowForm((current) => ({
+                                ...current,
+                                itemText: event.target.value,
+                              }))
+                            }
+                            className={formInputClassName}
+                            placeholder={l(
+                              "Nachverfolgung, PM-Anruf, Concierge-Handoff dokumentieren...",
+                              "Документируйте follow-up, звонок PM, передачу concierge...",
+                              "Document follow-up, PM call, concierge handoff...",
+                            )}
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-workflow-owner">{l("Verantwortlich", "Ответственный", "Owner")}</Label>
+                          <ShadSelect
+                            value={workflowForm.ownerUserId}
+                            onValueChange={(v) =>
+                              setWorkflowForm((current) => ({
+                                ...current,
+                                ownerUserId: v ?? "",
+                              }))
+                            }
+                          >
+                            <SelectTrigger id="patient-workflow-owner" className={cn("w-full", formInputClassName)}>
+                              <SelectValue>
+                                {workflowForm.ownerUserId
+                                  ? (() => {
+                                      const owner = activeWorkflowAssignees.find((it) => it.user_id === workflowForm.ownerUserId);
+                                      return owner ? `${owner.user_name} · ${roleLbl(owner.user_role, tr)}` : workflowForm.ownerUserId;
+                                    })()
+                                  : l("Aktueller Benutzer", "Текущий пользователь", "Current user")}
+                              </SelectValue>
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="">{l("Aktueller Benutzer", "Текущий пользователь", "Current user")}</SelectItem>
+                              {activeWorkflowAssignees.map((item) => (
+                                <SelectItem key={item.user_id} value={item.user_id}>
+                                  {item.user_name} · {roleLbl(item.user_role, tr)}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </ShadSelect>
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-workflow-priority">{l("Priorität", "Приоритет", "Priority")}</Label>
+                          <ShadSelect
+                            value={workflowForm.priority}
+                            onValueChange={(v) =>
+                              setWorkflowForm((current) => ({
+                                ...current,
+                                priority: v ?? current.priority,
+                              }))
+                            }
+                          >
+                            <SelectTrigger id="patient-workflow-priority" className={cn("w-full", formInputClassName)}>
+                              <SelectValue>{priorityLabel(workflowForm.priority)}</SelectValue>
+                            </SelectTrigger>
+                            <SelectContent>
+                              {["low", "normal", "high", "urgent"].map((priority) => (
+                                <SelectItem key={priority} value={priority}>
+                                  {priorityLabel(priority)}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </ShadSelect>
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-workflow-due">{l("Fällig am", "Срок до", "Due at")}</Label>
+                          <Input
+                            id="patient-workflow-due"
+                            type="datetime-local"
+                            value={workflowForm.dueDate}
+                            onChange={(event) =>
+                              setWorkflowForm((current) => ({
+                                ...current,
+                                dueDate: event.target.value,
+                              }))
+                            }
+                            className={formInputClassName}
+                          />
+                        </div>
+                      </div>
+                      <div className="flex justify-end">
+                        <Button
+                          type="submit"
+                          size="sm"
+                          className="h-9 rounded-lg gap-1.5"
+                          disabled={workflowBusy || !workflowForm.itemText.trim()}
+                        >
+                          {workflowBusy ? (
+                            <LoaderCircle className="size-4 animate-spin" />
+                          ) : null}
+                          {l("Workflow-Element hinzufügen", "Добавить элемент процесса", "Add workflow item")}
+                        </Button>
+                      </div>
+                    </FormSection>
+                  </form>
+                </>
+              ) : null}
+            </>
+          )}
+        </TabsContent>
+
+        <TabsContent value="timeline" className="space-y-4 mt-4 min-h-[400px]">
+          {tabLoading ? (
+            <TabLoader />
+          ) : timeline.length === 0 ? (
+            <EmptyCell>
+              {l("Für diesen Patienten wurden noch keine Timeline-Ereignisse erfasst.", "Для этого пациента пока не зарегистрировано событий таймлайна.", "No timeline events have been recorded for this patient yet.")}
+            </EmptyCell>
+          ) : (
+            <>
+              <WorkspaceSectionIntro
+                title={l("Timeline-Cockpit", "Панель таймлайна", "Timeline cockpit")}
+                description={l(
+                  "Alle patientenbezogenen Ereignisse mit URL-synchronisierten Filtern für Navigation, Back/Forward und Deep Links.",
+                  "Все события по пациенту с фильтрами, синхронизированными с URL, для навигации, back/forward и deep-link.",
+                  "All patient events with URL-synced filters for navigation, back/forward and deep links.",
+                )}
+                accessory={<CountBadge>{filteredTimeline.length}</CountBadge>}
+              />
+
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <StatCard
+                  label={l("Ereignisse gesamt", "Всего событий", "Total events")}
+                  value={timelineSummary.total}
+                  description={l("Alle erfassten Touchpoints im Patienten-Workflow.", "Все зафиксированные точки касания в процессе ведения пациента.", "All recorded patient workflow touchpoints.")}
+                />
+                <StatCard
+                  label={l("Offene Punkte", "Открытые пункты", "Open items")}
+                  value={timelineSummary.open}
+                  description={l("Ereignisse, die noch operative Nachverfolgung erfordern.", "События, которые ещё требуют операционного сопровождения.", "Events that still require operational follow-through.")}
+                />
+                <StatCard
+                  label={l("Letzte 30 Tage", "Последние 30 дней", "Last 30 days")}
+                  value={timelineSummary.recent}
+                  description={l("Aktuelle Bewegung über Behandlung, Billing und Dokumente.", "Недавняя активность по лечению, счетам и документам.", "Recent movement across care, billing and documents.")}
+                />
+                <StatCard
+                  label={l("Aktive Bereiche", "Активные направления", "Domains active")}
+                  value={timelineSummary.entityCounts.length}
+                  description={l("Eindeutige Workstreams, die diesen Patienten bereits berühren.", "Уникальные направления работы, уже затрагивающие этого пациента.", "Unique workstreams already touching this patient.")}
+                />
+              </div>
+
+              <FormSection
+                title={l("Timeline-Filter", "Фильтры таймлайна", "Timeline filters")}
+                accessory={<CountBadge>{filteredTimeline.length} {l("Treffer", "совпадений", "matches")}</CountBadge>}
+              >
+                <div className="flex flex-wrap gap-1.5">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={timelineEntityFilter === "all" ? "default" : "outline"}
+                    className="h-6 rounded-full px-2.5 text-[11px]"
+                    onClick={() => {
+                      setTimelineEntityFilter("all");
+                      setTimelineOffset(0);
+                    }}
+                  >
+                    {l("Alle", "Все", "All")}
+                    <span className="text-muted-foreground/60 text-[6px] leading-none align-middle">●</span>
+                    {timelineTotal}
                   </Button>
                   {timelineSummary.entityCounts.map((entry) => (
                     <Button
                       key={entry.entityType}
                       type="button"
+                      size="sm"
                       variant={timelineEntityFilter === entry.entityType ? "default" : "outline"}
-                      className={cn(
-                        "rounded-full",
-                        timelineEntityFilter === entry.entityType
-                          ? "bg-slate-950 text-white hover:bg-slate-800"
-                          : ""
-                      )}
-                      onClick={() => setTimelineEntityFilter(entry.entityType)}
+                      className="h-6 rounded-full px-2.5 text-[11px]"
+                      onClick={() => {
+                        setTimelineEntityFilter(entry.entityType);
+                        setTimelineOffset(0);
+                      }}
                     >
-                      {entry.entityType} · {entry.count}
+                      {localizeTimelineEntityType(entry.entityType, l)}
+                      <span className="text-muted-foreground/60 text-[6px] leading-none align-middle">●</span>
+                      {entry.count}
                     </Button>
                   ))}
                 </div>
-                <div className="mt-4 grid gap-3 lg:grid-cols-[180px_220px_240px_minmax(0,1fr)_auto]">
-                  <ShadSelect value={timelineRangeFilter} onValueChange={(value) => setTimelineRangeFilter((value as PatientTimelineRangeFilter) ?? "all")}>
-                    <SelectTrigger className="h-10 rounded-xl bg-slate-50">
-                      <SelectValue />
+                <div className="grid gap-3 lg:grid-cols-[180px_220px_240px_minmax(0,1fr)_auto]">
+                  <ShadSelect value={timelineRangeFilter} onValueChange={(value) => {
+                    setTimelineRangeFilter((value as PatientTimelineRangeFilter) ?? "all");
+                    setTimelineOffset(0);
+                  }}>
+                    <SelectTrigger className={cn("w-full", formInputClassName)}>
+                      <SelectValue>
+                        {localizedTimelineRangeOptions.find((o) => o.value === timelineRangeFilter)?.label ?? ""}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       {localizedTimelineRangeOptions.map((option) => (
@@ -4323,43 +5365,61 @@ export function PatientDetailPage() {
                       ))}
                     </SelectContent>
                   </ShadSelect>
-                  <ShadSelect value={timelineCategoryFilter} onValueChange={(value) => setTimelineCategoryFilter(value ?? "all")}>
-                    <SelectTrigger className="h-10 rounded-xl bg-slate-50">
-                      <SelectValue placeholder={t.providers_all} />
+                  <ShadSelect value={timelineCategoryFilter} onValueChange={(value) => {
+                    setTimelineCategoryFilter(value ?? "all");
+                    setTimelineOffset(0);
+                  }}>
+                    <SelectTrigger className={cn("w-full", formInputClassName)}>
+                      <SelectValue>
+                        {timelineCategoryFilter === "all"
+                          ? l("Alle Kategorien", "Все категории", "All categories")
+                          : localizeTimelineCategory(timelineCategoryFilter, l)}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">{l("Alle Kategorien", "Все категории", "All categories")}</SelectItem>
                       {timelineCategoryOptions.map((category) => (
                         <SelectItem key={category} value={category}>
-                          {category}
+                          {localizeTimelineCategory(category, l)}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </ShadSelect>
-                  <ShadSelect value={timelineSourceFilter} onValueChange={(value) => setTimelineSourceFilter(value ?? "all")}>
-                    <SelectTrigger className="h-10 rounded-xl bg-slate-50">
-                      <SelectValue placeholder={t.providers_all} />
+                  <ShadSelect value={timelineSourceFilter} onValueChange={(value) => {
+                    setTimelineSourceFilter(value ?? "all");
+                    setTimelineOffset(0);
+                  }}>
+                    <SelectTrigger className={cn("w-full", formInputClassName)}>
+                      <SelectValue>
+                        {timelineSourceFilter === "all"
+                          ? l("Alle Quellen", "Все источники", "All sources")
+                          : localizeTimelineSource(timelineSourceFilter, l)}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">{l("Alle Quellen", "Все источники", "All sources")}</SelectItem>
                       {timelineSourceOptions.map((source) => (
                         <SelectItem key={source} value={source}>
-                          {source}
+                          {localizeTimelineSource(source, l)}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </ShadSelect>
                   <Input
                     value={timelineSearch}
-                    onChange={(event) => setTimelineSearch(event.target.value)}
+                    onChange={(event) => {
+                      setTimelineSearch(event.target.value);
+                      setTimelineOffset(0);
+                    }}
                     placeholder={t.common_search}
-                    className="w-full"
+                    className={formInputClassName}
                   />
                   {hasTimelineFilters ? (
                     <Button
                       type="button"
                       variant="outline"
-                      className="rounded-xl"
+                      size="sm"
+                      className="h-9 rounded-lg"
                       onClick={() => {
                         setTimelineEntityFilter("all");
                         setTimelineCategoryFilter("all");
@@ -4373,716 +5433,288 @@ export function PatientDetailPage() {
                     </Button>
                   ) : null}
                 </div>
-              </div>
+              </FormSection>
 
               {filteredTimeline.length === 0 ? (
-                <div className={card("p-8 text-center")}>
-                  <p className="text-sm text-slate-500">{l("Keine Zeitachsen-Ereignisse entsprechen den aktuellen Filtern.", "Текущим фильтрам не соответствует ни одно событие таймлайна.", "No timeline events match the current filters.")}</p>
-                </div>
+                <EmptyCell>{l("Keine Zeitachsen-Ereignisse entsprechen den aktuellen Filtern.", "Текущим фильтрам не соответствует ни одно событие таймлайна.", "No timeline events match the current filters.")}</EmptyCell>
               ) : (
-                <div className="space-y-3">
-              <div className={card("flex items-center justify-between gap-3 p-4")}>
-                <p className="text-sm text-slate-500">
-                  {l("Angezeigt", "Показаны", "Showing")} {timelineTotal === 0 ? 0 : timelineOffset + 1}-
-                  {timelineTotal === 0
-                    ? 0
-                    : Math.min(timelineOffset + timeline.length, timelineTotal)}{" "}
-                  {l("von", "из", "of")} {timelineTotal}
-                </p>
-                <div className="flex items-center gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="rounded-xl"
-                    disabled={timelineOffset === 0}
-                    onClick={() => setTimelineOffset((current) => Math.max(0, current - timelineLimit))}
-                  >
-                    {l("Zurück", "Назад", "Previous")}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="rounded-xl"
-                    disabled={!timelineHasNextPage}
-                    onClick={() => setTimelineOffset((current) => current + timelineLimit)}
-                  >
-                    {l("Weiter", "Далее", "Next")}
-                  </Button>
-                </div>
-              </div>
-              {filteredTimeline.map((item) => {
-                const route = resolvePatientTimelineRoute(item, {
-                  canOpenDocumentsWorkspace,
-                  canViewContracts,
-                  canViewInvoices,
-                  canOpenComplianceWorkspace,
-                });
-
-                return (
-                  <button
-                    key={`${item.entity_type}-${item.entity_id}`}
-                    type="button"
-                    onClick={() => {
-                      if (route) {
-                        staffGo(route);
-                      }
-                    }}
-                    className={card(
-                      cn(
-                        "w-full p-5 text-left transition",
-                        route ? "hover:-translate-y-0.5 hover:shadow-lg" : ""
-                      )
-                    )}
-                  >
-                  <div className="flex items-center justify-between gap-3">
+                <FormSection
+                  title={l("Ereignisse", "События", "Events")}
+                  accessory={
                     <div className="flex items-center gap-2">
-                      <Badge variant="outline" className="rounded-full text-[10px]">{item.entity_type}</Badge>
-                      <Badge variant="outline" className={cn("rounded-full text-[10px]", STATUS_COLORS[item.status] ?? "")}>{patientDetailStatusLabel(item.status)}</Badge>
+                      <span className="text-xs text-muted-foreground">
+                        {l("Angezeigt", "Показаны", "Showing")} {timelineTotal === 0 ? 0 : timelineOffset + 1}-
+                        {timelineTotal === 0
+                          ? 0
+                          : Math.min(timelineOffset + timeline.length, timelineTotal)}{" "}
+                        {l("von", "из", "of")} {timelineTotal}
+                      </span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 rounded-lg"
+                        disabled={timelineOffset === 0}
+                        onClick={() => setTimelineOffset((current) => Math.max(0, current - timelineLimit))}
+                      >
+                        {l("Zurück", "Назад", "Previous")}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 rounded-lg"
+                        disabled={!timelineHasNextPage}
+                        onClick={() => setTimelineOffset((current) => current + timelineLimit)}
+                      >
+                        {l("Weiter", "Далее", "Next")}
+                      </Button>
                     </div>
-                    <p className="text-xs text-slate-400">{fmtDateTime(item.happened_at)}</p>
+                  }
+                >
+                  <div className="rounded-2xl border border-border/50 bg-card px-4 py-3 sm:px-5">
+                    <div className="space-y-5">
+                      {groupedTimeline.map((group) => (
+                        <div key={group.key} className="space-y-3">
+                          <div className="flex items-center gap-2">
+                            <span className="shrink-0 rounded-full border border-border/60 bg-muted/35 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+                              {group.label}
+                            </span>
+                            <span className="h-px flex-1 bg-border/60" />
+                          </div>
+
+                          <div className="space-y-0">
+                            {group.items.map((item, idx) => {
+                              const route = resolvePatientTimelineRoute(item, {
+                                canOpenDocumentsWorkspace,
+                                canViewContracts,
+                                canViewInvoices,
+                                canOpenComplianceWorkspace,
+                              });
+
+                              return (
+                                <div
+                                  key={`${item.entity_type}-${item.entity_id}`}
+                                  className={cn(
+                                    "grid grid-cols-[16px_minmax(0,1fr)] gap-3",
+                                    idx < group.items.length - 1 && "pb-3"
+                                  )}
+                                >
+                                  <div className="relative flex justify-center">
+                                    {idx < group.items.length - 1 ? (
+                                      <span className="absolute top-3 bottom-[-0.75rem] w-px bg-gradient-to-b from-border/90 via-border/60 to-transparent" />
+                                    ) : null}
+                                    <span
+                                      className={cn(
+                                        "relative mt-1.5 size-2 rounded-full border border-card shadow-[0_0_0_2px_rgba(255,255,255,0.92)]",
+                                        timelineEntityDotClass(item.entity_type)
+                                      )}
+                                    />
+                                  </div>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (route) {
+                                        staffGo(route);
+                                      }
+                                    }}
+                                    className={cn(
+                                      "rounded-2xl border px-4 py-3 text-left transition-colors",
+                                      timelineItemSurfaceClass(item.status),
+                                      route
+                                        ? "hover:border-border hover:bg-muted/30 cursor-pointer"
+                                        : "cursor-default"
+                                    )}
+                                  >
+                                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                      <div className="min-w-0">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                          <Badge
+                                            variant="outline"
+                                            className={cn("rounded-full text-[10px]", timelineEntityTypeBadgeClass(item.entity_type))}
+                                          >
+                                            {localizeTimelineEntityType(item.entity_type, l)}
+                                          </Badge>
+                                          <Badge
+                                            variant="outline"
+                                            className={cn(
+                                              "rounded-full text-[10px]",
+                                              STATUS_COLORS[item.status] ?? "border-border/60 bg-muted/25 text-muted-foreground"
+                                            )}
+                                          >
+                                            {patientDetailStatusLabel(item.status)}
+                                          </Badge>
+                                          <span className="text-xs text-muted-foreground">
+                                            {localizeTimelineCategory(item.category, l)}
+                                          </span>
+                                          {item.source_label ? (
+                                            <span className="text-xs text-muted-foreground/80">
+                                              · {localizeTimelineSource(item.source_label, l)}
+                                            </span>
+                                          ) : null}
+                                        </div>
+                                        <p className="mt-2 text-sm font-semibold text-foreground">{item.title}</p>
+                                      </div>
+
+                                      <div className="shrink-0">
+                                        <p className="text-xs font-medium text-muted-foreground/80">
+                                          {fmtDateTime(item.happened_at)}
+                                        </p>
+                                      </div>
+                                    </div>
+                                  </button>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <p className="mt-3 text-sm font-semibold text-slate-950">{item.title}</p>
-                  <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-500">
-                    <span>{item.category}</span>
-                    {item.source_label ? <span>· {item.source_label}</span> : null}
-                  </div>
-                  </button>
-                );
-              })}
-                </div>
+                </FormSection>
               )}
-            </div>
+            </>
           )}
         </TabsContent>
       </Tabs>
 
-      <Sheet open={profileEditorOpen} onOpenChange={setProfileEditorOpen}>
-        <SheetContent side="right" className="w-full sm:max-w-[860px]">
-          {profileEditForm ? (
-            <form className="flex flex-col flex-1 min-h-0" onSubmit={handleSavePatientProfile}>
-              <SheetHeader className="shrink-0 px-4 pt-3 pb-1">
-                <SheetTitle>{l("Patientenprofil bearbeiten", "Редактировать профиль пациента", "Edit patient profile")}</SheetTitle>
-              </SheetHeader>
+      <MemoizedPatientProfileEditorSheet
+        open={profileEditorOpen}
+        patientId={id}
+        detail={detail}
+        dictionary={tr}
+        lang={lang}
+        onOpenChange={handleProfileEditorOpenChange}
+        onSaved={reload}
+        onError={setTabActionError}
+      />
 
-              <div className="flex-1 overflow-y-auto px-4 py-2 space-y-3">
-                <FormSection title={l("Persönliche Daten", "Личные данные", "Personal data")}>
-                  <div className="grid gap-3 md:grid-cols-3">
-                    <FormField label={l("Titel", "Обращение", "Title")}>
-                      <Input value={profileEditForm.title} onChange={(event) => setProfileEditForm((current) => current ? { ...current, title: event.target.value } : current)} className={formInputClassName} />
-                    </FormField>
-                    <FormField label={l("Vorname", "Имя", "First name")}>
-                      <Input value={profileEditForm.firstName} onChange={(event) => setProfileEditForm((current) => current ? { ...current, firstName: event.target.value } : current)} required className={formInputClassName} />
-                    </FormField>
-                    <FormField label={l("Nachname", "Фамилия", "Last name")}>
-                      <Input value={profileEditForm.lastName} onChange={(event) => setProfileEditForm((current) => current ? { ...current, lastName: event.target.value } : current)} required className={formInputClassName} />
-                    </FormField>
-                  </div>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <FormField label={l("Nationalität", "Гражданство", "Nationality")}>
-                      <Input value={profileEditForm.nationality} onChange={(event) => setProfileEditForm((current) => current ? { ...current, nationality: event.target.value } : current)} className={formInputClassName} />
-                    </FormField>
-                    <FormField label={l("Wohnsitzland", "Страна проживания", "Residence country")}>
-                      <Input value={profileEditForm.residenceCountry} onChange={(event) => setProfileEditForm((current) => current ? { ...current, residenceCountry: event.target.value } : current)} className={formInputClassName} />
-                    </FormField>
-                  </div>
-                  <FormField label={l("Sprachen", "Языки", "Languages")}>
-                    <Input value={profileEditForm.languages} onChange={(event) => setProfileEditForm((current) => current ? { ...current, languages: event.target.value } : current)} placeholder="de, uk, en" className={formInputClassName} />
-                  </FormField>
-                  <FormField label={l("Funktionale Labels", "Функциональные метки", "Functional labels")}>
-                    <FunctionalLabelChips
-                      value={profileEditForm.functionalLabels}
-                      onChange={(next) => setProfileEditForm((current) => current ? { ...current, functionalLabels: next } : current)}
-                    />
-                  </FormField>
-                </FormSection>
+      <MemoizedPatientRelationEditorSheet
+        open={relationEditorOpen}
+        patientId={id}
+        selfPatientId={detail.id}
+        canManageRelations={canManageRelations}
+        editingRelation={editingRelation}
+        dictionary={tr}
+        lang={lang}
+        onOpenChange={handleRelationEditorOpenChange}
+        onSaved={reload}
+        onError={setTabActionError}
+      />
 
-                <FormSection title={l("Kontakt", "Контакты", "Contact")}>
-                  <div className="grid gap-3 md:grid-cols-3">
-                    <FormField label={l("Primäre Telefonnummer", "Основной телефон", "Primary phone")}>
-                      <Input value={profileEditForm.phonePrimary} onChange={(event) => setProfileEditForm((current) => current ? { ...current, phonePrimary: event.target.value } : current)} className={formInputClassName} />
-                    </FormField>
-                    <FormField label={l("Sekundäre Telefonnummer", "Доп. телефон", "Secondary phone")}>
-                      <Input value={profileEditForm.phoneSecondary} onChange={(event) => setProfileEditForm((current) => current ? { ...current, phoneSecondary: event.target.value } : current)} className={formInputClassName} />
-                    </FormField>
-                    <FormField label={l("E-Mail", "Эл. почта", "Email")}>
-                      <Input type="email" value={profileEditForm.email} onChange={(event) => setProfileEditForm((current) => current ? { ...current, email: event.target.value } : current)} className={formInputClassName} />
-                    </FormField>
-                  </div>
-                </FormSection>
+      <MemoizedPatientDocumentUploadDialog
+        open={documentUploadOpen}
+        patientId={id}
+        orders={orders}
+        appointments={appointments}
+        dictionary={tr}
+        lang={lang}
+        onOpenChange={handleDocumentUploadOpenChange}
+        onSaved={reload}
+        onError={setTabActionError}
+      />
 
-                <FormSection title={l("Adresse", "Адрес", "Address")}>
-                  <FormField label={l("Straße", "Улица", "Street")}>
-                    <Input value={profileEditForm.addressStreet} onChange={(event) => setProfileEditForm((current) => current ? { ...current, addressStreet: event.target.value } : current)} className={formInputClassName} />
-                  </FormField>
-                  <div className="grid gap-3 md:grid-cols-3">
-                    <FormField label={l("Stadt", "Город", "City")}>
-                      <Input value={profileEditForm.addressCity} onChange={(event) => setProfileEditForm((current) => current ? { ...current, addressCity: event.target.value } : current)} className={formInputClassName} />
-                    </FormField>
-                    <FormField label={l("PLZ", "Индекс", "ZIP")}>
-                      <Input value={profileEditForm.addressZip} onChange={(event) => setProfileEditForm((current) => current ? { ...current, addressZip: event.target.value } : current)} className={formInputClassName} />
-                    </FormField>
-                    <FormField label={l("Adressland", "Страна адреса", "Address country")}>
-                      <Input value={profileEditForm.addressCountry} onChange={(event) => setProfileEditForm((current) => current ? { ...current, addressCountry: event.target.value } : current)} className={formInputClassName} />
-                    </FormField>
-                  </div>
-                </FormSection>
-
-                <FormSection title={l("Versicherung", "Страхование", "Insurance")}>
-                  <div className="grid gap-3 md:grid-cols-3">
-                    <FormField label={l("Versicherer", "Страховая компания", "Insurance provider")}>
-                      <Input value={profileEditForm.insuranceProvider} onChange={(event) => setProfileEditForm((current) => current ? { ...current, insuranceProvider: event.target.value } : current)} className={formInputClassName} />
-                    </FormField>
-                    <FormField label={l("Versicherungsnummer", "Номер полиса", "Insurance number")}>
-                      <Input value={profileEditForm.insuranceNumber} onChange={(event) => setProfileEditForm((current) => current ? { ...current, insuranceNumber: event.target.value } : current)} className={formInputClassName} />
-                    </FormField>
-                    <FormField label={l("Versicherungstyp", "Тип страхования", "Insurance type")}>
-                      <ShadSelect value={profileEditForm.insuranceType} onValueChange={(v) => setProfileEditForm((current) => current ? { ...current, insuranceType: v ?? "" } : current)}>
-                        <SelectTrigger className={cn("w-full", formInputClassName)}>
-                          <SelectValue>
-                            {(() => {
-                              switch (profileEditForm.insuranceType) {
-                                case "private": return l("Privat", "Частная", "Private");
-                                case "public": return l("Gesetzlich", "Государственная", "Public");
-                                case "self_pay": return l("Selbstzahler", "Самооплата", "Self pay");
-                                case "foreign": return l("Ausland", "Иностранная", "Foreign");
-                                default: return t.common_not_set;
-                              }
-                            })()}
-                          </SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="">{t.common_not_set}</SelectItem>
-                          <SelectItem value="private">{l("Privat", "Частная", "Private")}</SelectItem>
-                          <SelectItem value="public">{l("Gesetzlich", "Государственная", "Public")}</SelectItem>
-                          <SelectItem value="self_pay">{l("Selbstzahler", "Самооплата", "Self pay")}</SelectItem>
-                          <SelectItem value="foreign">{l("Ausland", "Иностранная", "Foreign")}</SelectItem>
-                        </SelectContent>
-                      </ShadSelect>
-                    </FormField>
-                  </div>
-                </FormSection>
-
-                <FormSection title={l("Notfallkontakt", "Экстренный контакт", "Emergency contact")}>
-                  <div className="grid gap-3 md:grid-cols-3">
-                    <FormField label={l("Notfallkontakt", "Контакт", "Contact")}>
-                      <Input value={profileEditForm.emergencyContactName} onChange={(event) => setProfileEditForm((current) => current ? { ...current, emergencyContactName: event.target.value } : current)} className={formInputClassName} />
-                    </FormField>
-                    <FormField label={l("Notfalltelefon", "Телефон", "Phone")}>
-                      <Input value={profileEditForm.emergencyContactPhone} onChange={(event) => setProfileEditForm((current) => current ? { ...current, emergencyContactPhone: event.target.value } : current)} className={formInputClassName} />
-                    </FormField>
-                    <FormField label={l("Beziehung", "Связь", "Relation")}>
-                      <Input value={profileEditForm.emergencyContactRelation} onChange={(event) => setProfileEditForm((current) => current ? { ...current, emergencyContactRelation: event.target.value } : current)} className={formInputClassName} />
-                    </FormField>
-                  </div>
-                </FormSection>
-
-                <FormSection
-                  title={t.patients_legal_status}
-                  accessory={<LegalStatusPill status={profileEditForm.legalStatus} />}
-                >
-                  <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-                    {[
-                      { key: "dsgvoSigned", label: l("DSGVO unterschrieben", "DSGVO подписано", "DSGVO signed") },
-                      { key: "confidentialityReleaseSigned", label: l("Schweigepflicht freigegeben", "Снятие врачебной тайны", "Confidentiality released") },
-                      { key: "identityVerified", label: l("Identität bestätigt", "Личность подтверждена", "Identity verified") },
-                      { key: "documentPackComplete", label: l("Dokumentenpaket vollständig", "Пакет документов собран", "Document pack complete") },
-                      { key: "complianceCompleted", label: l("Bereit bestätigt", "Готовность подтверждена", "Readiness confirmed") },
-                    ].map((item) => {
-                      const k = item.key as keyof typeof profileEditForm.legalStatus;
-                      const checked = Boolean(profileEditForm.legalStatus[k]);
-                      return (
-                        <label
-                          key={item.key}
-                          className="flex items-center gap-2 rounded-lg border border-border/50 bg-card px-2.5 py-2 text-[12.5px] text-foreground cursor-pointer hover:bg-muted/40 transition-colors"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={(event) =>
-                              setProfileEditForm((current) =>
-                                current
-                                  ? {
-                                      ...current,
-                                      legalStatus: { ...current.legalStatus, [item.key]: event.target.checked },
-                                    }
-                                  : current
-                              )
-                            }
-                            className="size-3.5 accent-[var(--brand)] cursor-pointer"
-                          />
-                          {item.label}
-                        </label>
-                      );
-                    })}
-                  </div>
-                  <FormField label={l("Vertragsstatus", "Статус договора", "Contract status")}>
-                    <ShadSelect
-                      value={profileEditForm.legalStatus.contractStatus}
-                      onValueChange={(v) =>
-                        setProfileEditForm((current) =>
-                          current
-                            ? { ...current, legalStatus: { ...current.legalStatus, contractStatus: v ?? "" } }
-                            : current
-                        )
-                      }
-                    >
-                      <SelectTrigger className={cn("w-full", formInputClassName)}>
-                        <SelectValue>
-                          {patientDetailStatusLabel(profileEditForm.legalStatus.contractStatus)}
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        {PATIENT_CONTRACT_STATUS_OPTIONS.map((status) => (
-                          <SelectItem key={status} value={status}>
-                            {patientDetailStatusLabel(status)}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </ShadSelect>
-                  </FormField>
-                  <FormField label={l("Notizen", "Заметки", "Notes")}>
-                    <textarea
-                      className={formTextareaClassName}
-                      value={profileEditForm.legalStatus.notes}
-                      onChange={(event) =>
-                        setProfileEditForm((current) =>
-                          current
-                            ? { ...current, legalStatus: { ...current.legalStatus, notes: event.target.value } }
-                            : current
-                        )
-                      }
-                      placeholder={l(
-                        "Ausstehende Unterschriften, fehlende IDs, offene Compliance-Fragen",
-                        "Ожидающие подписи, отсутствующие ID, открытые вопросы compliance",
-                        "Pending signatures, missing IDs, open compliance questions",
-                      )}
-                    />
-                  </FormField>
-                </FormSection>
-
-                <FormSection title={l("CAVE-Hinweise", "Предупреждения CAVE", "CAVE warnings")}>
-                  <textarea
-                    className={formTextareaClassName}
-                    value={profileEditForm.clinicalWarnings}
-                    onChange={(event) =>
-                      setProfileEditForm((current) =>
-                        current ? { ...current, clinicalWarnings: event.target.value } : current
-                      )
-                    }
-                    placeholder={l(
-                      "Dauerhafte klinische Warnhinweise oder Sicherheitshinweise",
-                      "Постоянные клинические предупреждения или сигналы безопасности",
-                      "Persistent clinical warnings or safety alerts",
-                    )}
-                  />
-                </FormSection>
-
-                <FormSection title={l("Notizen", "Заметки", "Notes")}>
-                  <textarea
-                    className={formTextareaClassName}
-                    value={profileEditForm.notes}
-                    onChange={(event) =>
-                      setProfileEditForm((current) =>
-                        current ? { ...current, notes: event.target.value } : current
-                      )
-                    }
-                  />
-                </FormSection>
-              </div>
-
-              <div className="shrink-0 flex justify-end gap-2 px-4 py-3 bg-popover">
-                <Button type="button" variant="outline" className="h-9 rounded-lg" onClick={() => setProfileEditorOpen(false)}>
-                  {l("Abbrechen", "Отмена", "Cancel")}
-                </Button>
-                <Button type="submit" className="h-9 rounded-lg gap-1.5 px-3.5" disabled={profileEditorBusy}>
-                  {profileEditorBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                  {l("Patient speichern", "Сохранить пациента", "Save patient")}
-                </Button>
-              </div>
-            </form>
-          ) : null}
-        </SheetContent>
-      </Sheet>
-
-      <Dialog open={relationEditorOpen} onOpenChange={setRelationEditorOpen}>
-        <DialogContent className="sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>{editingRelation ? l("Beziehung bearbeiten", "Редактировать связь", "Edit relation") : l("Beziehung hinzufügen", "Добавить связь", "Add relation")}</DialogTitle>
-            <DialogDescription>
-              {l(
-                "Hinterlegen Sie Angehörige, Betreuungspersonen und Notfallkontakte direkt im Patientenprofil.",
-                "Храните родственников, опекунов и экстренные контакты прямо в профиле пациента.",
-                "Keep relatives, caregivers and emergency contacts directly on the patient profile.",
-              )}
-            </DialogDescription>
-          </DialogHeader>
-          <form className="space-y-4" onSubmit={handleSaveRelation}>
-            <div className={card("p-4")}>
-              <div className="grid gap-4 md:grid-cols-[1.2fr_1.8fr]">
-                <div className="space-y-2">
-                  <Label htmlFor="relation-patient-search">{l("Bestehenden Patienten suchen", "Поиск существующего пациента", "Search existing patient")}</Label>
-                  <Input
-                    id="relation-patient-search"
-                    value={relationPatientSearch}
-                    onChange={(event) => setRelationPatientSearch(event.target.value)}
-                    placeholder={l("PID oder Patientenname", "PID или имя пациента", "PID or patient name")}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="relation-linked-patient">{l("Patient im System verknüpfen", "Связать пациента в системе", "Link patient in system")}</Label>
-                  <select
-                    id="relation-linked-patient"
-                    className={selectClassName}
-                    value={relationForm.relatedPatientId}
-                    onChange={(event) => {
-                      const nextPatientId = event.target.value;
-                      const selectedPatient =
-                        relationPatientOptions.find((option) => option.id === nextPatientId) ?? null;
-                      setRelationPatientSearch(
-                        selectedPatient ? formatRelatedPatientOption(selectedPatient) : ""
-                      );
-                      setRelationForm((current) => ({
-                        ...current,
-                        relatedPatientId: nextPatientId,
-                        relatedName: selectedPatient
-                          ? formatRelatedPatientName(selectedPatient)
-                          : current.relatedName,
-                      }));
-                    }}
-                    disabled={relationPatientOptionsLoading}
+      <Sheet open={contractCreateOpen} onOpenChange={setContractCreateOpen}>
+        <SheetContent side="right" className="w-full sm:max-w-[560px] gap-0">
+          <SheetHeader className="px-4 py-3">
+            <SheetTitle>
+              {l("Rahmenvertrag erstellen", "Создать рамочный договор", "Create framework contract")}
+            </SheetTitle>
+          </SheetHeader>
+          <form className="flex flex-col flex-1 min-h-0" onSubmit={handleCreateContract}>
+            <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="flex flex-col gap-1.5">
+                  <Label
+                    className="text-[11.5px] font-medium text-muted-foreground leading-tight"
+                    htmlFor="contract-status"
                   >
-                    <option value="">Standalone contact</option>
-                    {relationPatientOptionsFiltered.map((option) => (
-                      <option key={option.id} value={option.id}>
-                        {formatRelatedPatientOption(option)}
-                      </option>
-                    ))}
-                  </select>
-                  <p className="text-xs text-slate-500">
-                    {relationPatientOptionsLoading
-                      ? "Loading patient directory..."
-                      : selectedRelatedPatient
-                        ? "Linked relations stay synced to an existing patient record."
-                        : "Keep this empty for relatives or caregivers who are not patients in the system."}
-                  </p>
+                    {l("Status", "Статус", "Status")}
+                  </Label>
+                  <ShadSelect
+                    value={contractCreateForm.status}
+                    onValueChange={(value) =>
+                      setContractCreateForm((current) => ({
+                        ...current,
+                        status: (value ?? current.status) as ContractStatus,
+                      }))
+                    }
+                  >
+                    <SelectTrigger id="contract-status" className="w-full">
+                      <SelectValue>{patientDetailStatusLabel(contractCreateForm.status)}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {CONTRACT_STATUS_OPTIONS.map((status) => (
+                        <SelectItem key={status} value={status}>
+                          {patientDetailStatusLabel(status)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </ShadSelect>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label
+                    className="text-[11.5px] font-medium text-muted-foreground leading-tight"
+                    htmlFor="contract-signed-at"
+                  >
+                    {l("Unterzeichnet am", "Подписано", "Signed at")}
+                  </Label>
+                  <Input
+                    id="contract-signed-at"
+                    type="datetime-local"
+                    value={contractCreateForm.signedAt}
+                    onChange={(event) => setContractCreateForm((current) => ({ ...current, signedAt: event.target.value }))}
+                  />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label
+                    className="text-[11.5px] font-medium text-muted-foreground leading-tight"
+                    htmlFor="contract-valid-from"
+                  >
+                    {l("Gültig ab", "Действует с", "Valid from")}
+                  </Label>
+                  <Input
+                    id="contract-valid-from"
+                    type="date"
+                    value={contractCreateForm.validFrom}
+                    onChange={(event) => setContractCreateForm((current) => ({ ...current, validFrom: event.target.value }))}
+                  />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label
+                    className="text-[11.5px] font-medium text-muted-foreground leading-tight"
+                    htmlFor="contract-valid-to"
+                  >
+                    {l("Gültig bis", "Действует до", "Valid to")}
+                  </Label>
+                  <Input
+                    id="contract-valid-to"
+                    type="date"
+                    value={contractCreateForm.validTo}
+                    onChange={(event) => setContractCreateForm((current) => ({ ...current, validTo: event.target.value }))}
+                  />
                 </div>
               </div>
             </div>
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="relation-name">Name</Label>
-                <Input
-                  id="relation-name"
-                  value={relationForm.relatedName}
-                  onChange={(event) => setRelationForm((current) => ({ ...current, relatedName: event.target.value }))}
-                  placeholder="Relative or caregiver name"
-                  disabled={Boolean(relationForm.relatedPatientId)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="relation-type">Relation type</Label>
-                <select
-                  id="relation-type"
-                  className={selectClassName}
-                  value={relationForm.relationType}
-                  onChange={(event) => setRelationForm((current) => ({ ...current, relationType: event.target.value }))}
-                >
-                  {RELATION_TYPE_OPTIONS.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="relation-phone">Phone</Label>
-                <Input
-                  id="relation-phone"
-                  value={relationForm.phone}
-                  onChange={(event) => setRelationForm((current) => ({ ...current, phone: event.target.value }))}
-                  placeholder="+49 ..."
-                />
-              </div>
-              <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={relationForm.isEmergencyContact}
-                  onChange={(event) =>
-                    setRelationForm((current) => ({
-                      ...current,
-                      isEmergencyContact: event.target.checked,
-                    }))
-                  }
-                />
-                {l("Notfallkontakt", "Экстренный контакт", "Emergency contact")}
-              </label>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="relation-notes">{l("Notizen", "Заметки", "Notes")}</Label>
-              <textarea
-                id="relation-notes"
-                className={textareaClassName}
-                value={relationForm.notes}
-                onChange={(event) => setRelationForm((current) => ({ ...current, notes: event.target.value }))}
-                placeholder={l(
-                  "Erreichbarkeit, Kontakthinweise oder besondere Anweisungen",
-                  "Доступность, заметки по контакту или особые инструкции",
-                  "Availability, contact notes or special instructions",
-                )}
-              />
-            </div>
-            <DialogFooter>
-              <Button type="button" variant="outline" className="rounded-xl" onClick={() => setRelationEditorOpen(false)}>
-                {l("Abbrechen", "Отмена", "Cancel")}
+            <div className="flex justify-end gap-2 px-4 py-3">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 rounded-lg"
+                onClick={() => setContractCreateOpen(false)}
+              >
+                {t.common_cancel}
               </Button>
-              <Button type="submit" className="rounded-xl bg-slate-950 text-white hover:bg-slate-800" disabled={relationBusy}>
-                {relationBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
-                {editingRelation ? t.common_save : t.common_save}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={documentUploadOpen} onOpenChange={setDocumentUploadOpen}>
-        <DialogContent className="sm:max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>{l("Patientendokument hochladen", "Загрузить документ пациента", "Upload patient document")}</DialogTitle>
-            <DialogDescription>
-              {l(
-                "Hier hochgeladene Dateien werden direkt mit diesem Patienten verknüpft und können auch einem Auftrag oder Termin zugeordnet werden.",
-                "Загруженные здесь файлы привязываются напрямую к пациенту и также могут быть связаны с заказом или приёмом.",
-                "Files uploaded here are linked directly to this patient and can also be attached to an order or appointment.",
-              )}
-            </DialogDescription>
-          </DialogHeader>
-          <form className="space-y-4" onSubmit={handleUploadDocument}>
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="document-file">{l("Datei", "Файл", "File")}</Label>
-                <Input id="document-file" type="file" onChange={handleDocumentFileChange} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="document-name">{l("Anzeigename", "Отображаемое имя", "Display name")}</Label>
-                <Input
-                  id="document-name"
-                  value={documentUploadForm.autoName}
-                  onChange={(event) => setDocumentUploadForm((current) => ({ ...current, autoName: event.target.value }))}
-                  placeholder={l("Optionaler sichtbarer Name für den Patienten", "Необязательное имя для отображения пациенту", "Optional patient-facing name")}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="document-art">{l("Typ", "Тип", "Type")}</Label>
-                <Input
-                  id="document-art"
-                  value={documentUploadForm.art}
-                  onChange={(event) => setDocumentUploadForm((current) => ({ ...current, art: event.target.value }))}
-                  placeholder="report"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="document-category">{l("Kategorie", "Категория", "Category")}</Label>
-                <Input
-                  id="document-category"
-                  value={documentUploadForm.category}
-                  onChange={(event) => setDocumentUploadForm((current) => ({ ...current, category: event.target.value }))}
-                  placeholder="medical"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="document-status">{l("Status", "Статус", "Status")}</Label>
-                <select
-                  id="document-status"
-                  className={selectClassName}
-                  value={documentUploadForm.status}
-                  onChange={(event) =>
-                    setDocumentUploadForm((current) => ({
-                      ...current,
-                      status: event.target.value as DocumentStatus,
-                    }))
-                  }
-                >
-                  {DOCUMENT_STATUS_OPTIONS.map((status) => (
-                    <option key={status} value={status}>
-                      {patientDetailStatusLabel(status)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="document-visibility">{l("Sichtbarkeit", "Видимость", "Visibility")}</Label>
-                <select
-                  id="document-visibility"
-                  className={selectClassName}
-                  value={documentUploadForm.visibility}
-                  onChange={(event) =>
-                    setDocumentUploadForm((current) => ({
-                      ...current,
-                      visibility: event.target.value as DocumentVisibility,
-                    }))
-                  }
-                >
-                  {DOCUMENT_VISIBILITY_OPTIONS.map((visibility) => (
-                    <option key={visibility} value={visibility}>
-                      {visibility === "internal"
-                        ? l("Intern", "Внутреннее", "Internal")
-                        : visibility === "released_internal"
-                          ? l("Intern freigegeben", "Внутренне опубликовано", "Released internal")
-                          : visibility === "released_external"
-                            ? l("Extern freigegeben", "Внешне опубликовано", "Released external")
-                            : l("Für Patienten sichtbar", "Видно пациенту", "Patient visible")}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="document-order">{l("Auftrag", "Заказ", "Order")}</Label>
-                <select
-                  id="document-order"
-                  className={selectClassName}
-                  value={documentUploadForm.orderId}
-                  onChange={(event) => setDocumentUploadForm((current) => ({ ...current, orderId: event.target.value }))}
-                >
-                  <option value="">{l("Keine Auftragsverknüpfung", "Без привязки к заказу", "No order link")}</option>
-                  {orders.map((order) => (
-                    <option key={order.id} value={order.id}>
-                      {order.order_number}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="document-appointment">{l("Termin", "Приём", "Appointment")}</Label>
-                <select
-                  id="document-appointment"
-                  className={selectClassName}
-                  value={documentUploadForm.appointmentId}
-                  onChange={(event) =>
-                    setDocumentUploadForm((current) => ({
-                      ...current,
-                      appointmentId: event.target.value,
-                    }))
-                  }
-                >
-                  <option value="">{l("Keine Terminverknüpfung", "Без привязки к приёму", "No appointment link")}</option>
-                  {appointments.map((appointment) => (
-                    <option key={appointment.id} value={appointment.id}>
-                      {appointment.title} · {fmtDate(appointment.date)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={documentUploadForm.isMedical}
-                  onChange={(event) =>
-                    setDocumentUploadForm((current) => ({
-                      ...current,
-                      isMedical: event.target.checked,
-                    }))
-                  }
-                />
-                {l("Medizinisches Dokument", "Медицинский документ", "Medical document")}
-              </label>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="document-notes">{l("Notizen", "Заметки", "Notes")}</Label>
-              <textarea
-                id="document-notes"
-                className={textareaClassName}
-                value={documentUploadForm.notes}
-                onChange={(event) => setDocumentUploadForm((current) => ({ ...current, notes: event.target.value }))}
-                placeholder={l("Optionale Verarbeitungs- oder Sichtbarkeitsnotizen", "Необязательные заметки по обработке или видимости", "Optional processing or visibility notes")}
-              />
-            </div>
-            <DialogFooter>
-              <Button type="button" variant="outline" className="rounded-xl" onClick={() => setDocumentUploadOpen(false)}>
-                {l("Abbrechen", "Отмена", "Cancel")}
-              </Button>
-              <Button type="submit" className="rounded-xl bg-slate-950 text-white hover:bg-slate-800" disabled={documentUploadBusy}>
-                {documentUploadBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
-                {l("Dokument hochladen", "Загрузить документ", "Upload document")}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={contractCreateOpen} onOpenChange={setContractCreateOpen}>
-        <DialogContent className="sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>{l("Rahmenvertrag erstellen", "Создать рамочный договор", "Create framework contract")}</DialogTitle>
-            <DialogDescription>
-              {l(
-                "Starten Sie einen patientengebundenen Vertrag direkt aus dem Profil, ohne den Patientenkontext zu verlassen.",
-                "Создайте договор, привязанный к пациенту, прямо из профиля, не выходя из контура пациента.",
-                "Start a patient-bound contract directly from the profile without leaving the patient loop.",
-              )}
-            </DialogDescription>
-          </DialogHeader>
-          <form className="space-y-4" onSubmit={handleCreateContract}>
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="contract-status">{l("Status", "Статус", "Status")}</Label>
-                <select
-                  id="contract-status"
-                  className={selectClassName}
-                  value={contractCreateForm.status}
-                  onChange={(event) =>
-                    setContractCreateForm((current) => ({
-                      ...current,
-                      status: event.target.value as ContractStatus,
-                    }))
-                  }
-                >
-                  {CONTRACT_STATUS_OPTIONS.map((status) => (
-                    <option key={status} value={status}>
-                      {patientDetailStatusLabel(status)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="contract-signed-at">{l("Unterzeichnet am", "Подписано", "Signed at")}</Label>
-                <Input
-                  id="contract-signed-at"
-                  type="datetime-local"
-                  value={contractCreateForm.signedAt}
-                  onChange={(event) => setContractCreateForm((current) => ({ ...current, signedAt: event.target.value }))}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="contract-valid-from">{l("Gültig ab", "Действует с", "Valid from")}</Label>
-                <Input
-                  id="contract-valid-from"
-                  type="date"
-                  value={contractCreateForm.validFrom}
-                  onChange={(event) => setContractCreateForm((current) => ({ ...current, validFrom: event.target.value }))}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="contract-valid-to">{l("Gültig bis", "Действует до", "Valid to")}</Label>
-                <Input
-                  id="contract-valid-to"
-                  type="date"
-                  value={contractCreateForm.validTo}
-                  onChange={(event) => setContractCreateForm((current) => ({ ...current, validTo: event.target.value }))}
-                />
-              </div>
-            </div>
-            <DialogFooter>
-              <Button type="button" variant="outline" className="rounded-xl" onClick={() => setContractCreateOpen(false)}>
-                {l("Abbrechen", "Отмена", "Cancel")}
-              </Button>
-              <Button type="submit" className="rounded-xl bg-slate-950 text-white hover:bg-slate-800" disabled={contractBusy}>
-                {contractBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
+              <Button type="submit" size="sm" className="h-8 rounded-lg gap-1.5" disabled={contractBusy}>
+                {contractBusy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
                 {l("Vertrag erstellen", "Создать договор", "Create contract")}
               </Button>
-            </DialogFooter>
+            </div>
           </form>
-        </DialogContent>
-      </Dialog>
+        </SheetContent>
+      </Sheet>
 
       <Dialog open={Boolean(contractStatusId)} onOpenChange={(open) => { if (!open) setContractStatusId(""); }}>
         <DialogContent className="sm:max-w-2xl">
@@ -5100,23 +5732,26 @@ export function PatientDetailPage() {
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="contract-status-edit">{l("Status", "Статус", "Status")}</Label>
-                <select
-                  id="contract-status-edit"
-                  className={selectClassName}
+                <ShadSelect
                   value={contractStatusForm.status}
-                  onChange={(event) =>
+                  onValueChange={(value) =>
                     setContractStatusForm((current) => ({
                       ...current,
-                      status: event.target.value as ContractStatus,
+                      status: (value ?? current.status) as ContractStatus,
                     }))
                   }
                 >
-                  {CONTRACT_STATUS_OPTIONS.map((status) => (
-                    <option key={status} value={status}>
-                      {patientDetailStatusLabel(status)}
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger id="contract-status-edit" className="w-full">
+                    <SelectValue>{patientDetailStatusLabel(contractStatusForm.status)}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CONTRACT_STATUS_OPTIONS.map((status) => (
+                      <SelectItem key={status} value={status}>
+                        {patientDetailStatusLabel(status)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </ShadSelect>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="contract-signed-at-edit">{l("Unterzeichnet am", "Подписано", "Signed at")}</Label>
@@ -5176,23 +5811,26 @@ export function PatientDetailPage() {
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="invoice-status-edit">{l("Status", "Статус", "Status")}</Label>
-                  <select
-                    id="invoice-status-edit"
-                    className={selectClassName}
+                  <ShadSelect
                     value={invoiceStatusForm.status}
-                    onChange={(event) =>
+                    onValueChange={(value) =>
                       setInvoiceStatusForm((current) => ({
                         ...current,
-                        status: event.target.value as InvoiceStatus,
+                        status: (value ?? current.status) as InvoiceStatus,
                       }))
                     }
                   >
-                    {INVOICE_STATUS_OPTIONS.map((status) => (
-                      <option key={status} value={status}>
-                        {patientDetailStatusLabel(status)}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger id="invoice-status-edit" className="w-full">
+                      <SelectValue>{patientDetailStatusLabel(invoiceStatusForm.status)}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {INVOICE_STATUS_OPTIONS.map((status) => (
+                        <SelectItem key={status} value={status}>
+                          {patientDetailStatusLabel(status)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </ShadSelect>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="invoice-due-date-edit">{l("Fälligkeitsdatum", "Срок", "Due date")}</Label>
@@ -5256,7 +5894,7 @@ export function PatientDetailPage() {
               </div>
               <div className="mt-4 space-y-3">
                 {dunningEvents.length === 0 ? (
-                  <p className="text-sm text-slate-500">{l("Noch keine Mahnereignisse.", "Событий напоминаний пока нет.", "No dunning events yet.")}</p>
+                  <p className="text-sm text-slate-500">{l("Noch nicht erfasst.", "Не зафиксировано.", "Not recorded yet.")}</p>
                 ) : (
                   dunningEvents.map((event) => (
                     <div key={event.id} className="rounded-xl border border-slate-200 bg-white px-4 py-3">

@@ -356,6 +356,13 @@ export const ru: Translations = {
     "Изменение статуса можно применить к текущему приёму, к текущему и следующим или ко всей активной серии.",
   appointments_scope_following_hint:
     "Этот и следующие создаёт новую хвостовую ветку серии от текущего приёма. Вся серия сохраняет ту же идентичность серии и сдвигает все активные приёмы вместе.",
+  appointments_repeat_this: "Повторять этот приём",
+  appointments_repeat_hint:
+    "Создать повторяющуюся серию на основе текущей даты и временного слота.",
+  appointments_repeat_interval_error:
+    "Интервал повтора должен быть положительным числом.",
+  appointments_repeat_require_end_error:
+    "Укажите либо общее количество повторов, либо дату окончания повторения.",
   appointments_active_series_path: "Активный путь серии",
   appointments_current_occurrence: "Текущий",
   appointments_open_checklist: "открытый чеклист",
@@ -1054,6 +1061,9 @@ export const ru: Translations = {
   documents_uploading: "Загрузка…",
   documents_loading_documents: "Загрузка документов…",
   documents_confidence: "Уверенность",
+  documents_confidence_low: "низкая",
+  documents_confidence_medium: "средняя",
+  documents_confidence_high: "высокая",
   documents_unclassified: "Без классификации",
   documents_upload_interpreter_hint:
     "Загрузки переводчика сохраняются как внутренние draft-документы и отправляются на проверку тимлиду.",

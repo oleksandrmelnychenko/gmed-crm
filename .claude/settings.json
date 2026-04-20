@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git pull *)",
+      "Bash(git stash *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(npx tsc *)",
+      "Bash(git fetch *)",
+      "Bash(grep -nE \"^import \\\\{|^  useMemo,\" /c/Users/123/Downloads/dev/frontend/src/pages/appointments.tsx)",
+      "Bash(awk ' *)",
+      "Bash(mv patient-detail.tsx.tmp patient-detail.tsx)",
+      "Bash(awk 'NR>=3067 && /^          \\\\\\) : null\\\\}/ { print NR; exit }' /c/Users/123/Downloads/dev/frontend/src/pages/patient-detail.tsx)",
+      "Bash(awk 'NR==2700 {found=1} found && /^          \\\\\\) : null\\\\}/ && !/FormSection/ { print NR; exit }' /c/Users/123/Downloads/dev/frontend/src/pages/patient-detail.tsx)",
+      "Bash(awk 'NR>=2702 && /^          \\\\\\) : null\\\\}/ { print NR; exit }' /c/Users/123/Downloads/dev/frontend/src/pages/patient-detail.tsx)",
+      "Bash(grep -nE \"^        '[A-Z][a-z]+[^']{20,}',\" /c/Users/123/Downloads/dev/migrations/20260417143000_refresh_demo_seed_data.sql)",
+      "Bash(awk '/jsonb,$/ { getline next1; if \\(next1 ~ /^        '\\\\''[A-Z]/\\) print NR\": \"next1 }' /c/Users/123/Downloads/dev/migrations/20260417143000_refresh_demo_seed_data.sql)",
+      "Bash(awk '/^        ARRAY[[\\(]/ { getline next1; if \\(next1 ~ /^        '\\\\''[A-Z]/\\) print NR\": \"next1 }' /c/Users/123/Downloads/dev/migrations/20260417143000_refresh_demo_seed_data.sql)",
+      "Bash(python -)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\123\\Downloads\\dev\\frontend",
+      "c:\\c\\Users\\123\\Downloads\\dev\\frontend\\src\\pages"
+    ]
+  }
+}

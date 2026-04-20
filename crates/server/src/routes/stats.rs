@@ -4714,11 +4714,21 @@ async fn dashboard_demographics(
 
     let clause = dashboard_period_clause(&q.period, "created_at");
 
-    let by_country = load_patients_by_country(&state, &clause).await.unwrap_or_default();
-    let by_age_group = load_patients_by_age(&state, &clause).await.unwrap_or_default();
-    let by_gender = load_patients_by_gender(&state, &clause).await.unwrap_or_else(|_| json!({}));
-    let by_insurance = load_patients_by_insurance(&state, &clause).await.unwrap_or_else(|_| json!({}));
-    let top_languages = load_top_languages(&state, &clause).await.unwrap_or_default();
+    let by_country = load_patients_by_country(&state, &clause)
+        .await
+        .unwrap_or_default();
+    let by_age_group = load_patients_by_age(&state, &clause)
+        .await
+        .unwrap_or_default();
+    let by_gender = load_patients_by_gender(&state, &clause)
+        .await
+        .unwrap_or_else(|_| json!({}));
+    let by_insurance = load_patients_by_insurance(&state, &clause)
+        .await
+        .unwrap_or_else(|_| json!({}));
+    let top_languages = load_top_languages(&state, &clause)
+        .await
+        .unwrap_or_default();
     let total = load_patients_count(&state, &clause).await.unwrap_or(0);
 
     Json(json!({
@@ -4744,8 +4754,12 @@ async fn dashboard_clinical(
 
     let clause = dashboard_period_clause(&q.period, "created_at");
 
-    let top_case_reasons = load_top_case_reasons(&state, &clause).await.unwrap_or_default();
-    let cases_by_status = load_cases_by_status(&state, &clause).await.unwrap_or_else(|_| json!({}));
+    let top_case_reasons = load_top_case_reasons(&state, &clause)
+        .await
+        .unwrap_or_default();
+    let cases_by_status = load_cases_by_status(&state, &clause)
+        .await
+        .unwrap_or_else(|_| json!({}));
     let service_mix = load_ceo_service_mix(&state).await.unwrap_or_default();
     let avg_case_duration_days = load_avg_case_duration(&state, &clause).await.unwrap_or(0.0);
 
@@ -4772,10 +4786,18 @@ async fn dashboard_operations(
     let apt_clause = dashboard_period_clause(&q.period, "date");
     let order_clause = dashboard_period_clause(&q.period, "created_at");
 
-    let appointments_by_status = load_appointments_by_status(&state, &apt_clause).await.unwrap_or_else(|_| json!({}));
-    let appointments_heatmap = load_appointments_heatmap(&state, &apt_clause).await.unwrap_or_default();
-    let orders_by_phase_valued = load_orders_by_phase_valued(&state, &order_clause).await.unwrap_or_default();
-    let top_providers = load_top_providers(&state, &apt_clause).await.unwrap_or_default();
+    let appointments_by_status = load_appointments_by_status(&state, &apt_clause)
+        .await
+        .unwrap_or_else(|_| json!({}));
+    let appointments_heatmap = load_appointments_heatmap(&state, &apt_clause)
+        .await
+        .unwrap_or_default();
+    let orders_by_phase_valued = load_orders_by_phase_valued(&state, &order_clause)
+        .await
+        .unwrap_or_default();
+    let top_providers = load_top_providers(&state, &apt_clause)
+        .await
+        .unwrap_or_default();
 
     Json(json!({
         "period": q.period.as_deref().unwrap_or("30d"),
@@ -4789,7 +4811,10 @@ async fn dashboard_operations(
 
 /* ── Demographics loaders ── */
 
-async fn load_patients_by_country(state: &AppState, clause: &str) -> Result<Vec<Value>, sqlx::Error> {
+async fn load_patients_by_country(
+    state: &AppState,
+    clause: &str,
+) -> Result<Vec<Value>, sqlx::Error> {
     let sql = format!(
         r#"SELECT
                 COALESCE(
@@ -4881,9 +4906,12 @@ async fn load_patients_by_insurance(state: &AppState, clause: &str) -> Result<Va
            GROUP BY 1"#
     );
     let rows = sqlx::query(&sql).fetch_all(&state.db).await?;
-    let mut result = json!({ "private": 0, "public": 0, "self_pay": 0, "foreign": 0, "unknown": 0 });
+    let mut result =
+        json!({ "private": 0, "public": 0, "self_pay": 0, "foreign": 0, "unknown": 0 });
     for r in rows {
-        let t: String = r.try_get::<String, _>("t").unwrap_or_else(|_| "unknown".to_string());
+        let t: String = r
+            .try_get::<String, _>("t")
+            .unwrap_or_else(|_| "unknown".to_string());
         let c: i64 = r.try_get::<i64, _>("c").unwrap_or(0);
         result[t] = json!(c);
     }
@@ -4915,9 +4943,8 @@ async fn load_top_languages(state: &AppState, clause: &str) -> Result<Vec<Value>
 }
 
 async fn load_patients_count(state: &AppState, clause: &str) -> Result<i64, sqlx::Error> {
-    let sql = format!(
-        r#"SELECT COUNT(*)::bigint AS c FROM patients WHERE is_active = true {clause}"#
-    );
+    let sql =
+        format!(r#"SELECT COUNT(*)::bigint AS c FROM patients WHERE is_active = true {clause}"#);
     let row = sqlx::query(&sql).fetch_one(&state.db).await?;
     Ok(row.try_get::<i64, _>("c").unwrap_or(0))
 }
@@ -5004,7 +5031,10 @@ async fn load_appointments_by_status(state: &AppState, clause: &str) -> Result<V
     Ok(result)
 }
 
-async fn load_appointments_heatmap(state: &AppState, clause: &str) -> Result<Vec<Value>, sqlx::Error> {
+async fn load_appointments_heatmap(
+    state: &AppState,
+    clause: &str,
+) -> Result<Vec<Value>, sqlx::Error> {
     // Buckets: dow (0=Sun..6=Sat), hour (0..23) based on time_start
     let sql = format!(
         r#"SELECT
@@ -5029,7 +5059,10 @@ async fn load_appointments_heatmap(state: &AppState, clause: &str) -> Result<Vec
         .collect())
 }
 
-async fn load_orders_by_phase_valued(state: &AppState, clause: &str) -> Result<Vec<Value>, sqlx::Error> {
+async fn load_orders_by_phase_valued(
+    state: &AppState,
+    clause: &str,
+) -> Result<Vec<Value>, sqlx::Error> {
     let sql = format!(
         r#"SELECT
                 phase,

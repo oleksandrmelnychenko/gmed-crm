@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { Building2, LoaderCircle, RefreshCw, Send } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -64,7 +64,11 @@ export function PatientServicesPage() {
   const [cancelBusyId, setCancelBusyId] = useState("");
   const [form, setForm] = useState<ServiceRequestFormState>(blankServiceRequestForm());
   const [version, setVersion] = useState(0);
-  const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
+  const l = useCallback(
+    (de: string, ru: string, en: string) =>
+      lang === "de" ? de : lang === "ru" ? ru : en,
+    [lang],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -98,7 +102,7 @@ export function PatientServicesPage() {
     return () => {
       cancelled = true;
     };
-  }, [loading, version]);
+  }, [loading, version, l]);
 
   const openItems = useMemo(
     () => services.filter((item) => !["completed", "cancelled"].includes(item.status)),

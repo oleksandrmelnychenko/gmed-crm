@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { startTransition, useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
   CalendarDays,
@@ -124,6 +124,14 @@ export function StaffDashboardPageNew() {
   const [operations, setOperations] = useState<OperationsPayload | null>(null);
   const [sectionsLoading, setSectionsLoading] = useState(true);
 
+  function handlePeriodChange(nextPeriod: Period) {
+    if (nextPeriod === period) return;
+    setSectionsLoading(true);
+    startTransition(() => {
+      setPeriod(nextPeriod);
+    });
+  }
+
   // Static fetches (don't depend on period)
   useEffect(() => {
     let cancelled = false;
@@ -152,7 +160,6 @@ export function StaffDashboardPageNew() {
   // Period-dependent fetches
   useEffect(() => {
     let cancelled = false;
-    setSectionsLoading(true);
 
     void Promise.all([
       apiFetch<DemographicsPayload>(`/stats/dashboard/demographics?period=${period}`).catch(() => null),
@@ -202,7 +209,7 @@ export function StaffDashboardPageNew() {
             {tr.dash_subtitle ?? "Overview of your team's daily performance"}
           </p>
         </div>
-        <PeriodSwitcher value={period} onChange={setPeriod} tr={tr} />
+        <PeriodSwitcher value={period} onChange={handlePeriodChange} tr={tr} />
       </div>
 
       {/* KPI row */}
@@ -1135,4 +1142,3 @@ function TopProvidersTable({
     </div>
   );
 }
-

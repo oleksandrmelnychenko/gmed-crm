@@ -15,3 +15,4 @@ edition = "2024"
 opt-level = "s"
 lto = true
 codegen-units = 1
+strip = "symbols"

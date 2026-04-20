@@ -3,12 +3,20 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "packageManager": "npm@10",
+  "engines": {
+    "node": ">=22 <23",
+    "npm": ">=10"
+  },
   "scripts": {
     "dev": "vite",
+    "typecheck": "tsc -b",
     "build": "tsc -b && vite build",
     "check:staff-nav": "node scripts/check-staff-spa-navigation.mjs",
     "lint": "eslint . --max-warnings 0 && npm run check:staff-nav",
     "test": "vitest run",
+    "release:check": "npm run lint && npm run build",
+    "release:check:full": "npm run lint && npm run test && npm run build",
     "test:e2e": "playwright test",
     "test:e2e:live": "playwright test -c playwright.live.config.ts",
     "preview": "vite preview"

@@ -1,4 +1,5 @@
 import {
+  memo,
   startTransition,
   useDeferredValue,
   useEffect,
@@ -270,6 +271,314 @@ function patientToForm(detail: PatientDetail): PatientFormState {
     notes: detail.notes ?? "",
   };
 }
+
+type PatientsDictionary = Record<string, string>;
+
+type CreatePatientSheetProps = {
+  open: boolean;
+  dictionary: PatientsDictionary;
+  onOpenChange: (open: boolean) => void;
+  onCreated: (patientId: string) => void;
+};
+
+function CreatePatientSheet({
+  open,
+  dictionary,
+  onOpenChange,
+  onCreated,
+}: CreatePatientSheetProps) {
+  const [form, setForm] = useState<PatientFormState>(blankPatientForm);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!open) {
+      setForm(blankPatientForm());
+      setBusy(false);
+      setError("");
+    }
+  }, [open]);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+
+    try {
+      const created = await apiFetch<{ id: string }>("/patients", {
+        method: "POST",
+        body: JSON.stringify({
+          title: toOptional(form.title),
+          first_name: form.firstName.trim(),
+          last_name: form.lastName.trim(),
+          birth_date: form.birthDate,
+          gender: form.gender,
+          nationality: toOptional(form.nationality),
+          residence_country: toOptional(form.residenceCountry),
+          languages: parseLanguages(form.languages),
+          functional_labels: parseFunctionalLabels(form.functionalLabels),
+          phone_primary: toOptional(form.phonePrimary),
+          phone_secondary: toOptional(form.phoneSecondary),
+          email: toOptional(form.email),
+          address_street: toOptional(form.addressStreet),
+          address_city: toOptional(form.addressCity),
+          address_zip: toOptional(form.addressZip),
+          address_country: toOptional(form.addressCountry),
+          insurance_provider: toOptional(form.insuranceProvider),
+          insurance_number: toOptional(form.insuranceNumber),
+          insurance_type: toOptional(form.insuranceType),
+          emergency_contact_name: toOptional(form.emergencyContactName),
+          emergency_contact_phone: toOptional(form.emergencyContactPhone),
+          emergency_contact_relation: toOptional(form.emergencyContactRelation),
+          notes: toOptional(form.notes),
+        }),
+      });
+      onOpenChange(false);
+      onCreated(created.id);
+    } catch (submitError) {
+      setError(
+        submitError instanceof Error
+          ? submitError.message
+          : dictionary.common_failed_create
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent side="right" className="w-full sm:max-w-[720px]">
+        <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
+          <SheetHeader className="shrink-0 px-4 pt-3 pb-1">
+            <SheetTitle>{dictionary.patients_create}</SheetTitle>
+          </SheetHeader>
+
+          <div className="flex-1 overflow-y-auto px-4 py-2 space-y-4">
+            {error ? <Banner tone="error">{error}</Banner> : null}
+            <PatientFormFields
+              form={form}
+              onChange={(field, value) =>
+                setForm((current) => ({ ...current, [field]: value }))
+              }
+              includeBirthAndGender
+            />
+          </div>
+
+          <div className="shrink-0 flex justify-end gap-2 px-4 py-3 bg-popover">
+            <Button
+              type="button"
+              variant="outline"
+              className="h-9 rounded-lg"
+              onClick={() => onOpenChange(false)}
+            >
+              {dictionary.common_cancel}
+            </Button>
+            <Button type="submit" className="h-9 rounded-lg gap-1.5 px-3.5" disabled={busy}>
+              {busy ? <LoaderCircle className="size-4 animate-spin" /> : <Plus className="size-4" />}
+              {busy ? dictionary.patients_creating : dictionary.common_create}
+            </Button>
+          </div>
+        </form>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+const MemoizedCreatePatientSheet = memo(CreatePatientSheet);
+
+type PatientDetailSheetProps = {
+  open: boolean;
+  detail: PatientDetail | null;
+  detailBusy: boolean;
+  detailError: string;
+  dictionary: PatientsDictionary;
+  canCreateEdit: boolean;
+  canViewAssignments: boolean;
+  canManageAssignments: boolean;
+  assignments: PatientAssignment[];
+  assignableStaff: StaffOption[];
+  selectedAssignee: string;
+  assignmentBusy: boolean;
+  assignmentError: string;
+  onAssigneeChange: (value: string) => void;
+  onAssign: () => void;
+  onOpenChange: (open: boolean) => void;
+  onRefresh: () => void;
+  onOpenCases: () => void;
+  onOpenOrders: () => void;
+  onOpenAppointments: () => void;
+  onOpenContracts: () => void;
+  onOpenDocuments: () => void;
+};
+
+function PatientDetailSheet({
+  open,
+  detail,
+  detailBusy,
+  detailError,
+  dictionary,
+  canCreateEdit,
+  canViewAssignments,
+  canManageAssignments,
+  assignments,
+  assignableStaff,
+  selectedAssignee,
+  assignmentBusy,
+  assignmentError,
+  onAssigneeChange,
+  onAssign,
+  onOpenChange,
+  onRefresh,
+  onOpenCases,
+  onOpenOrders,
+  onOpenAppointments,
+  onOpenContracts,
+  onOpenDocuments,
+}: PatientDetailSheetProps) {
+  const [form, setForm] = useState<PatientFormState>(blankPatientForm);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!open) {
+      setForm(blankPatientForm());
+      setBusy(false);
+      setError("");
+      return;
+    }
+
+    if (detail) {
+      setForm(patientToForm(detail));
+      setError("");
+    }
+  }, [detail, open]);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!detail) return;
+
+    setBusy(true);
+    setError("");
+
+    try {
+      await apiFetch(`/patients/${detail.id}/update`, {
+        method: "POST",
+        body: JSON.stringify({
+          title: toOptional(form.title),
+          first_name: toOptional(form.firstName),
+          last_name: toOptional(form.lastName),
+          phone_primary: toOptional(form.phonePrimary),
+          phone_secondary: toOptional(form.phoneSecondary),
+          email: toOptional(form.email),
+          nationality: toOptional(form.nationality),
+          residence_country: toOptional(form.residenceCountry),
+          languages: parseLanguages(form.languages),
+          functional_labels: parseFunctionalLabels(form.functionalLabels),
+          address_street: toOptional(form.addressStreet),
+          address_city: toOptional(form.addressCity),
+          address_zip: toOptional(form.addressZip),
+          address_country: toOptional(form.addressCountry),
+          insurance_provider: toOptional(form.insuranceProvider),
+          insurance_number: toOptional(form.insuranceNumber),
+          insurance_type: toOptional(form.insuranceType),
+          emergency_contact_name: toOptional(form.emergencyContactName),
+          emergency_contact_phone: toOptional(form.emergencyContactPhone),
+          emergency_contact_relation: toOptional(form.emergencyContactRelation),
+          notes: toOptional(form.notes),
+        }),
+      });
+      onRefresh();
+    } catch (submitError) {
+      setError(
+        submitError instanceof Error
+          ? submitError.message
+          : dictionary.common_failed_update
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent side="right" className="w-full sm:max-w-[860px]">
+        {detailBusy ? (
+          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+            <LoaderCircle className="mr-2 size-4 animate-spin" />
+            {dictionary.common_loading}
+          </div>
+        ) : detail ? (
+          <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
+            <SheetHeader className="shrink-0 px-4 pt-3 pb-1">
+              <SheetTitle>{patientName(detail)}</SheetTitle>
+            </SheetHeader>
+
+            <div className="flex-1 overflow-y-auto px-4 py-2 space-y-4">
+              {detailError ? <Banner tone="error">{detailError}</Banner> : null}
+              {error ? <Banner tone="error">{error}</Banner> : null}
+              <PatientOverviewSection
+                detail={detail}
+                onOpenCases={onOpenCases}
+                onOpenOrders={onOpenOrders}
+                onOpenAppointments={onOpenAppointments}
+                onOpenContracts={onOpenContracts}
+                onOpenDocuments={onOpenDocuments}
+              />
+              <PatientProfileSection
+                detail={detail}
+                form={form}
+                canEdit={canCreateEdit}
+                onChange={(field, value) =>
+                  setForm((current) => ({ ...current, [field]: value }))
+                }
+              />
+              {canViewAssignments ? (
+                <AssignmentsSection
+                  assignments={assignments}
+                  assignableStaff={assignableStaff}
+                  canManage={canManageAssignments}
+                  assignmentBusy={assignmentBusy}
+                  assignmentError={assignmentError}
+                  selectedAssignee={selectedAssignee}
+                  onAssigneeChange={onAssigneeChange}
+                  onAssign={onAssign}
+                />
+              ) : null}
+            </div>
+
+            <div className="shrink-0 flex justify-end gap-2 px-4 py-3 bg-popover">
+              <Button
+                type="button"
+                variant="outline"
+                className="h-9 rounded-lg"
+                onClick={() => onOpenChange(false)}
+              >
+                {dictionary.common_cancel}
+              </Button>
+              {canCreateEdit ? (
+                <Button type="submit" className="h-9 rounded-lg gap-1.5 px-3.5" disabled={busy}>
+                  {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                  {busy ? dictionary.patients_saving : dictionary.patients_save}
+                </Button>
+              ) : null}
+            </div>
+          </form>
+        ) : detailError ? (
+          <div className="p-4">
+            <Banner tone="error">{detailError}</Banner>
+          </div>
+        ) : (
+          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+            {dictionary.patients_subtitle}
+          </div>
+        )}
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+const MemoizedPatientDetailSheet = memo(PatientDetailSheet);
 
 function buildPatientsPath(filters: PatientFilters) {
   const params = new URLSearchParams();
@@ -909,9 +1218,6 @@ export function PatientsPage() {
   const [listVersion, setListVersion] = useState(0);
 
   const [createOpen, setCreateOpen] = useState(false);
-  const [createBusy, setCreateBusy] = useState(false);
-  const [createError, setCreateError] = useState("");
-  const [createForm, setCreateForm] = useState<PatientFormState>(blankPatientForm());
 
   const [detailOpen, setDetailOpen] = useState(false);
   const [selectedId, setSelectedId] = useState("");
@@ -919,10 +1225,6 @@ export function PatientsPage() {
   const [detailBusy, setDetailBusy] = useState(false);
   const [detailError, setDetailError] = useState("");
   const [detailVersion, setDetailVersion] = useState(0);
-
-  const [editForm, setEditForm] = useState<PatientFormState>(blankPatientForm());
-  const [editBusy, setEditBusy] = useState(false);
-  const [editError, setEditError] = useState("");
 
   const [assignments, setAssignments] = useState<PatientAssignment[]>([]);
   const [staff, setStaff] = useState<StaffOption[]>([]);
@@ -1200,7 +1502,6 @@ export function PatientsPage() {
     let cancelled = false;
     setDetailBusy(true);
     setDetailError("");
-    setEditError("");
     setAssignmentError("");
 
     const detailPromise = apiFetch<PatientDetail>(`/patients/${selectedId}`);
@@ -1216,7 +1517,6 @@ export function PatientsPage() {
         if (cancelled) return;
         startTransition(() => {
           setDetail(patientDetail);
-          setEditForm(patientToForm(patientDetail));
           setAssignments(assignmentItems);
           setStaff(staffItems);
         });
@@ -1252,95 +1552,32 @@ export function PatientsPage() {
     setDetailVersion((current) => current + 1);
   }
 
-  function openPatient(patientId: string) {
+  function handleCreateOpenChange(open: boolean) {
+    setCreateOpen(open);
+  }
+
+  function handleDetailOpenChange(open: boolean) {
+    setDetailOpen(open);
+    if (!open) {
+      setSelectedId("");
+      setDetail(null);
+      setAssignments([]);
+      setSelectedAssignee("");
+      syncQuery({ patient: null });
+    }
+  }
+
+  function handlePatientCreated(patientId: string) {
     staffGo(`/patients/${patientId}`);
   }
 
-  async function handleCreatePatient(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setCreateBusy(true);
-    setCreateError("");
-
-    try {
-      const created = await apiFetch<{ id: string }>("/patients", {
-        method: "POST",
-        body: JSON.stringify({
-          title: toOptional(createForm.title),
-          first_name: createForm.firstName.trim(),
-          last_name: createForm.lastName.trim(),
-          birth_date: createForm.birthDate,
-          gender: createForm.gender,
-          nationality: toOptional(createForm.nationality),
-          residence_country: toOptional(createForm.residenceCountry),
-          languages: parseLanguages(createForm.languages),
-          functional_labels: parseFunctionalLabels(createForm.functionalLabels),
-          phone_primary: toOptional(createForm.phonePrimary),
-          phone_secondary: toOptional(createForm.phoneSecondary),
-          email: toOptional(createForm.email),
-          address_street: toOptional(createForm.addressStreet),
-          address_city: toOptional(createForm.addressCity),
-          address_zip: toOptional(createForm.addressZip),
-          address_country: toOptional(createForm.addressCountry),
-          insurance_provider: toOptional(createForm.insuranceProvider),
-          insurance_number: toOptional(createForm.insuranceNumber),
-          insurance_type: toOptional(createForm.insuranceType),
-          emergency_contact_name: toOptional(createForm.emergencyContactName),
-          emergency_contact_phone: toOptional(createForm.emergencyContactPhone),
-          emergency_contact_relation: toOptional(createForm.emergencyContactRelation),
-          notes: toOptional(createForm.notes),
-        }),
-      });
-      setCreateOpen(false);
-      setCreateForm(blankPatientForm());
-      staffGo(`/patients/${created.id}`);
-    } catch (error) {
-      setCreateError(error instanceof Error ? error.message : t.common_failed_create);
-    } finally {
-      setCreateBusy(false);
-    }
+  function handleDetailSaved() {
+    refreshList();
+    refreshDetail();
   }
 
-  async function handleUpdatePatient(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!detail) return;
-
-    setEditBusy(true);
-    setEditError("");
-
-    try {
-      await apiFetch(`/patients/${detail.id}/update`, {
-        method: "POST",
-        body: JSON.stringify({
-          title: toOptional(editForm.title),
-          first_name: toOptional(editForm.firstName),
-          last_name: toOptional(editForm.lastName),
-          phone_primary: toOptional(editForm.phonePrimary),
-          phone_secondary: toOptional(editForm.phoneSecondary),
-          email: toOptional(editForm.email),
-          nationality: toOptional(editForm.nationality),
-          residence_country: toOptional(editForm.residenceCountry),
-          languages: parseLanguages(editForm.languages),
-          functional_labels: parseFunctionalLabels(editForm.functionalLabels),
-          address_street: toOptional(editForm.addressStreet),
-          address_city: toOptional(editForm.addressCity),
-          address_zip: toOptional(editForm.addressZip),
-          address_country: toOptional(editForm.addressCountry),
-          insurance_provider: toOptional(editForm.insuranceProvider),
-          insurance_number: toOptional(editForm.insuranceNumber),
-          insurance_type: toOptional(editForm.insuranceType),
-          emergency_contact_name: toOptional(editForm.emergencyContactName),
-          emergency_contact_phone: toOptional(editForm.emergencyContactPhone),
-          emergency_contact_relation: toOptional(editForm.emergencyContactRelation),
-          notes: toOptional(editForm.notes),
-        }),
-      });
-      refreshList();
-      refreshDetail();
-    } catch (error) {
-      setEditError(error instanceof Error ? error.message : t.common_failed_update);
-    } finally {
-      setEditBusy(false);
-    }
+  function openPatient(patientId: string) {
+    staffGo(`/patients/${patientId}`);
   }
 
   async function handleAssignPatient() {
@@ -1398,11 +1635,7 @@ export function PatientsPage() {
                 type="button"
                 size="sm"
                 className="h-9 rounded-lg gap-1.5 px-3.5"
-                onClick={() => {
-                  setCreateError("");
-                  setCreateForm(blankPatientForm());
-                  setCreateOpen(true);
-                }}
+                onClick={() => setCreateOpen(true)}
               >
                 <Plus className="size-3.5" />
                 {t.patients_new}
@@ -1801,112 +2034,37 @@ export function PatientsPage() {
         </div>
       </div>
 
-      <Sheet open={createOpen} onOpenChange={setCreateOpen}>
-        <SheetContent side="right" className="w-full sm:max-w-[720px]">
-          <form onSubmit={handleCreatePatient} className="flex flex-col flex-1 min-h-0">
-            <SheetHeader className="shrink-0 px-4 pt-3 pb-1">
-              <SheetTitle>{t.patients_create}</SheetTitle>
-            </SheetHeader>
+      <MemoizedCreatePatientSheet
+        open={createOpen}
+        dictionary={tr}
+        onOpenChange={handleCreateOpenChange}
+        onCreated={handlePatientCreated}
+      />
 
-            <div className="flex-1 overflow-y-auto px-4 py-2 space-y-4">
-              {createError ? <Banner tone="error">{createError}</Banner> : null}
-              <PatientFormFields form={createForm} onChange={(field, value) => setCreateForm((current) => ({ ...current, [field]: value }))} includeBirthAndGender />
-            </div>
-
-            <div className="shrink-0 flex justify-end gap-2 px-4 py-3 bg-popover">
-              <Button type="button" variant="outline" className="h-9 rounded-lg" onClick={() => setCreateOpen(false)}>
-                {t.common_cancel}
-              </Button>
-              <Button type="submit" className="h-9 rounded-lg gap-1.5 px-3.5" disabled={createBusy}>
-                {createBusy ? <LoaderCircle className="size-4 animate-spin" /> : <Plus className="size-4" />}
-                {createBusy ? t.patients_creating : t.common_create}
-              </Button>
-            </div>
-          </form>
-        </SheetContent>
-      </Sheet>
-
-      <Sheet
+      <MemoizedPatientDetailSheet
         open={detailOpen}
-        onOpenChange={(open) => {
-          setDetailOpen(open);
-          if (!open) {
-            setSelectedId("");
-            setDetail(null);
-            setAssignments([]);
-            setSelectedAssignee("");
-            syncQuery({ patient: null });
-          }
-        }}
-      >
-        <SheetContent side="right" className="w-full sm:max-w-[860px]">
-          {detailBusy ? (
-            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-              <LoaderCircle className="mr-2 size-4 animate-spin" />
-              {t.common_loading}
-            </div>
-          ) : detail ? (
-            <form onSubmit={handleUpdatePatient} className="flex flex-col flex-1 min-h-0">
-              <SheetHeader className="shrink-0 px-4 pt-3 pb-1">
-                <SheetTitle>{patientName(detail)}</SheetTitle>
-              </SheetHeader>
-
-              <div className="flex-1 overflow-y-auto px-4 py-2 space-y-4">
-                {detailError ? <Banner tone="error">{detailError}</Banner> : null}
-                {editError ? <Banner tone="error">{editError}</Banner> : null}
-                <PatientOverviewSection
-                  detail={detail}
-                  onOpenCases={() => staffGo(`/cases?patient=${detail.id}`)}
-                  onOpenOrders={() => staffGo(`/orders?patient=${detail.id}`)}
-                  onOpenAppointments={() => staffGo(`/appointments?patient=${detail.id}`)}
-                  onOpenContracts={() => staffGo(`/contracts?patient=${detail.id}`)}
-                  onOpenDocuments={() => staffGo(`/documents?patient=${detail.id}`)}
-                />
-                <PatientProfileSection
-                  detail={detail}
-                  form={editForm}
-                  canEdit={permissions.canCreateEdit}
-                  onChange={(field, value) =>
-                    setEditForm((current) => ({ ...current, [field]: value }))
-                  }
-                />
-                {permissions.canViewAssignments ? (
-                  <AssignmentsSection
-                    assignments={assignments}
-                    assignableStaff={assignableStaff}
-                    canManage={permissions.canManageAssignments}
-                    assignmentBusy={assignmentBusy}
-                    assignmentError={assignmentError}
-                    selectedAssignee={selectedAssignee}
-                    onAssigneeChange={setSelectedAssignee}
-                    onAssign={handleAssignPatient}
-                  />
-                ) : null}
-              </div>
-
-              <div className="shrink-0 flex justify-end gap-2 px-4 py-3 bg-popover">
-                <Button type="button" variant="outline" className="h-9 rounded-lg" onClick={() => setDetailOpen(false)}>
-                  {t.common_cancel}
-                </Button>
-                {permissions.canCreateEdit ? (
-                  <Button type="submit" className="h-9 rounded-lg gap-1.5 px-3.5" disabled={editBusy}>
-                    {editBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                    {editBusy ? t.patients_saving : t.patients_save}
-                  </Button>
-                ) : null}
-              </div>
-            </form>
-          ) : detailError ? (
-            <div className="p-4">
-              <Banner tone="error">{detailError}</Banner>
-            </div>
-          ) : (
-            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-              {t.patients_subtitle}
-            </div>
-          )}
-        </SheetContent>
-      </Sheet>
+        detail={detail}
+        detailBusy={detailBusy}
+        detailError={detailError}
+        dictionary={tr}
+        canCreateEdit={permissions.canCreateEdit}
+        canViewAssignments={permissions.canViewAssignments}
+        canManageAssignments={permissions.canManageAssignments}
+        assignments={assignments}
+        assignableStaff={assignableStaff}
+        selectedAssignee={selectedAssignee}
+        assignmentBusy={assignmentBusy}
+        assignmentError={assignmentError}
+        onAssigneeChange={setSelectedAssignee}
+        onAssign={handleAssignPatient}
+        onOpenChange={handleDetailOpenChange}
+        onRefresh={handleDetailSaved}
+        onOpenCases={() => detail ? staffGo(`/cases?patient=${detail.id}`) : undefined}
+        onOpenOrders={() => detail ? staffGo(`/orders?patient=${detail.id}`) : undefined}
+        onOpenAppointments={() => detail ? staffGo(`/appointments?patient=${detail.id}`) : undefined}
+        onOpenContracts={() => detail ? staffGo(`/contracts?patient=${detail.id}`) : undefined}
+        onOpenDocuments={() => detail ? staffGo(`/documents?patient=${detail.id}`) : undefined}
+      />
     </>
   );
 }

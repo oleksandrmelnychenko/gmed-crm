@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useMemo, useState, type FormEvent } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { Download, LoaderCircle, RefreshCw, Upload } from "lucide-react";
 
@@ -44,7 +44,11 @@ export function PatientInvoicesPage() {
   const [uploadError, setUploadError] = useState("");
   const [uploadNote, setUploadNote] = useState("");
   const [uploadFile, setUploadFile] = useState<File | null>(null);
-  const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
+  const l = useCallback(
+    (de: string, ru: string, en: string) =>
+      lang === "de" ? de : lang === "ru" ? ru : en,
+    [lang],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -83,7 +87,7 @@ export function PatientInvoicesPage() {
     return () => {
       cancelled = true;
     };
-  }, [loading, selectedInvoiceId, version]);
+  }, [loading, selectedInvoiceId, version, l]);
 
   useEffect(() => {
     if (!selectedInvoiceId) {
@@ -115,7 +119,7 @@ export function PatientInvoicesPage() {
     return () => {
       cancelled = true;
     };
-  }, [selectedInvoiceId, version]);
+  }, [selectedInvoiceId, version, l]);
 
   const totalBalance = useMemo(
     () => invoices.reduce((sum, item) => sum + Number(item.balance_due ?? 0), 0),

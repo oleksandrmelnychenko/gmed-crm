@@ -407,7 +407,7 @@ export function buildPatientLabelPrintHtml(payload: PatientLabelPayload) {
         width: 100%;
         min-height: 100%;
         background: #f3f4f6;
-        font-family: "IBM Plex Sans", "Segoe UI", Arial, sans-serif;
+        font-family: "Onest Variable", sans-serif;
         color: #0f172a;
       }
 

@@ -1,47 +1,24 @@
-import { type ReactNode } from "react";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import {
+  CountBadge,
+  EmptyCell,
+  Field,
+  Section as FormSection,
+  TabLoader,
+  inputClass,
+  textareaClass,
+} from "@/components/ui-shell";
 
-export const formInputClassName = "h-9 rounded-lg bg-card";
+// Re-export shell primitives so existing screens keep working.
+// New code should import from "@/components/ui-shell" directly.
+export { CountBadge, EmptyCell, Field, FormSection, TabLoader };
 
-export const textareaClassName =
-  "min-h-[80px] w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
+export const formInputClassName = inputClass;
+export const textareaClassName = textareaClass;
 
-export function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <label className="flex flex-col gap-1.5">
-      <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
-        {label}
-      </span>
-      {children}
-    </label>
-  );
-}
-
-export function FormSection({
-  title,
-  accessory,
-  children,
-}: {
-  title: string;
-  accessory?: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <div className="h-2 w-2 shrink-0 rounded-full bg-[var(--brand)]" />
-          <h3 className="text-[13px] font-semibold tracking-tight text-foreground truncate">
-            {title}
-          </h3>
-        </div>
-        {accessory ? <div className="shrink-0">{accessory}</div> : null}
-      </div>
-      <div className="space-y-3">{children}</div>
-    </section>
-  );
-}
+// Patient-specific: functional label chips.
+// Kept here because the label dictionary is patient-domain.
 
 export function parseFunctionalLabels(value: string): string[] {
   return value

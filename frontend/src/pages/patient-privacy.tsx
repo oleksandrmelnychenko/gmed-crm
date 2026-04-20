@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useMemo, useState, type FormEvent } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { LoaderCircle, RefreshCw, Shield } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -29,7 +29,11 @@ export function PatientPrivacyPage() {
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [version, setVersion] = useState(0);
-  const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
+  const l = useCallback(
+    (de: string, ru: string, en: string) =>
+      lang === "de" ? de : lang === "ru" ? ru : en,
+    [lang],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -63,7 +67,7 @@ export function PatientPrivacyPage() {
     return () => {
       cancelled = true;
     };
-  }, [loading, version]);
+  }, [loading, version, l]);
 
   const openRequests = useMemo(
     () => requests.filter((item) => !["rejected", "completed", "executed"].includes(item.status)),

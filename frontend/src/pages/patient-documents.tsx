@@ -1,10 +1,11 @@
-import { startTransition, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { Download, LoaderCircle, RefreshCw, ShieldCheck, Upload } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
+import { localizeRequiredDocumentLabel } from "@/lib/required-document-labels";
 import {
   documentTone,
   downloadPortalDocument,
@@ -38,7 +39,11 @@ export function PatientDocumentsPage() {
   const [uploadNotes, setUploadNotes] = useState("");
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [version, setVersion] = useState(0);
-  const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
+  const l = useCallback(
+    (de: string, ru: string, en: string) =>
+      lang === "de" ? de : lang === "ru" ? ru : en,
+    [lang],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -78,7 +83,7 @@ export function PatientDocumentsPage() {
     return () => {
       cancelled = true;
     };
-  }, [loading, version]);
+  }, [loading, version, l]);
 
   const pending = useMemo(
     () => documents.filter((item) => item.requires_confirmation && !item.confirmed).length,
@@ -257,7 +262,7 @@ export function PatientDocumentsPage() {
                       variant="outline"
                       className="rounded-full border-amber-300 bg-white text-amber-800"
                     >
-                      {item.label}
+                      {localizeRequiredDocumentLabel(item.key, item.label, l)}
                     </Badge>
                   ))}
                 </div>

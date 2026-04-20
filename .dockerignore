@@ -1,0 +1,13 @@
+.git
+.github
+.claude
+.agent-extract
+target
+uploads
+tmp-*.log
+.env
+.env.dev
+frontend
+**/node_modules
+**/dist
+

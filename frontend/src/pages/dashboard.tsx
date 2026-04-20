@@ -311,7 +311,7 @@ function StaffDashboardPage() {
   const role = user?.role ?? "";
   const executive = role === "ceo" || role === "ceo_assistant";
   const locale = lang === "de" ? "de-DE" : "ru-RU";
-  const text = lang === "de"
+  const text = useMemo(() => (lang === "de"
     ? {
         heroSubtitle: "Operatives Cockpit für {role} mit Live-Queue, Pipeline- und Terminsignalen.",
         openCalendar: "Kalender öffnen",
@@ -627,7 +627,7 @@ function StaffDashboardPage() {
           clinicNetwork: "Сеть клиник",
           clinicNetworkDescription: "Провайдеры, врачи, услуги и связанные пациенты",
         },
-      };
+      }), [lang]);
   const severityLabel = (value: string) => enumLabel(value, text.severities);
   const priorityLabel = (value: string) => enumLabel(value, text.priorities);
   const taskStatusLabel = (value: string) => enumLabel(value, text.taskStatuses);
@@ -637,7 +637,7 @@ function StaffDashboardPage() {
   const phaseLabel = (value: string) => tr[`phase_${value}`] ?? value.replaceAll("_", " ");
   const monthLabels = useMemo(
     () => Array.from({ length: 12 }, (_, index) => text.monthLabel(index)),
-    [text, lang],
+    [text],
   );
 
   const [version, setVersion] = useState(0);
