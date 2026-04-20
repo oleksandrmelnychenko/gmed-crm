@@ -13,8 +13,6 @@ import {
   ArrowUp,
   Building2,
   CalendarClock,
-  ChevronLeft,
-  ChevronRight,
   Filter,
   LoaderCircle,
   Mail,
@@ -23,7 +21,6 @@ import {
   Phone,
   Plus,
   RefreshCw,
-  Star,
   Stethoscope,
   Trash2,
   UsersRound,
@@ -544,18 +541,6 @@ function providerTypeLabel(value: string, tr: Record<string, string>) {
   return value === "non_medical" ? tr.providers_type_non_medical : tr.providers_type_medical;
 }
 
-function providerTypeBadge(value: string) {
-  return value === "non_medical"
-    ? "border-teal-200 bg-teal-50 text-teal-700"
-    : "border-sky-200 bg-sky-50 text-sky-700";
-}
-
-function statusBadge(active: boolean) {
-  return active
-    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-    : "border-slate-200 bg-slate-100 text-slate-600";
-}
-
 function compactDateTime(value?: string | null, fallback = "Not set") {
   if (!value) return fallback;
   try {
@@ -582,11 +567,6 @@ function compactDate(value?: string | null, fallback = "Not set") {
   } catch {
     return value;
   }
-}
-
-function formatRating(value?: number | null) {
-  if (value === null || value === undefined) return null;
-  return value.toFixed(1);
 }
 
 function stringifyContract(value: unknown) {
@@ -753,41 +733,6 @@ function Banner({ tone, children }: { tone: "error" | "warning"; children: React
       )}
     >
       {children}
-    </div>
-  );
-}
-
-function MetricCard({
-  icon: Icon,
-  label,
-  value,
-  tone,
-}: {
-  icon: typeof Building2;
-  label: string;
-  value: string;
-  tone: "sky" | "emerald" | "amber" | "slate";
-}) {
-  const toneClass =
-    tone === "sky"
-      ? "bg-sky-100 text-sky-700"
-      : tone === "emerald"
-        ? "bg-emerald-100 text-emerald-700"
-        : tone === "amber"
-          ? "bg-amber-100 text-amber-700"
-          : "bg-slate-100 text-slate-700";
-
-  return (
-    <div className="rounded-[1.5rem] border border-white/90 bg-white/88 p-4 shadow-sm backdrop-blur">
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">
-          {label}
-        </span>
-        <span className={cn("rounded-2xl p-2", toneClass)}>
-          <Icon className="size-4" />
-        </span>
-      </div>
-      <p className="mt-4 text-3xl font-semibold tracking-tight text-slate-950">{value}</p>
     </div>
   );
 }
@@ -1028,11 +973,6 @@ function ProvidersPage() {
     [sortedAndFilteredProviders, page, pageSize]
   );
   useEffect(() => { setPage(0); }, [providers.length, pageSize]);
-
-  const selectedSummary = useMemo(
-    () => providers.find((provider) => provider.id === selectedId) ?? null,
-    [providers, selectedId]
-  );
 
   function syncQuery(next: Record<string, string | null>) {
     const params = new URLSearchParams(searchParams);
@@ -1831,7 +1771,6 @@ function ProvidersPage() {
               {l("Wählen Sie einen Anbieter aus, um den Registerbereich zu öffnen.", "Выберите провайдера, чтобы открыть реестровое рабочее пространство.", "Select a provider to open the registry workspace.")}
             </div>
           )}
-          </div>
         </SheetContent>
       </Sheet>
     </>

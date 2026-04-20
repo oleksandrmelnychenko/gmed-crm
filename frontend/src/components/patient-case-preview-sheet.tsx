@@ -52,27 +52,46 @@ export function PatientCasePreviewSheet({
   const l = (de: string, ru: string, en: string) =>
     lang === "de" ? de : lang === "ru" ? ru : en;
   const { staffGo } = useStaffNavigate();
-  const [detail, setDetail] = useState<CasePreview | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [detailState, setDetailState] = useState<{
+    caseId: string | null;
+    detail: CasePreview | null;
+    failed: boolean;
+  }>({
+    caseId: null,
+    detail: null,
+    failed: false,
+  });
+  const activeDetail =
+    open &&
+    caseId &&
+    detailState.caseId === caseId &&
+    !detailState.failed
+      ? detailState.detail
+      : null;
+  const showLoading = open && Boolean(caseId) && detailState.caseId !== caseId;
 
   useEffect(() => {
     if (!open || !caseId) {
-      setDetail(null);
       return;
     }
     let cancelled = false;
-    setLoading(true);
     apiFetch<CasePreview>(`/cases/${caseId}`)
       .then((row) => {
         if (!cancelled) {
-          setDetail(row);
-          setLoading(false);
+          setDetailState({
+            caseId,
+            detail: row,
+            failed: false,
+          });
         }
       })
       .catch(() => {
         if (!cancelled) {
-          setDetail(null);
-          setLoading(false);
+          setDetailState({
+            caseId,
+            detail: null,
+            failed: true,
+          });
         }
       });
     return () => {
@@ -86,8 +105,8 @@ export function PatientCasePreviewSheet({
         <SheetHeader className="px-4 py-3 flex-row items-center justify-between">
           <SheetTitle className="inline-flex items-center gap-2">
             <Folder className="size-4 text-muted-foreground" />
-            {detail ? (
-              <span className="font-mono text-sm">{detail.case_id}</span>
+            {activeDetail ? (
+              <span className="font-mono text-sm">{activeDetail.case_id}</span>
             ) : (
               l("Fall", "Кейс", "Case")
             )}
@@ -110,12 +129,12 @@ export function PatientCasePreviewSheet({
         </SheetHeader>
 
         <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
-          {loading ? (
+          {showLoading ? (
             <div className="flex items-center justify-center py-8 text-muted-foreground text-sm">
               <LoaderCircle className="size-4 mr-2 animate-spin" />
               Loading…
             </div>
-          ) : !detail ? (
+          ) : !activeDetail ? (
             <div className="rounded-lg border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
               {l("Noch nicht erfasst.", "Не зафиксировано.", "Not recorded yet.")}
             </div>
@@ -123,28 +142,28 @@ export function PatientCasePreviewSheet({
             <>
               <div className="flex items-center gap-2">
                 <Badge variant="outline" className="rounded-full text-[10px]">
-                  {tr[`cases_${detail.status}`] ?? detail.status}
+                  {tr[`cases_${activeDetail.status}`] ?? activeDetail.status}
                 </Badge>
                 <span className="text-[11.5px] text-muted-foreground">
-                  {formatDate(detail.created_at)}
+                  {formatDate(activeDetail.created_at)}
                 </span>
               </div>
 
               <Field
                 label={l("Hauptanfragegrund", "Основная причина обращения", "Main request reason")}
-                value={detail.hauptanfragegrund}
+                value={activeDetail.hauptanfragegrund}
               />
               <Field
                 label={l("Aktuelle Anamnese", "Текущий анамнез", "Current anamnesis")}
-                value={detail.aktuelle_anamnese}
+                value={activeDetail.aktuelle_anamnese}
               />
               <Field
                 label={l("Zuweiser", "Направитель", "Referrer")}
-                value={detail.zuweiser}
+                value={activeDetail.zuweiser}
               />
               <Field
                 label={l("Notizen", "Заметки", "Notes")}
-                value={detail.notes}
+                value={activeDetail.notes}
               />
             </>
           )}

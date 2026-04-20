@@ -656,28 +656,6 @@ function patientOptionLabel(patient: PatientOption) {
   return `${patient.patient_id} · ${[patient.first_name, patient.last_name].filter(Boolean).join(" ")}`;
 }
 
-function humanizeCode(value: string | null | undefined) {
-  if (!value) return "";
-  return value
-    .replace(/[_-]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-// Auto-name from backend is usually human-readable ("Passport scan"). But
-// some flows fall back to raw enum codes ("translated_summary"). Detect that
-// shape and humanize to keep the list readable.
-function displayAutoName(value: string | null | undefined) {
-  if (!value) return "";
-  const trimmed = value.trim();
-  if (!trimmed) return "";
-  if (/^[a-z0-9][a-z0-9_-]*$/.test(trimmed)) {
-    return humanizeCode(trimmed);
-  }
-  return trimmed;
-}
-
 function formatConfidenceLabel(
   value: string,
   tr: Record<string, string>,
