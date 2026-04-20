@@ -147,7 +147,7 @@ type ServiceItem = {
   created_at: string;
 };
 
-type ProviderDetail = {
+export type ProviderDetail = {
   id: string;
   name: string;
   provider_type: ProviderType;
@@ -232,7 +232,7 @@ type ServiceFormState = {
   validTo: string;
 };
 
-type ProviderPermissions = {
+export type ProviderPermissions = {
   canViewPage: boolean;
   canManageRegistry: boolean;
   forceNonMedical: boolean;
@@ -1777,7 +1777,7 @@ function ProvidersPage() {
   );
 }
 
-function ProviderOverviewSection({
+export function ProviderOverviewSection({
   detail,
   providerActionBusy,
   permissions,
@@ -2316,7 +2316,7 @@ function ServiceSection({
   );
 }
 
-function LinkedPatientsSection({
+export function LinkedPatientsSection({
   detail,
   onOpenPatient,
   onOpenAppointments,
@@ -2415,7 +2415,7 @@ function LinkedPatientsSection({
   );
 }
 
-function InteractionHistorySection({
+export function InteractionHistorySection({
   detail,
   onOpenPatient,
   onOpenAppointments,

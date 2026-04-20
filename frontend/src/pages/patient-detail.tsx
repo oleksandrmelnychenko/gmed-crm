@@ -67,7 +67,7 @@ import { PatientVitalsSheet } from "@/components/patient-vitals-sheet";
 import { PatientCaveNotesSheet } from "@/components/patient-cave-notes-sheet";
 import { PatientNotesSheet } from "@/components/patient-notes-sheet";
 import { PatientAppointmentSheet } from "@/components/patient-appointment-sheet";
-import { PatientCasePreviewSheet } from "@/components/patient-case-preview-sheet";
+import { CaseWorkspaceModal } from "@/components/case-workspace-modal";
 import {
   localizeDocumentCode,
   localizeRequiredDocumentLabel,
@@ -4345,8 +4345,9 @@ export function PatientDetailPage() {
               </div>
             )}
           </FormSection>
-          <PatientCasePreviewSheet
+          <CaseWorkspaceModal
             caseId={casePreviewId}
+            patientId={id}
             open={Boolean(casePreviewId)}
             onOpenChange={(value) => { if (!value) setCasePreviewId(null); }}
           />

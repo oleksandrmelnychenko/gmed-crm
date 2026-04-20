@@ -21,6 +21,7 @@ import { useSearchParams } from "react-router-dom";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { CasesRosterSection, type CaseRosterItem } from "@/components/cases-roster-section";
 import {
   Dialog,
   DialogContent,
@@ -60,18 +61,6 @@ import {
 } from "./cases.snippets";
 
 type CaseStatus = "open" | "in_progress" | "closed";
-
-type CaseItem = {
-  id: string;
-  case_uuid?: string;
-  case_id: string;
-  patient_id: string;
-  patient_name: string;
-  patient_pid: string;
-  status: CaseStatus | string;
-  hauptanfragegrund: string | null;
-  created_at: string;
-};
 
 type VorerkrankungItem = {
   erkrankung: string;
@@ -398,6 +387,13 @@ type FieldProps = {
 type BannerProps = {
   tone: "error" | "success";
   children: ReactNode;
+};
+
+type CasesPageProps = {
+  embedded?: boolean;
+  embeddedPatientId?: string | null;
+  embeddedCaseId?: string | null;
+  onCloseCaseSheet?: () => void;
 };
 
 type EmptyPanelProps = {
@@ -766,10 +762,6 @@ function historySectionLabel(section: string) {
   }
 }
 
-function textValue(value: string | null | undefined) {
-  return value?.trim() ? value : runtimeTranslations().common_not_set;
-}
-
 function numericInputToValue(value: string) {
   const trimmed = value.trim().replace(",", ".");
   if (!trimmed) return null;
@@ -1001,7 +993,12 @@ function urologyToPayload(urology: UrologyAssessment) {
   };
 }
 
-export function CasesPage() {
+export function CasesPage({
+  embedded = false,
+  embeddedPatientId = null,
+  embeddedCaseId = null,
+  onCloseCaseSheet,
+}: CasesPageProps = {}) {
   const { t } = useLang();
   const { user } = useAuth();
   const { staffGo } = useStaffNavigate();
@@ -1012,7 +1009,7 @@ export function CasesPage() {
   const deferredSearch = useDeferredValue(filters.search);
   const [patients, setPatients] = useState<PatientOption[]>([]);
   const [doctors, setDoctors] = useState<DoctorOption[]>([]);
-  const [cases, setCases] = useState<CaseItem[]>([]);
+  const [cases, setCases] = useState<CaseRosterItem[]>([]);
   const [listBusy, setListBusy] = useState(false);
   const [listError, setListError] = useState("");
   const [listVersion, setListVersion] = useState(0);
@@ -1258,9 +1255,13 @@ export function CasesPage() {
   }, [permissions.canViewPage, snippetVersion]);
 
   useEffect(() => {
-    const patientParam = searchParams.get("patient") ?? "";
-    const caseParam = searchParams.get("case") ?? "";
-    const createParam = searchParams.get("create") ?? "";
+    const patientParam = embedded
+      ? embeddedPatientId ?? ""
+      : searchParams.get("patient") ?? "";
+    const caseParam = embedded
+      ? embeddedCaseId ?? ""
+      : searchParams.get("case") ?? "";
+    const createParam = embedded ? "" : searchParams.get("create") ?? "";
 
     if (patientParam !== filters.patientId) {
       setFilters((current) => ({ ...current, patientId: patientParam }));
@@ -1271,7 +1272,7 @@ export function CasesPage() {
       setDetailOpen(true);
     }
 
-    if (createParam && permissions.canCreate) {
+    if (createParam && permissions.canCreate && !embedded) {
       setCreateError("");
       setCreateForm({
         ...DEFAULT_CREATE_FORM,
@@ -1282,7 +1283,16 @@ export function CasesPage() {
       params.delete("create");
       setSearchParams(params, { replace: true });
     }
-  }, [filters.patientId, permissions.canCreate, searchParams, selectedId, setSearchParams]);
+  }, [
+    embedded,
+    embeddedPatientId,
+    embeddedCaseId,
+    filters.patientId,
+    permissions.canCreate,
+    searchParams,
+    selectedId,
+    setSearchParams,
+  ]);
 
   useEffect(() => {
     if (!permissions.canViewPage) return;
@@ -1290,7 +1300,7 @@ export function CasesPage() {
     setListBusy(true);
     setListError("");
 
-    void apiFetch<CaseItem[]>(casesPath)
+    void apiFetch<CaseRosterItem[]>(casesPath)
       .then((items) => {
         if (!cancelled) {
           startTransition(() => setCases(items));
@@ -1489,6 +1499,7 @@ export function CasesPage() {
   }
 
   function updateQuery(next: Record<string, string | null>) {
+    if (embedded) return;
     const params = new URLSearchParams(searchParams);
     Object.entries(next).forEach(([key, value]) => {
       if (value) {
@@ -1907,7 +1918,8 @@ export function CasesPage() {
 
   return (
     <>
-      <div className="space-y-6">
+      {embedded ? null : (
+        <div className="space-y-6">
         <section className="rounded-[2rem] border border-white/70 bg-[radial-gradient(circle_at_top_left,_rgba(125,211,252,0.28),_transparent_38%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(241,245,249,0.92))] p-6 shadow-[0_32px_80px_rgba(15,23,42,0.08)]">
           <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
             <div className="max-w-3xl">
@@ -2060,102 +2072,51 @@ export function CasesPage() {
             </div>
           </section>
 
-          <section className={cardClass("p-5")}>
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-sm font-semibold text-slate-950">{t.cases_roster}</h2>
-                <p className="mt-1 text-sm text-slate-600">
-                  {t.cases_subtitle}
-                </p>
-              </div>
-              <div className="text-xs uppercase tracking-[0.12em] text-slate-500">
-                {listBusy ? t.patients_syncing : `${cases.length} ${t.patients_records}`}
-              </div>
-            </div>
-
-            {listError ? (
+          <CasesRosterSection
+            className={cardClass("p-5")}
+            title={t.cases_roster}
+            subtitle={t.cases_subtitle}
+            counterLabel={listBusy ? t.patients_syncing : `${cases.length} ${t.patients_records}`}
+            loading={listBusy}
+            loadingLabel={t.common_loading}
+            error={listError}
+            renderError={(message) => (
               <div className="mt-5">
-                <Banner tone="error">{listError}</Banner>
-              </div>
-            ) : null}
-
-            {listBusy ? (
-              <div className="flex min-h-[320px] items-center justify-center text-sm text-slate-500">
-                <LoaderCircle className="mr-2 size-4 animate-spin" />
-                {t.common_loading}
-              </div>
-            ) : cases.length === 0 ? (
-              <div className="mt-5">
-                <EmptyPanel
-                  title={t.cases_no_match}
-                  text={t.cases_no_match}
-                  action={
-                    permissions.canCreate ? (
-                      <Button
-                        type="button"
-                        className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
-                        onClick={() => setCreateOpen(true)}
-                      >
-                        <Plus className="size-4" />
-                        {t.cases_title}
-                      </Button>
-                    ) : undefined
-                  }
-                />
-              </div>
-            ) : (
-              <div className="mt-5 grid gap-4 xl:grid-cols-2">
-                {cases.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => openCase(item.id)}
-                    className="rounded-[1.6rem] border border-slate-200 bg-white p-5 text-left transition hover:-translate-y-0.5 hover:shadow-[0_18px_48px_rgba(15,23,42,0.08)]"
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <div className="font-mono text-xs font-semibold tracking-[0.16em] text-slate-500">
-                          {item.case_id}
-                        </div>
-                        <h3 className="mt-2 text-lg font-semibold text-slate-950">
-                          {item.patient_name}
-                        </h3>
-                        <p className="mt-1 text-sm text-slate-600">{item.patient_pid}</p>
-                      </div>
-                      <Badge
-                        variant="outline"
-                        className={cn("rounded-full", statusBadgeClass(item.status))}
-                      >
-                        {caseStatusLabel(item.status, t)}
-                      </Badge>
-                    </div>
-
-                    <div className="mt-4 grid gap-3 md:grid-cols-2">
-                      <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                          {t.cases_reason}
-                        </div>
-                        <div className="mt-2 text-sm text-slate-900">
-                          {textValue(item.hauptanfragegrund)}
-                        </div>
-                      </div>
-                      <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                          {t.users_created}
-                        </div>
-                        <div className="mt-2 text-sm text-slate-900">
-                          {formatDate(item.created_at)}
-                        </div>
-                      </div>
-                    </div>
-                  </button>
-                ))}
+                <Banner tone="error">{message}</Banner>
               </div>
             )}
-          </section>
+            items={cases}
+            emptyState={
+              <EmptyPanel
+                title={t.cases_no_match}
+                text={t.cases_no_match}
+                action={
+                  permissions.canCreate ? (
+                    <Button
+                      type="button"
+                      className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+                      onClick={() => setCreateOpen(true)}
+                    >
+                      <Plus className="size-4" />
+                      {t.cases_title}
+                    </Button>
+                  ) : undefined
+                }
+              />
+            }
+            onCaseClick={(item) => openCase(item.id)}
+            caseStatusLabel={(status) => caseStatusLabel(status, t)}
+            caseStatusBadgeClassName={statusBadgeClass}
+            reasonLabel={t.cases_reason}
+            createdLabel={t.users_created}
+            notSetLabel={t.common_not_set}
+            formatDateTimeLabel={(value) => formatDate(value)}
+          />
         </div>
-      </div>
+        </div>
+      )}
 
+      {embedded ? null : (
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
@@ -2250,6 +2211,7 @@ export function CasesPage() {
           </form>
         </DialogContent>
       </Dialog>
+      )}
 
       <Sheet
         open={detailOpen}
@@ -2266,6 +2228,7 @@ export function CasesPage() {
             setUrology(blankUrology());
             setDetailError("");
             updateQuery({ case: null });
+            onCloseCaseSheet?.();
           }
         }}
       >

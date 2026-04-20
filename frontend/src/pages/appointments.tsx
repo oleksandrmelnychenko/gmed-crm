@@ -49,6 +49,12 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { DocumentsGrid } from "@/components/documents-grid";
+import {
+  CasesRosterSection,
+  type CaseRosterItem,
+} from "@/components/cases-roster-section";
+import { CaseWorkspaceModal } from "@/components/case-workspace-modal";
 import {
   Dialog,
   DialogContent,
@@ -80,6 +86,7 @@ import {
 } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { apiFetch } from "@/lib/api";
+import { localizeDocumentCode } from "@/lib/required-document-labels";
 import { cn } from "@/lib/utils";
 import {
   buildInterpreterMobileAgendaSections,
@@ -98,6 +105,13 @@ import {
   type PatientsDictionary,
   type StaffOption as PatientSheetStaffOption,
 } from "@/pages/patients";
+import {
+  InteractionHistorySection as ProviderInteractionHistorySection,
+  LinkedPatientsSection as ProviderLinkedPatientsSection,
+  ProviderOverviewSection,
+  type ProviderDetail as ProviderSheetDetail,
+  type ProviderPermissions as ProviderSheetPermissions,
+} from "@/pages/providers";
 
 type AppointmentKind = "medical" | "non_medical" | "internal";
 type AppointmentCarePathKind =
@@ -443,6 +457,31 @@ type LinkedPreviewKind =
   | "cases";
 type LinkedPreviewRecord = Record<string, unknown>;
 type LinkedPreviewPayload = LinkedPreviewRecord | LinkedPreviewRecord[];
+type LinkedDocumentItem = {
+  id: string;
+  patient_id: string | null;
+  order_id: string | null;
+  appointment_id: string | null;
+  patient_pid: string | null;
+  patient_name: string | null;
+  order_number: string | null;
+  appointment_title: string | null;
+  auto_name: string;
+  original_filename: string | null;
+  art: string;
+  category: string | null;
+  status: string;
+  visibility: string;
+  mime_type: string | null;
+  file_size: number | null;
+  notes: string | null;
+  uploaded_by_name: string | null;
+  version_number: number;
+  version_count: number;
+  created_at: string;
+  updated_at: string;
+  share_count: number;
+};
 
 type FiltersState = {
   search: string;
@@ -817,6 +856,11 @@ const TASK_ASSIGNABLE_ROLES = new Set([
   "interpreter",
   "concierge",
 ]);
+const PROVIDER_PREVIEW_PERMISSIONS: ProviderSheetPermissions = {
+  canViewPage: true,
+  canManageRegistry: false,
+  forceNonMedical: false,
+};
 const MAX_PROVIDER_DOCTORS_CACHE = 24;
 const providerDoctorsCache = new Map<string, DoctorOption[]>();
 const providerDoctorsInFlight = new Map<string, Promise<DoctorOption[]>>();
@@ -2016,6 +2060,58 @@ function formatDateTimeLabel(dateTime: string | null | undefined) {
   } catch {
     return dateTime;
   }
+}
+
+function formatDocumentFileSize(size: number | null | undefined) {
+  if (!size || size <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"] as const;
+  const index = Math.min(Math.floor(Math.log(size) / Math.log(1024)), units.length - 1);
+  const value = size / 1024 ** index;
+  const precision = index === 0 ? 0 : value < 10 ? 1 : 0;
+  return `${value.toFixed(precision)} ${units[index]}`;
+}
+
+function linkedDocumentStatusBadge(status: string) {
+  if (status === "active") return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  if (status === "archived") return "border-slate-200 bg-slate-50 text-slate-700";
+  return "border-amber-200 bg-amber-50 text-amber-700";
+}
+
+function linkedDocumentVisibilityBadge(visibility: string) {
+  if (visibility === "patient_visible")
+    return "border-blue-200 bg-blue-50 text-blue-700";
+  if (visibility === "released_external")
+    return "border-cyan-200 bg-cyan-50 text-cyan-700";
+  if (visibility === "released_internal")
+    return "border-violet-200 bg-violet-50 text-violet-700";
+  return "border-slate-200 bg-slate-50 text-slate-700";
+}
+
+function linkedDocumentSensitivityBadge(value: string) {
+  void value;
+  return "border-slate-200 bg-slate-50 text-slate-700";
+}
+
+function toTimestamp(value: string | null | undefined) {
+  if (!value) return 0;
+  const timestamp = Date.parse(value);
+  return Number.isNaN(timestamp) ? 0 : timestamp;
+}
+
+function sortLinkedDocuments(items: LinkedDocumentItem[]) {
+  return [...items].sort((left, right) => {
+    const updatedDiff = toTimestamp(right.updated_at) - toTimestamp(left.updated_at);
+    if (updatedDiff !== 0) return updatedDiff;
+
+    const createdDiff = toTimestamp(right.created_at) - toTimestamp(left.created_at);
+    if (createdDiff !== 0) return createdDiff;
+
+    if (right.version_number !== left.version_number) {
+      return right.version_number - left.version_number;
+    }
+
+    return (left.auto_name || "").localeCompare(right.auto_name || "");
+  });
 }
 
 function toDateTimeLocalInput(dateTime: string | null | undefined) {
@@ -10126,6 +10222,31 @@ function StaffAppointmentsPage() {
   const [linkedPatientAssignmentError, setLinkedPatientAssignmentError] =
     useState("");
   const [linkedPatientVersion, setLinkedPatientVersion] = useState(0);
+  const [linkedProviderOpen, setLinkedProviderOpen] = useState(false);
+  const [linkedProviderId, setLinkedProviderId] = useState("");
+  const [linkedProviderDetailLoading, setLinkedProviderDetailLoading] =
+    useState(false);
+  const [linkedProviderDetailError, setLinkedProviderDetailError] =
+    useState("");
+  const [linkedProviderDetail, setLinkedProviderDetail] =
+    useState<ProviderSheetDetail | null>(null);
+  const [linkedCasesOpen, setLinkedCasesOpen] = useState(false);
+  const [linkedCasesLoading, setLinkedCasesLoading] = useState(false);
+  const [linkedCasesError, setLinkedCasesError] = useState("");
+  const [linkedCasesItems, setLinkedCasesItems] = useState<CaseRosterItem[]>(
+    [],
+  );
+  const [linkedCasePreviewOpen, setLinkedCasePreviewOpen] = useState(false);
+  const [linkedCasePreviewId, setLinkedCasePreviewId] = useState("");
+  const [linkedDocumentsOpen, setLinkedDocumentsOpen] = useState(false);
+  const [linkedDocumentsLoading, setLinkedDocumentsLoading] = useState(false);
+  const [linkedDocumentsError, setLinkedDocumentsError] = useState("");
+  const [linkedDocumentsItems, setLinkedDocumentsItems] = useState<
+    LinkedDocumentItem[]
+  >([]);
+  const [linkedDocumentSelectedIds, setLinkedDocumentSelectedIds] = useState<
+    string[]
+  >([]);
 
   const [followUpAssigneeId, setFollowUpAssigneeId] = useState("");
   const [actionBusy, setActionBusy] = useState("");
@@ -10696,6 +10817,21 @@ function StaffAppointmentsPage() {
       setLinkedPatientAssignmentBusy(false);
       setLinkedPatientAssignmentError("");
       setLinkedPatientVersion(0);
+      setLinkedProviderOpen(false);
+      setLinkedProviderId("");
+      setLinkedProviderDetailLoading(false);
+      setLinkedProviderDetailError("");
+      setLinkedProviderDetail(null);
+      setLinkedCasesOpen(false);
+      setLinkedCasesLoading(false);
+      setLinkedCasesError("");
+      setLinkedCasesItems([]);
+      setLinkedCasePreviewOpen(false);
+      setLinkedCasePreviewId("");
+      setLinkedDocumentsOpen(false);
+      setLinkedDocumentsLoading(false);
+      setLinkedDocumentsError("");
+      setLinkedDocumentsItems([]);
       if (clearQuery) {
         syncQuery({
           appointment: null,
@@ -11006,6 +11142,7 @@ function StaffAppointmentsPage() {
 
   useEffect(() => {
     if (!linkedPreviewOpen || !linkedPreviewKind || !detail) return;
+    const currentDetail = detail;
     let active = true;
 
     async function loadLinkedPreview() {
@@ -11016,7 +11153,7 @@ function StaffAppointmentsPage() {
       try {
         let endpoint = "";
         if (linkedPreviewKind === "order") {
-          if (!detail.order_id) {
+          if (!currentDetail.order_id) {
             throw new Error(
               appointmentText(
                 "Kein Auftrag mit diesem Termin verknupft.",
@@ -11025,9 +11162,9 @@ function StaffAppointmentsPage() {
               ),
             );
           }
-          endpoint = `/orders/${detail.order_id}`;
+          endpoint = `/orders/${currentDetail.order_id}`;
         } else if (linkedPreviewKind === "provider") {
-          if (!detail.provider_id) {
+          if (!currentDetail.provider_id) {
             throw new Error(
               appointmentText(
                 "Keine Klinik mit diesem Termin verknupft.",
@@ -11036,11 +11173,11 @@ function StaffAppointmentsPage() {
               ),
             );
           }
-          endpoint = `/providers/${detail.provider_id}`;
+          endpoint = `/providers/${currentDetail.provider_id}`;
         } else if (linkedPreviewKind === "documents") {
-          endpoint = `/documents?appointment=${detail.id}&patient=${detail.patient_id}`;
+          endpoint = `/documents?appointment=${currentDetail.id}&patient=${currentDetail.patient_id}`;
         } else {
-          endpoint = `/cases?patient=${detail.patient_id}`;
+          endpoint = `/cases?patient=${currentDetail.patient_id}`;
         }
 
         const payload = await apiFetch<unknown>(endpoint);
@@ -11126,6 +11263,104 @@ function StaffAppointmentsPage() {
     patientSheetPermissions.canViewAssignments,
     t.common_failed_load,
   ]);
+
+  useEffect(() => {
+    if (!linkedProviderOpen || !linkedProviderId) return;
+    let active = true;
+    setLinkedProviderDetailLoading(true);
+    setLinkedProviderDetailError("");
+
+    void apiFetch<ProviderSheetDetail>(`/providers/${linkedProviderId}`)
+      .then((providerDetail) => {
+        if (!active) return;
+        setLinkedProviderDetail(providerDetail);
+      })
+      .catch((error) => {
+        if (!active) return;
+        setLinkedProviderDetail(null);
+        setLinkedProviderDetailError(
+          error instanceof Error ? error.message : t.common_failed_load,
+        );
+      })
+      .finally(() => {
+        if (active) {
+          setLinkedProviderDetailLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [linkedProviderId, linkedProviderOpen, t.common_failed_load]);
+
+  useEffect(() => {
+    if (!linkedCasesOpen || !detail?.patient_id) return;
+    let active = true;
+    setLinkedCasesLoading(true);
+    setLinkedCasesError("");
+
+    void apiFetch<CaseRosterItem[]>(`/cases?patient_id=${detail.patient_id}`)
+      .then((items) => {
+        if (!active) return;
+        setLinkedCasesItems(items);
+      })
+      .catch((error) => {
+        if (!active) return;
+        setLinkedCasesItems([]);
+        setLinkedCasesError(
+          error instanceof Error ? error.message : t.common_failed_load,
+        );
+      })
+      .finally(() => {
+        if (active) {
+          setLinkedCasesLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [detail?.patient_id, linkedCasesOpen, t.common_failed_load]);
+
+  useEffect(() => {
+    if (!linkedDocumentsOpen || !detail?.id || !detail.patient_id) return;
+    let active = true;
+    setLinkedDocumentsLoading(true);
+    setLinkedDocumentsError("");
+
+    void apiFetch<LinkedDocumentItem[]>(
+      `/documents?appointment_id=${detail.id}&patient_id=${detail.patient_id}`,
+    )
+      .then((items) => {
+        if (!active) return;
+        const patientScoped = items.filter(
+          (item) => item.patient_id === detail.patient_id,
+        );
+        setLinkedDocumentsItems(sortLinkedDocuments(patientScoped));
+      })
+      .catch((error) => {
+        if (!active) return;
+        setLinkedDocumentsItems([]);
+        setLinkedDocumentsError(
+          error instanceof Error ? error.message : t.common_failed_load,
+        );
+      })
+      .finally(() => {
+        if (active) {
+          setLinkedDocumentsLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [detail?.id, detail?.patient_id, linkedDocumentsOpen, t.common_failed_load]);
+
+  useEffect(() => {
+    setLinkedDocumentSelectedIds((current) =>
+      current.filter((id) => linkedDocumentsItems.some((item) => item.id === id)),
+    );
+  }, [linkedDocumentsItems]);
 
   const scopedAppointments = useMemo(
     () =>
@@ -11462,18 +11697,65 @@ function StaffAppointmentsPage() {
         setLinkedPreviewOpen(false);
         setLinkedPreviewKind(null);
         setLinkedPreviewLabel("");
+        setLinkedProviderOpen(false);
+        setLinkedProviderId("");
+        setLinkedCasesOpen(false);
+        setLinkedDocumentsOpen(false);
         setLinkedPatientId(patientId);
         setLinkedPatientVersion((current) => current + 1);
         setLinkedPatientOpen(true);
         return;
       }
+      if (kind === "provider") {
+        const providerId = detail?.provider_id ?? "";
+        if (!providerId) return;
+        setLinkedPreviewOpen(false);
+        setLinkedPreviewKind(null);
+        setLinkedPreviewLabel("");
+        setLinkedPatientOpen(false);
+        setLinkedPatientId("");
+        setLinkedCasesOpen(false);
+        setLinkedDocumentsOpen(false);
+        setLinkedProviderId(providerId);
+        setLinkedProviderOpen(true);
+        return;
+      }
+      if (kind === "cases") {
+        setLinkedPreviewOpen(false);
+        setLinkedPreviewKind(null);
+        setLinkedPreviewLabel("");
+        setLinkedPatientOpen(false);
+        setLinkedPatientId("");
+        setLinkedProviderOpen(false);
+        setLinkedProviderId("");
+        setLinkedDocumentsOpen(false);
+        setLinkedCasesOpen(true);
+        return;
+      }
+      if (kind === "documents") {
+        if (!detail?.id || !detail.patient_id) return;
+        setLinkedPreviewOpen(false);
+        setLinkedPreviewKind(null);
+        setLinkedPreviewLabel("");
+        setLinkedPatientOpen(false);
+        setLinkedPatientId("");
+        setLinkedProviderOpen(false);
+        setLinkedProviderId("");
+        setLinkedCasesOpen(false);
+        setLinkedDocumentsOpen(true);
+        return;
+      }
       setLinkedPatientOpen(false);
       setLinkedPatientId("");
+      setLinkedProviderOpen(false);
+      setLinkedProviderId("");
+      setLinkedCasesOpen(false);
+      setLinkedDocumentsOpen(false);
       setLinkedPreviewKind(kind);
       setLinkedPreviewLabel(label);
       setLinkedPreviewOpen(true);
     },
-    [detail?.patient_id],
+    [detail?.id, detail?.patient_id, detail?.provider_id],
   );
 
   const handleLinkedPreviewOpenChange = useCallback((open: boolean) => {
@@ -11500,6 +11782,44 @@ function StaffAppointmentsPage() {
       setLinkedPatientAssignmentBusy(false);
       setLinkedPatientAssignmentError("");
       setLinkedPatientVersion(0);
+    }
+  }, []);
+
+  const handleLinkedProviderOpenChange = useCallback((open: boolean) => {
+    setLinkedProviderOpen(open);
+    if (!open) {
+      setLinkedProviderId("");
+      setLinkedProviderDetailLoading(false);
+      setLinkedProviderDetailError("");
+      setLinkedProviderDetail(null);
+    }
+  }, []);
+
+  const handleLinkedCasesOpenChange = useCallback((open: boolean) => {
+    setLinkedCasesOpen(open);
+    if (!open) {
+      setLinkedCasesLoading(false);
+      setLinkedCasesError("");
+      setLinkedCasesItems([]);
+      setLinkedCasePreviewOpen(false);
+      setLinkedCasePreviewId("");
+    }
+  }, []);
+
+  const handleLinkedDocumentsOpenChange = useCallback((open: boolean) => {
+    setLinkedDocumentsOpen(open);
+    if (!open) {
+      setLinkedDocumentsLoading(false);
+      setLinkedDocumentsError("");
+      setLinkedDocumentsItems([]);
+      setLinkedDocumentSelectedIds([]);
+    }
+  }, []);
+
+  const handleLinkedCasePreviewOpenChange = useCallback((open: boolean) => {
+    setLinkedCasePreviewOpen(open);
+    if (!open) {
+      setLinkedCasePreviewId("");
     }
   }, []);
 
@@ -13383,6 +13703,387 @@ function StaffAppointmentsPage() {
             : undefined
         }
       />
+
+      <Sheet
+        open={linkedProviderOpen}
+        onOpenChange={handleLinkedProviderOpenChange}
+      >
+        <SheetContent side="right" className="w-full sm:max-w-[880px]">
+          {linkedProviderDetailLoading ? (
+            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+              <LoaderCircle className="mr-2 size-4 animate-spin" />
+              {appointmentText(
+                "Anbieter wird geladen",
+                "Загрузка провайдера",
+                "Loading provider",
+              )}
+            </div>
+          ) : linkedProviderDetail ? (
+            <>
+              <SheetHeader className="shrink-0 border-b border-border/60 px-4 pt-3 pb-3">
+                <SheetTitle>
+                  {linkedProviderDetail.name || t.providers_detail}
+                </SheetTitle>
+              </SheetHeader>
+              <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+                {linkedProviderDetailError ? (
+                  <Banner tone="error">{linkedProviderDetailError}</Banner>
+                ) : null}
+                <ProviderOverviewSection
+                  detail={linkedProviderDetail}
+                  providerActionBusy={null}
+                  permissions={PROVIDER_PREVIEW_PERMISSIONS}
+                  onActivate={() => undefined}
+                  onDeactivate={() => undefined}
+                  onDelete={() => undefined}
+                  onOpenPatients={() =>
+                    staffGo(`/patients?provider=${linkedProviderDetail.id}`)
+                  }
+                  onOpenAppointments={() =>
+                    staffGo(`/appointments?provider=${linkedProviderDetail.id}`)
+                  }
+                />
+                <ProviderLinkedPatientsSection
+                  detail={linkedProviderDetail}
+                  onOpenPatient={(patientId) =>
+                    staffGo(`/patients?patient=${patientId}`)
+                  }
+                  onOpenAppointments={(patientId) =>
+                    staffGo(
+                      `/appointments?patient=${patientId}&provider=${linkedProviderDetail.id}`,
+                    )
+                  }
+                />
+                <ProviderInteractionHistorySection
+                  detail={linkedProviderDetail}
+                  onOpenPatient={(patientId) =>
+                    staffGo(`/patients?patient=${patientId}`)
+                  }
+                  onOpenAppointments={(patientId) =>
+                    staffGo(
+                      `/appointments?patient=${patientId}&provider=${linkedProviderDetail.id}`,
+                    )
+                  }
+                  onOpenAppointment={(appointmentId) =>
+                    staffGo(`/appointments?appointment=${appointmentId}`)
+                  }
+                  onOpenOrder={(orderId) => staffGo(`/orders?order=${orderId}`)}
+                />
+              </div>
+            </>
+          ) : linkedProviderDetailError ? (
+            <div className="p-4">
+              <Banner tone="error">{linkedProviderDetailError}</Banner>
+            </div>
+          ) : (
+            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+              {appointmentText(
+                "Keine Klinikdaten verfügbar.",
+                "Нет данных клиники.",
+                "No provider data available.",
+              )}
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
+
+      <Sheet open={linkedCasesOpen} onOpenChange={handleLinkedCasesOpenChange}>
+        <SheetContent side="right" className="w-full sm:max-w-[980px]">
+          <SheetHeader className="shrink-0 border-b border-border/60 px-4 pt-3 pb-3">
+            <SheetTitle>{t.cases_roster}</SheetTitle>
+            <SheetDescription>
+              {linkedCasesLoading
+                ? `${t.cases_subtitle} · ${t.patients_syncing}`
+                : `${t.cases_subtitle} · ${linkedCasesItems.length} ${t.patients_records}`}
+            </SheetDescription>
+          </SheetHeader>
+          <div className="flex-1 overflow-y-auto px-4 py-4">
+            {/*
+              <div className="flex min-h-[220px] items-center justify-center text-sm text-muted-foreground">
+                <LoaderCircle className="mr-2 size-4 animate-spin" />
+                {appointmentText(
+                  "Falle werden geladen",
+                  "Загрузка кейсов",
+                  "Loading cases",
+                )}
+              </div>
+            ) : linkedCasesError ? (
+              <Banner tone="error">{linkedCasesError}</Banner>
+            ) : linkedCasesItems.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-border/70 px-4 py-8 text-center text-sm text-muted-foreground">
+                {appointmentText(
+                  "Keine Falle fur diesen Patienten.",
+                  "Для этого пациента нет кейсов.",
+                  "No cases for this patient.",
+                )}
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {linkedCasesItems.map((item) => (
+                  <div
+                    key={item.id}
+                    className="rounded-xl border border-border/60 bg-card px-3.5 py-3"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-sm font-semibold text-foreground">
+                        {item.case_id}
+                      </p>
+                      <span className="rounded-full border border-border/60 bg-muted/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                        {item.status.replaceAll("_", " ")}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {item.patient_pid} · {item.patient_name}
+                    </p>
+                    <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">
+                      {item.hauptanfragegrund || t.common_not_set}
+                    </p>
+                    <p className="mt-2 text-[11px] text-muted-foreground/80">
+                      {formatDateTimeLabel(item.created_at)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            */}
+            <CasesRosterSection
+              title={t.cases_roster}
+              subtitle={t.cases_subtitle}
+              counterLabel={
+                linkedCasesLoading
+                  ? t.patients_syncing
+                  : `${linkedCasesItems.length} ${t.patients_records}`
+              }
+              loading={linkedCasesLoading}
+              loadingLabel={appointmentText(
+                "Falle werden geladen",
+                "Загрузка кейсов",
+                "Loading cases",
+              )}
+              error={linkedCasesError}
+              renderError={(message) => <Banner tone="error">{message}</Banner>}
+              items={linkedCasesItems}
+              onCaseClick={(item) => {
+                if (!item.id) return;
+                setLinkedCasePreviewId(item.id);
+                setLinkedCasePreviewOpen(true);
+              }}
+              emptyState={
+                <div className="rounded-xl border border-dashed border-border/70 px-4 py-8 text-center text-sm text-muted-foreground">
+                  {appointmentText(
+                    "Keine Falle fur diesen Patienten.",
+                    "Для этого пациента нет кейсов.",
+                    "No cases for this patient.",
+                  )}
+                </div>
+              }
+              caseStatusLabel={(status) => status.replaceAll("_", " ")}
+              reasonLabel={t.cases_reason}
+              createdLabel={t.users_created}
+              notSetLabel={t.common_not_set}
+              formatDateTimeLabel={formatDateTimeLabel}
+              showHeader={false}
+            />
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      <CaseWorkspaceModal
+        caseId={linkedCasePreviewId || null}
+        patientId={detail?.patient_id ?? null}
+        open={linkedCasePreviewOpen}
+        onOpenChange={handleLinkedCasePreviewOpenChange}
+      />
+
+      {/*
+      <Sheet
+        open={linkedDocumentsOpen}
+        onOpenChange={handleLinkedDocumentsOpenChange}
+      >
+        <SheetContent side="right" className="w-full sm:max-w-[760px] gap-0">
+          <SheetHeader className="border-b border-border/70 pb-4">
+            <SheetTitle>
+              {appointmentText("Dokumente", "Документы", "Documents")}
+            </SheetTitle>
+            <SheetDescription>
+              {appointmentText(
+                "Dokumente aus dem aktuellen Termin-Kontext.",
+                "Документы из контекста текущего приема.",
+                "Documents from the current appointment context.",
+              )}
+            </SheetDescription>
+          </SheetHeader>
+          <div className="flex-1 overflow-y-auto px-4 pb-6 pt-4">
+            {linkedDocumentsLoading ? (
+              <div className="flex min-h-[220px] items-center justify-center text-sm text-muted-foreground">
+                <LoaderCircle className="mr-2 size-4 animate-spin" />
+                {appointmentText(
+                  "Dokumente werden geladen",
+                  "Загрузка документов",
+                  "Loading documents",
+                )}
+              </div>
+            ) : linkedDocumentsError ? (
+              <Banner tone="error">{linkedDocumentsError}</Banner>
+            ) : linkedDocumentsItems.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-border/70 px-4 py-8 text-center text-sm text-muted-foreground">
+                {appointmentText(
+                  "Keine Dokumente im aktuellen Kontext.",
+                  "В текущем контексте нет документов.",
+                  "No documents in this context.",
+                )}
+              </div>
+            ) : (
+              <div className="space-y-2.5">
+                {linkedDocumentsItems.map((item) => (
+                  <div
+                    key={item.id}
+                    className="rounded-xl border border-border/60 bg-card px-3.5 py-3"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <p className="text-sm font-semibold text-foreground">
+                        {item.auto_name || item.original_filename || item.id}
+                      </p>
+                      <span className="rounded-full border border-border/60 bg-muted/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                        {item.status}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {[item.art, item.category, item.visibility]
+                        .filter((value) => Boolean(value))
+                        .join(" • ")}
+                    </p>
+                    <div className="mt-2 grid gap-1 text-[12px] text-muted-foreground sm:grid-cols-2">
+                      <p>
+                        {appointmentText("Patient", "Пациент", "Patient")}:{" "}
+                        {item.patient_name
+                          ? `${item.patient_pid ?? ""} · ${item.patient_name}`.trim()
+                          : t.common_not_set}
+                      </p>
+                      <p>
+                        {appointmentText(
+                          "Termin",
+                          "Прием",
+                          "Appointment",
+                        )}:{" "}
+                        {item.appointment_title || t.common_not_set}
+                      </p>
+                      <p>
+                        {appointmentText("Hochgeladen", "Загружено", "Uploaded")}:{" "}
+                        {formatDateTimeLabel(item.created_at)}
+                      </p>
+                      <p>
+                        {appointmentText("Freigaben", "Шеры", "Shares")}:{" "}
+                        {item.share_count}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
+      */}
+
+      <Sheet
+        open={linkedDocumentsOpen}
+        onOpenChange={handleLinkedDocumentsOpenChange}
+      >
+        <SheetContent side="right" className="w-full sm:max-w-[760px] gap-0">
+          <SheetHeader className="border-b border-border/70 pb-4">
+            <SheetTitle>
+              {appointmentText("Dokumente", "Documents", "Documents")}
+            </SheetTitle>
+            <SheetDescription>
+              {appointmentText(
+                "Dokumente aus dem aktuellen Termin-Kontext.",
+                "Documents from the current appointment context.",
+                "Documents from the current appointment context.",
+              )}
+            </SheetDescription>
+          </SheetHeader>
+          <div className="flex-1 overflow-y-auto px-4 pb-6 pt-4">
+            {linkedDocumentsLoading ? (
+              <div className="flex min-h-[220px] items-center justify-center text-sm text-muted-foreground">
+                <LoaderCircle className="mr-2 size-4 animate-spin" />
+                {appointmentText(
+                  "Dokumente werden geladen",
+                  "Loading documents",
+                  "Loading documents",
+                )}
+              </div>
+            ) : linkedDocumentsError ? (
+              <Banner tone="error">{linkedDocumentsError}</Banner>
+            ) : linkedDocumentsItems.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-border/70 px-4 py-8 text-center text-sm text-muted-foreground">
+                {appointmentText(
+                  "Keine Dokumente im aktuellen Kontext.",
+                  "No documents in this context.",
+                  "No documents in this context.",
+                )}
+              </div>
+            ) : (
+              <DocumentsGrid
+                documents={linkedDocumentsItems.map((item) => ({
+                  ...item,
+                  is_latest_version: item.version_number >= item.version_count,
+                  needs_categorization: false,
+                  data_sensitivity: "standard",
+                }))}
+                showSelection={false}
+                selectedDocumentIds={linkedDocumentSelectedIds}
+                selectedId={null}
+                labels={{
+                  selectBulkShare: t.documents_select_bulk_share,
+                  filename: t.documents_filename,
+                  patient: t.orders_patient,
+                  category: t.documents_category,
+                  status: t.users_status,
+                  visibility: appointmentText(
+                    "Sichtbarkeit",
+                    "Видимость",
+                    "Visibility",
+                  ),
+                  size: t.documents_size,
+                  uploadedBy: t.documents_uploaded_by,
+                  unclassified: t.documents_unclassified,
+                  current: appointmentText("aktuell", "текущая", "current"),
+                  pidFallback: "PID",
+                  notSet: t.common_not_set,
+                  unknownUploader: t.documents_unknown_uploader,
+                  needsCategorization: appointmentText(
+                    "Kategorisierung erforderlich",
+                    "Требуется категоризация",
+                    "Needs categorization",
+                  ),
+                }}
+                localizeCode={(value) => localizeDocumentCode(value, appointmentText)}
+                onSelectionChange={setLinkedDocumentSelectedIds}
+                onToggleSelection={(id, checked) =>
+                  setLinkedDocumentSelectedIds((current) =>
+                    checked
+                      ? current.includes(id)
+                        ? current
+                        : [...current, id]
+                      : current.filter((itemId) => itemId !== id),
+                  )
+                }
+                onOpenDocument={() => {}}
+                statusBadge={linkedDocumentStatusBadge}
+                visibilityBadge={linkedDocumentVisibilityBadge}
+                sensitivityBadge={linkedDocumentSensitivityBadge}
+                formatStatusLabel={(value) => value}
+                formatVisibilityLabel={(value) => value}
+                formatSensitivityLabel={() =>
+                  appointmentText("Standard", "Стандарт", "Standard")
+                }
+                formatFileSize={formatDocumentFileSize}
+                formatDateTime={formatDateTimeLabel}
+              />
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
 
       <Sheet
         open={linkedPreviewOpen}

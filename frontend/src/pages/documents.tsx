@@ -26,6 +26,8 @@ import {
 } from "lucide-react";
 
 import { StaffLink } from "@/components/staff-link";
+import { DocumentsGrid } from "@/components/documents-grid";
+import { DocumentRightViewDetails } from "@/components/document-right-view-details";
 import { localizeDocumentCode } from "@/lib/required-document-labels";
 import {
   CountBadge,
@@ -933,6 +935,7 @@ function StaffDocumentsPage() {
     ursprung: searchParams.get("ursprung") ?? "",
   }));
   const deferredSearch = useDeferredValue(filters.search);
+  const embedDetailOnly = searchParams.get("embed") === "detail";
 
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [intakeQueue, setIntakeQueue] = useState<DocumentItem[]>([]);
@@ -2170,6 +2173,8 @@ function StaffDocumentsPage() {
 
   return (
     <div className="space-y-4">
+      {!embedDetailOnly ? (
+        <>
       <PageHeader
         title={t.documents_workspace_heading}
         actions={
@@ -2561,177 +2566,39 @@ function StaffDocumentsPage() {
         ) : documents.length === 0 ? (
           <EmptyCell>{t.documents_no_documents_match}</EmptyCell>
         ) : (
-          <div className="rounded-xl border border-border bg-card overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-[13px]">
-                <thead className="bg-muted/40">
-                  <tr className="text-left text-[11px] uppercase tracking-wider text-muted-foreground">
-                    <th className="w-10 px-3 py-2.5">
-                      <input
-                        type="checkbox"
-                        aria-label={t.documents_select_bulk_share}
-                        checked={
-                          documents.length > 0 &&
-                          documents.every((d) =>
-                            selectedDocumentIds.includes(d.id),
-                          )
-                        }
-                        onChange={(event) =>
-                          setSelectedDocumentIds(
-                            event.target.checked
-                              ? documents.map((d) => d.id)
-                              : [],
-                          )
-                        }
-                        className="size-4 rounded border-input"
-                      />
-                    </th>
-                    <th className="px-3 py-2.5 font-medium">{t.documents_filename}</th>
-                    <th className="px-3 py-2.5 font-medium">{t.orders_patient}</th>
-                    <th className="px-3 py-2.5 font-medium">{t.documents_category}</th>
-                    <th className="px-3 py-2.5 font-medium">{t.users_status}</th>
-                    <th className="px-3 py-2.5 font-medium">{text.visibilityHeader}</th>
-                    <th className="px-3 py-2.5 font-medium text-right">
-                      {t.documents_size}
-                    </th>
-                    <th className="px-3 py-2.5 font-medium">{t.documents_uploaded_by}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {documents.map((item) => (
-                    <tr
-                      key={item.id}
-                      className={cn(
-                        "group/row border-t border-border transition-colors hover:bg-muted/40 cursor-pointer",
-                        selectedId === item.id && "bg-sky-50/60",
-                      )}
-                      onClick={() => openDocument(item.id)}
-                    >
-                      <td
-                        className="w-10 px-3 py-2.5"
-                        onClick={(event) => event.stopPropagation()}
-                      >
-                        <input
-                          type="checkbox"
-                          aria-label={t.documents_select_bulk_share}
-                          checked={selectedDocumentIds.includes(item.id)}
-                          onChange={(event) =>
-                            toggleDocumentSelection(item.id, event.target.checked)
-                          }
-                          className="size-4 rounded border-input"
-                        />
-                      </td>
-                      <td className="px-3 py-2.5 min-w-0">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span className="truncate font-medium text-foreground">
-                            {localizeDocumentCode(item.auto_name, l)}
-                          </span>
-                          {item.needs_categorization ? (
-                            <Badge
-                              variant="outline"
-                              className="rounded-full text-[10px] border-amber-200 bg-amber-50 text-amber-700 shrink-0"
-                            >
-                              {text.needsCategorization}
-                            </Badge>
-                          ) : null}
-                        </div>
-                        <div className="mt-0.5 flex flex-wrap items-center gap-x-1 text-xs text-muted-foreground">
-                          <span className="truncate">
-                            {item.original_filename ?? t.documents_unclassified}
-                          </span>
-                          <span className="text-muted-foreground/60">·</span>
-                          <span>v{item.version_number}</span>
-                          {item.is_latest_version ? (
-                            <>
-                              <span className="text-muted-foreground/60">·</span>
-                              <span>{text.current}</span>
-                            </>
-                          ) : null}
-                        </div>
-                      </td>
-                      <td className="px-3 py-2.5">
-                        {item.patient_name ? (
-                          <div className="min-w-0">
-                            <span className="font-mono text-xs text-muted-foreground">
-                              {item.patient_pid ?? text.pidFallback}
-                            </span>
-                            <div className="truncate text-foreground">
-                              {item.patient_name}
-                            </div>
-                          </div>
-                        ) : (
-                          <span className="text-muted-foreground">
-                            {t.common_not_set}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-3 py-2.5">
-                        {item.art || item.category ? (
-                          <div className="min-w-0">
-                            {item.art ? (
-                              <div className="truncate text-foreground">
-                                {localizeDocumentCode(item.art, l)}
-                              </div>
-                            ) : null}
-                            {item.category ? (
-                              <div className="truncate text-xs text-muted-foreground">
-                                {localizeDocumentCode(item.category, l)}
-                              </div>
-                            ) : null}
-                          </div>
-                        ) : (
-                          <span className="text-muted-foreground">
-                            {t.documents_unclassified}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <Badge
-                          variant="outline"
-                          className={cn("rounded-full text-[10px]", statusBadge(item.status))}
-                        >
-                          {formatDocumentStatusLabel(item.status, t)}
-                        </Badge>
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <div className="flex flex-col items-start gap-1">
-                          <Badge
-                            variant="outline"
-                            className={cn(
-                              "rounded-full text-[10px]",
-                              visibilityBadge(item.visibility),
-                            )}
-                          >
-                            {formatVisibilityLabel(item.visibility, t)}
-                          </Badge>
-                          <Badge
-                            variant="outline"
-                            className={cn(
-                              "rounded-full text-[10px]",
-                              sensitivityBadge(item.data_sensitivity),
-                            )}
-                          >
-                            {formatSensitivityLabel(item.data_sensitivity)}
-                          </Badge>
-                        </div>
-                      </td>
-                      <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">
-                        {formatFileSize(item.file_size)}
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <div className="text-foreground truncate">
-                          {item.uploaded_by_name || t.documents_unknown_uploader}
-                        </div>
-                        <div className="text-xs text-muted-foreground">
-                          {formatDateTime(item.updated_at)}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          <DocumentsGrid
+            documents={documents}
+            selectedDocumentIds={selectedDocumentIds}
+            selectedId={selectedId}
+            labels={{
+              selectBulkShare: t.documents_select_bulk_share,
+              filename: t.documents_filename,
+              patient: t.orders_patient,
+              category: t.documents_category,
+              status: t.users_status,
+              visibility: text.visibilityHeader,
+              size: t.documents_size,
+              uploadedBy: t.documents_uploaded_by,
+              unclassified: t.documents_unclassified,
+              current: text.current,
+              pidFallback: text.pidFallback,
+              notSet: t.common_not_set,
+              unknownUploader: t.documents_unknown_uploader,
+              needsCategorization: text.needsCategorization,
+            }}
+            localizeCode={(value) => localizeDocumentCode(value, l)}
+            onSelectionChange={setSelectedDocumentIds}
+            onToggleSelection={toggleDocumentSelection}
+            onOpenDocument={openDocument}
+            statusBadge={statusBadge}
+            visibilityBadge={visibilityBadge}
+            sensitivityBadge={sensitivityBadge}
+            formatStatusLabel={(value) => formatDocumentStatusLabel(value, t)}
+            formatVisibilityLabel={(value) => formatVisibilityLabel(value, t)}
+            formatSensitivityLabel={formatSensitivityLabel}
+            formatFileSize={formatFileSize}
+            formatDateTime={formatDateTime}
+          />
         )}
       </Section>
 
@@ -3338,6 +3205,8 @@ function StaffDocumentsPage() {
           </form>
         </SheetContent>
       </Sheet>
+        </>
+      ) : null}
 
       <Dialog
         open={deleteOpen}
@@ -3414,16 +3283,17 @@ function StaffDocumentsPage() {
             <SheetDescription>{t.documents_detail_description}</SheetDescription>
           </SheetHeader>
           <div className="flex-1 overflow-y-auto px-4 pb-6">
-            {detailBusy ? (
-              <div className="flex min-h-[280px] items-center justify-center text-sm text-muted-foreground">
-                <LoaderCircle className="mr-2 size-4 animate-spin" />
-                {t.documents_loading_document}
-              </div>
-            ) : detailError ? (
-              <div className="pt-5">
-                <Banner tone="error">{detailError}</Banner>
-              </div>
-            ) : detail ? (
+            <DocumentRightViewDetails
+              busy={detailBusy}
+              error={detailError}
+              errorContent={
+                <div className="pt-5">
+                  <Banner tone="error">{detailError}</Banner>
+                </div>
+              }
+              loadingLabel={t.documents_loading_document}
+            >
+              {detail ? (
               <div className="space-y-6 pt-5">
                 <section className="rounded-xl border border-border/60 bg-muted/25 p-5">
                   <div className="flex flex-wrap items-start justify-between gap-3">
@@ -4811,7 +4681,8 @@ function StaffDocumentsPage() {
                   </SectionCard>
                 ) : null}
               </div>
-            ) : null}
+              ) : null}
+            </DocumentRightViewDetails>
           </div>
         </SheetContent>
       </Sheet>
