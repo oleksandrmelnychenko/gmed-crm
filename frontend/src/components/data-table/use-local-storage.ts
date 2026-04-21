@@ -1,14 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 type Serializer<T> = {
   parse: (raw: string) => T;
   stringify: (value: T) => string;
 };
 
-const defaultSerializer = <T>(): Serializer<T> => ({
-  parse: (raw: string) => JSON.parse(raw) as T,
-  stringify: (value: T) => JSON.stringify(value),
-});
+function defaultSerializer<T>(): Serializer<T> {
+  return {
+    parse: (raw: string) => JSON.parse(raw) as T,
+    stringify: (value: T) => JSON.stringify(value),
+  };
+}
 
 function readFromStorage<T>(key: string, fallback: T, serializer: Serializer<T>): T {
   if (typeof window === "undefined") return fallback;
@@ -26,19 +28,17 @@ export function useLocalStorage<T>(
   initial: T,
   serializer?: Serializer<T>,
 ): [T, (value: T | ((prev: T) => T)) => void] {
-  const serializerRef = useRef(serializer ?? defaultSerializer<T>());
-  const [state, setState] = useState<T>(() =>
-    readFromStorage(key, initial, serializerRef.current),
-  );
+  const effective = useMemo(() => serializer ?? defaultSerializer<T>(), [serializer]);
+  const [state, setState] = useState<T>(() => readFromStorage(key, initial, effective));
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
-      window.localStorage.setItem(key, serializerRef.current.stringify(state));
+      window.localStorage.setItem(key, effective.stringify(state));
     } catch {
       /* quota exceeded or access denied; silent */
     }
-  }, [key, state]);
+  }, [key, state, effective]);
 
   const update = useCallback((value: T | ((prev: T) => T)) => {
     setState((prev) => (typeof value === "function" ? (value as (p: T) => T)(prev) : value));

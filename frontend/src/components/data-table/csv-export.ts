@@ -20,9 +20,11 @@ export function buildCsv<T>(
   return body ? `${header}\n${body}` : header;
 }
 
+const UTF8_BOM = "﻿";
+
 export function downloadCsv(filename: string, csv: string): void {
   if (typeof document === "undefined") return;
-  const blob = new Blob([`﻿${csv}`], { type: "text/csv;charset=utf-8;" });
+  const blob = new Blob([UTF8_BOM + csv], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;

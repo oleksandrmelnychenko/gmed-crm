@@ -62,6 +62,7 @@ export function DataTable<T>({
 
   const visibleCols = columns.filter((c) => !hiddenColumns.includes(c.id) || c.required);
 
+  // eslint-disable-next-line react-hooks/incompatible-library -- tanstack-virtual returns functions that the React compiler can't memoize; safe here because DataTable is not memoized.
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
