@@ -33,6 +33,7 @@ import { DensityToggle } from "@/components/data-table/density-toggle";
 import { FilterBuilder } from "@/components/data-table/filter-builder";
 import { exportCsv } from "@/components/data-table/csv-export";
 import { applyFilters } from "@/components/data-table/filter-logic";
+import { formatRelativeTime } from "@/components/data-table/relative-time";
 import { buildSearchIndex, searchWithIndex } from "@/components/data-table/search";
 import { SortBuilder } from "@/components/data-table/sort-builder";
 import { applySort } from "@/components/data-table/sort-logic";
@@ -526,6 +527,7 @@ export function PatientsPage() {
   const [listBusy, setListBusy] = useState(false);
   const [listError, setListError] = useState("");
   const [listVersion, setListVersion] = useState(0);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   const [createOpen, setCreateOpen] = useState(false);
 
@@ -751,6 +753,7 @@ export function PatientsPage() {
             ? items.filter((p) => !p.is_active)
             : items;
           startTransition(() => setPatients(filtered));
+          setLastUpdated(new Date());
         }
       })
       .catch((error: unknown) => {
@@ -1059,6 +1062,11 @@ export function PatientsPage() {
           </ShadSelect>
 
           <div className="ml-auto flex items-center gap-1">
+            {lastUpdated ? (
+              <span className="text-[11px] tabular-nums text-muted-foreground">
+                {formatRelativeTime(lastUpdated)}
+              </span>
+            ) : null}
             <Button
               type="button"
               variant="outline"
