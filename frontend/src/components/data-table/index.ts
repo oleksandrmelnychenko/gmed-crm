@@ -59,3 +59,4 @@ export {
 } from "./filter-operator-meta";
 export { FilterValueInput } from "./filter-value-input";
 export { FilterBuilder, type FilterBuilderProps, type FilterBuilderTranslations } from "./filter-builder";
+export { SortBuilder, type SortBuilderProps, type SortBuilderTranslations } from "./sort-builder";
