@@ -67,213 +67,30 @@ import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 import { getPatientLegalStatusSummary, normalizePatientLegalStatus } from "./patient-legal-status";
+import {
+  DEFAULT_PATIENT_FILTERS as DEFAULT_FILTERS,
+  blankPatientForm,
+  parseLanguages,
+  patientPermissions,
+  patientToForm,
+  toOptional,
+  type DoctorOption,
+  type PatientAssignment,
+  type PatientDetail,
+  type PatientFilters,
+  type PatientFormState,
+  type PatientSummary,
+  type PatientsDictionary,
+  type ProviderOption,
+  type StaffOption,
+} from "./patients.helpers";
 
-type PatientSummary = {
-  id: string;
-  patient_id: string;
-  title?: string | null;
-  first_name?: string | null;
-  last_name?: string | null;
-  birth_date?: string | null;
-  gender: string;
-  nationality?: string | null;
-  residence_country?: string | null;
-  languages?: string[];
-  functional_labels?: string[];
-  phone_primary?: string | null;
-  email?: string | null;
-  insurance_provider?: string | null;
-  insurance_type?: string | null;
-  is_active: boolean;
-  created_at: string;
-};
-
-export type PatientDetail = PatientSummary & {
-  updated_at?: string;
-  phone_secondary?: string | null;
-  address_street?: string | null;
-  address_city?: string | null;
-  address_zip?: string | null;
-  address_country?: string | null;
-  insurance_number?: string | null;
-  emergency_contact_name?: string | null;
-  emergency_contact_phone?: string | null;
-  emergency_contact_relation?: string | null;
-  legal_status?: unknown;
-  notes?: string | null;
-};
-
-export type PatientAssignment = {
-  user_id: string;
-  user_name: string;
-  user_role: string;
-  user_active: boolean;
-  assigned_by_name: string | null;
-  assigned_at: string;
-  revoked_at: string | null;
-};
-
-export type StaffOption = {
-  id: string;
-  name: string;
-  role: string;
-};
-
-type ProviderOption = {
-  id: string;
-  name: string;
-  provider_type: string;
-  address_city: string | null;
-};
-
-type DoctorOption = {
-  id: string;
-  name: string;
-  title: string | null;
-  fachbereich: string | null;
-};
-
-type PatientFilters = {
-  search: string;
-  activeOnly: string;
-  providerId: string;
-  doctorId: string;
-};
-
-type PatientFormState = {
-  title: string;
-  firstName: string;
-  lastName: string;
-  birthDate: string;
-  gender: string;
-  nationality: string;
-  residenceCountry: string;
-  languages: string;
-  functionalLabels: string;
-  phonePrimary: string;
-  phoneSecondary: string;
-  email: string;
-  addressStreet: string;
-  addressCity: string;
-  addressZip: string;
-  addressCountry: string;
-  insuranceProvider: string;
-  insuranceNumber: string;
-  insuranceType: string;
-  emergencyContactName: string;
-  emergencyContactPhone: string;
-  emergencyContactRelation: string;
-  notes: string;
-};
-
-type PatientPermissions = {
-  canViewPage: boolean;
-  canCreateEdit: boolean;
-  canViewAssignments: boolean;
-  canManageAssignments: boolean;
-};
-
-const DEFAULT_FILTERS: PatientFilters = {
-  search: "",
-  activeOnly: "true",
-  providerId: "",
-  doctorId: "",
-};
-
-
-function patientPermissions(role?: string): PatientPermissions {
-  return {
-    canViewPage: [
-      "ceo",
-      "ceo_assistant",
-      "patient_manager",
-      "billing",
-      "teamlead_interpreter",
-      "interpreter",
-      "concierge",
-    ].includes(role ?? ""),
-    canCreateEdit: role === "ceo" || role === "patient_manager",
-    canViewAssignments: [
-      "ceo",
-      "patient_manager",
-      "teamlead_interpreter",
-      "interpreter",
-      "concierge",
-    ].includes(role ?? ""),
-    canManageAssignments:
-      role === "ceo" || role === "patient_manager" || role === "teamlead_interpreter",
-  };
-}
-
-function blankPatientForm(): PatientFormState {
-  return {
-    title: "",
-    firstName: "",
-    lastName: "",
-    birthDate: "",
-    gender: "male",
-    nationality: "",
-    residenceCountry: "",
-    languages: "",
-    functionalLabels: "",
-    phonePrimary: "",
-    phoneSecondary: "",
-    email: "",
-    addressStreet: "",
-    addressCity: "",
-    addressZip: "",
-    addressCountry: "",
-    insuranceProvider: "",
-    insuranceNumber: "",
-    insuranceType: "",
-    emergencyContactName: "",
-    emergencyContactPhone: "",
-    emergencyContactRelation: "",
-    notes: "",
-  };
-}
-
-function toOptional(value: string) {
-  const trimmed = value.trim();
-  return trimmed ? trimmed : null;
-}
-
-function parseLanguages(value: string) {
-  return value
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function patientToForm(detail: PatientDetail): PatientFormState {
-  return {
-    title: detail.title ?? "",
-    firstName: detail.first_name ?? "",
-    lastName: detail.last_name ?? "",
-    birthDate: detail.birth_date ?? "",
-    gender: detail.gender ?? "male",
-    nationality: detail.nationality ?? "",
-    residenceCountry: detail.residence_country ?? "",
-    languages: detail.languages?.join(", ") ?? "",
-    functionalLabels: detail.functional_labels?.join(", ") ?? "",
-    phonePrimary: detail.phone_primary ?? "",
-    phoneSecondary: detail.phone_secondary ?? "",
-    email: detail.email ?? "",
-    addressStreet: detail.address_street ?? "",
-    addressCity: detail.address_city ?? "",
-    addressZip: detail.address_zip ?? "",
-    addressCountry: detail.address_country ?? "",
-    insuranceProvider: detail.insurance_provider ?? "",
-    insuranceNumber: detail.insurance_number ?? "",
-    insuranceType: detail.insurance_type ?? "",
-    emergencyContactName: detail.emergency_contact_name ?? "",
-    emergencyContactPhone: detail.emergency_contact_phone ?? "",
-    emergencyContactRelation: detail.emergency_contact_relation ?? "",
-    notes: detail.notes ?? "",
-  };
-}
-
-export type PatientsDictionary = Record<string, string>;
+export type {
+  PatientAssignment,
+  PatientDetail,
+  PatientsDictionary,
+  StaffOption,
+} from "./patients.helpers";
 
 type CreatePatientSheetProps = {
   open: boolean;
