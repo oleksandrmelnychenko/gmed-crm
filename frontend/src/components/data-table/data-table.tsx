@@ -1,5 +1,5 @@
 import { ArrowDown, ArrowUp, ChevronsUpDown } from "lucide-react";
-import { useRef, type CSSProperties, type ReactNode } from "react";
+import { useRef, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
 import { cn } from "@/lib/utils";
@@ -99,6 +99,36 @@ export function DataTable<T>({
     onSortChange(next);
   };
 
+  const activeIndex = activeRowId
+    ? rows.findIndex((row) => rowId(row) === activeRowId)
+    : -1;
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!onRowClick || rows.length === 0) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      const next = activeIndex < 0 ? 0 : Math.min(activeIndex + 1, rows.length - 1);
+      onRowClick(rows[next]);
+      virtualizer.scrollToIndex(next, { align: "auto" });
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      const next = activeIndex <= 0 ? 0 : activeIndex - 1;
+      onRowClick(rows[next]);
+      virtualizer.scrollToIndex(next, { align: "auto" });
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      onRowClick(rows[0]);
+      virtualizer.scrollToIndex(0, { align: "start" });
+    } else if (event.key === "End") {
+      event.preventDefault();
+      onRowClick(rows[rows.length - 1]);
+      virtualizer.scrollToIndex(rows.length - 1, { align: "end" });
+    } else if (event.key === "Enter" && activeIndex >= 0) {
+      event.preventDefault();
+      onRowClick(rows[activeIndex]);
+    }
+  };
+
   const sortLookup = new Map(sort.map((s, i) => [s.field, { ...s, index: i }]));
 
   const gridTemplate = buildGridTemplate(visibleCols, {
@@ -116,9 +146,11 @@ export function DataTable<T>({
     <div className={cn("flex flex-col rounded-lg border border-border bg-card", className)}>
       <div
         ref={scrollRef}
-        className="relative flex-1 overflow-auto"
+        className="relative flex-1 overflow-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
         role="table"
         aria-rowcount={rows.length}
+        tabIndex={0}
+        onKeyDown={handleKeyDown}
       >
         <div
           role="row"
