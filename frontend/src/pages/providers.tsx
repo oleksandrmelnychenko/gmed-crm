@@ -1272,14 +1272,10 @@ function ProvidersPage() {
       <div className="space-y-6">
         <section className={cardClass("p-8")}>
           <h1 className="text-3xl font-semibold tracking-tight text-slate-950">
-            {l("Klinik- und Arztregister", "Реестр клиник и врачей", "Clinic and doctor registry")}
+            {t.providers_no_access_title}
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600">
-            {l(
-              "Dieser Bereich ist auf CEO, Patientenmanager, Concierge, Billing und Sales beschränkt, weil er die Klinikkoordination und die Sicht auf externe Partner steuert.",
-              "Этот раздел доступен только CEO, менеджерам пациентов, concierge, billing и sales, потому что он управляет координацией клиник и видимостью внешних партнёров.",
-              "This workspace is limited to CEO, patient managers, concierge, billing and sales roles because it drives clinic coordination and external partner visibility.",
-            )}
+            {t.providers_no_access_body}
           </p>
         </section>
       </div>
@@ -1573,13 +1569,7 @@ function ProvidersPage() {
           <form onSubmit={handleCreateProvider} className="flex flex-col flex-1 min-h-0">
             <SheetHeader className="shrink-0 border-b border-border/60 px-4 pt-3 pb-3">
               <SheetTitle>{l("Anbieter anlegen", "Создать провайдера", "Create provider")}</SheetTitle>
-              <SheetDescription>
-                {l(
-                  "Legen Sie die nächste Klinik oder den nächsten Servicepartner direkt mit Vertragsnotizen, Kontaktdaten und Fachkontext an.",
-                  "Добавьте следующую клинику или сервисного партнера сразу с примечаниями по договору, контактами и профильным контекстом.",
-                  "Add the next clinic or service partner with contract notes, contact data and specialty context from the start.",
-                )}
-              </SheetDescription>
+              <SheetDescription>{t.providers_create_description}</SheetDescription>
             </SheetHeader>
             <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
               {createError ? <Banner tone="error">{createError}</Banner> : null}
@@ -1675,11 +1665,7 @@ function ProvidersPage() {
                     />
                     {!permissions.canManageRegistry ? (
                       <p className="text-[12px] text-muted-foreground italic">
-                        {l(
-                          "Registeränderungen sind für Ihre Rolle gesperrt.",
-                          "Изменения в реестре для вашей роли ограничены.",
-                          "Registry edits are restricted for your role.",
-                        )}
+                        {t.providers_edit_restricted_note}
                       </p>
                     ) : null}
                   </section>
@@ -1768,7 +1754,7 @@ function ProvidersPage() {
             </div>
           ) : (
             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-              {l("Wählen Sie einen Anbieter aus, um den Registerbereich zu öffnen.", "Выберите провайдера, чтобы открыть реестровое рабочее пространство.", "Select a provider to open the registry workspace.")}
+              {t.providers_select_to_open_workspace}
             </div>
           )}
         </SheetContent>
@@ -1994,8 +1980,8 @@ function DoctorSection({
             </h3>
             <p className="mt-1 text-sm text-slate-600">
               {detail.provider_type === "non_medical"
-                ? l("Register der operativen Kontakte dieses Partners.", "Реестр операционных контактов этого партнера.", "Registry of operational contacts attached to this partner.")
-                : l("Register der diesem Anbieter zugeordneten Ärztinnen und Ärzte.", "Реестр врачей, привязанных к этому провайдеру.", "Registry of clinicians attached to this provider.")}
+                ? t.providers_doctors_description_non_medical
+                : t.providers_doctors_description_medical}
             </p>
           </div>
           <div className="text-xs uppercase tracking-[0.12em] text-slate-500">
@@ -2125,7 +2111,7 @@ function DoctorSection({
                 {form.id ? t.providers_doctor_detail : t.providers_doctor_new}
               </h4>
               <p className="mt-1 text-sm text-slate-600">
-                {l("Arztstammdaten werden für Anbieterfilter und Terminrouting verwendet.", "Карточки врачей используются в фильтрах провайдеров и маршрутизации записей.", "Doctor records are used by provider filters and appointment routing.")}
+                {t.providers_doctors_hint}
               </p>
             </div>
             {form.id ? (
@@ -2192,7 +2178,7 @@ function ServiceSection({
         <div>
           <h3 className="text-sm font-semibold text-slate-950">{l("Servicekatalog", "Каталог сервисов", "Service catalog")}</h3>
           <p className="mt-1 text-sm text-slate-600">
-            {l("Operativer Katalog für Suche und künftige Order-/Concierge-Abläufe.", "Операционный каталог для поиска и будущих сценариев заказа / concierge.", "Operational catalog used for search and future order / concierge flows.")}
+            {t.providers_services_description}
           </p>
         </div>
         <div className="text-xs uppercase tracking-[0.12em] text-slate-500">
@@ -2280,7 +2266,7 @@ function ServiceSection({
                 {form.id ? t.providers_service_detail : t.providers_service_new}
               </h4>
               <p className="mt-1 text-sm text-slate-600">
-                {l("Services speisen heute die Filter und fließen als Nächstes in Orders und Concierge-Ausführung ein.", "Сервисы уже питают фильтры и следующим шагом войдут в заказы и выполнение concierge.", "Services power filters today and will flow into orders and concierge execution next.")}
+                {t.providers_services_hint}
               </p>
             </div>
             {form.id ? (
@@ -2333,7 +2319,7 @@ export function LinkedPatientsSection({
         <div>
           <h3 className="text-sm font-semibold text-slate-950">{l("Verknüpfte Patienten", "Связанные пациенты", "Linked patients")}</h3>
           <p className="mt-1 text-sm text-slate-600">
-            {l("Patienten, die diesen Anbieter bereits über Termine oder Serviceeinträge berührt haben.", "Пациенты, уже связанные с этим провайдером через записи или сервисные записи.", "Patients who already touched this provider through appointments or service records.")}
+            {t.providers_linked_patients_description}
           </p>
         </div>
         <div className="text-xs uppercase tracking-[0.12em] text-slate-500">
@@ -2436,7 +2422,7 @@ export function InteractionHistorySection({
         <div>
           <h3 className="text-sm font-semibold text-slate-950">{l("Interaktionsverlauf", "История взаимодействий", "Interaction history")}</h3>
           <p className="mt-1 text-sm text-slate-600">
-            {l("Zeitachse der mit diesem Anbieter verbundenen Termine und Service-Interaktionen.", "Хронология записей и сервисных взаимодействий, связанных с этим провайдером.", "Timeline of appointments and service-level interactions associated with this provider.")}
+            {t.providers_interactions_description}
           </p>
         </div>
         <div className="text-xs uppercase tracking-[0.12em] text-slate-500">

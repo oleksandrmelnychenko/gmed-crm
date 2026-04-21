@@ -133,6 +133,18 @@ export interface Translations {
   providers_new: string;
   providers_detail: string;
   providers_select_hint: string;
+  providers_select_to_open_workspace: string;
+  providers_no_access_title: string;
+  providers_no_access_body: string;
+  providers_create_description: string;
+  providers_edit_restricted_note: string;
+  providers_doctors_description_medical: string;
+  providers_doctors_description_non_medical: string;
+  providers_doctors_hint: string;
+  providers_services_description: string;
+  providers_services_hint: string;
+  providers_linked_patients_description: string;
+  providers_interactions_description: string;
   providers_type: string;
   providers_type_medical: string;
   providers_type_non_medical: string;

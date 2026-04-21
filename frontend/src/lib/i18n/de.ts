@@ -135,6 +135,29 @@ export const de: Translations = {
   providers_detail: "Provider-Details",
   providers_select_hint:
     "Provider auswählen, um Ärzte, Leistungen und Patienten zu verwalten.",
+  providers_select_to_open_workspace:
+    "Wählen Sie einen Anbieter aus, um den Registerbereich zu öffnen.",
+  providers_no_access_title: "Klinik- und Arztregister",
+  providers_no_access_body:
+    "Dieser Bereich ist auf CEO, Patientenmanager, Concierge, Billing und Sales beschränkt, weil er die Klinikkoordination und die Sicht auf externe Partner steuert.",
+  providers_create_description:
+    "Legen Sie die nächste Klinik oder den nächsten Servicepartner direkt mit Vertragsnotizen, Kontaktdaten und Fachkontext an.",
+  providers_edit_restricted_note:
+    "Registeränderungen sind für Ihre Rolle gesperrt.",
+  providers_doctors_description_medical:
+    "Register der diesem Anbieter zugeordneten Ärztinnen und Ärzte.",
+  providers_doctors_description_non_medical:
+    "Register der operativen Kontakte dieses Partners.",
+  providers_doctors_hint:
+    "Arztstammdaten werden für Anbieterfilter und Terminrouting verwendet.",
+  providers_services_description:
+    "Operativer Katalog für Suche und künftige Order-/Concierge-Abläufe.",
+  providers_services_hint:
+    "Services speisen heute die Filter und fließen als Nächstes in Orders und Concierge-Ausführung ein.",
+  providers_linked_patients_description:
+    "Patienten, die diesen Anbieter bereits über Termine oder Serviceeinträge berührt haben.",
+  providers_interactions_description:
+    "Zeitachse der mit diesem Anbieter verbundenen Termine und Service-Interaktionen.",
   providers_type: "Typ",
   providers_type_medical: "Medizinisch",
   providers_type_non_medical: "Nicht-medizinisch",

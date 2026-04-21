@@ -1063,34 +1063,40 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
     }
 
     if (path === "/invoices" || path.startsWith("/invoices?")) {
-      return json(route, [
-        {
-          id: "00000000-0000-0000-0000-000000000601",
-          quote_id: null,
-          quote_number: null,
-          order_id: "00000000-0000-0000-0000-000000000701",
-          order_number: "ORD-001",
-          contract_id: null,
-          patient_id: "00000000-0000-0000-0000-000000000301",
-          patient_name: "Anna Muster",
-          patient_pid: "PT-001",
-          invoice_number: "INV-001",
-          invoice_type: "advance",
-          status: "sent",
-          issued_at: "2026-04-01",
-          due_date: "2026-04-15",
-          total_net: "1000.00",
-          total_vat: "0.00",
-          total_gross: "1000.00",
-          paid_amount: "0.00",
-          balance_due: "1000.00",
-          paid_at: null,
-          notes: null,
-          created_at: "2026-04-01T09:00:00Z",
-          updated_at: "2026-04-01T09:00:00Z",
-          line_items: [],
-        },
-      ]);
+      return json(route, {
+        items: [
+          {
+            id: "00000000-0000-0000-0000-000000000601",
+            quote_id: null,
+            quote_number: null,
+            order_id: "00000000-0000-0000-0000-000000000701",
+            order_number: "ORD-001",
+            contract_id: null,
+            patient_id: "00000000-0000-0000-0000-000000000301",
+            patient_name: "Anna Muster",
+            patient_pid: "PT-001",
+            invoice_number: "INV-001",
+            invoice_type: "advance",
+            status: "sent",
+            issued_at: "2026-04-01",
+            due_date: "2026-04-15",
+            total_net: "1000.00",
+            total_vat: "0.00",
+            total_gross: "1000.00",
+            paid_amount: "0.00",
+            balance_due: "1000.00",
+            paid_at: null,
+            notes: null,
+            created_at: "2026-04-01T09:00:00Z",
+            updated_at: "2026-04-01T09:00:00Z",
+            line_items: [],
+          },
+        ],
+        page: 1,
+        per_page: 25,
+        total: 1,
+        total_pages: 1,
+      });
     }
 
     return json(route, []);
@@ -1104,14 +1110,14 @@ test.describe("staff smoke flows", () => {
     });
     await installStaffApiMocks(page);
     await loginAsStaff(page, "admin@gmed.de");
-    await expect(page.getByRole("button", { name: /Open calendar/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /Dashboard/i })).toBeVisible();
   });
 
   test("staff can open dashboard, patients, appointments, documents and invoices", async ({
     page,
   }) => {
     await expect(page).toHaveURL(/\/$/);
-    await expect(page.getByRole("heading", { level: 1 })).toContainText(/Admin GMED|GMED/i);
+    await expect(page.getByText("Admin GMED", { exact: true })).toBeVisible();
 
     await page.goto("/patients");
     await expect(page).toHaveURL(/\/patients$/);
@@ -1244,7 +1250,9 @@ test.describe("staff smoke flows", () => {
     await expect(
       page.locator('[role="status"]').filter({ hasText: /Freigabe widerrufen\./i }),
     ).toBeVisible();
-    await expect(sheet.getByText("Revoked")).toBeVisible();
+    await expect(
+      sheet.getByText(/^Widerrufen$|^Revoked$/i).first(),
+    ).toBeVisible();
   });
 
   test("staff can delete a stored document file and keep metadata trail", async ({
@@ -1347,7 +1355,7 @@ test.describe("staff smoke flows", () => {
     await page.goto("/feedback");
     await expect(page).toHaveURL(/\/feedback$/);
     await expect(
-      page.getByRole("heading", { name: /Feedback and NPS/i }),
+      page.getByRole("heading", { name: /Feedback und NPS|Отзывы и NPS|Feedback and NPS/i }),
     ).toBeVisible();
 
     const feedbackCard = page
@@ -1355,22 +1363,32 @@ test.describe("staff smoke flows", () => {
       .filter({ hasText: "Portal feedback from Anna." })
       .first();
     await expect(feedbackCard).toBeVisible();
-    await expect(feedbackCard.getByText("submitted")).toBeVisible();
+    await expect(feedbackCard.getByText(/Eingereicht|Submitted/i)).toBeVisible();
 
-    await feedbackCard.getByRole("button", { name: /^Review$/i }).click();
+    await feedbackCard
+      .getByRole("button", { name: /^Prüfen$|^Review$/i })
+      .click();
 
     const reviewSheet = page.getByRole("dialog");
     await expect(
-      reviewSheet.getByRole("heading", { name: /Review feedback/i }),
+      reviewSheet.getByRole("heading", {
+        name: /Feedback prüfen|Проверить отзыв|Review feedback/i,
+      }),
     ).toBeVisible();
-    await reviewSheet.getByPlaceholder("Operational follow-up or review note").fill(
-      "Reviewed with the clinic manager and added to the quality follow-up list.",
-    );
-    await reviewSheet.getByRole("button", { name: /Save review/i }).click();
+    await reviewSheet
+      .getByPlaceholder(
+        /Operative Nachverfolgung oder Prüfnotiz|Operational follow-up or review note/i,
+      )
+      .fill("Reviewed with the clinic manager and added to the quality follow-up list.");
+    await reviewSheet
+      .getByRole("button", {
+        name: /Prüfung speichern|Сохранить проверку|Save review/i,
+      })
+      .click();
 
     await expect(reviewSheet).toHaveCount(0);
     await expect(
-      feedbackCard.getByText("reviewed", { exact: true }),
+      feedbackCard.getByText(/^Geprüft$|^Reviewed$/i).first(),
     ).toBeVisible();
     await expect(
       feedbackCard.getByText(
@@ -1392,7 +1410,7 @@ test.describe("patient-profile RBAC shell", () => {
       userId: "00000000-0000-0000-0000-000000000002",
     });
     await loginAsStaff(page, "assistant@gmed.de");
-    await expect(page.getByRole("heading", { level: 1 })).toContainText(/CEO Assistant|GMED/i);
+    await expect(page.getByText("CEO Assistant", { exact: true }).first()).toBeVisible();
   });
 
   test("ceo assistant sees only read-only commercial tabs on patient profile", async ({
@@ -1400,21 +1418,40 @@ test.describe("patient-profile RBAC shell", () => {
   }) => {
     await page.goto("/patients/00000000-0000-0000-0000-000000000301?tab=documents");
     await page.waitForURL(/\/patients\/00000000-0000-0000-0000-000000000301$/);
+    const workspaceNav = page.getByRole("complementary");
 
     await expect(page.getByRole("heading", { name: "Anna Muster" })).toBeVisible();
-    await expect(page.getByRole("tab", { name: "Documents" })).toHaveCount(0);
-    await expect(page.getByRole("tab", { name: "Relations" })).toHaveCount(0);
-    await expect(page.getByRole("tab", { name: "Workflow" })).toHaveCount(0);
-    await expect(page.getByRole("tab", { name: "Timeline" })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Open documents" })).toBeVisible();
+    await expect(
+      workspaceNav.getByRole("link", { name: /Dokumente|Documents/i }),
+    ).toHaveCount(0);
+    await expect(
+      workspaceNav.getByRole("link", { name: /Связи|Relations/i }),
+    ).toHaveCount(0);
+    await expect(
+      workspaceNav.getByRole("link", { name: /Arbeitsablauf|Рабочий процесс|Workflow/i }),
+    ).toHaveCount(0);
+    await expect(
+      workspaceNav.getByRole("link", { name: /Таймлайн|Timeline/i }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: /Dokumente öffnen|Open documents/i }),
+    ).toHaveCount(0);
 
-    await expect(page.getByRole("tab", { name: "Contracts" })).toBeVisible();
-    await expect(page.getByRole("tab", { name: "Invoices" })).toBeVisible();
+    await expect(
+      workspaceNav.getByRole("link", { name: /Verträge|Договоры|Contracts/i }),
+    ).toBeVisible();
+    await expect(
+      workspaceNav.getByRole("link", { name: /Rechnungen|Счета|Invoices/i }),
+    ).toBeVisible();
 
-    await page.getByRole("tab", { name: "Contracts" }).click();
+    await workspaceNav
+      .getByRole("link", { name: /Verträge|Договоры|Contracts/i })
+      .click();
     await expect(page.getByText("CTR-001")).toBeVisible();
 
-    await page.getByRole("tab", { name: "Invoices" }).click();
+    await workspaceNav
+      .getByRole("link", { name: /Rechnungen|Счета|Invoices/i })
+      .click();
     await expect(page.getByText("INV-001")).toBeVisible();
   });
 });

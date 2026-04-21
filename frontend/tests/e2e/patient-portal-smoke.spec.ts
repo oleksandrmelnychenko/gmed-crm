@@ -632,10 +632,16 @@ test.describe("patient portal smoke flows", () => {
     await page.goto("/invoices");
     await expect(page).toHaveURL(/\/invoices$/);
     await expect(
-      page.getByRole("button", { name: /Upload payment proof/i }),
+      page.getByRole("button", {
+        name: /Zahlungsnachweis hochladen|Загрузить подтверждение оплаты|Upload payment proof/i,
+      }),
     ).toBeVisible();
 
-    await page.getByRole("button", { name: /Upload payment proof/i }).click();
+    await page
+      .getByRole("button", {
+        name: /Zahlungsnachweis hochladen|Загрузить подтверждение оплаты|Upload payment proof/i,
+      })
+      .click();
     await page
       .locator("#invoice-payment-proof")
       .setInputFiles({
@@ -644,12 +650,20 @@ test.describe("patient portal smoke flows", () => {
         buffer: Buffer.from("payment-proof"),
       });
     await page.locator("#invoice-payment-proof-note").fill("Bank transfer sent.");
-    await page.getByRole("button", { name: /Send proof/i }).click();
+    await page
+      .getByRole("button", {
+        name: /Nachweis senden|Отправить подтверждение|Send proof/i,
+      })
+      .click();
 
     await expect(
-      page.getByText("Payment proof uploaded for the billing team."),
+      page.getByText(
+        /Zahlungsnachweis wurde für das Abrechnungsteam hochgeladen|Подтверждение оплаты загружено для отдела биллинга|Payment proof uploaded for the billing team/i,
+      ),
     ).toBeVisible();
-    await expect(page.getByText(/Uploaded 10 Apr 2026/i)).toBeVisible();
+    await expect(
+      page.getByText(/Hochgeladen 10\. Apr\.? 2026|Uploaded 10 Apr 2026/i),
+    ).toBeVisible();
   });
 
   test("patient can export data and submit privacy request", async ({ page }) => {
@@ -658,7 +672,11 @@ test.describe("patient portal smoke flows", () => {
       request.url().includes("/api/v1/me/export?format=zip"),
     );
 
-    await page.getByRole("button", { name: /Export my data/i }).click();
+    await page
+      .getByRole("button", {
+        name: /Meine Daten exportieren|Экспортировать мои данные|Export my data/i,
+      })
+      .click();
     await exportRequest;
 
     await page.goto("/privacy");
@@ -666,34 +684,62 @@ test.describe("patient portal smoke flows", () => {
 
     await page.locator("#privacy-type").selectOption("third_party_revoke");
     await page.locator("#privacy-reason").fill("Please stop sharing my records with external providers.");
-    await page.getByRole("button", { name: /Submit request/i }).click();
+    await page
+      .getByRole("button", {
+        name: /Anfrage senden|Отправить запрос|Submit request/i,
+      })
+      .click();
 
     const submittedRequest = page
       .locator("article")
       .filter({ hasText: "Please stop sharing my records with external providers." });
 
-    await expect(page.getByText("Privacy request submitted.")).toBeVisible();
+    await expect(
+      page.getByText(
+        /Datenschutzanfrage wurde eingereicht|Запрос по приватности отправлен|Privacy request submitted/i,
+      ),
+    ).toBeVisible();
     await expect(submittedRequest).toBeVisible();
     await expect(
-      submittedRequest.getByText("Revoke third-party sharing"),
+      submittedRequest.getByText(
+        /Weitergabe an Dritte widerrufen|Отозвать передачу третьим лицам|Revoke third-party sharing/i,
+      ),
     ).toBeVisible();
-    await expect(page.getByText(/Open requests:\s*2/i)).toBeVisible();
+    await expect(
+      page.getByText(/Offene Anfragen:\s*2|Open requests:\s*2/i),
+    ).toBeVisible();
   });
 
   test("patient can confirm portal document receipt", async ({ page }) => {
     await page.goto("/documents");
     await expect(page).toHaveURL(/\/documents$/);
-    await expect(page.getByText(/Pending confirmations:\s*1/i)).toBeVisible();
+    await expect(
+      page.getByText(
+        /Ausstehende Bestätigungen:\s*1|Pending confirmations:\s*1/i,
+      ),
+    ).toBeVisible();
 
     const releasedCard = page
       .locator("article")
       .filter({ hasText: "Released discharge note" });
 
-    await page.getByRole("button", { name: /Confirm receipt/i }).click();
+    await page
+      .getByRole("button", {
+        name: /Empfang bestätigen|Подтвердить получение|Confirm receipt/i,
+      })
+      .click();
 
-    await expect(page.getByText("Document receipt confirmed.")).toBeVisible();
-    await expect(page.getByText(/Pending confirmations:\s*0/i)).toBeVisible();
-    await expect(releasedCard.getByText("Confirmed")).toBeVisible();
+    await expect(
+      page.getByText(
+        /Dokumentenerhalt bestätigt|Получение документа подтверждено|Document receipt confirmed/i,
+      ),
+    ).toBeVisible();
+    await expect(
+      page.getByText(
+        /Ausstehende Bestätigungen:\s*0|Pending confirmations:\s*0/i,
+      ),
+    ).toBeVisible();
+    await expect(releasedCard.getByText(/Bestätigt|Confirmed/i)).toBeVisible();
   });
 
   test("patient can upload own document and download released plus uploaded files", async ({
@@ -709,23 +755,37 @@ test.describe("patient portal smoke flows", () => {
       request.method() === "GET" &&
       request.url().includes("/api/v1/me/documents/00000000-0000-0000-0000-000000009401/download"),
     );
-    await releasedCard.getByRole("button", { name: /^Download$/i }).click();
+    await releasedCard
+      .getByRole("button", { name: /Herunterladen|Скачать|Download/i })
+      .click();
     await releasedDownloadRequest;
 
-    await page.getByLabel("Upload type").selectOption("insurance_document");
-    await page.getByLabel("Title").fill("Insurance card April");
     await page
-      .getByLabel("File")
+      .getByLabel(/Upload-Typ|Тип загрузки|Upload type/i)
+      .selectOption("insurance_document");
+    await page.getByLabel(/Titel|Название|Title/i).fill("Insurance card April");
+    await page
+      .getByLabel(/Datei|Файл|File/i)
       .setInputFiles({
         name: "insurance-card.pdf",
         mimeType: "application/pdf",
         buffer: Buffer.from("insurance-card"),
       });
-    await page.getByLabel("Note").fill("Front and back scanned.");
-    await page.getByRole("button", { name: /Send upload/i }).click();
+    await page
+      .getByLabel(/Notiz|Заметка|Note/i)
+      .fill("Front and back scanned.");
+    await page
+      .getByRole("button", {
+        name: /Upload senden|Отправить загрузку|Send upload/i,
+      })
+      .click();
 
-    await expect(page.getByText("Upload sent to the care team.")).toBeVisible();
-    await expect(page.getByText(/My uploads:\s*2/i)).toBeVisible();
+    await expect(
+      page.getByText(
+        /Upload wurde an das Betreuungsteam gesendet|Загрузка отправлена команде сопровождения|Upload sent to the care team/i,
+      ),
+    ).toBeVisible();
+    await expect(page.getByText(/Meine Uploads:\s*2|My uploads:\s*2/i)).toBeVisible();
 
     const uploadedCard = page
       .locator("article")
@@ -737,7 +797,9 @@ test.describe("patient portal smoke flows", () => {
       request.method() === "GET" &&
       request.url().includes("/api/v1/me/documents/uploads/00000000-0000-0000-0000-000000009411/download"),
     );
-    await uploadedCard.getByRole("button", { name: /^Download$/i }).click();
+    await uploadedCard
+      .getByRole("button", { name: /Herunterladen|Скачать|Download/i })
+      .click();
     await uploadDownloadRequest;
   });
 
@@ -747,48 +809,90 @@ test.describe("patient portal smoke flows", () => {
     await page.goto("/appointments");
     await expect(page).toHaveURL(/\/appointments$/);
 
-    await page.getByLabel("Preferred from").fill("2026-05-10");
-    await page.getByLabel("Preferred to").fill("2026-05-12");
-    await page.getByLabel("Specialty or topic").fill("Cardiology follow-up");
-    await page.getByLabel("Location preference").fill("Clinic Cologne");
+    await page.getByRole("textbox").nth(0).fill("2026-05-10");
+    await page.getByRole("textbox").nth(1).fill("2026-05-12");
     await page
-      .getByLabel("Reason")
+      .getByLabel(/Fachgebiet oder Thema|Specialty or topic/i)
+      .fill("Cardiology follow-up");
+    await page
+      .getByLabel(/Ortpräferenz|Location preference/i)
+      .fill("Clinic Cologne");
+    await page
+      .getByLabel(/Anlass|Reason/i)
       .fill("Need a follow-up appointment after receiving the latest findings.");
-    await page.getByLabel("Additional note").fill("Morning slots preferred.");
-    await page.getByRole("button", { name: /Send appointment request/i }).click();
+    await page
+      .getByLabel(/Zusätzliche Notiz|Additional note/i)
+      .fill("Morning slots preferred.");
+    await page
+      .getByRole("button", {
+        name: /Terminanfrage senden|Отправить запрос на запись|Send appointment request/i,
+      })
+      .click();
 
-    await expect(page.getByText("Appointment request sent to the care team.")).toBeVisible();
+    await expect(
+      page.getByText(
+        /Terminanfrage wurde an das Betreuungsteam gesendet|Запрос на запись отправлен команде сопровождения|Appointment request sent to the care team/i,
+      ),
+    ).toBeVisible();
 
     const requestCard = page
       .locator("article")
       .filter({ hasText: "Need a follow-up appointment after receiving the latest findings." });
     await expect(requestCard).toBeVisible();
-    await expect(requestCard.getByText("requested", { exact: true })).toBeVisible();
+    await expect(
+      requestCard.getByText(/Angefragt|Запрошено|requested/i).first(),
+    ).toBeVisible();
   });
 
   test("patient can request and cancel an additional service", async ({ page }) => {
     await page.goto("/services");
     await expect(page).toHaveURL(/\/services$/);
 
-    await page.getByLabel("Title").fill("Hotel near clinic");
-    await page.getByLabel("Preferred vendor").fill("River Hotel");
-    await page.getByLabel("Vendor contact").fill("booking@river.example");
-    await page.getByLabel("Estimated budget (EUR)").fill("240");
+    await page.getByLabel(/Titel|Название|Title/i).fill("Hotel near clinic");
     await page
-      .getByLabel("Notes")
+      .getByLabel(/Bevorzugter Anbieter|Preferred vendor/i)
+      .fill("River Hotel");
+    await page
+      .getByLabel(/Kontakt des Anbieters|Vendor contact/i)
+      .fill("booking@river.example");
+    await page
+      .getByLabel(/Geschätztes Budget \(EUR\)|Estimated budget \(EUR\)/i)
+      .fill("240");
+    await page
+      .getByLabel(/Notizen|Заметки|Notes/i)
       .fill("Need a quiet room close to the clinic for two nights.");
-    await page.getByRole("button", { name: /Send request/i }).click();
+    await page
+      .getByRole("button", {
+        name: /Anfrage senden|Отправить запрос|Send request/i,
+      })
+      .click();
 
-    await expect(page.getByText("Additional service request sent to the care team.")).toBeVisible();
+    await expect(
+      page.getByText(
+        /Serviceanfrage wurde an das Betreuungsteam gesendet|Запрос на сервис отправлен команде сопровождения|Additional service request sent to the care team/i,
+      ),
+    ).toBeVisible();
 
     const createdCard = page.locator("article").filter({ hasText: "Hotel near clinic" });
     await expect(createdCard).toBeVisible();
-    await expect(createdCard.getByText("pending", { exact: true })).toBeVisible();
-    await createdCard.getByRole("button", { name: /Cancel request/i }).click();
+    await expect(createdCard.getByText(/^Ausstehend$|^Pending$/i)).toBeVisible();
+    await createdCard
+      .getByRole("button", {
+        name: /Anfrage stornieren|Отменить запрос|Cancel request/i,
+      })
+      .click();
 
-    await expect(page.getByText("Service request cancelled.")).toBeVisible();
-    await expect(createdCard.getByText("cancelled")).toBeVisible();
-    await expect(createdCard.getByRole("button", { name: /Cancel request/i })).toHaveCount(0);
+    await expect(
+      page.getByText(
+        /Serviceanfrage wurde storniert|Сервисный запрос отменен|Service request cancelled/i,
+      ),
+    ).toBeVisible();
+    await expect(createdCard.getByText(/Storniert|Cancelled/i)).toBeVisible();
+    await expect(
+      createdCard.getByRole("button", {
+        name: /Anfrage stornieren|Отменить запрос|Cancel request/i,
+      }),
+    ).toHaveCount(0);
   });
 
   test("patient can submit appointment-linked feedback and see it in history", async ({
@@ -802,15 +906,27 @@ test.describe("patient portal smoke flows", () => {
       "00000000-0000-0000-0000-000000009101",
     );
     await form
-      .getByPlaceholder("What worked well?")
+      .getByPlaceholder(/Was ist gut gelaufen\?|What worked well\?/i)
       .fill("The doctor explained the next steps clearly.");
     await form
-      .getByPlaceholder("What should the team improve?")
+      .getByPlaceholder(
+        /Was sollte das Team verbessern\?|What should the team improve\?/i,
+      )
       .fill("Waiting area signage could be clearer.");
-    await form.getByRole("button", { name: /Submit feedback/i }).click();
+    await form
+      .getByRole("button", {
+        name: /Feedback senden|Отправить отзыв|Submit feedback/i,
+      })
+      .click();
 
-    await expect(page.getByText("Feedback submitted. Thank you.")).toBeVisible();
-    await expect(page.getByText(/Submitted feedback/i)).toBeVisible();
+    await expect(
+      page.getByText(
+        /Feedback wurde gesendet\. Vielen Dank\.|Отзыв отправлен\. Спасибо\.|Feedback submitted\. Thank you\./i,
+      ),
+    ).toBeVisible();
+    await expect(
+      page.getByText(/Abgegebene Rückmeldungen|Submitted feedback/i),
+    ).toBeVisible();
 
     const feedbackCard = page
       .locator("article")
@@ -818,7 +934,7 @@ test.describe("patient portal smoke flows", () => {
       .first();
     await expect(feedbackCard).toBeVisible();
     await expect(feedbackCard.getByText("Clinic follow-up")).toBeVisible();
-    await expect(feedbackCard.getByText("submitted")).toBeVisible();
+    await expect(feedbackCard.getByText(/Eingereicht|Submitted/i)).toBeVisible();
     await expect(feedbackCard.getByText("Waiting area signage could be clearer.")).toBeVisible();
   });
 });

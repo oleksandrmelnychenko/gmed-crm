@@ -133,6 +133,29 @@ export const ru: Translations = {
   providers_subtitle: "Управление клиниками, врачами и каталогом услуг",
   providers_new: "Новый провайдер",
   providers_detail: "Детали провайдера",
+  providers_select_to_open_workspace:
+    "Выберите провайдера, чтобы открыть реестровое рабочее пространство.",
+  providers_no_access_title: "Реестр клиник и врачей",
+  providers_no_access_body:
+    "Этот раздел доступен только CEO, менеджерам пациентов, concierge, billing и sales, потому что он управляет координацией клиник и видимостью внешних партнёров.",
+  providers_create_description:
+    "Добавьте следующую клинику или сервисного партнёра сразу с примечаниями по договору, контактами и профильным контекстом.",
+  providers_edit_restricted_note:
+    "Изменения в реестре для вашей роли ограничены.",
+  providers_doctors_description_medical:
+    "Реестр врачей, привязанных к этому провайдеру.",
+  providers_doctors_description_non_medical:
+    "Реестр операционных контактов этого партнёра.",
+  providers_doctors_hint:
+    "Карточки врачей используются в фильтрах провайдеров и маршрутизации записей.",
+  providers_services_description:
+    "Операционный каталог для поиска и будущих сценариев заказа / concierge.",
+  providers_services_hint:
+    "Сервисы уже питают фильтры и следующим шагом войдут в заказы и выполнение concierge.",
+  providers_linked_patients_description:
+    "Пациенты, уже связанные с этим провайдером через записи или сервисные записи.",
+  providers_interactions_description:
+    "Хронология записей и сервисных взаимодействий, связанных с этим провайдером.",
   providers_select_hint:
     "Выберите провайдера для управления врачами, услугами и пациентами.",
   providers_type: "Тип",

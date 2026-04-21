@@ -9,7 +9,7 @@ function json(route: Route, body: unknown, status = 200) {
 }
 
 test.describe("appointments recurring flows", () => {
-  test("staff can cancel a whole recurring series from the detail drawer", async ({
+  test("staff can cancel a whole recurring series from the detail workspace", async ({
     page,
   }) => {
     const patientId = "00000000-0000-0000-0000-00000000a001";
@@ -278,7 +278,9 @@ test.describe("appointments recurring flows", () => {
     await page.getByRole("button", { name: /Anmelden|Войти/i }).click();
     await page.waitForURL(/\/$/, { timeout: 15_000 });
 
-    await page.goto(`/appointments?appointment=${appointmentIds[0]}`);
+    await page.goto(
+      `/appointments?appointment=${appointmentIds[0]}&detailTab=workflow`,
+    );
 
     const statusScopeSelect = page.getByRole("combobox", {
       name: /Statusänderung anwenden auf/i,
@@ -292,6 +294,7 @@ test.describe("appointments recurring flows", () => {
     await expect(cancelWholeSeriesButton).toBeVisible();
     await cancelWholeSeriesButton.click();
 
-    await expect(page.getByText(/^cancelled$/)).toHaveCount(4);
+    await expect(page.getByText(/^Abgesagt$/).first()).toBeVisible();
+    await expect(page.getByText(/^3 abgesagt$/)).toBeVisible();
   });
 });

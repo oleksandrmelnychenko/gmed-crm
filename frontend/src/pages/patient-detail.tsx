@@ -3521,7 +3521,22 @@ export function PatientDetailPage() {
           </FormSection>
 
           {/* Emergency */}
-          <FormSection title={l("Notfallkontakt", "Экстренный контакт", "Emergency contact")}>
+          <FormSection
+            title={l("Notfallkontakt", "Экстренный контакт", "Emergency contact")}
+            accessory={
+              canEditPatientProfile ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-8 rounded-lg gap-1.5 bg-amber-500 text-white hover:bg-amber-600"
+                  onClick={openProfileEditor}
+                >
+                  <Pencil className="size-3.5" />
+                  {l("Bearbeiten", "Редактировать", "Edit")}
+                </Button>
+              ) : null
+            }
+          >
             <div className="grid gap-4 md:grid-cols-3">
               <InfoRow label={t.patients_emergency_name} value={fieldVal(detail.emergency_contact_name, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
               <InfoRow label={t.patients_emergency_phone} value={fieldVal(detail.emergency_contact_phone, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
