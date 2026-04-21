@@ -1117,6 +1117,31 @@ export function PatientsPage() {
             </div>
           }
         >
+          {selectedIds.length > 0 ? (
+            <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-primary/5 px-3 py-1.5 text-xs">
+              <div className="flex items-center gap-2 text-foreground">
+                <span className="tabular-nums font-medium">{selectedIds.length}</span>
+                <span className="text-muted-foreground">selected</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <Button type="button" variant="outline" size="xs" disabled>
+                  Archive
+                </Button>
+                <Button type="button" variant="outline" size="xs" disabled>
+                  Export
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  onClick={() => setSelectedIds([])}
+                >
+                  <X className="size-3" />
+                  Clear
+                </Button>
+              </div>
+            </div>
+          ) : null}
           <DataTable
             rows={sortedAndFilteredPatients}
             columns={columns}
