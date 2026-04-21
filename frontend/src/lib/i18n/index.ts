@@ -783,6 +783,9 @@ export interface Translations {
 
   // Patients extended
   patients_first_name: string;
+  patients_col_age: string;
+  patients_created_at: string;
+  patients_functional_labels: string;
   patients_birth_date: string;
   patients_nationality: string;
   patients_residence_country: string;
