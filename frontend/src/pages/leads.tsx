@@ -147,9 +147,9 @@ const LEGAL_SEX_OPTIONS = [
 
 function leadPermissions(role?: string): LeadPermissions {
   return {
-    canViewPage: role === "patient_manager" || role === "sales",
-    canCreate: role === "patient_manager" || role === "sales",
-    canConvert: role === "patient_manager",
+    canViewPage: role === "ceo" || role === "patient_manager" || role === "sales",
+    canCreate: role === "ceo" || role === "patient_manager" || role === "sales",
+    canConvert: role === "ceo" || role === "patient_manager",
   };
 }
 

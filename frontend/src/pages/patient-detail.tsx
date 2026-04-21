@@ -45,10 +45,12 @@ import {
   CountBadge,
   EmptyCell,
   Field as FormField,
+  InfoRow,
   Section as FormSection,
   StatCard,
   TabLoader,
   inputClass as formInputClassName,
+  selectClass,
   textareaClass as formTextareaClassName,
 } from "@/components/ui-shell";
 import { StatusActionPill } from "@/components/status-action-pill";
@@ -67,7 +69,6 @@ import { PatientVitalsSheet } from "@/components/patient-vitals-sheet";
 import { PatientCaveNotesSheet } from "@/components/patient-cave-notes-sheet";
 import { PatientNotesSheet } from "@/components/patient-notes-sheet";
 import { PatientAppointmentSheet } from "@/components/patient-appointment-sheet";
-import { CaseWorkspaceModal } from "@/components/case-workspace-modal";
 import {
   localizeDocumentCode,
   localizeRequiredDocumentLabel,
@@ -759,11 +760,10 @@ function canAssignTarget(managerRole: string | undefined, targetRole: string) {
   }
 }
 
-const selectClassName =
-  "h-9 w-full rounded-lg border border-input bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
-
-const textareaClassName =
-  "min-h-[104px] w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
+const spaciousTextareaClassName = cn(
+  formTextareaClassName,
+  "min-h-[104px]",
+);
 
 const RELATION_TYPE_OPTIONS = [
   "spouse",
@@ -1274,10 +1274,6 @@ function patientToEditForm(detail: PatientDetail): PatientEditFormState {
   };
 }
 
-function Lbl({ children }: { children: React.ReactNode }) {
-  return <span className="text-[11.5px] font-medium text-muted-foreground">{children}</span>;
-}
-
 function LegalStatusPill({ status }: { status: PatientLegalStatus }) {
   const { lang } = useLang();
   const lp = (de: string, ru: string, en: string) =>
@@ -1319,25 +1315,6 @@ function LegalStatusPill({ status }: { status: PatientLegalStatus }) {
       <span className={cn("size-1.5 rounded-full", dotClass)} />
       {text}
     </span>
-  );
-}
-
-function InfoRow({ label, value, onEdit }: { label: string; value: string; onEdit?: () => void }) {
-  return (
-    <div className="group flex flex-col gap-1 relative">
-      <Lbl>{label}</Lbl>
-      <span className="text-sm text-slate-900">{value}</span>
-      {onEdit && (
-        <button
-          type="button"
-          onClick={onEdit}
-          aria-label={`${patientDetailText("Bearbeiten", "Редактировать", "Edit")} ${label}`}
-          className="absolute top-0 right-0 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg p-1 hover:bg-slate-100"
-        >
-          <Pencil className="size-3 text-slate-400" />
-        </button>
-      )}
-    </div>
   );
 }
 
@@ -1789,28 +1766,29 @@ function PatientRelationEditorSheet({
 
   useEffect(() => {
     if (!open || !canManageRelations) return;
-    let cancelled = false;
+    const controller = new AbortController();
+    const { signal } = controller;
     setOptionsLoading(true);
 
-    apiFetch<PatientLookupItem[]>("/patients?active_only=true")
+    apiFetch<PatientLookupItem[]>("/patients?active_only=true", { signal })
       .then((items) => {
-        if (!cancelled) {
+        if (!signal.aborted) {
           setPatientOptions(items);
         }
       })
       .catch(() => {
-        if (!cancelled) {
+        if (!signal.aborted) {
           setPatientOptions([]);
         }
       })
       .finally(() => {
-        if (!cancelled) {
+        if (!signal.aborted) {
           setOptionsLoading(false);
         }
       });
 
     return () => {
-      cancelled = true;
+      controller.abort();
     };
   }, [canManageRelations, open]);
 
@@ -1928,7 +1906,7 @@ function PatientRelationEditorSheet({
               </Label>
               <select
                 id="relation-linked-patient"
-                className={selectClassName}
+                className={selectClass}
                 value={form.relatedPatientId}
                 onChange={(event) => {
                   const nextPatientId = event.target.value;
@@ -1987,7 +1965,7 @@ function PatientRelationEditorSheet({
                 </Label>
                 <select
                   id="relation-type"
-                  className={selectClassName}
+                  className={selectClass}
                   value={form.relationType}
                   onChange={(event) => setForm((current) => ({ ...current, relationType: event.target.value }))}
                 >
@@ -2035,7 +2013,7 @@ function PatientRelationEditorSheet({
               </Label>
               <textarea
                 id="relation-notes"
-                className={textareaClassName}
+                className={spaciousTextareaClassName}
                 value={form.notes}
                 onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
                 placeholder={l(
@@ -2210,7 +2188,7 @@ function PatientDocumentUploadDialog({
               <Label htmlFor="document-status">{l("Status", "Статус", "Status")}</Label>
               <select
                 id="document-status"
-                className={selectClassName}
+                className={selectClass}
                 value={form.status}
                 onChange={(event) =>
                   setForm((current) => ({
@@ -2230,7 +2208,7 @@ function PatientDocumentUploadDialog({
               <Label htmlFor="document-visibility">{l("Sichtbarkeit", "Видимость", "Visibility")}</Label>
               <select
                 id="document-visibility"
-                className={selectClassName}
+                className={selectClass}
                 value={form.visibility}
                 onChange={(event) =>
                   setForm((current) => ({
@@ -2256,7 +2234,7 @@ function PatientDocumentUploadDialog({
               <Label htmlFor="document-order">{l("Auftrag", "Заказ", "Order")}</Label>
               <select
                 id="document-order"
-                className={selectClassName}
+                className={selectClass}
                 value={form.orderId}
                 onChange={(event) => setForm((current) => ({ ...current, orderId: event.target.value }))}
               >
@@ -2272,7 +2250,7 @@ function PatientDocumentUploadDialog({
               <Label htmlFor="document-appointment">{l("Termin", "Приём", "Appointment")}</Label>
               <select
                 id="document-appointment"
-                className={selectClassName}
+                className={selectClass}
                 value={form.appointmentId}
                 onChange={(event) =>
                   setForm((current) => ({
@@ -2307,7 +2285,7 @@ function PatientDocumentUploadDialog({
             <Label htmlFor="document-notes">{l("Notizen", "Заметки", "Notes")}</Label>
             <textarea
               id="document-notes"
-              className={textareaClassName}
+              className={spaciousTextareaClassName}
               value={form.notes}
               onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
               placeholder={l("Optionale Verarbeitungs- oder Sichtbarkeitsnotizen", "Необязательные заметки по обработке или видимости", "Optional processing or visibility notes")}
@@ -2382,7 +2360,6 @@ export function PatientDetailPage() {
   const [medicalOrderSheetOpen, setMedicalOrderSheetOpen] = useState(false);
   const [riskScoreSheetOpen, setRiskScoreSheetOpen] = useState(false);
   const [appointmentSheetOpen, setAppointmentSheetOpen] = useState(false);
-  const [casePreviewId, setCasePreviewId] = useState<string | null>(null);
 
   const [relationEditorOpen, setRelationEditorOpen] = useState(false);
   const [editingRelation, setEditingRelation] = useState<RelationItem | null>(null);
@@ -2454,13 +2431,15 @@ export function PatientDetailPage() {
   const canManagePatientCardEntries = canEditPatientProfile;
   const canManagePatientMedicalOrders = canEditPatientProfile;
   const canManagePatientRiskScores = canEditPatientProfile;
-  const canExportPatientCompliance = user?.role === "patient_manager";
-  const canOpenComplianceWorkspace = user?.role === "patient_manager";
+  const canExportPatientCompliance = user?.role === "ceo" || user?.role === "patient_manager";
+  const canOpenComplianceWorkspace = user?.role === "ceo" || user?.role === "patient_manager";
   const canPrintPatientLabel = user?.role === "ceo" || user?.role === "patient_manager";
   const canManageWorkflowChecklist =
     user?.role === "ceo" ||
     user?.role === "patient_manager" ||
     user?.role === "concierge";
+  const editPatientFieldLabel = (label: string) =>
+    `${l("Bearbeiten", "Редактировать", "Edit")} ${label}`;
   const workspaceTabs = [
     {
       key: "profile",
@@ -2826,36 +2805,37 @@ export function PatientDetailPage() {
 
   useEffect(() => {
     if (!id) return;
-    let cancelled = false;
+    const controller = new AbortController();
+    const { signal } = controller;
     setLoading(true);
     setError("");
 
     Promise.all([
-      apiFetch<PatientDetail>(`/patients/${id}`),
-      apiFetch<PatientAssignment[]>(`/patients/${id}/assignments`).catch(() => []),
-      apiFetch<StaffOption[]>("/users?assignable_only=true&active_only=true").catch(() => []),
+      apiFetch<PatientDetail>(`/patients/${id}`, { signal }),
+      apiFetch<PatientAssignment[]>(`/patients/${id}/assignments`, { signal }).catch(() => []),
+      apiFetch<StaffOption[]>("/users?assignable_only=true&active_only=true", { signal }).catch(() => []),
       canManagePatientVitals
-        ? apiFetch<{ items: PatientVitalMeasurement[] }>(`/patients/${id}/vitals`).catch(() => ({
+        ? apiFetch<{ items: PatientVitalMeasurement[] }>(`/patients/${id}/vitals`, { signal }).catch(() => ({
             items: [],
           }))
         : Promise.resolve({ items: [] as PatientVitalMeasurement[] }),
       canManagePatientCardEntries
-        ? apiFetch<{ items: PatientCardEntry[] }>(`/patients/${id}/card-entries`).catch(() => ({
+        ? apiFetch<{ items: PatientCardEntry[] }>(`/patients/${id}/card-entries`, { signal }).catch(() => ({
             items: [],
           }))
         : Promise.resolve({ items: [] as PatientCardEntry[] }),
       canManagePatientMedicalOrders
-        ? apiFetch<{ items: PatientMedicalOrder[] }>(`/patients/${id}/medical-orders`).catch(() => ({
+        ? apiFetch<{ items: PatientMedicalOrder[] }>(`/patients/${id}/medical-orders`, { signal }).catch(() => ({
             items: [],
           }))
         : Promise.resolve({ items: [] as PatientMedicalOrder[] }),
       canManagePatientRiskScores
-        ? apiFetch<{ items: PatientRiskScore[] }>(`/patients/${id}/risk-scores`).catch(() => ({
+        ? apiFetch<{ items: PatientRiskScore[] }>(`/patients/${id}/risk-scores`, { signal }).catch(() => ({
             items: [],
           }))
         : Promise.resolve({ items: [] as PatientRiskScore[] }),
     ]).then(([d, a, s, vitals, entries, medicalOrderItems, riskScoreItems]) => {
-      if (cancelled) return;
+      if (signal.aborted) return;
       setDetail(d);
       setAssignments(a);
       setStaff(s);
@@ -2865,13 +2845,13 @@ export function PatientDetailPage() {
       setRiskScores(riskScoreItems.items ?? []);
       setLoading(false);
     }).catch((e) => {
-      if (cancelled) return;
+      if (signal.aborted) return;
       setDetail(null);
       setError(e instanceof Error ? e.message : String(e));
       setLoading(false);
     });
 
-    return () => { cancelled = true; };
+    return () => { controller.abort(); };
   }, [
     canManagePatientCardEntries,
     canManagePatientMedicalOrders,
@@ -2894,40 +2874,41 @@ export function PatientDetailPage() {
       (activeTab === "contracts" && !canViewContracts) ||
       (activeTab === "invoices" && !canViewInvoices)
     ) return;
-    let cancelled = false;
+    const controller = new AbortController();
+    const { signal } = controller;
     setTabLoading(true);
 
     async function loadTabData() {
       try {
         switch (activeTab) {
           case "relations": {
-            const result = await apiFetch<RelationItem[]>(`/patients/${id}/relations`);
-            if (!cancelled) setRelations(result);
+            const result = await apiFetch<RelationItem[]>(`/patients/${id}/relations`, { signal });
+            if (!signal.aborted) setRelations(result);
             break;
           }
           case "cases": {
-            const result = await apiFetch<CaseItem[]>(`/patients/${id}/cases`);
-            if (!cancelled) setCases(result);
+            const result = await apiFetch<CaseItem[]>(`/patients/${id}/cases`, { signal });
+            if (!signal.aborted) setCases(result);
             break;
           }
           case "orders": {
-            const result = await apiFetch<OrderItem[]>(`/patients/${id}/orders`);
-            if (!cancelled) setOrders(result);
+            const result = await apiFetch<OrderItem[]>(`/patients/${id}/orders`, { signal });
+            if (!signal.aborted) setOrders(result);
             break;
           }
           case "appointments": {
-            const result = await apiFetch<AppointmentItem[]>(`/patients/${id}/appointments`);
-            if (!cancelled) setAppointments(result);
+            const result = await apiFetch<AppointmentItem[]>(`/patients/${id}/appointments`, { signal });
+            if (!signal.aborted) setAppointments(result);
             break;
           }
           case "documents": {
             const [result, patientOrders, patientAppointments, alerts] = await Promise.all([
-              apiFetch<DocumentItem[]>(`/patients/${id}/documents`),
-              apiFetch<OrderItem[]>(`/patients/${id}/orders`).catch(() => []),
-              apiFetch<AppointmentItem[]>(`/patients/${id}/appointments`).catch(() => []),
-              apiFetch<DocumentAlerts>(`/patients/${id}/document-alerts`).catch(() => null),
+              apiFetch<DocumentItem[]>(`/patients/${id}/documents`, { signal }),
+              apiFetch<OrderItem[]>(`/patients/${id}/orders`, { signal }).catch(() => []),
+              apiFetch<AppointmentItem[]>(`/patients/${id}/appointments`, { signal }).catch(() => []),
+              apiFetch<DocumentAlerts>(`/patients/${id}/document-alerts`, { signal }).catch(() => null),
             ]);
-            if (!cancelled) {
+            if (!signal.aborted) {
               setDocuments(result);
               setOrders(patientOrders);
               setAppointments(patientAppointments);
@@ -2936,20 +2917,21 @@ export function PatientDetailPage() {
             break;
           }
           case "contracts": {
-            const result = await apiFetch<ContractItem[]>(`/patients/${id}/framework-contracts`);
-            if (!cancelled) setContracts(result);
+            const result = await apiFetch<ContractItem[]>(`/patients/${id}/framework-contracts`, { signal });
+            if (!signal.aborted) setContracts(result);
             break;
           }
           case "invoices": {
-            const result = await apiFetch<InvoiceItem[]>(`/patients/${id}/invoices`);
-            if (!cancelled) setInvoices(result);
+            const result = await apiFetch<InvoiceItem[]>(`/patients/${id}/invoices`, { signal });
+            if (!signal.aborted) setInvoices(result);
             break;
           }
           case "workflow": {
             const result = await apiFetch<WorkflowChecklistResponse>(
-              `/patients/${id}/workflow-checklist`
+              `/patients/${id}/workflow-checklist`,
+              { signal }
             );
-            if (!cancelled) setWorkflowChecklist(result);
+            if (!signal.aborted) setWorkflowChecklist(result);
             break;
           }
           case "timeline": {
@@ -2967,8 +2949,8 @@ export function PatientDetailPage() {
               limit: number;
               offset: number;
               has_more: boolean;
-            }>(`/patients/${id}/timeline?${params.toString()}`);
-            if (!cancelled) {
+            }>(`/patients/${id}/timeline?${params.toString()}`, { signal });
+            if (!signal.aborted) {
               setTimeline(result.items ?? []);
               setTimelineTotal(result.total ?? 0);
             }
@@ -2978,7 +2960,7 @@ export function PatientDetailPage() {
             break;
         }
       } catch {
-        if (cancelled) return;
+        if (signal.aborted) return;
         if (activeTab === "relations") setRelations([]);
         if (activeTab === "cases") setCases([]);
         if (activeTab === "orders") setOrders([]);
@@ -2995,13 +2977,13 @@ export function PatientDetailPage() {
           setTimelineTotal(0);
         }
       } finally {
-        if (!cancelled) setTabLoading(false);
+        if (!signal.aborted) setTabLoading(false);
       }
     }
 
     void loadTabData();
 
-    return () => { cancelled = true; };
+    return () => { controller.abort(); };
   }, [
     id,
     activeTab,
@@ -3024,16 +3006,17 @@ export function PatientDetailPage() {
       setDunningEvents([]);
       return;
     }
-    let cancelled = false;
-    apiFetch<DunningEvent[]>(`/invoices/${invoiceManageId}/dunning`)
+    const controller = new AbortController();
+    const { signal } = controller;
+    apiFetch<DunningEvent[]>(`/invoices/${invoiceManageId}/dunning`, { signal })
       .then((items) => {
-        if (!cancelled) setDunningEvents(items);
+        if (!signal.aborted) setDunningEvents(items);
       })
       .catch(() => {
-        if (!cancelled) setDunningEvents([]);
+        if (!signal.aborted) setDunningEvents([]);
       });
     return () => {
-      cancelled = true;
+      controller.abort();
     };
   }, [invoiceManageId]);
 
@@ -3487,36 +3470,36 @@ export function PatientDetailPage() {
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                 <InfoRow label={t.patients_birth_date} value={fmtDate(detail.birth_date, t.common_not_set)} />
                 <InfoRow label={t.patients_gender} value={genderLbl(detail.gender, tr)} />
-                <InfoRow label={t.patients_nationality} value={fieldVal(detail.nationality, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
-                <InfoRow label={t.patients_residence_country} value={fieldVal(detail.residence_country, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
-                <InfoRow label={t.patients_languages} value={fieldVal(detail.languages, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
-                <InfoRow label={l("Funktionale Labels", "Функциональные метки", "Functional labels")} value={fieldVal(detail.functional_labels, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
+                <InfoRow label={t.patients_nationality} value={fieldVal(detail.nationality, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} editLabel={editPatientFieldLabel(t.patients_nationality)} />
+                <InfoRow label={t.patients_residence_country} value={fieldVal(detail.residence_country, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} editLabel={editPatientFieldLabel(t.patients_residence_country)} />
+                <InfoRow label={t.patients_languages} value={fieldVal(detail.languages, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} editLabel={editPatientFieldLabel(t.patients_languages)} />
+                <InfoRow label={l("Funktionale Labels", "Функциональные метки", "Functional labels")} value={fieldVal(detail.functional_labels, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} editLabel={editPatientFieldLabel(l("Funktionale Labels", "Функциональные метки", "Functional labels"))} />
               </div>
             </FormSection>
 
             <FormSection title={l("Kontakt", "Контакты", "Contact")}>
               <div className="grid gap-4 md:grid-cols-2">
-                <InfoRow label={t.patients_phone_primary} value={fieldVal(detail.phone_primary, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
-                <InfoRow label={t.patients_phone_secondary} value={fieldVal(detail.phone_secondary, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
-                <InfoRow label={t.patients_email} value={fieldVal(detail.email, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
+                <InfoRow label={t.patients_phone_primary} value={fieldVal(detail.phone_primary, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} editLabel={editPatientFieldLabel(t.patients_phone_primary)} />
+                <InfoRow label={t.patients_phone_secondary} value={fieldVal(detail.phone_secondary, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} editLabel={editPatientFieldLabel(t.patients_phone_secondary)} />
+                <InfoRow label={t.patients_email} value={fieldVal(detail.email, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} editLabel={editPatientFieldLabel(t.patients_email)} />
               </div>
             </FormSection>
 
             <FormSection title={l("Versicherung und Kostenträger", "Страхование и плательщик", "Insurance and payer")}>
               <div className="grid gap-4 md:grid-cols-2">
-                <InfoRow label={t.patients_insurance_type} value={insuranceLbl(detail.insurance_type, tr)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
-                <InfoRow label={t.patients_insurance_provider} value={fieldVal(detail.insurance_provider, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
-                <InfoRow label={t.patients_insurance_number} value={fieldVal(detail.insurance_number, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
+                <InfoRow label={t.patients_insurance_type} value={insuranceLbl(detail.insurance_type, tr)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} editLabel={editPatientFieldLabel(t.patients_insurance_type)} />
+                <InfoRow label={t.patients_insurance_provider} value={fieldVal(detail.insurance_provider, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} editLabel={editPatientFieldLabel(t.patients_insurance_provider)} />
+                <InfoRow label={t.patients_insurance_number} value={fieldVal(detail.insurance_number, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} editLabel={editPatientFieldLabel(t.patients_insurance_number)} />
               </div>
             </FormSection>
 
           {/* Address */}
           <FormSection title={l("Adresse", "Адрес", "Address")}>
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-              <InfoRow label={t.patients_address_street} value={fieldVal(detail.address_street, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
-              <InfoRow label={t.patients_address_city} value={fieldVal(detail.address_city, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
-              <InfoRow label={t.patients_address_zip} value={fieldVal(detail.address_zip, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
-              <InfoRow label={t.patients_address_country} value={fieldVal(detail.address_country, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
+              <InfoRow label={t.patients_address_street} value={fieldVal(detail.address_street, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} editLabel={editPatientFieldLabel(t.patients_address_street)} />
+              <InfoRow label={t.patients_address_city} value={fieldVal(detail.address_city, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} editLabel={editPatientFieldLabel(t.patients_address_city)} />
+              <InfoRow label={t.patients_address_zip} value={fieldVal(detail.address_zip, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} editLabel={editPatientFieldLabel(t.patients_address_zip)} />
+              <InfoRow label={t.patients_address_country} value={fieldVal(detail.address_country, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} editLabel={editPatientFieldLabel(t.patients_address_country)} />
             </div>
           </FormSection>
 
@@ -3538,9 +3521,9 @@ export function PatientDetailPage() {
             }
           >
             <div className="grid gap-4 md:grid-cols-3">
-              <InfoRow label={t.patients_emergency_name} value={fieldVal(detail.emergency_contact_name, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
-              <InfoRow label={t.patients_emergency_phone} value={fieldVal(detail.emergency_contact_phone, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
-              <InfoRow label={t.patients_emergency_relation} value={fieldVal(detail.emergency_contact_relation, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} />
+              <InfoRow label={t.patients_emergency_name} value={fieldVal(detail.emergency_contact_name, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} editLabel={editPatientFieldLabel(t.patients_emergency_name)} />
+              <InfoRow label={t.patients_emergency_phone} value={fieldVal(detail.emergency_contact_phone, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} editLabel={editPatientFieldLabel(t.patients_emergency_phone)} />
+              <InfoRow label={t.patients_emergency_relation} value={fieldVal(detail.emergency_contact_relation, t.common_not_set)} onEdit={canEditPatientProfile ? openProfileEditor : undefined} editLabel={editPatientFieldLabel(t.patients_emergency_relation)} />
             </div>
           </FormSection>
           </div>
@@ -4344,7 +4327,7 @@ export function PatientDetailPage() {
                   <button
                     key={c.id}
                     type="button"
-                    onClick={() => setCasePreviewId(c.id)}
+                    onClick={() => staffGo(`/cases/${c.id}`)}
                     className="rounded-xl border border-border/50 bg-card px-4 py-3 text-left transition-colors hover:border-border hover:bg-muted/30"
                   >
                     <div className="flex items-center justify-between gap-3">
@@ -4360,12 +4343,6 @@ export function PatientDetailPage() {
               </div>
             )}
           </FormSection>
-          <CaseWorkspaceModal
-            caseId={casePreviewId}
-            patientId={id}
-            open={Boolean(casePreviewId)}
-            onOpenChange={(value) => { if (!value) setCasePreviewId(null); }}
-          />
         </TabsContent>
 
         {/* Orders tab */}
@@ -5871,7 +5848,7 @@ export function PatientDetailPage() {
                 <Label htmlFor="invoice-notes-edit">{l("Notizen", "Заметки", "Notes")}</Label>
                 <textarea
                   id="invoice-notes-edit"
-                  className={textareaClassName}
+                  className={spaciousTextareaClassName}
                   value={invoiceStatusForm.notes}
                   onChange={(event) => setInvoiceStatusForm((current) => ({ ...current, notes: event.target.value }))}
                   placeholder={l("Billing-Notizen oder Details zur Zahlungsbestätigung", "Заметки по billing или детали подтверждения оплаты", "Billing notes or payment confirmation details")}
@@ -5902,7 +5879,7 @@ export function PatientDetailPage() {
                 <Label htmlFor="dunning-note">{l("Mahnhinweis", "Заметка по напоминанию", "Reminder note")}</Label>
                 <textarea
                   id="dunning-note"
-                  className={textareaClassName}
+                  className={spaciousTextareaClassName}
                   value={dunningNote}
                   onChange={(event) => setDunningNote(event.target.value)}
                   placeholder={l("Optionale Notiz für den Billing-Verlauf", "Необязательная заметка для trail биллинга", "Optional note for billing trail")}

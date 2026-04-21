@@ -568,7 +568,8 @@ function StaffInvoicesPage() {
   const invoiceTypeLabel = (invoiceType: string) => enumLabel(invoiceType, text.types);
   const dunningLevelLabel = (level: string) => enumLabel(level, text.dunningLevels);
   const accountingDirectionLabel = (direction: string) => enumLabel(direction, text.directions);
-  const canLoadOrderOptions = user?.role === "patient_manager" || user?.role === "billing";
+  const canLoadOrderOptions =
+    user?.role === "ceo" || user?.role === "patient_manager" || user?.role === "billing";
   const currentYear = String(new Date().getFullYear());
   const canLoadQuoteOptions =
     user?.role === "ceo" ||

@@ -149,10 +149,10 @@ export function Topbar() {
             <PanelLeft className="size-[17px]" />
           </TopbarIconButton>
           <div className="h-4 w-px bg-border mx-1" />
-          <TopbarIconButton onClick={() => navigate(-1)} title="Back">
+          <TopbarIconButton onClick={() => navigate(-1)} title={t.nav_back}>
             <CornerUpLeft className="size-[17px]" />
           </TopbarIconButton>
-          <TopbarIconButton onClick={() => navigate(1)} title="Forward">
+          <TopbarIconButton onClick={() => navigate(1)} title={t.nav_forward}>
             <CornerUpRight className="size-[17px]" />
           </TopbarIconButton>
           <div className="h-4 w-px bg-border mx-1" />

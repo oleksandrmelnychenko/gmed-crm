@@ -104,10 +104,10 @@ describe("canAccessStaffRoute", () => {
     expect(canAccessStaffRoute("patient_manager", "/appointments")).toBe(true);
   });
 
-  it("allows only it_admin on generic /admin tooling routes", () => {
+  it("allows ceo and it_admin on generic /admin tooling routes", () => {
     expect(canAccessStaffRoute("patient_manager", "/admin/settings")).toBe(false);
     expect(canAccessStaffRoute("it_admin", "/admin/settings")).toBe(true);
-    expect(canAccessStaffRoute("ceo", "/admin/settings")).toBe(false);
+    expect(canAccessStaffRoute("ceo", "/admin/settings")).toBe(true);
     expect(canAccessStaffRoute("ceo_assistant", "/admin/settings")).toBe(false);
   });
 
@@ -125,22 +125,19 @@ describe("canAccessStaffRoute", () => {
   });
 
   it("allows users-management roles into /admin/users and excludes ceo_assistant", () => {
-    // Phase F micro-fix: tightened to {ceo, it_admin} to match
-    // users::list_users at routes/users.rs:95.
     expect(canAccessStaffRoute("ceo", "/admin/users")).toBe(true);
     expect(canAccessStaffRoute("it_admin", "/admin/users")).toBe(true);
     expect(canAccessStaffRoute("ceo_assistant", "/admin/users")).toBe(false);
     expect(canAccessStaffRoute("patient_manager", "/admin/users")).toBe(false);
-    // The narrower rule must NOT leak access to other admin areas
-    expect(canAccessStaffRoute("ceo", "/admin/settings")).toBe(false);
+    expect(canAccessStaffRoute("ceo", "/admin/settings")).toBe(true);
     expect(canAccessStaffRoute("ceo_assistant", "/admin/settings")).toBe(false);
   });
 
-  it("aligns /admin/custom-fields with backend allow list", () => {
+  it("aligns /admin/custom-fields with backend allow list (ceo passes via bypass)", () => {
     expect(canAccessStaffRoute("it_admin", "/admin/custom-fields")).toBe(true);
     expect(canAccessStaffRoute("patient_manager", "/admin/custom-fields")).toBe(true);
     expect(canAccessStaffRoute("sales", "/admin/custom-fields")).toBe(true);
-    expect(canAccessStaffRoute("ceo", "/admin/custom-fields")).toBe(false);
+    expect(canAccessStaffRoute("ceo", "/admin/custom-fields")).toBe(true);
     expect(canAccessStaffRoute("ceo_assistant", "/admin/custom-fields")).toBe(false);
     expect(canAccessStaffRoute("billing", "/admin/custom-fields")).toBe(false);
   });
@@ -165,12 +162,12 @@ describe("canAccessStaffRoute", () => {
     ).toBe(false);
   });
 
-  it("blocks non-lead roles from /leads (Phase F: matches list_leads allow list)", () => {
+  it("blocks non-lead roles from /leads (ceo passes via full-access policy)", () => {
     expect(canAccessStaffRoute("patient_manager", "/leads")).toBe(true);
     expect(canAccessStaffRoute("sales", "/leads")).toBe(true);
+    expect(canAccessStaffRoute("ceo", "/leads")).toBe(true);
     expect(canAccessStaffRoute("interpreter", "/leads")).toBe(false);
     expect(canAccessStaffRoute("billing", "/leads")).toBe(false);
-    expect(canAccessStaffRoute("ceo", "/leads")).toBe(false);
     expect(canAccessStaffRoute("ceo_assistant", "/leads")).toBe(false);
     expect(canAccessStaffRoute("concierge", "/leads")).toBe(false);
     expect(canAccessStaffRoute("teamlead_interpreter", "/leads")).toBe(false);

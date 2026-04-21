@@ -217,6 +217,71 @@ describe("buildAppointmentTimelineEvents", () => {
       detail: "Marta PM · Clarify the missing travel handoff.",
     });
   });
+
+  it("localizes known concierge transfer summaries through timeline labels", () => {
+    const events = buildAppointmentTimelineEvents({
+      detail: {
+        id: "apt-3",
+        title: "Airport transfer",
+        date: "2026-04-05",
+        time_start: "09:30",
+        time_end: "10:30",
+        patient_pid: "PID-3048",
+        patient_name: "Anna Schmidt",
+        provider_name: "Klinik Mitte",
+        doctor_name: "Dr. Weber",
+        interpreter_name: null,
+        interpreter_response: null,
+        created_at: "2026-04-01T08:00:00Z",
+      },
+      checklist: [],
+      reminders: [],
+      tasks: [],
+      services: [
+        {
+          id: "svc-2",
+          title:
+            "Completed airport arrival step. Driver waited at hotel lobby and escorted patient to admission desk. Completed concierge-linked transfer.",
+          status: "completed",
+          assigned_concierge_name: "Olha Concierge",
+          starts_at: "2026-04-11T07:00:00Z",
+          completed_at: "2026-04-11T09:00:00Z",
+          created_at: "2026-04-09T10:00:00Z",
+        },
+      ],
+      communications: [],
+      report: null,
+      labels: {
+        appointments_timeline_appointment_created: "Appointment created",
+        appointments_timeline_scheduled_slot: "Scheduled slot",
+        appointments_timeline_interpreter_pending: "Interpreter pending",
+        appointments_timeline_interpreter_assigned: "Interpreter assigned",
+        appointments_timeline_interpreter_accepted: "Interpreter accepted",
+        appointments_timeline_interpreter_declined: "Interpreter declined",
+        appointments_timeline_interpreter_discussion: "Interpreter in discussion",
+        appointments_timeline_checklist_completed: "Checklist completed",
+        appointments_timeline_checklist_pending: "Checklist pending",
+        appointments_timeline_external_response_logged: "External response logged",
+        appointments_timeline_external_communication_cancelled:
+          "External communication cancelled",
+        appointments_timeline_external_communication_closed:
+          "External communication closed",
+        appointments_timeline_interpreter_report_submitted:
+          "Interpreter report submitted",
+        appointments_timeline_interpreter_report_approved:
+          "Interpreter report approved",
+        appointments_timeline_interpreter_report_rejected:
+          "Interpreter report rejected",
+        appointments_timeline_concierge_transfer_completed:
+          "Localized concierge transfer summary",
+      },
+    });
+
+    expect(events.find((item) => item.id === "service:svc-2")).toMatchObject({
+      title: "Localized concierge transfer summary",
+      kind: "concierge",
+    });
+  });
 });
 
 describe("shouldUseInterpreterMobileAgenda", () => {

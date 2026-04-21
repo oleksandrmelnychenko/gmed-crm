@@ -69,37 +69,23 @@ export const ROLES_APPOINTMENTS = [
   "concierge",
 ] as const satisfies readonly StaffRole[];
 
-export const ROLES_ADMIN = ["it_admin"] as const satisfies readonly StaffRole[];
+// CEO has full access by policy — `AuthUser::require_any_role` in
+// `crates/server/src/auth/middleware.rs` short-circuits to Ok for Ceo,
+// so the frontend guard mirrors that by including "ceo" everywhere.
+export const ROLES_ADMIN = ["ceo", "it_admin"] as const satisfies readonly StaffRole[];
 
-/**
- * Roles allowed to open `/admin/compliance`. Matches the canonical
- * consent dashboard handler `admin_compliance::consent_dashboard`
- * (`crates/server/src/routes/admin_compliance.rs:123`) which only
- * grants Ceo + PatientManager. ceo_assistant and it_admin both get
- * 403 on the first call so we keep them out of the route guard.
- */
 export const ROLES_COMPLIANCE = [
   "ceo",
   "patient_manager",
 ] as const satisfies readonly StaffRole[];
 
-/**
- * Roles allowed to open `/admin/users`. Matches the canonical
- * `users::list_users` handler at `crates/server/src/routes/users.rs:95`
- * which only grants Ceo + ItAdmin. ceo_assistant gets 403 on first
- * call.
- */
 export const ROLES_ADMIN_USERS = [
   "ceo",
   "it_admin",
 ] as const satisfies readonly StaffRole[];
 
-/**
- * Roles allowed to open `/admin/custom-fields`. Matches the canonical
- * `custom_fields::list_fields` handler which grants ItAdmin +
- * PatientManager + Sales.
- */
 export const ROLES_ADMIN_CUSTOM_FIELDS = [
+  "ceo",
   "it_admin",
   "patient_manager",
   "sales",
@@ -109,8 +95,9 @@ export const ROLES_ADMIN_CUSTOM_FIELDS = [
 // staff workspace page hits on mount. See
 // `docs/testing/phase-f-ssot-drift-audit.md` for the cross-reference table.
 
-/** `crates/server/src/routes/leads.rs:114` (`list_leads`) */
+/** `crates/server/src/routes/leads.rs:114` (`list_leads`) — CEO passes via `require_any_role` bypass. */
 export const ROLES_LEADS = [
+  "ceo",
   "patient_manager",
   "sales",
 ] as const satisfies readonly StaffRole[];

@@ -32,7 +32,6 @@ import type {
   EventInput,
 } from "@fullcalendar/core";
 import {
-  AlertCircle,
   AlertTriangle,
   CalendarClock,
   CalendarDays,
@@ -76,6 +75,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Banner,
+  CountBadge,
+  EmptyCell,
+  InfoRow,
+  inputClass,
+  ListItem,
+  Section,
+  selectClass,
+  StatCard,
+  StatusBadge,
+  textareaClass,
+  tokens,
+} from "@/components/ui-shell";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useAuth } from "@/lib/auth";
 import {
@@ -106,11 +119,7 @@ import {
   type StaffOption as PatientSheetStaffOption,
 } from "@/pages/patients";
 import {
-  InteractionHistorySection as ProviderInteractionHistorySection,
-  LinkedPatientsSection as ProviderLinkedPatientsSection,
-  ProviderOverviewSection,
   type ProviderDetail as ProviderSheetDetail,
-  type ProviderPermissions as ProviderSheetPermissions,
 } from "@/pages/providers";
 
 type AppointmentKind = "medical" | "non_medical" | "internal";
@@ -856,11 +865,6 @@ const TASK_ASSIGNABLE_ROLES = new Set([
   "interpreter",
   "concierge",
 ]);
-const PROVIDER_PREVIEW_PERMISSIONS: ProviderSheetPermissions = {
-  canViewPage: true,
-  canManageRegistry: false,
-  forceNonMedical: false,
-};
 const MAX_PROVIDER_DOCTORS_CACHE = 24;
 const providerDoctorsCache = new Map<string, DoctorOption[]>();
 const providerDoctorsInFlight = new Map<string, Promise<DoctorOption[]>>();
@@ -916,13 +920,10 @@ function useDebouncedValue<T>(value: T, delayMs = 180) {
   return debouncedValue;
 }
 
-const selectClassName =
-  "h-10 w-full rounded-xl border border-input bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
-const textareaClassName =
-  "min-h-[96px] w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
-const createSheetInputClassName = "h-9 rounded-lg bg-card";
-const createSheetTextareaClassName =
-  "min-h-[80px] w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
+const selectClassName = cn(selectClass, "h-10 rounded-xl");
+const textareaClassName = cn(textareaClass, "min-h-[96px]");
+const createSheetInputClassName = inputClass;
+const createSheetTextareaClassName = textareaClass;
 
 function appointmentPermissions(role?: string): AppointmentPermissions {
   switch (role) {
@@ -1435,11 +1436,13 @@ function appointmentTypeLabel(
   tr?: Record<string, string>,
 ) {
   if (type === "non_medical")
-    return tr?.role_concierge ??
-      appointmentText("Concierge", "РљРѕРЅСЃСЊРµСЂР¶", "Concierge");
+    return tr?.apt_type_non_medical ??
+      appointmentText("Nicht-medizinisch", "Немедицинский", "Non-medical");
   if (type === "internal")
-    return appointmentText("Intern", "Внутренний", "Internal");
-  return tr?.common_doctor ?? appointmentText("Arzt", "Р’СЂР°С‡", "Medical");
+    return tr?.apt_type_internal ??
+      appointmentText("Intern", "Внутренний", "Internal");
+  return tr?.apt_type_medical ??
+    appointmentText("Medizinisch", "Медицинский", "Medical");
 }
 
 function carePathKindLabel(value?: string | null) {
@@ -1547,6 +1550,12 @@ function responseLabel(value: InterpreterResponse) {
   }
 }
 
+function attentionIssueLabel(count: number) {
+  return count === 1
+    ? appointmentText("offener Punkt", "открытый пункт", "open issue")
+    : appointmentText("offene Punkte", "открытые пункты", "open issues");
+}
+
 function reportApprovalLabel(status: string) {
   switch (status) {
     case "approved":
@@ -1566,17 +1575,6 @@ function reportApprovalLabel(status: string) {
         .split("_")
         .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
         .join(" ");
-  }
-}
-
-function reportApprovalBadgeClass(status: string) {
-  switch (status) {
-    case "approved":
-      return "bg-emerald-100 text-emerald-700 border-emerald-200";
-    case "rejected":
-      return "bg-rose-100 text-rose-700 border-rose-200";
-    default:
-      return "bg-amber-100 text-amber-700 border-amber-200";
   }
 }
 
@@ -2036,7 +2034,7 @@ function buildConflictQuery(
 
 function formatDateLabel(date: string) {
   try {
-    return new Intl.DateTimeFormat("en-GB", {
+    return new Intl.DateTimeFormat(runtimeLocale(), {
       weekday: "short",
       day: "2-digit",
       month: "short",
@@ -2596,8 +2594,164 @@ function buildHandoffStakeholders(
 
 function sectionCardClass(extra?: string) {
   return cn(
-    "rounded-[1.75rem] border border-border/70 bg-card",
+    "rounded-[1.75rem] border-border/70",
+    tokens.surface.card,
     extra,
+  );
+}
+
+function withEllipsis(value: string | null | undefined) {
+  const normalized = String(value ?? "").trim();
+  if (!normalized) return "";
+  return /[.…]$/u.test(normalized) ? normalized : `${normalized}…`;
+}
+
+function AppointmentWorkspaceSectionIntro({
+  title,
+  description,
+  accessory,
+}: {
+  title: ReactNode;
+  description: ReactNode;
+  accessory?: ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-3 rounded-2xl border border-border/60 bg-muted/20 px-4 py-4 sm:flex-row sm:items-start sm:justify-between">
+      <div className="space-y-1">
+        <h2 className="text-sm font-semibold text-foreground">{title}</h2>
+        <p className="max-w-3xl text-xs text-muted-foreground">{description}</p>
+      </div>
+      {accessory ? <div className="shrink-0">{accessory}</div> : null}
+    </div>
+  );
+}
+
+function AppointmentClinicalToggleCard({
+  checked,
+  disabled = false,
+  title,
+  description,
+  onChange,
+}: {
+  checked: boolean;
+  disabled?: boolean;
+  title: string;
+  description: string;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label
+      className={cn(
+        "flex items-start gap-3 rounded-xl px-4 py-3",
+        tokens.surface.card,
+        disabled && "opacity-60",
+      )}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.checked)}
+        className="mt-0.5 size-4 rounded border-border/60 text-[var(--brand)] focus:ring-[var(--brand)]/30"
+      />
+      <span className="min-w-0 space-y-1">
+        <span className="block text-sm font-medium text-foreground">{title}</span>
+        <span className="block text-xs text-muted-foreground">
+          {description}
+        </span>
+      </span>
+    </label>
+  );
+}
+
+function AppointmentEditorSheet({
+  open,
+  onOpenChange,
+  title,
+  description,
+  maxWidthClassName = "sm:max-w-[560px]",
+  onSubmit,
+  children,
+  footer,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: ReactNode;
+  description?: ReactNode;
+  maxWidthClassName?: string;
+  onSubmit?: (event: FormEvent<HTMLFormElement>) => void;
+  children: ReactNode;
+  footer: ReactNode;
+}) {
+  const content = (
+    <>
+      <SheetHeader className="px-4 py-3">
+        <SheetTitle>{title}</SheetTitle>
+        {description ? <SheetDescription>{description}</SheetDescription> : null}
+      </SheetHeader>
+      <div className="flex-1 overflow-y-auto overscroll-y-contain px-4 py-4 space-y-4">
+        {children}
+      </div>
+      <div className="flex shrink-0 justify-end gap-2 px-4 py-3 bg-popover">
+        {footer}
+      </div>
+    </>
+  );
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent side="right" className={cn("w-full gap-0", maxWidthClassName)}>
+        {onSubmit ? (
+          <form className="flex flex-col flex-1 min-h-0" onSubmit={onSubmit}>
+            {content}
+          </form>
+        ) : (
+          <div className="flex flex-col flex-1 min-h-0">{content}</div>
+        )}
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+function AppointmentPreviewSheet({
+  open,
+  onOpenChange,
+  title,
+  description,
+  maxWidthClassName = "sm:max-w-[560px]",
+  headerClassName,
+  bodyClassName,
+  children,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: ReactNode;
+  description?: ReactNode;
+  maxWidthClassName?: string;
+  headerClassName?: string;
+  bodyClassName?: string;
+  children: ReactNode;
+}) {
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent side="right" className={cn("w-full gap-0", maxWidthClassName)}>
+        <div className="flex flex-col flex-1 min-h-0">
+          <SheetHeader className={cn("px-4 py-3", headerClassName)}>
+            <SheetTitle>{title}</SheetTitle>
+            {description ? <SheetDescription>{description}</SheetDescription> : null}
+          </SheetHeader>
+          <div
+            className={cn(
+              "flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-4",
+              "overscroll-y-contain",
+              bodyClassName,
+            )}
+          >
+            {children}
+          </div>
+        </div>
+      </SheetContent>
+    </Sheet>
   );
 }
 
@@ -2652,6 +2806,155 @@ function timelineToneClass(tone: AppointmentTimelineEvent["tone"]) {
   }
 }
 
+function appointmentTimelineSurfaceClass(
+  tone: AppointmentTimelineEvent["tone"],
+) {
+  switch (tone) {
+    case "success":
+      return "border-emerald-200/80 bg-emerald-50/35";
+    case "warning":
+      return "border-amber-200/80 bg-amber-50/40";
+    case "danger":
+      return "border-rose-200/80 bg-rose-50/40";
+    case "info":
+      return "border-sky-200/80 bg-sky-50/40";
+    default:
+      return "border-border/50 bg-background";
+  }
+}
+
+function appointmentTimelineKindDotClass(kind: AppointmentTimelineKind) {
+  switch (kind) {
+    case "workflow":
+      return "bg-sky-500";
+    case "communication":
+      return "bg-amber-500";
+    case "interpreter":
+      return "bg-violet-500";
+    case "clinical":
+      return "bg-emerald-500";
+    case "followup":
+      return "bg-rose-500";
+    case "concierge":
+      return "bg-cyan-500";
+    default:
+      return "bg-[var(--brand)]";
+  }
+}
+
+function appointmentTimelineKindBadgeClass(kind: AppointmentTimelineKind) {
+  switch (kind) {
+    case "workflow":
+      return "border-sky-200 bg-sky-50 text-sky-700";
+    case "communication":
+      return "border-amber-200 bg-amber-50 text-amber-700";
+    case "interpreter":
+      return "border-violet-200 bg-violet-50 text-violet-700";
+    case "clinical":
+      return "border-emerald-200 bg-emerald-50 text-emerald-700";
+    case "followup":
+      return "border-rose-200 bg-rose-50 text-rose-700";
+    case "concierge":
+      return "border-cyan-200 bg-cyan-50 text-cyan-700";
+    default:
+      return "border-border/60 bg-muted/25 text-muted-foreground";
+  }
+}
+
+function appointmentTimelineKindLabel(kind: AppointmentTimelineKind) {
+  switch (kind) {
+    case "workflow":
+      return appointmentText("Workflow", "Воркфлоу", "Workflow");
+    case "communication":
+      return appointmentText("Kommunikation", "Коммуникация", "Communication");
+    case "interpreter":
+      return appointmentText("Dolmetscher", "Переводчик", "Interpreter");
+    case "clinical":
+      return appointmentText("Klinisch", "Клиническое", "Clinical");
+    case "followup":
+      return appointmentText("Follow-up", "Фоллоу-ап", "Follow-up");
+    case "concierge":
+      return "Concierge";
+    default:
+      return kind;
+  }
+}
+
+function appointmentTimelineToneLabel(tone: AppointmentTimelineEvent["tone"]) {
+  switch (tone) {
+    case "success":
+      return appointmentText("Erledigt", "Готово", "Done");
+    case "warning":
+      return appointmentText("Aufmerksamkeit", "Внимание", "Attention");
+    case "danger":
+      return appointmentText("Kritisch", "Критично", "Critical");
+    case "info":
+      return appointmentText("Info", "Инфо", "Info");
+    default:
+      return appointmentText("Geplant", "Запланировано", "Planned");
+  }
+}
+
+function appointmentTimelineDateGroupKey(value?: string | null) {
+  if (!value) return "unknown";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "unknown";
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function appointmentTimelineDateGroupLabel(
+  value: string | null | undefined,
+  lang: string,
+) {
+  const key = appointmentTimelineDateGroupKey(value);
+  if (key === "unknown") {
+    if (lang === "de") return "Unbekanntes Datum";
+    if (lang === "ru") return "Дата не указана";
+    return "Unknown date";
+  }
+
+  const date = new Date(value!);
+  const today = new Date();
+  const startOfToday = new Date(
+    today.getFullYear(),
+    today.getMonth(),
+    today.getDate(),
+  );
+  const startOfTarget = new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+  );
+  const diffInDays = Math.round(
+    (startOfToday.getTime() - startOfTarget.getTime()) / (1000 * 60 * 60 * 24),
+  );
+
+  if (diffInDays === 0) {
+    if (lang === "de") return "Heute";
+    if (lang === "ru") return "Сегодня";
+    return "Today";
+  }
+  if (diffInDays === 1) {
+    if (lang === "de") return "Gestern";
+    if (lang === "ru") return "Вчера";
+    return "Yesterday";
+  }
+
+  try {
+    return new Intl.DateTimeFormat(runtimeLocale(), {
+      weekday: "short",
+      day: "2-digit",
+      month: "short",
+      year: startOfTarget.getFullYear() === startOfToday.getFullYear() ? undefined : "numeric",
+    }).format(date);
+  } catch {
+    return key;
+  }
+}
+
 function Field({
   label,
   children,
@@ -2671,39 +2974,7 @@ function Field({
 }
 
 function EmptyState({ text }: { text: string }) {
-  return (
-    <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 px-4 py-5 text-sm text-muted-foreground">
-      {text}
-    </div>
-  );
-}
-
-function Banner({
-  tone,
-  children,
-}: {
-  tone: "error" | "warning";
-  children: ReactNode;
-}) {
-  const classes =
-    tone === "error"
-      ? "border-rose-200 bg-rose-50 text-rose-700"
-      : "border-amber-200 bg-amber-50 text-amber-700";
-  return (
-    <div
-      className={cn(
-        "flex items-start gap-3 rounded-2xl border px-4 py-3 text-sm",
-        classes,
-      )}
-    >
-      {tone === "error" ? (
-        <AlertCircle className="mt-0.5 size-4 shrink-0" />
-      ) : (
-        <ShieldAlert className="mt-0.5 size-4 shrink-0" />
-      )}
-      <div>{children}</div>
-    </div>
-  );
+  return <EmptyCell>{text}</EmptyCell>;
 }
 
 function CreateAppointmentSheet({
@@ -2720,6 +2991,9 @@ function CreateAppointmentSheet({
 }: CreateAppointmentSheetProps) {
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
+  const interpreterFieldLabel =
+    tr.role_interpreter ??
+    appointmentText("Dolmetscher", "Переводчик", "Interpreter");
   const [form, setForm] = useState<AppointmentFormState>(seed);
   const [doctors, setDoctors] = useState<DoctorOption[]>([]);
   const [conflicts, setConflicts] = useState<ConflictSummary | null>(null);
@@ -2931,7 +3205,11 @@ function CreateAppointmentSheet({
       setError(
         submitError instanceof Error
           ? submitError.message
-          : "Failed to create appointment",
+          : appointmentText(
+              "Termin konnte nicht erstellt werden.",
+              "Не удалось создать приём.",
+              "Failed to create appointment",
+            ),
       );
     } finally {
       setBusy(false);
@@ -2941,14 +3219,14 @@ function CreateAppointmentSheet({
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       {open ? (
-        <SheetContent side="right" className="w-full sm:max-w-[760px]">
+        <SheetContent side="right" className="w-full gap-0 sm:max-w-[760px]">
           <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
-            <SheetHeader className="shrink-0 px-4 pt-3 pb-1">
+            <SheetHeader className="px-4 py-3">
               <SheetTitle>{tr.appointments_new}</SheetTitle>
             </SheetHeader>
-            <div className="flex-1 overflow-y-auto px-4 py-2">
+            <div className="flex-1 overflow-y-auto overscroll-y-contain px-4 py-4">
               <div className="space-y-4">
-                {error ? <Banner tone="error">{error}</Banner> : null}
+                {error ? <Banner tone="error" withIcon>{error}</Banner> : null}
                 <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
                   <div className="grid gap-4 md:grid-cols-3">
                     <Field compact label={t.orders_patient}>
@@ -3263,7 +3541,7 @@ function CreateAppointmentSheet({
                         </SelectContent>
                       </ShadSelect>
                     </Field>
-                    <Field compact label={t.common_doctor}>
+                    <Field compact label={interpreterFieldLabel}>
                       <ShadSelect
                         value={form.interpreterId}
                         onValueChange={(value) =>
@@ -3335,20 +3613,22 @@ function CreateAppointmentSheet({
               <Button
                 type="button"
                 variant="outline"
-                className="h-9 rounded-lg"
+                size="sm"
+                className="h-8 rounded-lg"
                 onClick={() => onOpenChange(false)}
               >
                 {tr.common_cancel}
               </Button>
               <Button
                 type="submit"
-                className="h-9 rounded-lg gap-1.5 px-3.5"
+                size="sm"
+                className="h-8 rounded-lg gap-1.5 px-3.5"
                 disabled={busy}
               >
                 {busy ? (
-                  <LoaderCircle className="size-4 animate-spin" />
+                  <LoaderCircle className="size-3.5 animate-spin" />
                 ) : (
-                  <Plus className="size-4" />
+                  <Plus className="size-3.5" />
                 )}
                 {busy ? t.patients_creating : t.appointments_new}
               </Button>
@@ -3383,6 +3663,9 @@ function EditAppointmentSection({
 }: EditAppointmentSectionProps) {
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
+  const interpreterFieldLabel =
+    tr.role_interpreter ??
+    appointmentText("Dolmetscher", "Переводчик", "Interpreter");
   const [form, setForm] = useState<AppointmentFormState>(() =>
     buildEditAppointmentForm(detail),
   );
@@ -3550,7 +3833,11 @@ function EditAppointmentSection({
       setError(
         submitError instanceof Error
           ? submitError.message
-          : "Failed to save schedule",
+          : appointmentText(
+              "Terminplan konnte nicht gespeichert werden.",
+              "Не удалось сохранить расписание приёма.",
+              "Failed to save schedule",
+            ),
       );
     } finally {
       setBusy(false);
@@ -3564,7 +3851,7 @@ function EditAppointmentSection({
       </h3>
       {error ? (
         <div className="mt-4">
-          <Banner tone="error">{error}</Banner>
+          <Banner tone="error" withIcon>{error}</Banner>
         </div>
       ) : null}
       <form onSubmit={handleSubmit} className="mt-4 space-y-4">
@@ -3709,7 +3996,7 @@ function EditAppointmentSection({
               ))}
             </select>
           </Field>
-          <Field label={t.common_doctor}>
+          <Field label={interpreterFieldLabel}>
             <select
               value={form.interpreterId}
               onChange={(event) =>
@@ -3831,10 +4118,12 @@ function EditAppointmentSection({
                     }))
                   }
                   className="h-10 rounded-xl bg-white/80"
-                  placeholder={appointmentText(
-                    "Optional, wenn ein Enddatum gesetzt ist",
-                    "Необязательно, если указана дата окончания",
-                    "Optional when repeat-until is set",
+                  placeholder={withEllipsis(
+                    appointmentText(
+                      "Optional, wenn ein Enddatum gesetzt ist",
+                      "Необязательно, если указана дата окончания",
+                      "Optional when repeat-until is set",
+                    ),
                   )}
                   disabled={recurrenceScope === "single"}
                 />
@@ -3913,7 +4202,7 @@ function AppointmentOverviewSection({
 
   return (
     <section className="space-y-3 rounded-xl p-3.5 border border-border/50 bg-card/40">
-      <div className="flex items-start gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
         <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-[var(--brand)] text-[12px] font-semibold text-white">
           {patientInitials || "AP"}
         </div>
@@ -3938,21 +4227,23 @@ function AppointmentOverviewSection({
             {detail.id}
           </p>
         </div>
+        <div className="flex shrink-0 flex-wrap gap-2 sm:max-w-[40%] sm:justify-end">
+          <span
+            className={cn(
+              "rounded-full border px-2.5 py-1 text-[10.5px] font-semibold uppercase tracking-[0.12em]",
+              typeBadgeClass(detail.type),
+            )}
+          >
+            {appointmentTypeLabel(detail.type, tr)}
+          </span>
+          {detail.care_path_kind ? (
+            <span className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-violet-700">
+              {carePathKindLabel(detail.care_path_kind)}
+            </span>
+          ) : null}
+        </div>
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-2">
-        <span
-          className={cn(
-            "rounded-full border px-2.5 py-1 text-[10.5px] font-semibold uppercase tracking-[0.12em]",
-            typeBadgeClass(detail.type),
-          )}
-        >
-          {appointmentTypeLabel(detail.type, tr)}
-        </span>
-        {detail.care_path_kind ? (
-          <span className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-violet-700">
-            {carePathKindLabel(detail.care_path_kind)}
-          </span>
-        ) : null}
         {detail.recurrence_frequency ? (
           <span className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-sky-700">
             {recurrenceFrequencyLabel(detail.recurrence_frequency)} series
@@ -3965,7 +4256,9 @@ function AppointmentOverviewSection({
         ) : null}
         {detail.interpreter_response ? (
           <span className="rounded-full border border-border/60 bg-muted/25 px-2.5 py-1 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-            Interpreter {responseLabel(detail.interpreter_response)}
+            {(tr.role_interpreter ??
+              appointmentText("Dolmetscher", "Переводчик", "Interpreter"))}{" "}
+            {responseLabel(detail.interpreter_response)}
           </span>
         ) : null}
       </div>
@@ -4176,44 +4469,71 @@ const MemoizedAppointmentOverviewSection = memo(AppointmentOverviewSection);
 function AppointmentSnapshotSection({ detail }: { detail: AppointmentDetail }) {
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
+  const summaryTitle = appointmentText(
+    "Status und Zuständigkeiten",
+    "Статус и ответственные",
+    "Status and responsibilities",
+  );
+  const orderLabel = appointmentText("Auftrag", "Заказ", "Order");
+  const snapshotCards = [
+    {
+      label: t.orders_phase,
+      value: detail.checklist_phase || tr.phase_discovery,
+      meta: appointmentTypeLabel(detail.type, tr),
+    },
+    {
+      label: t.patients_assign_owner,
+      value: detail.owner_name || tr.common_not_set,
+      meta: detail.owner_role
+        ? roleLabel(detail.owner_role)
+        : tr.common_not_set,
+    },
+  ];
+
+  if (detail.doctor_name || detail.type === "medical") {
+    snapshotCards.push({
+      label: t.common_doctor,
+      value: detail.doctor_name || tr.common_not_set,
+      meta: detail.provider_name || tr.common_not_set,
+    });
+  }
+
+  if (detail.interpreter_name || detail.interpreter_response) {
+    snapshotCards.push({
+      label: t.role_interpreter,
+      value: detail.interpreter_name || tr.common_not_set,
+      meta: detail.interpreter_response
+        ? responseLabel(detail.interpreter_response)
+        : tr.common_not_set,
+    });
+  }
+
+  if (detail.order_id) {
+    snapshotCards.push({
+      label: orderLabel,
+      value: detail.order_id,
+      meta: detail.category || formatDateTimeLabel(detail.created_at),
+    });
+  }
 
   return (
     <section className="space-y-3 rounded-xl p-3.5 border border-border/50 bg-card/40">
       <div className="flex items-center gap-2">
         <div className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
         <h3 className="text-sm font-semibold text-foreground">
-          {t.appointments_title}
+          {summaryTitle}
         </h3>
       </div>
-      <div className="mt-4 grid gap-x-8 gap-y-3 md:grid-cols-3">
-        <ContextCard
-          variant="snapshot"
-          label={t.orders_phase}
-          value={detail.checklist_phase || tr.phase_discovery}
-          meta={appointmentTypeLabel(detail.type, tr)}
-        />
-        <ContextCard
-          variant="snapshot"
-          label={t.patients_assign_owner}
-          value={detail.owner_name || tr.common_not_set}
-          meta={detail.owner_role ? roleLabel(detail.owner_role) : tr.common_not_set}
-        />
-        <ContextCard
-          variant="snapshot"
-          label={t.common_doctor}
-          value={detail.interpreter_name || tr.common_not_set}
-          meta={
-            detail.interpreter_response
-              ? responseLabel(detail.interpreter_response)
-              : tr.mfa_pending
-          }
-        />
-        <ContextCard
-          variant="snapshot"
-          label={tr.providers_linked_patients}
-          value={detail.order_id || tr.common_not_set}
-          meta={detail.category || formatDateTimeLabel(detail.created_at)}
-        />
+      <div className="mt-4 grid gap-x-8 gap-y-3 md:grid-cols-2 xl:grid-cols-4">
+        {snapshotCards.map((card) => (
+          <ContextCard
+            key={`${card.label}:${card.value}`}
+            variant="snapshot"
+            label={card.label}
+            value={card.value}
+            meta={card.meta}
+          />
+        ))}
       </div>
     </section>
   );
@@ -4226,32 +4546,45 @@ function AppointmentAttentionSection({
 }: {
   attention: AppointmentAttentionItem;
 }) {
-  const { t } = useLang();
+  const title = appointmentText(
+    "Operativer Follow-up offen",
+    "Открыт операционный follow-up",
+    "Operational follow-up open",
+  );
+  const subtitle = appointmentText(
+    "Dieser Termin hat noch offene operative Folgepunkte.",
+    "У этого приёма остались незакрытые операционные follow-up пункты.",
+    "This appointment still has unresolved operational follow-up.",
+  );
+  const nextCheckpointLabel = appointmentText(
+    "Nächster Prüfpunkt",
+    "Следующая контрольная точка",
+    "Next due checkpoint",
+  );
 
   return (
     <section className="space-y-3 rounded-xl p-3.5 border border-border/50 bg-card/40">
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <div>
           <div className="flex items-center gap-2">
-            <div className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+            <div className="size-2 shrink-0 rounded-full bg-amber-500" />
             <h3 className="text-sm font-semibold text-foreground">
-              {t.common_error}
+              {title}
             </h3>
           </div>
           <p className="text-xs text-muted-foreground">
-            This appointment still has unresolved operational follow-up.
+            {subtitle}
           </p>
         </div>
-        <span className="rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-rose-700">
-          {attention.attention_score} issue
-          {attention.attention_score === 1 ? "" : "s"}
+        <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-800">
+          {attention.attention_score} {attentionIssueLabel(attention.attention_score)}
         </span>
       </div>
       <div className="mt-4 space-y-3">
         {attention.reasons.map((reason) => (
           <div
             key={reason}
-            className="rounded-xl border border-rose-200/80 bg-rose-50/80 px-4 py-3 text-sm text-rose-800"
+            className="rounded-xl border border-amber-200/80 bg-amber-50/80 px-4 py-3 text-sm text-amber-900"
           >
             {reason}
           </div>
@@ -4259,7 +4592,7 @@ function AppointmentAttentionSection({
       </div>
       {attention.next_due_at ? (
         <p className="mt-4 text-xs text-muted-foreground">
-          Next due checkpoint: {formatDateTimeLabel(attention.next_due_at)}
+          {nextCheckpointLabel}: {formatDateTimeLabel(attention.next_due_at)}
         </p>
       ) : null}
     </section>
@@ -4270,140 +4603,421 @@ const MemoizedAppointmentAttentionSection = memo(AppointmentAttentionSection);
 
 function AppointmentLinksSection({
   detail,
-  staffGo,
   onOpenPreview,
 }: {
   detail: AppointmentDetail;
-  staffGo: (href: string) => void;
   onOpenPreview: (kind: LinkedPreviewKind, label: string) => void;
 }) {
   const { t } = useLang();
-  const linkButtonClass =
-    "h-8 rounded-lg border-border/60 bg-card px-3 text-xs font-medium text-foreground transition-colors hover:border-border hover:bg-muted/60 hover:cursor-pointer";
   const previewButtonClass =
-    "h-8 rounded-lg border-[var(--brand)]/35 bg-[color-mix(in_oklch,var(--brand)_10%,white)] px-3 text-xs font-medium text-foreground transition-colors hover:border-[var(--brand)]/60 hover:bg-[color-mix(in_oklch,var(--brand)_16%,white)] hover:cursor-pointer";
+    "h-8 rounded-lg gap-1.5 border-orange-500 bg-orange-500 px-3 text-xs font-medium text-white transition-colors hover:cursor-pointer hover:border-orange-600 hover:bg-orange-600";
   const patientLabel = appointmentText("Patient", "Пациент", "Patient");
   const orderLabel = appointmentText("Auftrag", "Заказ", "Order");
   const clinicLabel = appointmentText("Klinik", "Клиника", "Clinic");
   const documentsLabel = appointmentText("Dokumente", "Документы", "Documents");
   const casesLabel = appointmentText("Fälle", "Кейсы", "Cases");
+  const linkedCount =
+    3 + Number(Boolean(detail.order_id)) + Number(Boolean(detail.provider_id));
 
   return (
-    <section className="space-y-3 rounded-xl p-3.5 border border-border/50 bg-card/40">
-      <div className="flex items-center gap-2">
-        <div className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
-        <h3 className="text-sm font-semibold text-foreground">
-          {t.providers_linked_patients}
-        </h3>
-      </div>
-      <div className="mt-3 flex flex-wrap gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          className={linkButtonClass}
-          onClick={() => staffGo(`/patients?patient=${detail.patient_id}`)}
-        >
-          {patientLabel}
-        </Button>
-        {detail.order_id ? (
+    <Section
+      title={t.compliance_col_linked_records}
+      accessory={<CountBadge>{linkedCount}</CountBadge>}
+    >
+      <div>
+        <div className="flex flex-wrap gap-2">
           <Button
             type="button"
-            variant="outline"
-            className={linkButtonClass}
-            onClick={() => staffGo(`/orders?order=${detail.order_id}`)}
-          >
-            {orderLabel}
-          </Button>
-        ) : null}
-        {detail.provider_id ? (
-          <Button
-            type="button"
-            variant="outline"
-            className={linkButtonClass}
-            onClick={() => staffGo(`/providers?provider=${detail.provider_id}`)}
-          >
-            {clinicLabel}
-          </Button>
-        ) : null}
-        <Button
-          type="button"
-          variant="outline"
-          className={linkButtonClass}
-          onClick={() =>
-            staffGo(
-              `/documents?appointment=${detail.id}&patient=${detail.patient_id}`,
-            )
-          }
-        >
-          {documentsLabel}
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          className={linkButtonClass}
-          onClick={() => staffGo(`/cases?patient=${detail.patient_id}`)}
-        >
-          {casesLabel}
-        </Button>
-      </div>
-      <div className="flex flex-wrap gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          className={previewButtonClass}
-          onClick={() => onOpenPreview("patient", patientLabel)}
-        >
-          {patientLabel}
-        </Button>
-        {detail.order_id ? (
-          <Button
-            type="button"
-            variant="outline"
             className={previewButtonClass}
-            onClick={() => onOpenPreview("order", orderLabel)}
+            onClick={() => onOpenPreview("patient", patientLabel)}
           >
-            {orderLabel}
+            {patientLabel}
           </Button>
-        ) : null}
-        {detail.provider_id ? (
+          {detail.order_id ? (
+            <Button
+              type="button"
+              className={previewButtonClass}
+              onClick={() => onOpenPreview("order", orderLabel)}
+            >
+              {orderLabel}
+            </Button>
+          ) : null}
+          {detail.provider_id ? (
+            <Button
+              type="button"
+              className={previewButtonClass}
+              onClick={() => onOpenPreview("provider", clinicLabel)}
+            >
+              {clinicLabel}
+            </Button>
+          ) : null}
           <Button
             type="button"
-            variant="outline"
             className={previewButtonClass}
-            onClick={() => onOpenPreview("provider", clinicLabel)}
+            onClick={() => onOpenPreview("documents", documentsLabel)}
           >
-            {clinicLabel}
+            {documentsLabel}
           </Button>
-        ) : null}
-        <Button
-          type="button"
-          variant="outline"
-          className={previewButtonClass}
-          onClick={() => onOpenPreview("documents", documentsLabel)}
-        >
-          {documentsLabel}
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          className={previewButtonClass}
-          onClick={() => onOpenPreview("cases", casesLabel)}
-        >
-          {casesLabel}
-        </Button>
+          <Button
+            type="button"
+            className={previewButtonClass}
+            onClick={() => onOpenPreview("cases", casesLabel)}
+          >
+            {casesLabel}
+          </Button>
+        </div>
       </div>
-    </section>
+    </Section>
   );
 }
 
 const MemoizedAppointmentLinksSection = memo(AppointmentLinksSection);
+
+function humanizeLinkedCode(value: string | null | undefined) {
+  if (!value) {
+    return appointmentText("Nicht festgelegt", "Не указано", "Not set");
+  }
+  return value
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function linkedProviderAddress(detail: ProviderSheetDetail) {
+  const notSet = appointmentText("Nicht festgelegt", "Не указано", "Not set");
+  const cityLine = [detail.address_zip, detail.address_city]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+  return [detail.address_street, cityLine, detail.address_country]
+    .filter(Boolean)
+    .join(", ") || notSet;
+}
+
+function linkedProviderPatientLabel(
+  patient: ProviderSheetDetail["linked_patients"][number],
+) {
+  return (
+    [patient.first_name, patient.last_name].filter(Boolean).join(" ").trim() ||
+    patient.patient_id
+  );
+}
+
+function AppointmentLinkedProviderOverviewSection({
+  detail,
+  formatDateTimeLabel,
+}: {
+  detail: ProviderSheetDetail;
+  formatDateTimeLabel: (value?: string | null) => string;
+}) {
+  const providerTypeLabel =
+    detail.provider_type === "medical"
+      ? appointmentText("Medizinisch", "Медицинская", "Medical")
+      : appointmentText("Nicht medizinisch", "Немедицинская", "Non-medical");
+  const notSet = appointmentText("Nicht festgelegt", "Не указано", "Not set");
+
+  return (
+    <Section
+      title={appointmentText("Klinikprofil", "Профиль клиники", "Clinic profile")}
+      accessory={<CountBadge>{providerTypeLabel}</CountBadge>}
+    >
+      <div className="flex flex-wrap gap-2">
+        <StatusBadge tone={detail.is_active ? "success" : "neutral"}>
+          {detail.is_active
+            ? appointmentText("Aktiv", "Активна", "Active")
+            : appointmentText("Inaktiv", "Неактивна", "Inactive")}
+        </StatusBadge>
+        {detail.kooperationsvertrag ? (
+          <StatusBadge tone="warning">
+            {appointmentText(
+              "Vertrag verknüpft",
+              "Договор привязан",
+              "Contract linked",
+            )}
+          </StatusBadge>
+        ) : null}
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <StatCard
+          label={appointmentText("Kontakte", "Контакты", "Contacts")}
+          value={detail.doctors.length}
+        />
+        <StatCard
+          label={appointmentText("Services", "Сервисы", "Services")}
+          value={detail.services.length}
+        />
+        <StatCard
+          label={appointmentText(
+            "Verknüpfte Patienten",
+            "Связанные пациенты",
+            "Linked patients",
+          )}
+          value={detail.linked_patients.length}
+        />
+        <StatCard
+          label={appointmentText("Aktivität", "Активность", "Activity")}
+          value={detail.interactions.length}
+        />
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2">
+        <div className={cn("rounded-xl px-4 py-3", tokens.surface.card)}>
+          <InfoRow
+            label={appointmentText("Name", "Название", "Name")}
+            value={detail.name || notSet}
+          />
+        </div>
+        <div className={cn("rounded-xl px-4 py-3", tokens.surface.card)}>
+          <InfoRow
+            label={appointmentText("Rechtsträger", "Юрлицо", "Legal name")}
+            value={detail.legal_name || notSet}
+          />
+        </div>
+        <div className={cn("rounded-xl px-4 py-3", tokens.surface.card)}>
+          <InfoRow
+            label={appointmentText("Standort", "Локация", "Location")}
+            value={linkedProviderAddress(detail)}
+          />
+        </div>
+        <div className={cn("rounded-xl px-4 py-3", tokens.surface.card)}>
+          <InfoRow
+            label={appointmentText("Fachbereich", "Специализация", "Specialty")}
+            value={detail.fachbereich || notSet}
+          />
+        </div>
+        <div className={cn("rounded-xl px-4 py-3", tokens.surface.card)}>
+          <InfoRow
+            label={appointmentText("Telefon", "Телефон", "Phone")}
+            value={detail.phone || notSet}
+          />
+        </div>
+        <div className={cn("rounded-xl px-4 py-3", tokens.surface.card)}>
+          <InfoRow label="Email" value={detail.email || notSet} />
+        </div>
+      </div>
+
+      {detail.notes ? (
+        <ListItem className="space-y-1">
+          <p className={tokens.text.label}>
+            {appointmentText("Notizen", "Заметки", "Notes")}
+          </p>
+          <p className="text-sm leading-6 text-foreground">{detail.notes}</p>
+        </ListItem>
+      ) : null}
+
+      <p className="text-xs text-muted-foreground">
+        {appointmentText("Aktualisiert", "Обновлено", "Updated")}:{" "}
+        {formatDateTimeLabel(detail.updated_at)}
+      </p>
+    </Section>
+  );
+}
+
+function AppointmentLinkedProviderPatientsSection({
+  detail,
+  formatDateTimeLabel,
+  onOpenPatient,
+}: {
+  detail: ProviderSheetDetail;
+  formatDateTimeLabel: (value?: string | null) => string;
+  onOpenPatient: (patientId: string) => void;
+}) {
+  return (
+    <Section
+      title={appointmentText(
+        "Verknüpfte Patienten",
+        "Связанные пациенты",
+        "Linked patients",
+      )}
+      accessory={<CountBadge>{detail.linked_patients.length}</CountBadge>}
+    >
+      {detail.linked_patients.length === 0 ? (
+        <EmptyCell>
+          {appointmentText(
+            "Für diese Klinik sind noch keine Patienten verknüpft.",
+            "Для этой клиники пока нет связанных пациентов.",
+            "No patients are linked to this clinic yet.",
+          )}
+        </EmptyCell>
+      ) : (
+        <div className="space-y-3">
+          {detail.linked_patients.map((patient) => (
+            <ListItem key={patient.id} className="space-y-3">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-foreground">
+                    {linkedProviderPatientLabel(patient)}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {patient.patient_id}
+                  </p>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {appointmentText(
+                      "Letzte Aktivität",
+                      "Последняя активность",
+                      "Last activity",
+                    )}
+                    : {formatDateTimeLabel(patient.last_interaction_at)}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <CountBadge>
+                    {patient.appointment_count}{" "}
+                    {appointmentText("Termine", "записи", "appointments")}
+                  </CountBadge>
+                  <CountBadge>
+                    {patient.leistung_count}{" "}
+                    {appointmentText("Services", "сервисы", "services")}
+                  </CountBadge>
+                  <CountBadge>
+                    {patient.concierge_count} Concierge
+                  </CountBadge>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 rounded-lg"
+                  onClick={() => onOpenPatient(patient.id)}
+                >
+                  {appointmentText("Patient", "Пациент", "Patient")}
+                </Button>
+              </div>
+            </ListItem>
+          ))}
+        </div>
+      )}
+    </Section>
+  );
+}
+
+function AppointmentLinkedProviderInteractionsSection({
+  detail,
+  formatDateTimeLabel,
+  onOpenPatient,
+  onOpenAppointment,
+}: {
+  detail: ProviderSheetDetail;
+  formatDateTimeLabel: (value?: string | null) => string;
+  onOpenPatient: (patientId: string) => void;
+  onOpenAppointment: (appointmentId: string) => void;
+}) {
+  const notSet = appointmentText("Nicht festgelegt", "Не указано", "Not set");
+
+  return (
+    <Section
+      title={appointmentText(
+        "Interaktionsverlauf",
+        "История взаимодействий",
+        "Interaction history",
+      )}
+      accessory={<CountBadge>{detail.interactions.length}</CountBadge>}
+    >
+      {detail.interactions.length === 0 ? (
+        <EmptyCell>
+          {appointmentText(
+            "Für diese Klinik gibt es noch keine Interaktionen.",
+            "Для этой клиники пока нет взаимодействий.",
+            "No interactions for this clinic yet.",
+          )}
+        </EmptyCell>
+      ) : (
+        <div className="space-y-3">
+          {detail.interactions.map((item) => (
+            <ListItem key={item.id} className="space-y-3">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap gap-2">
+                    <StatusBadge tone="neutral">
+                      {humanizeLinkedCode(item.kind)}
+                    </StatusBadge>
+                    <StatusBadge status={item.status}>
+                      {humanizeLinkedCode(item.status)}
+                    </StatusBadge>
+                    {item.appointment_type ? (
+                      <StatusBadge tone="info">
+                        {humanizeLinkedCode(item.appointment_type)}
+                      </StatusBadge>
+                    ) : null}
+                  </div>
+                  <p className="mt-3 text-sm font-semibold text-foreground">
+                    {item.title}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {item.patient_id} · {item.patient_name}
+                  </p>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {formatDateTimeLabel(item.occurred_at)}
+                </p>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className={cn("rounded-xl px-4 py-3", tokens.surface.card)}>
+                  <InfoRow
+                    label={appointmentText("Arzt", "Врач", "Doctor")}
+                    value={item.doctor_name || notSet}
+                  />
+                </div>
+                <div className={cn("rounded-xl px-4 py-3", tokens.surface.card)}>
+                  <InfoRow
+                    label={appointmentText("Standort", "Локация", "Location")}
+                    value={item.location || notSet}
+                  />
+                </div>
+              </div>
+
+              {item.notes ? (
+                <div
+                  className={cn(
+                    "rounded-xl px-4 py-3 text-sm leading-6 text-foreground",
+                    tokens.surface.mutedCard,
+                  )}
+                >
+                  {item.notes}
+                </div>
+              ) : null}
+
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 rounded-lg"
+                  onClick={() => onOpenPatient(item.patient_id)}
+                >
+                  {appointmentText("Patient", "Пациент", "Patient")}
+                </Button>
+                {item.kind === "appointment" ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 rounded-lg"
+                    onClick={() => onOpenAppointment(item.id)}
+                  >
+                    {appointmentText("Termin", "Запись", "Appointment")}
+                  </Button>
+                ) : null}
+              </div>
+            </ListItem>
+          ))}
+        </div>
+      )}
+    </Section>
+  );
+}
 
 function AppointmentTimelineSection({
   timelineEvents,
 }: {
   timelineEvents: AppointmentTimelineEvent[];
 }) {
-  const { t } = useLang();
+  const { lang } = useLang();
   const [timelineFilter, setTimelineFilter] = useState<
     "all" | AppointmentTimelineKind
   >("all");
@@ -4416,93 +5030,183 @@ function AppointmentTimelineSection({
     [timelineEvents, timelineFilter],
   );
 
+  const groupedTimeline = useMemo(() => {
+    const groups: Array<{
+      key: string;
+      label: string;
+      items: AppointmentTimelineEvent[];
+    }> = [];
+    const byKey = new Map<
+      string,
+      { key: string; label: string; items: AppointmentTimelineEvent[] }
+    >();
+
+    for (const item of visibleTimelineEvents) {
+      const key = appointmentTimelineDateGroupKey(item.occurredAt);
+      const existing = byKey.get(key);
+      if (existing) {
+        existing.items.push(item);
+        continue;
+      }
+
+      const group = {
+        key,
+        label: appointmentTimelineDateGroupLabel(item.occurredAt, lang),
+        items: [item],
+      };
+      byKey.set(key, group);
+      groups.push(group);
+    }
+
+    return groups;
+  }, [lang, visibleTimelineEvents]);
+
+  const filters = [
+    "all",
+    "workflow",
+    "communication",
+    "interpreter",
+    "clinical",
+    "followup",
+    "concierge",
+  ] as const;
+  const matchesLabel = appointmentText("Treffer", "совпадений", "matches");
+  const eventsLabel = appointmentText("Ereignisse", "события", "events");
+  const emptyLabel = appointmentText(
+    "Für diesen Termin gibt es noch keine Timeline-Ereignisse.",
+    "Для этого приёма пока нет событий таймлайна.",
+    "No timeline events have been recorded for this appointment yet.",
+  );
+  const noMatchesLabel = appointmentText(
+    "Ни одно событие не соответствует текущему фильтру.",
+    "Текущему фильтру не соответствует ни одно событие.",
+    "No timeline events match the current filter.",
+  );
+
   return (
-    <section className={sectionCardClass("p-5")}>
-      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h3 className="text-sm font-semibold text-slate-950">
-            {t.appointments_title}
-          </h3>
-          <p className="text-xs text-slate-500">
-            Unified event trail across scheduling, interpreter handling,
-            follow-up, concierge work and operational execution.
-          </p>
-        </div>
-        <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
-          {visibleTimelineEvents.length} event
-          {visibleTimelineEvents.length === 1 ? "" : "s"}
-        </span>
-      </div>
-      <div className="mt-4 flex flex-wrap gap-2">
-        {(
-          [
-            "all",
-            "workflow",
-            "communication",
-            "interpreter",
-            "clinical",
-            "followup",
-            "concierge",
-          ] as const
-        ).map((filter) => (
+    <Section
+      title={appointmentText("Timeline", "Таймлайн", "Timeline")}
+      accessory={
+        <CountBadge>
+          {visibleTimelineEvents.length} {eventsLabel}
+        </CountBadge>
+      }
+    >
+      <div className="flex flex-wrap gap-1.5">
+        {filters.map((filter) => (
           <Button
             key={filter}
             type="button"
-            variant={timelineFilter === filter ? "default" : "outline"}
             size="sm"
-            className={cn(
-              "rounded-2xl",
-              timelineFilter === filter ? "bg-slate-950 text-white hover:bg-slate-800" : "",
-            )}
+            variant={timelineFilter === filter ? "default" : "outline"}
+            className="h-6 rounded-full px-2.5 text-[11px]"
             onClick={() => setTimelineFilter(filter)}
           >
             {filter === "all"
-              ? "All"
-              : filter === "followup"
-                ? t.phase_followup
-                : filter === "communication"
-                  ? "Communication"
-                  : filter.charAt(0).toUpperCase() + filter.slice(1)}
+              ? appointmentText("Alle", "Все", "All")
+              : appointmentTimelineKindLabel(filter)}
+            <span className="text-muted-foreground/60 text-[6px] leading-none align-middle">
+              ●
+            </span>
+            {filter === "all"
+              ? timelineEvents.length
+              : timelineEvents.filter((item) => item.kind === filter).length}
           </Button>
         ))}
       </div>
-      <div className="mt-4 space-y-3">
-        {visibleTimelineEvents.length === 0 ? (
-          <EmptyState text={t.common_not_set} />
-        ) : (
-          visibleTimelineEvents.map((item) => (
-            <div
-              key={item.id}
-              className="flex flex-col gap-3 rounded-2xl border border-slate-200/80 bg-slate-50/80 px-4 py-3 md:flex-row md:items-start md:justify-between"
-            >
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="text-sm font-semibold text-slate-950">
-                    {item.title}
-                  </p>
-                  <span
-                    className={cn(
-                      "rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em]",
-                      timelineToneClass(item.tone),
-                    )}
-                  >
-                    {item.kind}
+
+      {timelineEvents.length === 0 ? (
+        <EmptyCell>{emptyLabel}</EmptyCell>
+      ) : visibleTimelineEvents.length === 0 ? (
+        <EmptyCell>{noMatchesLabel}</EmptyCell>
+      ) : (
+        <div className="rounded-2xl border border-border/50 bg-card px-4 py-3 sm:px-5">
+          <div className="space-y-5">
+            {groupedTimeline.map((group) => (
+              <div key={group.key} className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <span className="shrink-0 rounded-full border border-border/60 bg-muted/35 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+                    {group.label}
                   </span>
+                  <span className="h-px flex-1 bg-border/60" />
                 </div>
-                <p className="mt-1 text-xs text-slate-500">
-                  {formatDateTimeLabel(item.occurredAt)}
-                </p>
-                {item.detail ? (
-                  <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
-                    {item.detail}
-                  </p>
-                ) : null}
+
+                <div className="space-y-0">
+                  {group.items.map((item, idx) => (
+                    <div
+                      key={item.id}
+                      className={cn(
+                        "grid grid-cols-[16px_minmax(0,1fr)] gap-3",
+                        idx < group.items.length - 1 && "pb-3",
+                      )}
+                    >
+                      <div className="relative flex justify-center">
+                        {idx < group.items.length - 1 ? (
+                          <span className="absolute top-3 bottom-[-0.75rem] w-px bg-gradient-to-b from-border/90 via-border/60 to-transparent" />
+                        ) : null}
+                        <span
+                          className={cn(
+                            "relative mt-1.5 size-2 rounded-full border border-card shadow-[0_0_0_2px_rgba(255,255,255,0.92)]",
+                            appointmentTimelineKindDotClass(item.kind),
+                          )}
+                        />
+                      </div>
+
+                      <div
+                        className={cn(
+                          "rounded-2xl border px-4 py-3",
+                          appointmentTimelineSurfaceClass(item.tone),
+                        )}
+                      >
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span
+                                className={cn(
+                                  "rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em]",
+                                  appointmentTimelineKindBadgeClass(item.kind),
+                                )}
+                              >
+                                {appointmentTimelineKindLabel(item.kind)}
+                              </span>
+                              <span
+                                className={cn(
+                                  "rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em]",
+                                  timelineToneClass(item.tone),
+                                )}
+                              >
+                                {appointmentTimelineToneLabel(item.tone)}
+                              </span>
+                            </div>
+                            <p className="mt-2 text-sm font-semibold text-foreground">
+                              {item.title}
+                            </p>
+                            {item.detail ? (
+                              <p className="mt-2 whitespace-pre-line text-sm text-muted-foreground">
+                                {item.detail}
+                              </p>
+                            ) : null}
+                          </div>
+
+                          <div className="shrink-0">
+                            <p className="text-xs font-medium text-muted-foreground/80">
+                              {formatDateTimeLabel(item.occurredAt)}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
-          ))
-        )}
-      </div>
-    </section>
+            ))}
+          </div>
+        </div>
+      )}
+      <p className="text-xs text-muted-foreground">
+        {visibleTimelineEvents.length} {matchesLabel}
+      </p>
+    </Section>
   );
 }
 
@@ -4551,7 +5255,13 @@ function AppointmentInterpreterSection({
       onRefresh();
     } catch (error) {
       onError(
-        error instanceof Error ? error.message : "Failed to assign interpreter",
+        error instanceof Error
+          ? error.message
+          : appointmentText(
+              "Dolmetscher konnte nicht zugewiesen werden.",
+              "Не удалось назначить переводчика.",
+              "Failed to assign interpreter",
+            ),
       );
     } finally {
       setBusyAction("");
@@ -4571,7 +5281,13 @@ function AppointmentInterpreterSection({
       onRefresh();
     } catch (error) {
       onError(
-        error instanceof Error ? error.message : "Failed to submit response",
+        error instanceof Error
+          ? error.message
+          : appointmentText(
+              "Antwort konnte nicht gesendet werden.",
+              "Не удалось отправить ответ.",
+              "Failed to submit response",
+            ),
       );
     } finally {
       setBusyAction("");
@@ -4589,7 +5305,7 @@ function AppointmentInterpreterSection({
             onSubmit={handleAssignInterpreter}
             className="mt-4 grid gap-4 md:grid-cols-[minmax(0,1fr)_auto]"
           >
-            <Field label={t.common_doctor}>
+            <Field label={t.role_interpreter}>
               <select
                 value={assignInterpreterId}
                 onChange={(event) => setAssignInterpreterId(event.target.value)}
@@ -4689,7 +5405,13 @@ function AppointmentChecklistSection({
       onRefresh();
     } catch (error) {
       onError(
-        error instanceof Error ? error.message : "Failed to add checklist item",
+        error instanceof Error
+          ? error.message
+          : appointmentText(
+              "Checklisteneintrag konnte nicht hinzugefügt werden.",
+              "Не удалось добавить пункт чек-листа.",
+              "Failed to add checklist item",
+            ),
       );
     } finally {
       setSubmitBusy(false);
@@ -4706,7 +5428,13 @@ function AppointmentChecklistSection({
       onRefresh();
     } catch (error) {
       onError(
-        error instanceof Error ? error.message : "Failed to complete item",
+        error instanceof Error
+          ? error.message
+          : appointmentText(
+              "Element konnte nicht abgeschlossen werden.",
+              "Не удалось завершить элемент.",
+              "Failed to complete item",
+            ),
       );
     } finally {
       setCompletingId("");
@@ -4786,7 +5514,7 @@ function AppointmentChecklistSection({
                 itemText: event.target.value,
               }))
             }
-            placeholder={tr.appointments_title_col}
+            placeholder={withEllipsis(tr.appointments_title_col)}
             className="h-10 rounded-xl bg-slate-50"
             required
           />
@@ -4851,7 +5579,13 @@ function AppointmentRemindersSection({
       onRefresh();
     } catch (error) {
       onError(
-        error instanceof Error ? error.message : "Failed to add reminder",
+        error instanceof Error
+          ? error.message
+          : appointmentText(
+              "Erinnerung konnte nicht hinzugefügt werden.",
+              "Не удалось добавить напоминание.",
+              "Failed to add reminder",
+            ),
       );
     } finally {
       setSubmitBusy(false);
@@ -4868,7 +5602,13 @@ function AppointmentRemindersSection({
       onRefresh();
     } catch (error) {
       onError(
-        error instanceof Error ? error.message : "Failed to complete reminder",
+        error instanceof Error
+          ? error.message
+          : appointmentText(
+              "Erinnerung konnte nicht abgeschlossen werden.",
+              "Не удалось завершить напоминание.",
+              "Failed to complete reminder",
+            ),
       );
     } finally {
       setCompletingId("");
@@ -5221,7 +5961,7 @@ function AppointmentCompletionSection({
       </div>
       {completionWarnings.length > 0 ? (
         <div className="mt-4">
-          <Banner tone="warning">
+          <Banner tone="warning" withIcon>
             <div className="space-y-1">
               {completionWarnings.map((warning) => (
                 <p key={warning}>{warning}</p>
@@ -5366,7 +6106,15 @@ function AppointmentStatusSection({
       });
       onRefresh();
     } catch (error) {
-      onError(error instanceof Error ? error.message : "Failed to change status");
+      onError(
+        error instanceof Error
+          ? error.message
+          : appointmentText(
+              "Status konnte nicht geändert werden.",
+              "Не удалось изменить статус.",
+              "Failed to change status",
+            ),
+      );
     } finally {
       setBusyAction("");
     }
@@ -5451,7 +6199,7 @@ function AppointmentStatusSection({
             .
           </p>
           {completionScopeBlockers.length > 0 ? (
-            <Banner tone="warning">
+            <Banner tone="warning" withIcon>
               Completing this scope is currently blocked by{" "}
               {completionScopeBlockers.length} occurrence
               {completionScopeBlockers.length === 1 ? "" : "s"}:{" "}
@@ -5496,6 +6244,7 @@ function AppointmentReportSection({
   const [form, setForm] = useState<ReportFormState>(() => blankReportForm());
   const [rejectReason, setRejectReason] = useState("");
   const [busyAction, setBusyAction] = useState("");
+  const [editorOpen, setEditorOpen] = useState(false);
 
   useEffect(() => {
     setForm(
@@ -5508,6 +6257,7 @@ function AppointmentReportSection({
     );
     setRejectReason("");
     setBusyAction("");
+    setEditorOpen(false);
   }, [detail.id, detailReport]);
 
   async function handleReportSubmit(event: FormEvent<HTMLFormElement>) {
@@ -5522,10 +6272,17 @@ function AppointmentReportSection({
         }),
       });
       setForm(blankReportForm());
+      setEditorOpen(false);
       onRefresh();
     } catch (error) {
       onError(
-        error instanceof Error ? error.message : "Failed to submit report",
+        error instanceof Error
+          ? error.message
+          : appointmentText(
+              "Bericht konnte nicht eingereicht werden.",
+              "Не удалось отправить отчёт.",
+              "Failed to submit report",
+            ),
       );
     } finally {
       setBusyAction("");
@@ -5538,10 +6295,17 @@ function AppointmentReportSection({
       await apiFetch<{ ok: boolean }>(`/appointments/${detail.id}/report/approve`, {
         method: "POST",
       });
+      setEditorOpen(false);
       onRefresh();
     } catch (error) {
       onError(
-        error instanceof Error ? error.message : "Failed to approve report",
+        error instanceof Error
+          ? error.message
+          : appointmentText(
+              "Bericht konnte nicht freigegeben werden.",
+              "Не удалось согласовать отчёт.",
+              "Failed to approve report",
+            ),
       );
     } finally {
       setBusyAction("");
@@ -5556,227 +6320,375 @@ function AppointmentReportSection({
         body: JSON.stringify({ notes: rejectReason.trim() || null }),
       });
       setRejectReason("");
+      setEditorOpen(false);
       onRefresh();
     } catch (error) {
-      onError(error instanceof Error ? error.message : "Failed to reject report");
+      onError(
+        error instanceof Error
+          ? error.message
+          : appointmentText(
+              "Bericht konnte nicht zurückgewiesen werden.",
+              "Не удалось отклонить отчёт.",
+              "Failed to reject report",
+            ),
+      );
     } finally {
       setBusyAction("");
     }
   }
 
+  const reportStatusTone =
+    detailReport?.approval_status === "approved"
+      ? "success"
+      : detailReport?.approval_status === "rejected"
+        ? "error"
+        : "warning";
+  const canOpenReportEditor = canSubmitInterpreterReport || showReportReviewActions;
+  const reportEditorTitle = showReportReviewActions
+    ? appointmentText(
+        "Review-Entscheidung",
+        "Решение по проверке",
+        "Review decision",
+      )
+    : canResubmitRejectedReport
+      ? appointmentText(
+          "Bericht überarbeiten",
+          "Доработать отчёт",
+          "Revise report",
+        )
+      : appointmentText(
+          "Bericht einreichen",
+          "Отправить отчёт",
+          "Submit report",
+        );
+  const reportOpenButtonLabel = showReportReviewActions
+    ? appointmentText("Review öffnen", "Открыть review", "Open review")
+    : appointmentText("Bericht öffnen", "Открыть отчёт", "Open report");
+
   return (
-    <section className={sectionCardClass("p-5")}>
-      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h3 className="text-sm font-semibold text-slate-950">
-            {t.appointments_interpreter_report_title}
-          </h3>
-          <p className="text-xs text-slate-500">
-            {t.appointments_interpreter_report_subtitle}
-          </p>
-        </div>
-        {detailReport ? (
-          <span
-            className={cn(
-              "rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em]",
-              reportApprovalBadgeClass(detailReport.approval_status),
+    <div className="space-y-4">
+      <Section
+        title={t.appointments_interpreter_report_title}
+        accessory={
+          <div className="flex items-center gap-2">
+            {detailReport ? (
+              <StatusBadge tone={reportStatusTone}>
+                {reportApprovalLabel(detailReport.approval_status)}
+              </StatusBadge>
+            ) : (
+              <CountBadge>
+                {appointmentText("Nicht eingereicht", "Не отправлен", "Not submitted")}
+              </CountBadge>
             )}
-          >
-            {reportApprovalLabel(detailReport.approval_status)}
-          </span>
-        ) : null}
-      </div>
-
-      {detailReport ? (
-        <div className="mt-4 space-y-4">
-          <div className="grid gap-3 xl:grid-cols-3">
-            <ContextCard
-              label={t.common_doctor}
-              value={detailReport.interpreter_name}
-              meta={`${t.appointments_report_submitted_prefix} ${formatDateTimeLabel(detailReport.created_at)}`}
-            />
-            <ContextCard
-              label={t.appointments_time}
-              value={`${detailReport.hours} h`}
-              meta={
-                detailReport.approval_status === "approved"
-                  ? interpreterReportBillingSyncLabel(
-                      detailReport.billing_sync_status,
-                      t,
-                    )
-                  : detailReport.approval_status === "rejected"
-                    ? t.appointments_report_needs_interpreter_revision
-                    : t.appointments_report_waiting_teamlead_review
-              }
-            />
-            <ContextCard
-              label={tr.patients_notes}
-              value={
-                detailReport.approved_by_name ??
-                (detailReport.approval_status === "pending"
-                  ? t.common_pending
-                  : t.appointments_report_no_reviewer_recorded)
-              }
-              meta={reportReviewMeta}
-            />
+            {canOpenReportEditor ? (
+              <Button
+                type="button"
+                size="sm"
+                className="h-8 rounded-lg gap-1.5"
+                onClick={() => setEditorOpen(true)}
+              >
+                {reportOpenButtonLabel}
+              </Button>
+            ) : null}
           </div>
+        }
+      >
+        <p className="text-sm text-muted-foreground">
+          {t.appointments_interpreter_report_subtitle}
+        </p>
 
-          {detailReport.notes ? (
-            <Banner
-              tone={detailReport.approval_status === "rejected" ? "error" : "warning"}
-            >
-              <span className="font-medium">
-                {t.appointments_report_reviewer_notes}:
-              </span>{" "}
-              {detailReport.notes}
+        {detailReport ? (
+          <>
+            <div className="grid gap-3 xl:grid-cols-3">
+              <StatCard
+                label={appointmentText("Dolmetscher", "Переводчик", "Interpreter")}
+                value={
+                  detailReport.interpreter_name ??
+                  appointmentText("Nicht festgelegt", "Не указано", "Not set")
+                }
+                description={`${t.appointments_report_submitted_prefix} ${formatDateTimeLabel(detailReport.created_at)}`}
+              />
+              <StatCard
+                label={t.appointments_time}
+                value={`${detailReport.hours} h`}
+                description={
+                  detailReport.approval_status === "approved"
+                    ? interpreterReportBillingSyncLabel(
+                        detailReport.billing_sync_status,
+                        t,
+                      )
+                    : detailReport.approval_status === "rejected"
+                      ? t.appointments_report_needs_interpreter_revision
+                      : t.appointments_report_waiting_teamlead_review
+                }
+              />
+              <StatCard
+                label={tr.patients_notes}
+                value={
+                  detailReport.approved_by_name ??
+                  (detailReport.approval_status === "pending"
+                    ? t.common_pending
+                    : t.appointments_report_no_reviewer_recorded)
+                }
+                description={
+                  reportReviewMeta ||
+                  appointmentText(
+                    "Noch keine Review-Metadaten.",
+                    "Метаданные проверки пока отсутствуют.",
+                    "No review metadata recorded yet.",
+                  )
+                }
+              />
+            </div>
+
+            {detailReport.notes ? (
+              <Banner
+                tone={detailReport.approval_status === "rejected" ? "error" : "warning"}
+                withIcon
+              >
+                <span className="font-medium">
+                  {t.appointments_report_reviewer_notes}:
+                </span>{" "}
+                {detailReport.notes}
+              </Banner>
+            ) : null}
+
+            {detailReport.approval_status === "approved" ? (
+              <div
+                className={cn(
+                  "rounded-xl border px-4 py-3 text-sm",
+                  interpreterReportBillingSyncClass(detailReport.billing_sync_status),
+                )}
+              >
+                <p className="font-medium">{t.appointments_report_billing_sync}</p>
+                <p className="mt-1">
+                  {interpreterReportBillingSyncLabel(
+                    detailReport.billing_sync_status,
+                    t,
+                  )}
+                </p>
+                <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs opacity-80">
+                  {detailReport.billing_service_key ? (
+                    <span>
+                      {appointmentText(
+                        "Katalogschlüssel",
+                        "Ключ каталога",
+                        "Catalog key",
+                      )}
+                      : {detailReport.billing_service_key}
+                    </span>
+                  ) : null}
+                  {detailReport.billing_leistung_id ? (
+                    <span>
+                      {appointmentText(
+                        "Auftragsposition",
+                        "Строка заказа",
+                        "Order line",
+                      )}
+                      : {detailReport.billing_leistung_id}
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+
+            <div className={cn("rounded-xl px-4 py-4", tokens.surface.card)}>
+              <p className={tokens.text.label}>
+                {appointmentText("Berichtstext", "Текст отчёта", "Report text")}
+              </p>
+              {detailReport.report_text ? (
+                <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-foreground">
+                  {detailReport.report_text}
+                </p>
+              ) : (
+                <p className="mt-2 text-sm text-muted-foreground">
+                  {appointmentText(
+                    "Kein Freitext-Bericht eingereicht.",
+                    "Свободный текст отчёта не отправлен.",
+                    "No free-text report submitted.",
+                  )}
+                </p>
+              )}
+            </div>
+          </>
+        ) : (
+          <EmptyCell>
+            {appointmentText(
+              "Für diesen Termin liegt noch kein Dolmetscherbericht vor.",
+              "Для этого приёма пока нет отчёта переводчика.",
+              "No interpreter report has been submitted for this appointment yet.",
+            )}
+          </EmptyCell>
+        )}
+      </Section>
+
+      {canOpenReportEditor ? (
+        <AppointmentEditorSheet
+          open={editorOpen}
+          onOpenChange={setEditorOpen}
+          title={reportEditorTitle}
+          description={
+            showReportReviewActions
+              ? appointmentText(
+                  "Prüfen Sie Stunden und Bericht direkt im Kontext dieses Termins.",
+                  "Проверьте часы и текст отчёта прямо в контексте этого приёма.",
+                  "Review the hours and report directly in the context of this appointment.",
+                )
+              : appointmentText(
+                  "Pflegen Sie Stunden und Freitextbericht direkt im rechten Bearbeitungsbereich dieses Termins.",
+                  "Заполняйте часы и текстовый отчёт прямо в правой панели редактирования этого приёма.",
+                  "Manage hours and free-text report directly in this appointment's right-side editor.",
+                )
+          }
+          onSubmit={
+            canSubmitInterpreterReport ? handleReportSubmit : (event) => event.preventDefault()
+          }
+          footer={
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 rounded-lg"
+                onClick={() => setEditorOpen(false)}
+              >
+                {t.common_cancel}
+              </Button>
+              {showReportReviewActions && canRejectReport ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 rounded-lg gap-1.5 border-rose-200 text-rose-700 hover:bg-rose-50"
+                  disabled={busyAction === "report-reject"}
+                  onClick={handleRejectReport}
+                >
+                  {busyAction === "report-reject" ? (
+                    <LoaderCircle className="size-3.5 animate-spin" />
+                  ) : null}
+                  {appointmentText(
+                    "Zur Überarbeitung zurückgeben",
+                    "Вернуть на доработку",
+                    "Return for revision",
+                  )}
+                </Button>
+              ) : null}
+              {showReportReviewActions && canApproveReport ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-8 rounded-lg gap-1.5"
+                  disabled={busyAction === "report-approve"}
+                  onClick={handleApproveReport}
+                >
+                  {busyAction === "report-approve" ? (
+                    <LoaderCircle className="size-3.5 animate-spin" />
+                  ) : null}
+                  {appointmentText(
+                    "Stunden und Bericht freigeben",
+                    "Согласовать часы и отчёт",
+                    "Approve hours and report",
+                  )}
+                </Button>
+              ) : null}
+              {canSubmitInterpreterReport ? (
+                <Button
+                  type="submit"
+                  size="sm"
+                  className="h-8 rounded-lg gap-1.5"
+                  disabled={busyAction === "report-submit" || !form.hours}
+                >
+                  {busyAction === "report-submit" ? (
+                    <LoaderCircle className="size-3.5 animate-spin" />
+                  ) : null}
+                  {canResubmitRejectedReport
+                    ? appointmentText(
+                        "Bericht erneut einreichen",
+                        "Повторно отправить отчёт",
+                        "Resubmit report",
+                      )
+                    : t.common_save}
+                </Button>
+              ) : null}
+            </>
+          }
+        >
+          {canResubmitRejectedReport ? (
+            <Banner tone="warning" withIcon>
+              {appointmentText(
+                "Der letzte Bericht wurde zurückgegeben. Passen Sie Stunden oder Text an und reichen Sie ihn erneut zur Freigabe ein.",
+                "Последний отчёт вернули на доработку. Обновите часы или текст и отправьте его повторно на согласование.",
+                "The latest report was returned. Update the hours or text and resubmit it for approval.",
+              )}
             </Banner>
           ) : null}
 
-          {detailReport.approval_status === "approved" ? (
-            <div
-              className={cn(
-                "rounded-2xl border px-4 py-3 text-sm",
-                interpreterReportBillingSyncClass(detailReport.billing_sync_status),
-              )}
-            >
-              <div className="font-medium">{t.appointments_report_billing_sync}</div>
-              <div className="mt-1">
-                {interpreterReportBillingSyncLabel(
-                  detailReport.billing_sync_status,
-                  t,
-                )}
+          {canSubmitInterpreterReport ? (
+            <>
+              <div className="grid gap-4 md:grid-cols-[180px_minmax(0,1fr)]">
+                <Field label={t.appointments_time}>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.25"
+                    value={form.hours}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        hours: event.target.value,
+                      }))
+                    }
+                    className={cn(inputClass, "h-10 rounded-xl")}
+                    required
+                  />
+                </Field>
+                <Field label={tr.patients_notes}>
+                  <textarea
+                    value={form.reportText}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        reportText: event.target.value,
+                      }))
+                    }
+                    className={textareaClassName}
+                    rows={5}
+                    placeholder={withEllipsis(tr.patients_notes)}
+                  />
+                </Field>
               </div>
-              <div className="mt-1 text-xs opacity-80">
-                {detailReport.billing_service_key ? (
-                  <span>Catalog key: {detailReport.billing_service_key}</span>
-                ) : null}
-                {detailReport.billing_service_key && detailReport.billing_leistung_id
-                  ? " · "
-                  : null}
-                {detailReport.billing_leistung_id ? (
-                  <span>Order line: {detailReport.billing_leistung_id}</span>
-                ) : null}
-              </div>
-            </div>
+            </>
           ) : null}
 
-          <div className="rounded-2xl border border-slate-200/80 bg-white px-4 py-3">
-            {detailReport.report_text ? (
-              <p className="text-sm leading-6 text-slate-700">
-                {detailReport.report_text}
-              </p>
-            ) : (
-              <p className="text-sm text-slate-500">
-                No free-text report submitted.
-              </p>
-            )}
-          </div>
-        </div>
-      ) : (
-        <div className="mt-4">
-          <EmptyState text={tr.common_not_set} />
-        </div>
-      )}
-
-      {canSubmitInterpreterReport ? (
-        <form
-          onSubmit={handleReportSubmit}
-          className="mt-5 grid gap-4 md:grid-cols-[180px_minmax(0,1fr)]"
-        >
-          {canResubmitRejectedReport ? (
-            <div className="md:col-span-2">
-              <Banner tone="warning">
-                The latest report was returned. Update the hours or report text
-                and resubmit it for teamlead approval.
-              </Banner>
-            </div>
+          {showReportReviewActions ? (
+            <>
+              <div className={cn("rounded-xl px-4 py-3", tokens.surface.mutedCard)}>
+                <p className={tokens.text.label}>
+                  {appointmentText("Bericht", "Отчёт", "Report")}
+                </p>
+                <p className="mt-2 whitespace-pre-wrap text-sm text-foreground">
+                  {detailReport?.report_text ||
+                    appointmentText(
+                      "Kein Freitext-Bericht eingereicht.",
+                      "Свободный текст отчёта не отправлен.",
+                      "No free-text report submitted.",
+                    )}
+                </p>
+              </div>
+              <Field label={tr.patients_notes}>
+                <textarea
+                  value={rejectReason}
+                  onChange={(event) => setRejectReason(event.target.value)}
+                  className={textareaClassName}
+                  rows={4}
+                  placeholder={withEllipsis(tr.patients_notes)}
+                />
+              </Field>
+            </>
           ) : null}
-          <Field label={t.appointments_time}>
-            <Input
-              type="number"
-              min="0"
-              step="0.25"
-              value={form.hours}
-              onChange={(event) =>
-                setForm((current) => ({
-                  ...current,
-                  hours: event.target.value,
-                }))
-              }
-              className="h-10 rounded-xl bg-slate-50"
-              required
-            />
-          </Field>
-          <Field label={tr.patients_notes}>
-            <textarea
-              value={form.reportText}
-              onChange={(event) =>
-                setForm((current) => ({
-                  ...current,
-                  reportText: event.target.value,
-                }))
-              }
-              className={textareaClassName}
-              rows={4}
-              placeholder={tr.patients_notes}
-            />
-          </Field>
-          <div className="md:col-span-2 flex justify-end">
-            <Button
-              type="submit"
-              className="rounded-2xl"
-              disabled={busyAction === "report-submit" || !form.hours}
-            >
-              {busyAction === "report-submit" ? (
-                <LoaderCircle className="size-4 animate-spin" />
-              ) : null}
-              {canResubmitRejectedReport ? "Resubmit report" : t.common_save}
-            </Button>
-          </div>
-        </form>
+        </AppointmentEditorSheet>
       ) : null}
-
-      {showReportReviewActions ? (
-        <div className="mt-5 grid gap-4 md:grid-cols-[minmax(0,1fr)_auto]">
-          <Field label={tr.patients_notes}>
-            <textarea
-              value={rejectReason}
-              onChange={(event) => setRejectReason(event.target.value)}
-              className={textareaClassName}
-              rows={3}
-              placeholder={tr.patients_notes}
-            />
-          </Field>
-          <div className="flex items-end gap-3">
-            {canRejectReport ? (
-              <Button
-                variant="outline"
-                className="rounded-2xl border-rose-200 text-rose-700 hover:bg-rose-50"
-                disabled={busyAction === "report-reject"}
-                onClick={handleRejectReport}
-              >
-                {busyAction === "report-reject" ? (
-                  <LoaderCircle className="size-4 animate-spin" />
-                ) : null}
-                Return for revision
-              </Button>
-            ) : null}
-            {canApproveReport ? (
-              <Button
-                className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
-                disabled={busyAction === "report-approve"}
-                onClick={handleApproveReport}
-              >
-                {busyAction === "report-approve" ? (
-                  <LoaderCircle className="size-4 animate-spin" />
-                ) : null}
-                Approve hours and report
-              </Button>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
-    </section>
+    </div>
   );
 }
 
@@ -5850,7 +6762,15 @@ function AppointmentTasksSection({
       );
       onRefresh();
     } catch (error) {
-      onError(error instanceof Error ? error.message : "Failed to create task");
+      onError(
+        error instanceof Error
+          ? error.message
+          : appointmentText(
+              "Aufgabe konnte nicht erstellt werden.",
+              "Не удалось создать задачу.",
+              "Failed to create task",
+            ),
+      );
     } finally {
       setSubmitBusy(false);
     }
@@ -5865,7 +6785,15 @@ function AppointmentTasksSection({
       });
       onRefresh();
     } catch (error) {
-      onError(error instanceof Error ? error.message : "Failed to update task");
+      onError(
+        error instanceof Error
+          ? error.message
+          : appointmentText(
+              "Aufgabe konnte nicht aktualisiert werden.",
+              "Не удалось обновить задачу.",
+              "Failed to update task",
+            ),
+      );
     } finally {
       setActionBusy("");
     }
@@ -5964,7 +6892,7 @@ function AppointmentTasksSection({
                   title: event.target.value,
                 }))
               }
-              placeholder={tr.appointments_title_col}
+              placeholder={withEllipsis(tr.appointments_title_col)}
               className="h-10 rounded-xl bg-slate-50"
               required
             />
@@ -6031,7 +6959,7 @@ function AppointmentTasksSection({
               }
               className={textareaClassName}
               rows={3}
-              placeholder={tr.patients_notes}
+              placeholder={withEllipsis(tr.patients_notes)}
             />
           </Field>
           <div className="flex items-end justify-end md:col-span-2">
@@ -6309,7 +7237,13 @@ function AppointmentConciergeSection({
                             }
                             className={selectClassName}
                           >
-                            <option value="">No provider</option>
+                            <option value="">
+                              {appointmentText(
+                                "Kein Anbieter",
+                                "Без провайдера",
+                                "No provider",
+                              )}
+                            </option>
                             {nonMedicalProviders.map((provider) => (
                               <option key={provider.id} value={provider.id}>
                                 {provider.name}
@@ -6327,7 +7261,13 @@ function AppointmentConciergeSection({
                             }
                             className={selectClassName}
                           >
-                            <option value="">No concierge</option>
+                            <option value="">
+                              {appointmentText(
+                                "Ohne Concierge",
+                                "Без concierge",
+                                "No concierge",
+                              )}
+                            </option>
                             {conciergeStaff.map((member) => (
                               <option key={member.id} value={member.id}>
                                 {member.name}
@@ -6538,7 +7478,13 @@ function AppointmentConciergeSection({
               }
               className={selectClassName}
             >
-              <option value="">No provider</option>
+              <option value="">
+                {appointmentText(
+                  "Kein Anbieter",
+                  "Без провайдера",
+                  "No provider",
+                )}
+              </option>
               {nonMedicalProviders.map((provider) => (
                 <option key={provider.id} value={provider.id}>
                   {provider.name}
@@ -6557,7 +7503,13 @@ function AppointmentConciergeSection({
               }
               className={selectClassName}
             >
-              <option value="">No concierge</option>
+              <option value="">
+                {appointmentText(
+                  "Ohne Concierge",
+                  "Без concierge",
+                  "No concierge",
+                )}
+              </option>
               {conciergeStaff.map((member) => (
                 <option key={member.id} value={member.id}>
                   {member.name}
@@ -7129,7 +8081,7 @@ function AppointmentBillingHandoffSection({
                 }))
               }
               className="h-10 rounded-xl bg-slate-50"
-              placeholder={tr.appointments_title_col}
+              placeholder={withEllipsis(tr.appointments_title_col)}
             />
           </Field>
           <Field label={t.patients_notes}>
@@ -7143,7 +8095,7 @@ function AppointmentBillingHandoffSection({
               }
               className={textareaClassName}
               rows={3}
-              placeholder={tr.patients_notes}
+              placeholder={withEllipsis(tr.patients_notes)}
             />
           </Field>
           <div className="md:col-span-2 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -7169,7 +8121,11 @@ function AppointmentBillingHandoffSection({
                 disabled={!form.assigneeId}
                 onClick={openBillingChatDraft}
               >
-                Open billing chat draft
+                {appointmentText(
+                  "Billing-Chatentwurf öffnen",
+                  "Открыть черновик billing-чата",
+                  "Open billing chat draft",
+                )}
               </Button>
               <Button
                 type="submit"
@@ -7182,7 +8138,11 @@ function AppointmentBillingHandoffSection({
                 }
               >
                 {submitBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                Create billing handoff
+                {appointmentText(
+                  "Billing-Handoff erstellen",
+                  "Создать billing-handoff",
+                  "Create billing handoff",
+                )}
               </Button>
             </div>
           </div>
@@ -7695,7 +8655,7 @@ function AppointmentExternalHandoffSection({
                     title: event.target.value,
                   }))
                 }
-                placeholder={tr.appointments_title_col}
+                placeholder={withEllipsis(tr.appointments_title_col)}
                 className="h-10 rounded-xl bg-white"
                 required
               />
@@ -7709,7 +8669,13 @@ function AppointmentExternalHandoffSection({
                     contactName: event.target.value,
                   }))
                 }
-                placeholder={tr.common_doctor}
+                placeholder={withEllipsis(
+                  appointmentText(
+                    "Kontaktperson",
+                    "Контактное лицо",
+                    "Contact person",
+                  ),
+                )}
                 className="h-10 rounded-xl bg-white"
               />
             </Field>
@@ -7737,7 +8703,7 @@ function AppointmentExternalHandoffSection({
                 }
                 className={textareaClassName}
                 rows={5}
-                placeholder={tr.patients_notes}
+                placeholder={withEllipsis(tr.patients_notes)}
               />
             </Field>
             <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_180px]">
@@ -7786,7 +8752,11 @@ function AppointmentExternalHandoffSection({
                 disabled={!form.assigneeId}
                 onClick={openChatDraft}
               >
-                Open internal chat draft
+                {appointmentText(
+                  "Internen Chatentwurf öffnen",
+                  "Открыть черновик внутреннего чата",
+                  "Open internal chat draft",
+                )}
               </Button>
               <Button
                 type="submit"
@@ -7796,7 +8766,11 @@ function AppointmentExternalHandoffSection({
                 {submitBusy ? (
                   <LoaderCircle className="size-4 animate-spin" />
                 ) : null}
-                Log communication
+                {appointmentText(
+                  "Kommunikation protokollieren",
+                  "Зафиксировать коммуникацию",
+                  "Log communication",
+                )}
               </Button>
             </div>
           </form>
@@ -7841,7 +8815,11 @@ function AppointmentHandoffSection({
       peer: peer.id,
       name: peer.name,
       role: peer.role,
-      draft: `Appointment handoff: ${detail.patient_pid} · ${detail.title} · ${slotLabel(detail)}.`,
+      draft: appointmentText(
+        `Termin-Handoff: ${detail.patient_pid} · ${detail.title} · ${slotLabel(detail)}.`,
+        `Хэнд-офф приёма: ${detail.patient_pid} · ${detail.title} · ${slotLabel(detail)}.`,
+        `Appointment handoff: ${detail.patient_pid} · ${detail.title} · ${slotLabel(detail)}.`,
+      ),
     });
     staffGo(`/chat?${params.toString()}`);
   }
@@ -7993,6 +8971,9 @@ function AppointmentFollowUpVisitSection({
 }) {
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
+  const interpreterFieldLabel =
+    tr.role_interpreter ??
+    appointmentText("Dolmetscher", "Переводчик", "Interpreter");
   const scheduleWarningLabels = useMemo(
     () => ({
       patients_assign_owner: tr.patients_assign_owner,
@@ -8218,7 +9199,7 @@ function AppointmentFollowUpVisitSection({
       </div>
       {error ? (
         <div className="mt-4">
-          <Banner tone="error">{error}</Banner>
+          <Banner tone="error" withIcon>{error}</Banner>
         </div>
       ) : null}
       <form onSubmit={handleSubmit} className="mt-4 space-y-4">
@@ -8334,7 +9315,7 @@ function AppointmentFollowUpVisitSection({
               ))}
             </select>
           </Field>
-          <Field label={t.common_doctor}>
+          <Field label={interpreterFieldLabel}>
             <select
               value={form.interpreterId}
               onChange={(event) =>
@@ -8413,7 +9394,7 @@ function AppointmentFollowUpVisitSection({
             }
             className={textareaClassName}
             rows={4}
-            placeholder={tr.patients_notes}
+            placeholder={withEllipsis(tr.patients_notes)}
           />
         </Field>
         {detail.order_id ? (
@@ -8492,7 +9473,11 @@ function AppointmentFollowUpVisitSection({
             disabled={busy || !form.title.trim()}
           >
             {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-            Create follow-up visit
+            {appointmentText(
+              "Follow-up-Termin erstellen",
+              "Создать follow-up приём",
+              "Create follow-up visit",
+            )}
           </Button>
         </div>
       </form>
@@ -8719,7 +9704,7 @@ function AppointmentDoctorFollowUpSection({
                 onChange={(event) =>
                   setForm((current) => ({ ...current, title: event.target.value }))
                 }
-                placeholder={tr.appointments_title_col}
+                placeholder={withEllipsis(tr.appointments_title_col)}
                 className="h-10 rounded-xl bg-white"
                 required
               />
@@ -8763,7 +9748,7 @@ function AppointmentDoctorFollowUpSection({
                 }
                 className={textareaClassName}
                 rows={5}
-                placeholder={tr.patients_notes}
+                placeholder={withEllipsis(tr.patients_notes)}
               />
             </Field>
             <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_180px]">
@@ -9076,7 +10061,7 @@ function AppointmentPackageEndSection({
                 }
                 className={textareaClassName}
                 rows={4}
-                placeholder={tr.patients_notes}
+                placeholder={withEllipsis(tr.patients_notes)}
               />
             </Field>
             <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_180px]">
@@ -9181,12 +10166,38 @@ function AppointmentIncomingDataSection({
   );
   const [submitBusy, setSubmitBusy] = useState(false);
   const [actionBusy, setActionBusy] = useState("");
+  const [composerOpen, setComposerOpen] = useState(false);
   const openChecklistCount = checklist.filter((item) => !item.is_completed).length;
+  const intakeStateLabel =
+    openChecklistCount === 0 && checklist.length > 0
+      ? appointmentText("Intake bereit", "Интейк готов", "Intake clear")
+      : appointmentText(
+          `${openChecklistCount} offen`,
+          `${openChecklistCount} открыто`,
+          `${openChecklistCount} open`,
+        );
+  const followUpItemCount = reminders.length + tasks.length;
+  const caseUpdateLabel = appointmentText(
+    "Fallaktualisierung erforderlich",
+    "Нужно обновление кейса",
+    "Case update required",
+  );
+  const patientFollowUpLabel = appointmentText(
+    "Patienten-Follow-up erforderlich",
+    "Нужен фоллоу-ап с пациентом",
+    "Patient follow-up required",
+  );
+  const intakeComposerTitle = appointmentText(
+    "Intake-Follow-up anlegen",
+    "Создать intake follow-up",
+    "Create intake follow-up",
+  );
 
   useEffect(() => {
     setForm(buildDefaultForm());
     setSubmitBusy(false);
     setActionBusy("");
+    setComposerOpen(false);
   }, [buildDefaultForm]);
 
   async function completeChecklistItem(itemId: string) {
@@ -9199,7 +10210,13 @@ function AppointmentIncomingDataSection({
       onRefresh();
     } catch (error) {
       onError(
-        error instanceof Error ? error.message : "Failed to complete item",
+        error instanceof Error
+          ? error.message
+          : appointmentText(
+              "Element konnte nicht abgeschlossen werden.",
+              "Не удалось завершить элемент.",
+              "Failed to complete item",
+            ),
       );
     } finally {
       setActionBusy("");
@@ -9215,8 +10232,8 @@ function AppointmentIncomingDataSection({
       `Incoming data intake: ${detail.patient_pid} · ${detail.title}`,
       `Source: ${incomingDataSourceLabel(form.source)}`,
       `Category: ${incomingDataCategoryLabel(form.category)}`,
-      form.requiresCaseUpdate ? tr.common_error : "",
-      form.requiresPatientFollowUp ? "{tr.appointments_title}" : "",
+      form.requiresCaseUpdate ? caseUpdateLabel : "",
+      form.requiresPatientFollowUp ? patientFollowUpLabel : "",
       form.notes.trim() || "",
     ].filter(Boolean);
 
@@ -9242,8 +10259,8 @@ function AppointmentIncomingDataSection({
       `Appointment: ${detail.patient_pid} · ${detail.title} · ${slotLabel(detail)}`,
       `Source: ${incomingDataSourceLabel(form.source)}`,
       `Category: ${incomingDataCategoryLabel(form.category)}`,
-      form.requiresCaseUpdate ? tr.common_error : "",
-      form.requiresPatientFollowUp ? tr.common_error : "",
+      form.requiresCaseUpdate ? caseUpdateLabel : "",
+      form.requiresPatientFollowUp ? patientFollowUpLabel : "",
       form.notes.trim() || "",
     ]
       .filter(Boolean)
@@ -9307,6 +10324,7 @@ function AppointmentIncomingDataSection({
           form.source,
         ),
       );
+      setComposerOpen(false);
       onRefresh();
     } catch (error) {
       onError(error instanceof Error ? error.message : tr.common_failed_create);
@@ -9316,333 +10334,465 @@ function AppointmentIncomingDataSection({
   }
 
   return (
-    <section className={sectionCardClass("p-5")}>
-      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h3 className="text-sm font-semibold text-slate-950">
-            Incoming unprocessed medical data
-          </h3>
-          <p className="text-xs text-slate-500">
-            Capture incoming updates from patients, doctors, interpreters or
-            clinics that still need triage, categorization and case update.
-          </p>
+    <div className="space-y-4">
+      <Section
+        title={appointmentText(
+          "Eingehende medizinische Daten",
+          "Входящие медицинские данные",
+          "Incoming medical data",
+        )}
+        accessory={<CountBadge>{intakeStateLabel}</CountBadge>}
+      >
+        <p className="text-sm text-muted-foreground">
+          {appointmentText(
+            "Erfassen Sie neue medizinische Updates von Patienten, Ärzten, Dolmetschern oder Kliniken, die noch triagiert und in den Fall übernommen werden müssen.",
+            "Фиксируйте новые медицинские обновления от пациентов, врачей, переводчиков или клиник, которые ещё нужно протриажить и внести в кейс.",
+            "Capture new medical updates from patients, doctors, interpreters or clinics that still need triage and case updates.",
+          )}
+        </p>
+        <div className="grid gap-3 md:grid-cols-3">
+          <StatCard
+            label={appointmentText("Checkliste", "Чек-лист", "Checklist")}
+            value={checklist.length}
+            description={
+              checklist.length === 0
+                ? appointmentText(
+                    "Noch nicht gestartet",
+                    "Ещё не запущен",
+                    "Not started yet",
+                  )
+                : intakeStateLabel
+            }
+          />
+          <StatCard
+            label={appointmentText("Reminder", "Напоминания", "Reminders")}
+            value={reminders.length}
+            description={appointmentText(
+              "Zeitfenster für Triage und Verarbeitung.",
+              "Сроки для триажа и обработки.",
+              "Timing for triage and processing.",
+            )}
+          />
+          <StatCard
+            label={appointmentText("Aufgaben", "Задачи", "Tasks")}
+            value={tasks.length}
+            description={appointmentText(
+              "Operative Verantwortung für Kategorisierung und Fall-Update.",
+              "Операционная ответственность за категоризацию и обновление кейса.",
+              "Operational ownership for categorization and case updates.",
+            )}
+          />
         </div>
-        <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
-          {openChecklistCount === 0 && checklist.length > 0
-            ? "Intake clear"
-            : `${openChecklistCount} open`}
-        </span>
-      </div>
-      <div className="mt-4 grid gap-4 md:grid-cols-3">
-        <ContextCard
-          label={t.cases_status}
-          value={checklist.length === 0 ? "Not started" : `${checklist.length} item(s)`}
-          meta={
-            checklist.length === 0
-              ? "No intake checklist yet."
-              : `${openChecklistCount} item(s) still open.`
-          }
-        />
-        <ContextCard
-          label={t.common_search}
-          value={reminders.length === 0 ? "0" : String(reminders.length)}
-          meta="Deadline control for data triage and processing."
-        />
-        <ContextCard
-          label={t.cases_title}
-          value={tasks.length === 0 ? "0" : String(tasks.length)}
-          meta="Operational ownership for categorization and case updates."
-        />
-      </div>
-      <div className="mt-4 grid gap-4 xl:grid-cols-2">
-        <div className="space-y-4">
-          <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-              Intake checklist
-            </p>
-            <div className="mt-3 space-y-3">
-              {checklist.length === 0 ? (
-                <EmptyState text={tr.common_not_set} />
-              ) : (
-                checklist.map((item) => (
-                  <div
-                    key={item.id}
-                    className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 md:flex-row md:items-center md:justify-between"
-                  >
-                    <div>
-                      <p className="text-sm font-medium text-slate-900">
-                        {item.item_text.replace(
-                          `${INCOMING_DATA_CHECKLIST_PREFIX} `,
-                          "",
-                        )}
-                      </p>
-                      <p className="mt-1 text-xs uppercase tracking-[0.12em] text-slate-500">
-                        {item.phase}
-                      </p>
-                    </div>
-                    {item.is_completed ? (
-                      <span className="text-xs font-medium text-emerald-700">
-                        Completed {formatDateTimeLabel(item.completed_at)}
-                      </span>
-                    ) : (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="rounded-2xl"
-                        disabled={Boolean(actionBusy)}
-                        onClick={() => void completeChecklistItem(item.id)}
-                      >
-                        {actionBusy === `check:${item.id}` ? (
-                          <LoaderCircle className="size-4 animate-spin" />
-                        ) : null}
-                        Complete
-                      </Button>
-                    )}
-                  </div>
-                ))
+      </Section>
+
+      <div className="space-y-4">
+        <Section
+          title={appointmentText(
+            "Intake-Checkliste",
+            "Чек-лист intake",
+            "Intake checklist",
+          )}
+          accessory={<CountBadge>{checklist.length}</CountBadge>}
+        >
+          {checklist.length === 0 ? (
+            <EmptyCell>
+              {appointmentText(
+                "Für diesen Termin wurde noch keine Intake-Checkliste angelegt.",
+                "Для этого приёма пока не создан intake-чек-лист.",
+                "No intake checklist has been created for this appointment yet.",
               )}
-            </div>
-          </div>
-          <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-              Reminder and task trail
-            </p>
-            <div className="mt-3 space-y-3">
-              {reminders.length === 0 && tasks.length === 0 ? (
-                <EmptyState text={tr.common_not_set} />
-              ) : (
-                <>
-                  {reminders.map((item) => (
-                    <div
-                      key={item.id}
-                      className="rounded-2xl border border-slate-200 bg-white px-4 py-3"
+            </EmptyCell>
+          ) : (
+            <div className="space-y-2">
+              {checklist.map((item) => (
+                <div
+                  key={item.id}
+                  className={cn(
+                    "flex flex-col gap-3 rounded-xl px-4 py-3 md:flex-row md:items-start md:justify-between",
+                    tokens.surface.card,
+                  )}
+                >
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium text-foreground">
+                      {item.item_text.replace(
+                        `${INCOMING_DATA_CHECKLIST_PREFIX} `,
+                        "",
+                      )}
+                    </p>
+                    <p className="text-[11.5px] uppercase tracking-[0.12em] text-muted-foreground">
+                      {item.phase}
+                    </p>
+                  </div>
+                  {item.is_completed ? (
+                    <StatusBadge tone="success">
+                      {appointmentText(
+                        "Abgeschlossen",
+                        "Завершено",
+                        "Completed",
+                      )}{" "}
+                      {formatDateTimeLabel(item.completed_at)}
+                    </StatusBadge>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 rounded-lg gap-1.5"
+                      disabled={Boolean(actionBusy)}
+                      onClick={() => void completeChecklistItem(item.id)}
                     >
-                      <p className="text-sm font-medium text-slate-900">
+                      {actionBusy === `check:${item.id}` ? (
+                        <LoaderCircle className="size-4 animate-spin" />
+                      ) : null}
+                      {appointmentText("Abschließen", "Завершить", "Complete")}
+                    </Button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </Section>
+
+        <Section
+          title={appointmentText(
+            "Reminder und Aufgaben",
+            "Напоминания и задачи",
+            "Reminders and tasks",
+          )}
+          accessory={
+            <div className="flex items-center gap-2">
+              <CountBadge>{followUpItemCount}</CountBadge>
+              <Button
+                type="button"
+                size="sm"
+                className="h-8 rounded-lg gap-1.5"
+                onClick={() => setComposerOpen(true)}
+              >
+                {intakeComposerTitle}
+              </Button>
+            </div>
+          }
+        >
+          {followUpItemCount === 0 ? (
+            <EmptyCell>
+              {appointmentText(
+                "Für diesen Termin gibt es noch keine Reminder oder Aufgaben im Intake-Flow.",
+                "Для этого приёма пока нет напоминаний или задач в intake-flow.",
+                "No reminders or tasks exist in this intake flow yet.",
+              )}
+            </EmptyCell>
+          ) : (
+            <div className="space-y-2">
+              {reminders.map((item) => (
+                <div
+                  key={item.id}
+                  className={cn("space-y-2.5 rounded-xl px-4 py-3", tokens.surface.card)}
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium text-foreground">
                         {item.title.replace(`${INCOMING_DATA_PREFIX} `, "")}
                       </p>
-                      <p className="mt-1 text-xs text-slate-500">
+                      <p className="text-xs text-muted-foreground">
                         {item.user_name} · {formatDateTimeLabel(item.remind_at)}
                       </p>
-                      {item.description ? (
-                        <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
-                          {item.description}
-                        </p>
-                      ) : null}
                     </div>
-                  ))}
-                  {tasks.map((task) => (
-                    <div
-                      key={task.id}
-                      className="rounded-2xl border border-slate-200 bg-white px-4 py-3"
-                    >
-                      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                        <p className="text-sm font-medium text-slate-900">
-                          {task.title.replace(`${INCOMING_DATA_PREFIX} `, "")}
-                        </p>
-                        <span className="text-xs text-slate-500">
-                          {taskStatusLabel(task.status)} ·{" "}
-                          {taskPriorityLabel(task.priority)}
-                        </span>
-                      </div>
-                      <p className="mt-1 text-xs text-slate-500">
+                    <CountBadge>
+                      {appointmentText("Reminder", "Напоминание", "Reminder")}
+                    </CountBadge>
+                  </div>
+                  {item.description ? (
+                    <p className="whitespace-pre-line text-sm text-muted-foreground">
+                      {item.description}
+                    </p>
+                  ) : null}
+                </div>
+              ))}
+              {tasks.map((task) => (
+                <div
+                  key={task.id}
+                  className={cn("space-y-2.5 rounded-xl px-4 py-3", tokens.surface.card)}
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium text-foreground">
+                        {task.title.replace(`${INCOMING_DATA_PREFIX} `, "")}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
                         {task.assigned_to_name}
                         {task.due_date
                           ? ` · ${formatDateTimeLabel(task.due_date)}`
                           : ""}
                       </p>
-                      {task.description ? (
-                        <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
-                          {task.description}
-                        </p>
-                      ) : null}
                     </div>
-                  ))}
-                </>
-              )}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <StatusBadge status={task.status}>
+                        {taskStatusLabel(task.status)}
+                      </StatusBadge>
+                      <CountBadge>{taskPriorityLabel(task.priority)}</CountBadge>
+                    </div>
+                  </div>
+                  {task.description ? (
+                    <p className="whitespace-pre-line text-sm text-muted-foreground">
+                      {task.description}
+                    </p>
+                  ) : null}
+                </div>
+              ))}
             </div>
-          </div>
-        </div>
-        <form
-          onSubmit={handleSubmit}
-          className="space-y-4 rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4"
-        >
-          <div className="grid gap-4 md:grid-cols-2">
-            <Field label={tr.documents_source}>
-              <select
-                value={form.source}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    source: event.target.value as IncomingDataSource,
-                  }))
-                }
-                className={selectClassName}
-              >
-                <option value="patient">{tr.orders_patient}</option>
-                <option value="doctor">{tr.common_doctor}</option>
-                <option value="clinic">{tr.common_provider}</option>
-                <option value="interpreter">{tr.role_interpreter}</option>
-                <option value="external_lab">{tr.common_provider}</option>
-                <option value="other">{tr.common_not_set}</option>
-              </select>
-            </Field>
-            <Field label={tr.documents_category}>
-              <select
-                value={form.category}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    category: event.target.value as IncomingDataCategory,
-                  }))
-                }
-                className={selectClassName}
-              >
-                <option value="medical_update">Medical update</option>
-                <option value="diagnosis">{tr.cases_preconditions}</option>
-                <option value="medication">{tr.cases_medications}</option>
-                <option value="symptom">{tr.cases_symptoms}</option>
-                <option value="lab_result">{tr.cases_title}</option>
-                <option value="imaging">{tr.documents_title}</option>
-                <option value="recommendation">Recommendation</option>
-                <option value="risk_flag">{tr.common_error}</option>
-                <option value="other">{tr.common_not_set}</option>
-              </select>
-            </Field>
-          </div>
-          <div className="grid gap-4 md:grid-cols-2">
-            <Field label={t.patients_assign_owner}>
-              <select
-                value={form.assigneeId}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    assigneeId: event.target.value,
-                  }))
-                }
-                className={selectClassName}
-                required
-              >
-                <option value="">{tr.common_not_set}</option>
-                {assignees.map((member) => (
-                  <option key={member.id} value={member.id}>
-                    {member.name} · {roleLabel(member.role)}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label={tr.invoices_due_at}>
-              <Input
-                type="datetime-local"
-                value={form.dueAt}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, dueAt: event.target.value }))
-                }
-                className="h-10 rounded-xl bg-white"
-                required
-              />
-            </Field>
-          </div>
-          <Field label={tr.patients_notes}>
-            <textarea
-              value={form.notes}
-              onChange={(event) =>
-                setForm((current) => ({ ...current, notes: event.target.value }))
-              }
-              className={textareaClassName}
-              rows={5}
-              placeholder={tr.patients_notes}
-            />
-          </Field>
-          <div className="grid gap-3 md:grid-cols-2">
-            <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={form.requiresCaseUpdate}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    requiresCaseUpdate: event.target.checked,
-                  }))
-                }
-                className="mt-0.5 size-4 rounded border-slate-300 text-slate-950"
-              />
-              <span>{tr.cases_subtitle}</span>
-            </label>
-            <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={form.requiresPatientFollowUp}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    requiresPatientFollowUp: event.target.checked,
-                  }))
-                }
-                className="mt-0.5 size-4 rounded border-slate-300 text-slate-950"
-              />
-              <span>{tr.appointments_title}</span>
-            </label>
-          </div>
-          <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_180px]">
-            <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={form.createTask}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    createTask: event.target.checked,
-                  }))
-                }
-                className="mt-0.5 size-4 rounded border-slate-300 text-slate-950"
-              />
-              <span>{tr.providers_linked_patients}</span>
-            </label>
-            <Field label={tr.appointments_title_col}>
-              <select
-                value={form.taskPriority}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    taskPriority: event.target.value,
-                  }))
-                }
-                className={selectClassName}
-                disabled={!form.createTask}
-              >
-                {TASK_PRIORITY_OPTIONS.map((value) => (
-                  <option key={value} value={value}>
-                    {taskPriorityLabel(value)}
-                  </option>
-                ))}
-              </select>
-            </Field>
-          </div>
-          <div className="flex flex-wrap justify-end gap-3">
+          )}
+        </Section>
+      </div>
+
+      <AppointmentEditorSheet
+        open={composerOpen}
+        onOpenChange={(open) => {
+          setComposerOpen(open);
+          if (!open) {
+            setForm(buildDefaultForm());
+            setSubmitBusy(false);
+          }
+        }}
+        title={intakeComposerTitle}
+        description={appointmentText(
+          "Erstellen Sie Reminder, Checklistenpunkte und bei Bedarf eine verknüpfte Aufgabe direkt aus dem Termin.",
+          "Создавайте напоминания, пункты чек-листа и при необходимости связанную задачу прямо из приёма.",
+          "Create reminders, checklist items and, if needed, a linked task directly from the appointment.",
+        )}
+        onSubmit={handleSubmit}
+        footer={
+          <>
             <Button
               type="button"
               variant="outline"
-              className="rounded-2xl"
-              disabled={!form.assigneeId}
-              onClick={openChatDraft}
+              size="sm"
+              className="h-8 rounded-lg"
+              onClick={() => setComposerOpen(false)}
             >
-              Open internal chat draft
+              {t.common_cancel}
             </Button>
             <Button
               type="submit"
-              className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+              size="sm"
+              className="h-8 rounded-lg gap-1.5"
               disabled={submitBusy || !form.assigneeId || !form.dueAt}
             >
               {submitBusy ? (
-                <LoaderCircle className="size-4 animate-spin" />
+                <LoaderCircle className="size-3.5 animate-spin" />
               ) : null}
-              Start intake flow
+              {appointmentText(
+                "Intake-Flow starten",
+                "Запустить intake-flow",
+                "Start intake flow",
+              )}
             </Button>
-          </div>
-        </form>
-      </div>
-    </section>
+          </>
+        }
+      >
+        <div
+          className={cn(
+            "rounded-xl px-4 py-3 text-sm text-muted-foreground",
+            tokens.surface.mutedCard,
+          )}
+        >
+          {appointmentText(
+            "Alle Änderungen werden direkt am Termin gespeichert und danach sofort in der klinischen Übersicht angezeigt.",
+            "Все изменения сохраняются прямо в приёме и сразу отображаются в клиническом блоке.",
+            "All changes are saved directly on the appointment and shown immediately in the clinical view.",
+          )}
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field label={tr.documents_source}>
+            <select
+              value={form.source}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  source: event.target.value as IncomingDataSource,
+                }))
+              }
+              className={selectClassName}
+            >
+              <option value="patient">{tr.orders_patient}</option>
+              <option value="doctor">{tr.common_doctor}</option>
+              <option value="clinic">{tr.common_provider}</option>
+              <option value="interpreter">{tr.role_interpreter}</option>
+              <option value="external_lab">{tr.common_provider}</option>
+              <option value="other">{tr.common_not_set}</option>
+            </select>
+          </Field>
+          <Field label={tr.documents_category}>
+            <select
+              value={form.category}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  category: event.target.value as IncomingDataCategory,
+                }))
+              }
+              className={selectClassName}
+            >
+              <option value="medical_update">Medical update</option>
+              <option value="diagnosis">{tr.cases_preconditions}</option>
+              <option value="medication">{tr.cases_medications}</option>
+              <option value="symptom">{tr.cases_symptoms}</option>
+              <option value="lab_result">{tr.cases_title}</option>
+              <option value="imaging">{tr.documents_title}</option>
+              <option value="recommendation">Recommendation</option>
+              <option value="risk_flag">{tr.common_error}</option>
+              <option value="other">{tr.common_not_set}</option>
+            </select>
+          </Field>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field label={t.patients_assign_owner}>
+            <select
+              value={form.assigneeId}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  assigneeId: event.target.value,
+                }))
+              }
+              className={selectClassName}
+              required
+            >
+              <option value="">{tr.common_not_set}</option>
+              {assignees.map((member) => (
+                <option key={member.id} value={member.id}>
+                  {member.name} · {roleLabel(member.role)}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label={appointmentText("Fällig am", "Срок", "Due at")}>
+            <Input
+              type="datetime-local"
+              value={form.dueAt}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  dueAt: event.target.value,
+                }))
+              }
+              className={cn(inputClass, "h-10 rounded-xl")}
+              required
+            />
+          </Field>
+        </div>
+
+        <Field label={tr.patients_notes}>
+          <textarea
+            value={form.notes}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, notes: event.target.value }))
+            }
+            className={textareaClassName}
+            rows={5}
+            placeholder={withEllipsis(tr.patients_notes)}
+          />
+        </Field>
+
+        <div className="grid gap-3 md:grid-cols-2">
+          <AppointmentClinicalToggleCard
+            checked={form.requiresCaseUpdate}
+            title={caseUpdateLabel}
+            description={appointmentText(
+              "Erzeugt einen separaten Checklistenschritt zur Übernahme in Fall oder Anamnese.",
+              "Создаёт отдельный шаг чек-листа для переноса в кейс или анамнез.",
+              "Creates a separate checklist step to apply the update to the case or anamnesis.",
+            )}
+            onChange={(checked) =>
+              setForm((current) => ({
+                ...current,
+                requiresCaseUpdate: checked,
+              }))
+            }
+          />
+          <AppointmentClinicalToggleCard
+            checked={form.requiresPatientFollowUp}
+            title={patientFollowUpLabel}
+            description={appointmentText(
+              "Erzeugt einen separaten Schritt für die Rückmeldung an den Patienten nach der Datentriage.",
+              "Добавляет отдельный шаг для связи с пациентом после триажа данных.",
+              "Adds a separate step to contact the patient after data triage.",
+            )}
+            onChange={(checked) =>
+              setForm((current) => ({
+                ...current,
+                requiresPatientFollowUp: checked,
+              }))
+            }
+          />
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_180px]">
+          <AppointmentClinicalToggleCard
+            checked={form.createTask}
+            title={appointmentText(
+              "Zusätzliche Aufgabe erstellen",
+              "Создать дополнительную задачу",
+              "Create linked task",
+            )}
+            description={appointmentText(
+              "Legt zusätzlich eine verknüpfte operative Aufgabe für den Verantwortlichen an.",
+              "Дополнительно создаёт связанную операционную задачу для ответственного.",
+              "Also creates a linked operational task for the assignee.",
+            )}
+            onChange={(checked) =>
+              setForm((current) => ({
+                ...current,
+                createTask: checked,
+              }))
+            }
+          />
+          <Field
+            label={appointmentText(
+              "Aufgabenpriorität",
+              "Приоритет задачи",
+              "Task priority",
+            )}
+          >
+            <select
+              value={form.taskPriority}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  taskPriority: event.target.value,
+                }))
+              }
+              className={selectClassName}
+              disabled={!form.createTask}
+            >
+              {TASK_PRIORITY_OPTIONS.map((value) => (
+                <option key={value} value={value}>
+                  {taskPriorityLabel(value)}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+
+        <div className="flex justify-end">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 rounded-lg"
+            disabled={!form.assigneeId}
+            onClick={openChatDraft}
+          >
+            {appointmentText(
+              "Chat-Entwurf öffnen",
+              "Открыть черновик чата",
+              "Open chat draft",
+            )}
+          </Button>
+        </div>
+      </AppointmentEditorSheet>
+    </div>
   );
 }
 
@@ -9691,12 +10841,42 @@ function AppointmentFindingsSection({
   );
   const [submitBusy, setSubmitBusy] = useState(false);
   const [actionBusy, setActionBusy] = useState("");
+  const [composerOpen, setComposerOpen] = useState(false);
   const openChecklistCount = checklist.filter((item) => !item.is_completed).length;
+  const findingsStateLabel =
+    openChecklistCount === 0 && checklist.length > 0
+      ? appointmentText(
+          "Follow-up bereit",
+          "Фоллоу-ап готов",
+          "Follow-up ready",
+        )
+      : appointmentText(
+          `${openChecklistCount} offen`,
+          `${openChecklistCount} открыто`,
+          `${openChecklistCount} open`,
+        );
+  const followUpItemCount = reminders.length + tasks.length;
+  const translationRequiredLabel = appointmentText(
+    "Schriftliche Übersetzung erforderlich",
+    "Нужен письменный перевод",
+    "Written translation required",
+  );
+  const sendToPatientLabel = appointmentText(
+    "Paket an Patienten senden",
+    "Отправить пакет пациенту",
+    "Send package to patient",
+  );
+  const findingsComposerTitle = appointmentText(
+    "Befund-Follow-up anlegen",
+    "Создать follow-up по заключениям",
+    "Create findings follow-up",
+  );
 
   useEffect(() => {
     setForm(buildDefaultForm());
     setSubmitBusy(false);
     setActionBusy("");
+    setComposerOpen(false);
   }, [buildDefaultForm]);
 
   async function completeChecklistItem(itemId: string) {
@@ -9709,7 +10889,13 @@ function AppointmentFindingsSection({
       onRefresh();
     } catch (error) {
       onError(
-        error instanceof Error ? error.message : "Failed to complete item",
+        error instanceof Error
+          ? error.message
+          : appointmentText(
+              "Element konnte nicht abgeschlossen werden.",
+              "Не удалось завершить элемент.",
+              "Failed to complete item",
+            ),
       );
     } finally {
       setActionBusy("");
@@ -9726,8 +10912,8 @@ function AppointmentFindingsSection({
       `Expected: ${findingsArtifactLabel(form.artifact)}`,
       detail.provider_name ? `Clinic: ${detail.provider_name}` : "",
       detail.doctor_name ? `Doctor: ${detail.doctor_name}` : "",
-      form.translationRequired ? "{tr.common_loading}" : "",
-      form.sendToPatient ? tr.common_error : "",
+      form.translationRequired ? translationRequiredLabel : "",
+      form.sendToPatient ? sendToPatientLabel : "",
       form.notes.trim() || "",
     ].filter(Boolean);
 
@@ -9750,8 +10936,8 @@ function AppointmentFindingsSection({
       detail.provider_name ? `Clinic: ${detail.provider_name}` : "",
       detail.doctor_name ? `Doctor: ${detail.doctor_name}` : "",
       `Appointment: ${detail.patient_pid} · ${detail.title} · ${slotLabel(detail)}`,
-      form.translationRequired ? "{tr.common_loading}" : "",
-      form.sendToPatient ? tr.common_error : "",
+      form.translationRequired ? translationRequiredLabel : "",
+      form.sendToPatient ? sendToPatientLabel : "",
       form.notes.trim() || "",
     ]
       .filter(Boolean)
@@ -9816,6 +11002,7 @@ function AppointmentFindingsSection({
           form.artifact,
         ),
       );
+      setComposerOpen(false);
       onRefresh();
     } catch (error) {
       onError(error instanceof Error ? error.message : tr.common_failed_create);
@@ -9825,170 +11012,297 @@ function AppointmentFindingsSection({
   }
 
   return (
-    <section className={sectionCardClass("p-5")}>
-      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h3 className="text-sm font-semibold text-slate-950">
-            Arztbrief and written findings
-          </h3>
-          <p className="text-xs text-slate-500">
-            Track missing findings, translation needs and patient dispatch from
-            the appointment itself.
-          </p>
+    <div className="space-y-4">
+      <Section
+        title={appointmentText(
+          "Arztbrief und schriftliche Befunde",
+          "Arztbrief и письменные заключения",
+          "Arztbrief and written findings",
+        )}
+        accessory={<CountBadge>{findingsStateLabel}</CountBadge>}
+      >
+        <p className="text-sm text-muted-foreground">
+          {appointmentText(
+            "Verfolgen Sie ausstehende Befunde, Übersetzungsbedarf und den Versand an Patienten direkt aus dem Termin-Kontext.",
+            "Отслеживайте недостающие заключения, потребность в переводе и отправку пациенту прямо из контекста приёма.",
+            "Track missing findings, translation needs and patient delivery directly from the appointment context.",
+          )}
+        </p>
+        <div className="grid gap-3 md:grid-cols-3">
+          <StatCard
+            label={appointmentText("Checkliste", "Чек-лист", "Checklist")}
+            value={checklist.length}
+            description={
+              checklist.length === 0
+                ? appointmentText(
+                    "Noch nicht gestartet",
+                    "Ещё не запущен",
+                    "Not started yet",
+                  )
+                : findingsStateLabel
+            }
+          />
+          <StatCard
+            label={appointmentText("Reminder", "Напоминания", "Reminders")}
+            value={reminders.length}
+            description={appointmentText(
+              "Timing für Rückfragen, Übersetzung und Dokumentenhandling.",
+              "Сроки для запросов, перевода и работы с документами.",
+              "Timing for requests, translation and document handling.",
+            )}
+          />
+          <StatCard
+            label={appointmentText("Aufgaben", "Задачи", "Tasks")}
+            value={tasks.length}
+            description={appointmentText(
+              "Operative Verantwortung für Anforderung, Übersetzung und Versand von Befunden.",
+              "Операционная ответственность за запрос, перевод и отправку заключений.",
+              "Operational ownership for requesting, translating and sending findings.",
+            )}
+          />
         </div>
-        <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
-          {openChecklistCount === 0 && checklist.length > 0
-            ? "Follow-up ready"
-            : `${openChecklistCount} open`}
-        </span>
-      </div>
-      <div className="mt-4 grid gap-4 md:grid-cols-3">
-        <ContextCard
-          label={t.cases_status}
-          value={checklist.length === 0 ? "Not started" : `${checklist.length} item(s)`}
-          meta={
-            checklist.length === 0
-              ? "No document follow-up checklist yet."
-              : `${openChecklistCount} item(s) still open.`
-          }
-        />
-        <ContextCard
-          label={t.common_search}
-          value={reminders.length === 0 ? "0" : String(reminders.length)}
-          meta="Timing control for missing findings and document handling."
-        />
-        <ContextCard
-          label={t.cases_title}
-          value={tasks.length === 0 ? "0" : String(tasks.length)}
-          meta="Operational ownership for requesting, translating or sending findings."
-        />
-      </div>
-      <div className="mt-4 grid gap-4 xl:grid-cols-2">
+      </Section>
+
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(320px,0.95fr)]">
         <div className="space-y-4">
-          <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-              Checklist trail
-            </p>
-            <div className="mt-3 space-y-3">
-              {checklist.length === 0 ? (
-                <EmptyState text={tr.common_not_set} />
-              ) : (
-                checklist.map((item) => (
+          <Section
+            title={appointmentText(
+              "Follow-up-Checkliste",
+              "Чек-лист follow-up",
+              "Follow-up checklist",
+            )}
+            accessory={<CountBadge>{checklist.length}</CountBadge>}
+          >
+            {checklist.length === 0 ? (
+              <EmptyCell>
+                {appointmentText(
+                  "Für diesen Termin wurde noch keine Befund-Checkliste angelegt.",
+                  "Для этого приёма пока не создан чек-лист по заключениям.",
+                  "No findings checklist has been created for this appointment yet.",
+                )}
+              </EmptyCell>
+            ) : (
+              <div className="space-y-2">
+                {checklist.map((item) => (
                   <div
                     key={item.id}
-                    className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 md:flex-row md:items-center md:justify-between"
+                    className={cn(
+                      "flex flex-col gap-3 rounded-xl px-4 py-3 md:flex-row md:items-start md:justify-between",
+                      tokens.surface.card,
+                    )}
                   >
-                    <div>
-                      <p className="text-sm font-medium text-slate-900">
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium text-foreground">
                         {item.item_text.replace(`${FINDINGS_CHECKLIST_PREFIX} `, "")}
                       </p>
-                      <p className="mt-1 text-xs uppercase tracking-[0.12em] text-slate-500">
+                      <p className="text-[11.5px] uppercase tracking-[0.12em] text-muted-foreground">
                         {item.phase}
                       </p>
                     </div>
                     {item.is_completed ? (
-                      <span className="text-xs font-medium text-emerald-700">
-                        Completed {formatDateTimeLabel(item.completed_at)}
-                      </span>
+                      <StatusBadge tone="success">
+                        {appointmentText(
+                          "Abgeschlossen",
+                          "Завершено",
+                          "Completed",
+                        )}{" "}
+                        {formatDateTimeLabel(item.completed_at)}
+                      </StatusBadge>
                     ) : (
                       <Button
                         type="button"
                         variant="outline"
                         size="sm"
-                        className="rounded-2xl"
+                        className="h-8 rounded-lg gap-1.5"
                         disabled={Boolean(actionBusy)}
                         onClick={() => void completeChecklistItem(item.id)}
                       >
                         {actionBusy === `check:${item.id}` ? (
                           <LoaderCircle className="size-4 animate-spin" />
                         ) : null}
-                        Complete
+                        {appointmentText("Abschließen", "Завершить", "Complete")}
                       </Button>
                     )}
                   </div>
-                ))
-              )}
-            </div>
-          </div>
-          <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-              Reminder and task trail
-            </p>
-            <div className="mt-3 space-y-3">
-              {reminders.length === 0 && tasks.length === 0 ? (
-                <EmptyState text={tr.common_not_set} />
-              ) : (
-                <>
-                  {reminders.map((item) => (
-                    <div
-                      key={item.id}
-                      className="rounded-2xl border border-slate-200 bg-white px-4 py-3"
-                    >
-                      <p className="text-sm font-medium text-slate-900">
-                        {item.title.replace(`${FINDINGS_FOLLOW_UP_PREFIX} `, "")}
-                      </p>
-                      <p className="mt-1 text-xs text-slate-500">
-                        {item.user_name} · {formatDateTimeLabel(item.remind_at)}
-                      </p>
-                      {item.description ? (
-                        <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
-                          {item.description}
+                ))}
+              </div>
+            )}
+          </Section>
+
+          <Section
+            title={appointmentText(
+              "Reminder und Aufgaben",
+              "Напоминания и задачи",
+              "Reminders and tasks",
+            )}
+            accessory={
+              <div className="flex items-center gap-2">
+                <CountBadge>{followUpItemCount}</CountBadge>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-8 rounded-lg gap-1.5"
+                  onClick={() => setComposerOpen(true)}
+                >
+                  {findingsComposerTitle}
+                </Button>
+              </div>
+            }
+          >
+            {followUpItemCount === 0 ? (
+              <EmptyCell>
+                {appointmentText(
+                  "Für diesen Termin gibt es noch keine Reminder oder Aufgaben im Befund-Follow-up.",
+                  "Для этого приёма пока нет напоминаний или задач в follow-up по заключениям.",
+                  "No reminders or tasks exist in this findings follow-up yet.",
+                )}
+              </EmptyCell>
+            ) : (
+              <div className="space-y-2">
+                {reminders.map((item) => (
+                  <div
+                    key={item.id}
+                    className={cn("space-y-2.5 rounded-xl px-4 py-3", tokens.surface.card)}
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="space-y-1">
+                        <p className="text-sm font-medium text-foreground">
+                          {item.title.replace(`${FINDINGS_FOLLOW_UP_PREFIX} `, "")}
                         </p>
-                      ) : null}
+                        <p className="text-xs text-muted-foreground">
+                          {item.user_name} · {formatDateTimeLabel(item.remind_at)}
+                        </p>
+                      </div>
+                      <CountBadge>
+                        {appointmentText("Reminder", "Напоминание", "Reminder")}
+                      </CountBadge>
                     </div>
-                  ))}
-                  {tasks.map((task) => (
-                    <div
-                      key={task.id}
-                      className="rounded-2xl border border-slate-200 bg-white px-4 py-3"
-                    >
-                      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                        <p className="text-sm font-medium text-slate-900">
+                    {item.description ? (
+                      <p className="whitespace-pre-line text-sm text-muted-foreground">
+                        {item.description}
+                      </p>
+                    ) : null}
+                  </div>
+                ))}
+                {tasks.map((task) => (
+                  <div
+                    key={task.id}
+                    className={cn("space-y-2.5 rounded-xl px-4 py-3", tokens.surface.card)}
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="space-y-1">
+                        <p className="text-sm font-medium text-foreground">
                           {task.title.replace(`${FINDINGS_FOLLOW_UP_PREFIX} `, "")}
                         </p>
-                        <span className="text-xs text-slate-500">
-                          {taskStatusLabel(task.status)} ·{" "}
-                          {taskPriorityLabel(task.priority)}
-                        </span>
-                      </div>
-                      <p className="mt-1 text-xs text-slate-500">
-                        {task.assigned_to_name}
-                        {task.due_date
-                          ? ` · ${formatDateTimeLabel(task.due_date)}`
-                          : ""}
-                      </p>
-                      {task.description ? (
-                        <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
-                          {task.description}
+                        <p className="text-xs text-muted-foreground">
+                          {task.assigned_to_name}
+                          {task.due_date
+                            ? ` · ${formatDateTimeLabel(task.due_date)}`
+                            : ""}
                         </p>
-                      ) : null}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <StatusBadge status={task.status}>
+                          {taskStatusLabel(task.status)}
+                        </StatusBadge>
+                        <CountBadge>{taskPriorityLabel(task.priority)}</CountBadge>
+                      </div>
                     </div>
-                  ))}
-                </>
-              )}
-            </div>
-          </div>
+                    {task.description ? (
+                      <p className="whitespace-pre-line text-sm text-muted-foreground">
+                        {task.description}
+                      </p>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            )}
+          </Section>
         </div>
-        <form
-          onSubmit={handleSubmit}
-          className="space-y-4 rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4"
-        >
-          <Field label={tr.documents_source}>
-            <select
-              value={form.artifact}
-              onChange={(event) =>
-                setForm((current) => ({
-                  ...current,
-                  artifact: event.target.value as FindingsFollowUpArtifact,
-                }))
-              }
-              className={selectClassName}
+      </div>
+
+      <AppointmentEditorSheet
+        open={composerOpen}
+        onOpenChange={(open) => {
+          setComposerOpen(open);
+          if (!open) {
+            setForm(buildDefaultForm());
+            setSubmitBusy(false);
+          }
+        }}
+        title={findingsComposerTitle}
+        description={appointmentText(
+          "Steuern Sie Anforderung, Übersetzung und Versand von Befunden direkt aus dem Termin.",
+          "Управляйте запросом, переводом и отправкой заключений прямо из приёма.",
+          "Control the request, translation and delivery of findings directly from the appointment.",
+        )}
+        onSubmit={handleSubmit}
+        footer={
+          <>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-lg"
+              onClick={() => setComposerOpen(false)}
             >
-              <option value="arztbrief">Arztbrief</option>
-              <option value="written_findings">Written findings</option>
-              <option value="both">Both</option>
-            </select>
-          </Field>
+              {t.common_cancel}
+            </Button>
+            <Button
+              type="submit"
+              size="sm"
+              className="h-8 rounded-lg gap-1.5"
+              disabled={submitBusy || !form.assigneeId || !form.dueAt}
+            >
+              {submitBusy ? (
+                <LoaderCircle className="size-3.5 animate-spin" />
+              ) : null}
+              {appointmentText(
+                "Follow-up starten",
+                "Запустить follow-up",
+                "Start follow-up",
+              )}
+            </Button>
+          </>
+        }
+      >
+        <div
+          className={cn(
+            "rounded-xl px-4 py-3 text-sm text-muted-foreground",
+            tokens.surface.mutedCard,
+          )}
+        >
+          {appointmentText(
+            "Die erstellten Reminder, Aufgaben und Checklisteneinträge erscheinen sofort im klinischen Befundblock dieses Termins.",
+            "Созданные напоминания, задачи и пункты чек-листа сразу появятся в клиническом блоке заключений этого приёма.",
+            "Created reminders, tasks and checklist items appear immediately in this appointment's findings block.",
+          )}
+        </div>
+
+        <Field
+          label={appointmentText(
+            "Erwartetes Dokument",
+            "Ожидаемый документ",
+            "Expected document",
+          )}
+        >
+          <select
+            value={form.artifact}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                artifact: event.target.value as FindingsFollowUpArtifact,
+              }))
+            }
+            className={selectClassName}
+          >
+            <option value="arztbrief">Arztbrief</option>
+            <option value="written_findings">Written findings</option>
+            <option value="both">Both</option>
+          </select>
+        </Field>
+
+        <div className="grid gap-4 md:grid-cols-2">
           <Field label={t.patients_assign_owner}>
             <select
               value={form.assigneeId}
@@ -10009,117 +11323,132 @@ function AppointmentFindingsSection({
               ))}
             </select>
           </Field>
-          <Field label={tr.invoices_due_at}>
+          <Field label={appointmentText("Fällig am", "Срок", "Due at")}>
             <Input
               type="datetime-local"
               value={form.dueAt}
               onChange={(event) =>
-                setForm((current) => ({ ...current, dueAt: event.target.value }))
+                setForm((current) => ({
+                  ...current,
+                  dueAt: event.target.value,
+                }))
               }
-              className="h-10 rounded-xl bg-white"
+              className={cn(inputClass, "h-10 rounded-xl")}
               required
             />
           </Field>
-          <Field label={tr.patients_notes}>
-            <textarea
-              value={form.notes}
+        </div>
+
+        <Field label={tr.patients_notes}>
+          <textarea
+            value={form.notes}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, notes: event.target.value }))
+            }
+            className={textareaClassName}
+            rows={5}
+            placeholder={withEllipsis(tr.patients_notes)}
+          />
+        </Field>
+
+        <div className="grid gap-3 md:grid-cols-2">
+          <AppointmentClinicalToggleCard
+            checked={form.translationRequired}
+            title={translationRequiredLabel}
+            description={appointmentText(
+              "Fügt einen separaten Schritt für die schriftliche Übersetzung hinzu.",
+              "Добавляет отдельный шаг для письменного перевода.",
+              "Adds a separate step for written translation.",
+            )}
+            onChange={(checked) =>
+              setForm((current) => ({
+                ...current,
+                translationRequired: checked,
+              }))
+            }
+          />
+          <AppointmentClinicalToggleCard
+            checked={form.sendToPatient}
+            title={sendToPatientLabel}
+            description={appointmentText(
+              "Plant einen zusätzlichen Schritt für den Versand des Befundpakets an den Patienten.",
+              "Планирует дополнительный шаг для отправки пакета заключений пациенту.",
+              "Plans an additional step to send the findings package to the patient.",
+            )}
+            onChange={(checked) =>
+              setForm((current) => ({
+                ...current,
+                sendToPatient: checked,
+              }))
+            }
+          />
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_180px]">
+          <AppointmentClinicalToggleCard
+            checked={form.createTask}
+            title={appointmentText(
+              "Zusätzliche Aufgabe erstellen",
+              "Создать дополнительную задачу",
+              "Create linked task",
+            )}
+            description={appointmentText(
+              "Legt zusätzlich eine verknüpfte operative Aufgabe für das Befund-Follow-up an.",
+              "Дополнительно создаёт связанную операционную задачу для follow-up по заключениям.",
+              "Also creates a linked operational task for findings follow-up.",
+            )}
+            onChange={(checked) =>
+              setForm((current) => ({
+                ...current,
+                createTask: checked,
+              }))
+            }
+          />
+          <Field
+            label={appointmentText(
+              "Aufgabenpriorität",
+              "Приоритет задачи",
+              "Task priority",
+            )}
+          >
+            <select
+              value={form.taskPriority}
               onChange={(event) =>
-                setForm((current) => ({ ...current, notes: event.target.value }))
+                setForm((current) => ({
+                  ...current,
+                  taskPriority: event.target.value,
+                }))
               }
-              className={textareaClassName}
-              rows={5}
-              placeholder={tr.patients_notes}
-            />
+              className={selectClassName}
+              disabled={!form.createTask}
+            >
+              {TASK_PRIORITY_OPTIONS.map((value) => (
+                <option key={value} value={value}>
+                  {taskPriorityLabel(value)}
+                </option>
+              ))}
+            </select>
           </Field>
-          <div className="grid gap-3 md:grid-cols-2">
-            <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={form.translationRequired}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    translationRequired: event.target.checked,
-                  }))
-                }
-                className="mt-0.5 size-4 rounded border-slate-300 text-slate-950"
-              />
-              <span>{tr.common_loading}</span>
-            </label>
-            <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={form.sendToPatient}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    sendToPatient: event.target.checked,
-                  }))
-                }
-                className="mt-0.5 size-4 rounded border-slate-300 text-slate-950"
-              />
-              <span>{tr.common_error}</span>
-            </label>
-          </div>
-          <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_180px]">
-            <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={form.createTask}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    createTask: event.target.checked,
-                  }))
-                }
-                className="mt-0.5 size-4 rounded border-slate-300 text-slate-950"
-              />
-              <span>{tr.providers_linked_patients}</span>
-            </label>
-            <Field label={tr.appointments_title_col}>
-              <select
-                value={form.taskPriority}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    taskPriority: event.target.value,
-                  }))
-                }
-                className={selectClassName}
-                disabled={!form.createTask}
-              >
-                {TASK_PRIORITY_OPTIONS.map((value) => (
-                  <option key={value} value={value}>
-                    {taskPriorityLabel(value)}
-                  </option>
-                ))}
-              </select>
-            </Field>
-          </div>
-          <div className="flex flex-wrap justify-end gap-3">
-            <Button
-              type="button"
-              variant="outline"
-              className="rounded-2xl"
-              disabled={!form.assigneeId}
-              onClick={openChatDraft}
-            >
-              Open internal chat draft
-            </Button>
-            <Button
-              type="submit"
-              className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
-              disabled={submitBusy || !form.assigneeId || !form.dueAt}
-            >
-              {submitBusy ? (
-                <LoaderCircle className="size-4 animate-spin" />
-              ) : null}
-              Start findings follow-up
-            </Button>
-          </div>
-        </form>
-      </div>
-    </section>
+        </div>
+
+        <div className="flex justify-end">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 rounded-lg"
+            disabled={!form.assigneeId}
+            onClick={openChatDraft}
+          >
+            {appointmentText(
+              "Chat-Entwurf öffnen",
+              "Открыть черновик чата",
+              "Open chat draft",
+            )}
+          </Button>
+        </div>
+      </AppointmentEditorSheet>
+    </div>
   );
 }
 
@@ -10131,7 +11460,6 @@ function StaffAppointmentsPage() {
   const { user } = useAuth();
   const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
-  const { staffGo } = useStaffNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const detailTab = normalizeAppointmentWorkspaceTab(
     searchParams.get("detailTab"),
@@ -10720,6 +12048,8 @@ function StaffAppointmentsPage() {
         t.appointments_timeline_interpreter_report_approved,
       appointments_timeline_interpreter_report_rejected:
         t.appointments_timeline_interpreter_report_rejected,
+      appointments_timeline_concierge_transfer_completed:
+        t.appointments_timeline_concierge_transfer_completed,
     }),
     [
       t.appointments_timeline_appointment_created,
@@ -10737,6 +12067,7 @@ function StaffAppointmentsPage() {
       t.appointments_timeline_interpreter_report_submitted,
       t.appointments_timeline_interpreter_report_approved,
       t.appointments_timeline_interpreter_report_rejected,
+      t.appointments_timeline_concierge_transfer_completed,
     ],
   );
   const timelineEvents = useMemo(
@@ -11115,7 +12446,13 @@ function StaffAppointmentsPage() {
         setDetailCommunications([]);
         setFollowUpAssigneeId("");
         setDetailError(
-          error instanceof Error ? error.message : "Failed to load appointment",
+        error instanceof Error
+          ? error.message
+          : appointmentText(
+              "Termin konnte nicht geladen werden.",
+              "Не удалось загрузить приём.",
+              "Failed to load appointment",
+            ),
         );
       } finally {
         if (active) setDetailLoading(false);
@@ -11157,7 +12494,7 @@ function StaffAppointmentsPage() {
             throw new Error(
               appointmentText(
                 "Kein Auftrag mit diesem Termin verknupft.",
-                "No linked order for this appointment.",
+                "Для этого приёма нет связанного заказа.",
                 "No linked order for this appointment.",
               ),
             );
@@ -11168,7 +12505,7 @@ function StaffAppointmentsPage() {
             throw new Error(
               appointmentText(
                 "Keine Klinik mit diesem Termin verknupft.",
-                "No linked provider for this appointment.",
+                "Для этого приёма нет связанной клиники.",
                 "No linked provider for this appointment.",
               ),
             );
@@ -11190,8 +12527,8 @@ function StaffAppointmentsPage() {
             ? error.message
             : appointmentText(
                 "Verknupfte Daten konnten nicht geladen werden.",
-                "Failed to load linked records.",
-                "Failed to load linked records.",
+                "Не удалось загрузить связанные данные.",
+                "Failed to load linked records",
               ),
         );
       } finally {
@@ -12098,7 +13435,13 @@ function StaffAppointmentsPage() {
       }
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "Failed to change status";
+        error instanceof Error
+          ? error.message
+          : appointmentText(
+              "Status konnte nicht geändert werden.",
+              "Не удалось изменить статус.",
+              "Failed to change status",
+            );
       if (selectedId === appointmentId) {
         setDetailError(message);
       } else {
@@ -12115,16 +13458,16 @@ function StaffAppointmentsPage() {
         <div className="flex items-center justify-center py-10 text-sm text-muted-foreground">
           <LoaderCircle className="mr-2 size-4 animate-spin" />
           {appointmentText(
-            "Verknupfte Daten werden geladen...",
-            "Loading linked records...",
-            "Loading linked records...",
+            "Verknupfte Daten werden geladen…",
+            "Загрузка связанных данных…",
+            "Loading linked records…",
           )}
         </div>
       );
     }
 
     if (linkedPreviewError) {
-      return <Banner tone="error">{linkedPreviewError}</Banner>;
+      return <Banner tone="error" withIcon>{linkedPreviewError}</Banner>;
     }
 
     if (
@@ -12132,13 +13475,13 @@ function StaffAppointmentsPage() {
       (Array.isArray(linkedPreviewPayload) && linkedPreviewPayload.length === 0)
     ) {
       return (
-        <div className="rounded-xl border border-dashed border-border/70 px-4 py-8 text-center text-sm text-muted-foreground">
+        <EmptyCell>
           {appointmentText(
             "Keine verknupften Daten gefunden.",
-            "No linked records found.",
+            "Связанные данные не найдены.",
             "No linked records found.",
           )}
-        </div>
+        </EmptyCell>
       );
     }
 
@@ -12148,7 +13491,7 @@ function StaffAppointmentsPage() {
         linkedPreviewKind === "patient"
           ? [
               {
-                label: appointmentText("Name", "Name", "Name"),
+                label: appointmentText("Name", "Имя", "Name"),
                 value: readLinkedPreviewValue(record, [
                   "name",
                   "full_name",
@@ -12164,7 +13507,7 @@ function StaffAppointmentsPage() {
                 value: readLinkedPreviewValue(record, ["pid"]),
               },
               {
-                label: appointmentText("Telefon", "Phone", "Phone"),
+                label: appointmentText("Telefon", "Телефон", "Phone"),
                 value: readLinkedPreviewValue(record, [
                   "phone",
                   "phone_number",
@@ -12179,7 +13522,7 @@ function StaffAppointmentsPage() {
           : linkedPreviewKind === "order"
             ? [
                 {
-                  label: appointmentText("Auftrag", "Order", "Order"),
+                  label: appointmentText("Auftrag", "Заказ", "Order"),
                   value: readLinkedPreviewValue(record, [
                     "order_number",
                     "number",
@@ -12187,22 +13530,22 @@ function StaffAppointmentsPage() {
                   ]),
                 },
                 {
-                  label: appointmentText("Status", "Status", "Status"),
+                  label: appointmentText("Status", "Статус", "Status"),
                   value: readLinkedPreviewValue(record, ["status"]),
                 },
                 {
-                  label: appointmentText("Typ", "Type", "Type"),
+                  label: appointmentText("Typ", "Тип", "Type"),
                   value: readLinkedPreviewValue(record, ["order_type", "type"]),
                 },
                 {
-                  label: appointmentText("Patient", "Patient", "Patient"),
+                  label: appointmentText("Patient", "Пациент", "Patient"),
                   value: readLinkedPreviewValue(record, [
                     "patient_name",
                     "patient_id",
                   ]),
                 },
                 {
-                  label: appointmentText("Erstellt", "Created", "Created"),
+                  label: appointmentText("Erstellt", "Создано", "Created"),
                   value: readLinkedPreviewValue(record, [
                     "created_at",
                     "updated_at",
@@ -12211,18 +13554,18 @@ function StaffAppointmentsPage() {
               ]
             : [
                 {
-                  label: appointmentText("Name", "Name", "Name"),
+                  label: appointmentText("Name", "Название", "Name"),
                   value: readLinkedPreviewValue(record, ["name"]),
                 },
                 {
-                  label: appointmentText("Typ", "Type", "Type"),
+                  label: appointmentText("Typ", "Тип", "Type"),
                   value: readLinkedPreviewValue(record, [
                     "provider_type",
                     "type",
                   ]),
                 },
                 {
-                  label: appointmentText("Stadt", "City", "City"),
+                  label: appointmentText("Stadt", "Город", "City"),
                   value: readLinkedPreviewValue(record, [
                     "address_city",
                     "city",
@@ -12231,13 +13574,13 @@ function StaffAppointmentsPage() {
                 {
                   label: appointmentText(
                     "Fachbereich",
-                    "Specialty",
+                    "Специализация",
                     "Specialty",
                   ),
                   value: readLinkedPreviewValue(record, ["fachbereich", "specialty"]),
                 },
                 {
-                  label: appointmentText("Adresse", "Address", "Address"),
+                  label: appointmentText("Adresse", "Адрес", "Address"),
                   value: readLinkedPreviewValue(record, [
                     "address",
                     "address_line1",
@@ -12246,16 +13589,13 @@ function StaffAppointmentsPage() {
               ];
 
       return (
-        <div className="space-y-2.5">
+        <div className="grid gap-3 md:grid-cols-2">
           {fields.map((field) => (
             <div
               key={field.label}
-              className="rounded-xl border border-border/60 bg-card px-3.5 py-3"
+              className={cn("rounded-xl px-4 py-3", tokens.surface.card)}
             >
-              <p className="text-[11.5px] font-medium text-muted-foreground">
-                {field.label}
-              </p>
-              <p className="mt-1 text-sm text-foreground">{field.value}</p>
+              <InfoRow label={field.label} value={field.value} />
             </div>
           ))}
         </div>
@@ -12289,20 +13629,24 @@ function StaffAppointmentsPage() {
             .join(" • ");
 
           return (
-            <div
+            <ListItem
               key={readLinkedPreviewValue(item, ["id"]) + String(index)}
-              className="rounded-xl border border-border/60 bg-card px-3.5 py-3"
+              className="space-y-1"
             >
               <p className="text-sm font-medium text-foreground">{title}</p>
               {meta ? (
-                <p className="mt-1 text-xs text-muted-foreground">{meta}</p>
+                <p className="text-xs text-muted-foreground">{meta}</p>
               ) : null}
-            </div>
+            </ListItem>
           );
         })}
         {hiddenCount > 0 ? (
           <p className="pt-1 text-xs text-muted-foreground">
-            +{hiddenCount} more
+            {appointmentText(
+              `+${hiddenCount} weitere`,
+              `+${hiddenCount} еще`,
+              `+${hiddenCount} more`,
+            )}
           </p>
         ) : null}
       </div>
@@ -12312,7 +13656,11 @@ function StaffAppointmentsPage() {
   if (!permissions.canViewPage) {
     return (
       <div className={sectionCardClass("p-8 text-sm text-muted-foreground")}>
-        Your current role does not have access to appointments.
+        {appointmentText(
+          "Ihre aktuelle Rolle hat keinen Zugriff auf Termine.",
+          "У вашей текущей роли нет доступа к приёмам.",
+          "Your current role does not have access to appointments.",
+        )}
       </div>
     );
   }
@@ -12322,19 +13670,29 @@ function StaffAppointmentsPage() {
       return (
         <div className="flex min-h-[320px] items-center justify-center text-muted-foreground">
           <LoaderCircle className="mr-2 size-4 animate-spin" />
-          Loading appointment
+          {appointmentText(
+            "Termin wird geladen",
+            "Загрузка приёма",
+            "Loading appointment",
+          )}
         </div>
       );
     }
 
     if (detailError) {
-      return <Banner tone="error">{detailError}</Banner>;
+      return <Banner tone="error" withIcon>{detailError}</Banner>;
     }
 
     if (!detail) {
       return (
         <section className={sectionCardClass("p-5")}>
-          <EmptyState text="Select an appointment from the calendar or list." />
+          <EmptyState
+            text={appointmentText(
+              "Termin im Kalender oder in der Liste auswahlen.",
+              "Выберите приём в календаре или списке.",
+              "Select an appointment from the calendar or list.",
+            )}
+          />
         </section>
       );
     }
@@ -12374,11 +13732,34 @@ function StaffAppointmentsPage() {
     const showNotesTab = detailTab === "notes";
 
     const hasCoordinationContent = !detail.is_blocked;
+    const showClinicalIncomingSection =
+      !detail.is_blocked &&
+      permissions.canManageChecklist &&
+      permissions.canViewReminders;
+    const showClinicalFindingsSection =
+      showClinicalIncomingSection &&
+      Boolean(detail.provider_id || detail.doctor_id);
+    const showClinicalReportSection = permissions.canViewReport;
     const hasClinicalContent =
-      (!detail.is_blocked &&
-        permissions.canManageChecklist &&
-        permissions.canViewReminders) ||
-      permissions.canViewReport;
+      showClinicalIncomingSection ||
+      showClinicalFindingsSection ||
+      showClinicalReportSection;
+    const clinicalSurfaceItemCount =
+      Number(showClinicalIncomingSection) +
+      Number(showClinicalFindingsSection) +
+      Number(showClinicalReportSection);
+    const incomingDataOpenCount = incomingDataChecklist.filter(
+      (item) => !item.is_completed,
+    ).length;
+    const findingsOpenCount = findingsChecklist.filter(
+      (item) => !item.is_completed,
+    ).length;
+    const clinicalOpenCount = incomingDataOpenCount + findingsOpenCount;
+    const clinicalFollowUpCount =
+      incomingDataReminders.length +
+      incomingDataTasks.length +
+      findingsReminders.length +
+      findingsTasks.length;
     const hasWorkflowContent =
       permissions.canManageStatus ||
       permissions.canEditSchedule ||
@@ -12393,7 +13774,7 @@ function StaffAppointmentsPage() {
     return (
       <div className="space-y-6">
         {appointmentsNotice ? (
-          <Banner tone="warning">{appointmentsNotice}</Banner>
+          <Banner tone="warning" withIcon>{appointmentsNotice}</Banner>
         ) : null}
         <MemoizedAppointmentOverviewSection
           detail={detail}
@@ -12408,7 +13789,6 @@ function StaffAppointmentsPage() {
             ) : null}
             <MemoizedAppointmentLinksSection
               detail={detail}
-              staffGo={staffGo}
               onOpenPreview={openLinkedPreview}
             />
           </>
@@ -12501,59 +13881,152 @@ function StaffAppointmentsPage() {
         ) : null}
 
         {showClinicalTab ? (
-          hasClinicalContent ? (
-            <>
-              {!detail.is_blocked &&
-              permissions.canManageChecklist &&
-              permissions.canViewReminders ? (
-                <MemoizedAppointmentIncomingDataSection
-                  detail={detail}
-                  checklist={incomingDataChecklist}
-                  reminders={incomingDataReminders}
-                  tasks={incomingDataTasks}
-                  assignees={doctorFollowUpAssignees}
-                  defaultAssigneeId={detailDefaultAssigneeId}
-                  canCreateTasks={permissions.canCreateTasks}
-                  onRefresh={refreshDetail}
-                  onError={reportDetailError}
-                />
-              ) : null}
-              {!detail.is_blocked &&
-              permissions.canManageChecklist &&
-              permissions.canViewReminders &&
-              (detail.provider_id || detail.doctor_id) ? (
-                <MemoizedAppointmentFindingsSection
-                  detail={detail}
-                  checklist={findingsChecklist}
-                  reminders={findingsReminders}
-                  tasks={findingsTasks}
-                  assignees={doctorFollowUpAssignees}
-                  defaultAssigneeId={detailDefaultAssigneeId}
-                  canCreateTasks={permissions.canCreateTasks}
-                  onRefresh={refreshDetail}
-                  onError={reportDetailError}
-                />
-              ) : null}
-              {permissions.canViewReport ? (
-                <MemoizedAppointmentReportSection
-                  detail={detail}
-                  detailReport={detailReport}
-                  reportReviewMeta={reportReviewMeta}
-                  canSubmitInterpreterReport={canSubmitInterpreterReport}
-                  canResubmitRejectedReport={canResubmitRejectedReport}
-                  showReportReviewActions={showReportReviewActions}
-                  canApproveReport={permissions.canApproveReport}
-                  canRejectReport={permissions.canRejectReport}
-                  onRefresh={refreshDetail}
-                  onError={reportDetailError}
-                />
-              ) : null}
-            </>
-          ) : (
-            <section className={sectionCardClass("p-5")}>
-              <EmptyState text={clinicalEmpty} />
-            </section>
-          )
+          <>
+            <AppointmentWorkspaceSectionIntro
+              title={appointmentText(
+                "Klinische Oberfläche",
+                "Клинический блок",
+                "Clinical surface",
+              )}
+              description={appointmentText(
+                "Eingehende medizinische Daten, Befunde und Dolmetscherbericht direkt im Termin-Kontext.",
+                "Входящие медицинские данные, заключения и отчёт переводчика прямо в контексте приёма.",
+                "Incoming medical data, findings and interpreter reporting in the appointment context.",
+              )}
+              accessory={<CountBadge>{clinicalSurfaceItemCount}</CountBadge>}
+            />
+
+            {hasClinicalContent ? (
+              <>
+                <Section
+                  title={appointmentText(
+                    "Klinische Übersicht",
+                    "Клиническая сводка",
+                    "Clinical summary",
+                  )}
+                  accessory={<CountBadge>{clinicalOpenCount}</CountBadge>}
+                >
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                    <StatCard
+                      label={appointmentText(
+                        "Intake offen",
+                        "Открытый intake",
+                        "Open intake",
+                      )}
+                      value={incomingDataOpenCount}
+                      description={appointmentText(
+                        "Checklistenpunkte für Eingangsdaten.",
+                        "Пункты чек-листа по входящим данным.",
+                        "Checklist items for incoming data.",
+                      )}
+                    />
+                    <StatCard
+                      label={appointmentText(
+                        "Befunde offen",
+                        "Открытые заключения",
+                        "Open findings",
+                      )}
+                      value={findingsOpenCount}
+                      description={appointmentText(
+                        "Punkte rund um Arztbrief und Befunde.",
+                        "Пункты по Arztbrief и заключениям.",
+                        "Items related to Arztbrief and findings.",
+                      )}
+                    />
+                    <StatCard
+                      label={appointmentText(
+                        "Follow-up-Last",
+                        "Нагрузка follow-up",
+                        "Follow-up load",
+                      )}
+                      value={clinicalFollowUpCount}
+                      description={appointmentText(
+                        "Reminder und Aufgaben im klinischen Flow.",
+                        "Напоминания и задачи в клиническом flow.",
+                        "Reminders and tasks in the clinical flow.",
+                      )}
+                    />
+                    <StatCard
+                      label={appointmentText(
+                        "Bericht",
+                        "Отчёт",
+                        "Report",
+                      )}
+                      value={
+                        detailReport
+                          ? reportApprovalLabel(detailReport.approval_status)
+                          : appointmentText(
+                              "Offen",
+                              "Ожидается",
+                              "Pending",
+                            )
+                      }
+                      description={
+                        detailReport
+                          ? `${detailReport.hours} h`
+                          : appointmentText(
+                              "Noch nicht eingereicht.",
+                              "Пока не отправлен.",
+                              "Not submitted yet.",
+                            )
+                      }
+                    />
+                  </div>
+                </Section>
+
+                {showClinicalIncomingSection ? (
+                  <MemoizedAppointmentIncomingDataSection
+                    detail={detail}
+                    checklist={incomingDataChecklist}
+                    reminders={incomingDataReminders}
+                    tasks={incomingDataTasks}
+                    assignees={doctorFollowUpAssignees}
+                    defaultAssigneeId={detailDefaultAssigneeId}
+                    canCreateTasks={permissions.canCreateTasks}
+                    onRefresh={refreshDetail}
+                    onError={reportDetailError}
+                  />
+                ) : null}
+                {showClinicalFindingsSection ? (
+                  <MemoizedAppointmentFindingsSection
+                    detail={detail}
+                    checklist={findingsChecklist}
+                    reminders={findingsReminders}
+                    tasks={findingsTasks}
+                    assignees={doctorFollowUpAssignees}
+                    defaultAssigneeId={detailDefaultAssigneeId}
+                    canCreateTasks={permissions.canCreateTasks}
+                    onRefresh={refreshDetail}
+                    onError={reportDetailError}
+                  />
+                ) : null}
+                {showClinicalReportSection ? (
+                  <MemoizedAppointmentReportSection
+                    detail={detail}
+                    detailReport={detailReport}
+                    reportReviewMeta={reportReviewMeta}
+                    canSubmitInterpreterReport={canSubmitInterpreterReport}
+                    canResubmitRejectedReport={canResubmitRejectedReport}
+                    showReportReviewActions={showReportReviewActions}
+                    canApproveReport={permissions.canApproveReport}
+                    canRejectReport={permissions.canRejectReport}
+                    onRefresh={refreshDetail}
+                    onError={reportDetailError}
+                  />
+                ) : null}
+              </>
+            ) : (
+              <Section
+                title={appointmentText(
+                  "Klinische Oberfläche",
+                  "Клинический блок",
+                  "Clinical surface",
+                )}
+              >
+                <EmptyCell>{clinicalEmpty}</EmptyCell>
+              </Section>
+            )}
+          </>
         ) : null}
 
         {showWorkflowTab ? (
@@ -12757,12 +14230,12 @@ function StaffAppointmentsPage() {
         </div>
 
         {appointmentsError ? (
-          <Banner tone="error">{appointmentsError}</Banner>
+          <Banner tone="error" withIcon>{appointmentsError}</Banner>
         ) : null}
         {appointmentsNotice ? (
-          <Banner tone="warning">{appointmentsNotice}</Banner>
+          <Banner tone="warning" withIcon>{appointmentsNotice}</Banner>
         ) : null}
-        {metadataError ? <Banner tone="warning">{metadataError}</Banner> : null}
+        {metadataError ? <Banner tone="warning" withIcon>{metadataError}</Banner> : null}
 
         {useInterpreterMobileAgenda ? (
           <div className="space-y-4">
@@ -12800,7 +14273,7 @@ function StaffAppointmentsPage() {
                         search: event.target.value,
                       }))
                     }
-                    placeholder={tr.common_search}
+                    placeholder={withEllipsis(tr.common_search)}
                     className="h-10 rounded-xl bg-slate-50"
                   />
                 </Field>
@@ -12846,7 +14319,7 @@ function StaffAppointmentsPage() {
                     className="rounded-full px-3"
                     onClick={resetQuickScopes}
                   >
-                    Reset
+                    {t.common_reset}
                   </Button>
                 </div>
               </div>
@@ -12854,7 +14327,13 @@ function StaffAppointmentsPage() {
 
             {mobileAgendaSections.length === 0 ? (
               <section className={sectionCardClass("p-5")}>
-                <EmptyState text="No appointments in the current mobile scope." />
+                <EmptyState
+                  text={appointmentText(
+                    "Im aktuellen mobilen Scope sind keine Termine vorhanden.",
+                    "В текущем мобильном scope нет приёмов.",
+                    "No appointments in the current mobile scope.",
+                  )}
+                />
               </section>
             ) : (
               mobileAgendaSections.map((section) => (
@@ -12960,42 +14439,44 @@ function StaffAppointmentsPage() {
                 ) : null}
               </Dialog>
 
-              <Sheet open={searchModalOpen} onOpenChange={setSearchModalOpen}>
-                {shouldRenderSearchSheet ? (
-                  <SheetContent side="right" className="w-full sm:max-w-[420px]">
-                    <section
-                      className={sectionCardClass(
-                        "h-full overflow-y-auto border-0 p-5 shadow-none",
-                      )}
-                    >
-              <div className="mb-4 flex items-center justify-between">
-                <div>
-                  <h2 className="text-sm font-semibold text-slate-950">
-                    {t.common_search}
-                  </h2>
-                    <p className="text-xs text-muted-foreground">
-                      Narrow the calendar to the exact operational slice.
-                    </p>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      setOperationalScope("all");
-                      setFilters(DEFAULT_FILTERS);
-                      syncQuery({
-                        patient: null,
-                        provider: null,
-                        doctor: null,
-                        appointment: null,
-                        detailTab: null,
-                      });
-                    }}
-                  >
-                    Reset
-                  </Button>
-                </div>
-                <div className="space-y-4">
+              {shouldRenderSearchSheet ? (
+                <AppointmentEditorSheet
+                  open={searchModalOpen}
+                  onOpenChange={setSearchModalOpen}
+                  title={t.common_search}
+                  maxWidthClassName="sm:max-w-[460px]"
+                  footer={
+                    <>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 rounded-lg"
+                        onClick={() => {
+                          setOperationalScope("all");
+                          setFilters(DEFAULT_FILTERS);
+                          syncQuery({
+                            patient: null,
+                            provider: null,
+                            doctor: null,
+                            appointment: null,
+                            detailTab: null,
+                          });
+                        }}
+                      >
+                        {t.common_reset}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="h-8 rounded-lg"
+                        onClick={() => setSearchModalOpen(false)}
+                      >
+                        {t.common_cancel}
+                      </Button>
+                    </>
+                  }
+                >
                   <Field label={t.common_search}>
                     <Input
                       value={filters.search}
@@ -13005,8 +14486,9 @@ function StaffAppointmentsPage() {
                           search: event.target.value,
                         }))
                       }
-                      placeholder={tr.common_search}
-                      className="h-10 rounded-xl bg-slate-50"
+                      placeholder={withEllipsis(tr.common_search)}
+                      autoComplete="off"
+                      className={createSheetInputClassName}
                     />
                   </Field>
                   <Field label={t.appointments_type}>
@@ -13018,7 +14500,7 @@ function StaffAppointmentsPage() {
                           appointmentType: event.target.value,
                         }))
                       }
-                      className={selectClassName}
+                      className={selectClass}
                     >
                       <option value="">{t.providers_all}</option>
                       {TYPE_OPTIONS.map((value) => (
@@ -13028,7 +14510,13 @@ function StaffAppointmentsPage() {
                       ))}
                     </select>
                   </Field>
-                  <Field label={appointmentText("Versorgungspfad", "Траектория лечения", "Care path")}>
+                  <Field
+                    label={appointmentText(
+                      "Versorgungspfad",
+                      "Траектория лечения",
+                      "Care path",
+                    )}
+                  >
                     <select
                       value={filters.carePathKind}
                       onChange={(event) =>
@@ -13037,7 +14525,7 @@ function StaffAppointmentsPage() {
                           carePathKind: event.target.value,
                         }))
                       }
-                      className={selectClassName}
+                      className={selectClass}
                     >
                       <option value="">{t.providers_all}</option>
                       {CARE_PATH_KIND_OPTIONS.map((value) => (
@@ -13056,7 +14544,7 @@ function StaffAppointmentsPage() {
                           status: event.target.value,
                         }))
                       }
-                      className={selectClassName}
+                      className={selectClass}
                     >
                       <option value="">{t.providers_all}</option>
                       {STATUS_OPTIONS.map((value) => (
@@ -13074,7 +14562,7 @@ function StaffAppointmentsPage() {
                         setFilters((current) => ({ ...current, patientId }));
                         syncQuery({ patient: patientId || null });
                       }}
-                      className={selectClassName}
+                      className={selectClass}
                     >
                       <option value="">{tr.providers_all}</option>
                       {patients.map((patient) => (
@@ -13099,7 +14587,7 @@ function StaffAppointmentsPage() {
                           doctor: null,
                         });
                       }}
-                      className={selectClassName}
+                      className={selectClass}
                     >
                       <option value="">{tr.providers_all}</option>
                       {providers.map((provider) => (
@@ -13117,7 +14605,7 @@ function StaffAppointmentsPage() {
                         setFilters((current) => ({ ...current, doctorId }));
                         syncQuery({ doctor: doctorId || null });
                       }}
-                      className={selectClassName}
+                      className={selectClass}
                       disabled={!filters.providerId}
                     >
                       <option value="">{t.providers_all}</option>
@@ -13137,7 +14625,7 @@ function StaffAppointmentsPage() {
                           ownerUserId: event.target.value,
                         }))
                       }
-                      className={selectClassName}
+                      className={selectClass}
                     >
                       <option value="">{tr.providers_all}</option>
                       {staff.map((member) => (
@@ -13147,7 +14635,12 @@ function StaffAppointmentsPage() {
                       ))}
                     </select>
                   </Field>
-                  <Field label={t.common_doctor}>
+                  <Field
+                    label={
+                      tr.role_interpreter ??
+                      appointmentText("Dolmetscher", "Переводчик", "Interpreter")
+                    }
+                  >
                     <select
                       value={filters.interpreterId}
                       onChange={(event) =>
@@ -13156,7 +14649,7 @@ function StaffAppointmentsPage() {
                           interpreterId: event.target.value,
                         }))
                       }
-                      className={selectClassName}
+                      className={selectClass}
                     >
                       <option value="">{t.providers_all}</option>
                       {interpreters.map((member) => (
@@ -13177,7 +14670,7 @@ function StaffAppointmentsPage() {
                             dateFrom: event.target.value,
                           }))
                         }
-                        className="h-10 rounded-xl bg-slate-50"
+                        className={createSheetInputClassName}
                       />
                     </Field>
                     <Field label={tr.providers_service_valid_to}>
@@ -13190,206 +14683,188 @@ function StaffAppointmentsPage() {
                             dateTo: event.target.value,
                           }))
                         }
-                        className="h-10 rounded-xl bg-slate-50"
+                        className={createSheetInputClassName}
                       />
                     </Field>
                   </div>
-                </div>
-                    </section>
-                  </SheetContent>
-                ) : null}
-              </Sheet>
+                </AppointmentEditorSheet>
+              ) : null}
 
-              <Sheet open={queueModalOpen} onOpenChange={setQueueModalOpen}>
-                {shouldRenderQueueSheet ? (
-                  <SheetContent side="right" className="w-full sm:max-w-[640px]">
-                    <section
-                      className={sectionCardClass(
-                        "h-full overflow-y-auto border-0 p-5 shadow-none",
-                      )}
-                    >
-                <div className="mb-4 flex items-center justify-between">
-                  <div>
-                    <h2 className="text-sm font-semibold text-slate-950">
-                      {t.appointments_title}
-                    </h2>
-                    <p className="text-xs text-muted-foreground">
-                      {operationalScope === "all"
-                        ? tr.appointments_title
-                        : tr.appointments_title}
-                    </p>
-                  </div>
+              {shouldRenderQueueSheet ? (
+                <AppointmentPreviewSheet
+                  open={queueModalOpen}
+                  onOpenChange={setQueueModalOpen}
+                  title={t.appointments_title}
+                  maxWidthClassName="sm:max-w-[640px]"
+                >
                   {appointmentsLoading || metadataLoading ? (
-                    <LoaderCircle className="size-4 animate-spin text-muted-foreground" />
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <LoaderCircle className="size-3.5 animate-spin" />
+                      {t.patients_syncing}
+                    </div>
                   ) : null}
-                </div>
-                <div className="space-y-3">
                   {queueAppointments.length === 0 ? (
-                    <EmptyState text={tr.common_not_set} />
+                    <EmptyCell>{tr.common_not_set}</EmptyCell>
                   ) : (
-                    queueAppointments.map((item) => (
-                      <div
-                        key={item.id}
-                        className="rounded-2xl border border-slate-200/80 bg-slate-50/80 px-4 py-3 transition hover:border-sky-200 hover:bg-white"
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <button
-                              type="button"
-                              onClick={() => openDetailSheet(item.id)}
-                              className="truncate text-left text-sm font-semibold text-slate-950 hover:text-sky-700"
+                    <div className="space-y-3">
+                      {queueAppointments.map((item) => (
+                        <ListItem key={item.id} className="space-y-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <button
+                                type="button"
+                                onClick={() => openDetailSheet(item.id)}
+                                className="truncate text-left text-sm font-semibold text-foreground transition-colors hover:text-[var(--brand)]"
+                              >
+                                {item.title}
+                              </button>
+                              <p className="truncate text-xs text-muted-foreground">
+                                {item.patient_pid} · {item.patient_name}
+                              </p>
+                            </div>
+                            <span
+                              className={cn(
+                                "rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em]",
+                                statusBadgeClass(item.status),
+                              )}
                             >
-                              {item.title}
-                            </button>
-                            <p className="truncate text-xs text-slate-500">
-                              {item.patient_pid} · {item.patient_name}
-                            </p>
-                          </div>
-                          <span
-                            className={cn(
-                              "rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em]",
-                              statusBadgeClass(item.status),
-                            )}
-                          >
-                            {statusLabel(item.status)}
-                          </span>
-                        </div>
-                        <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-slate-500">
-                          <span className="inline-flex items-center gap-1">
-                            <Clock3 className="size-3.5" />
-                            {slotLabel(item)}
-                          </span>
-                          {item.provider_name ? (
-                            <span className="inline-flex items-center gap-1">
-                              <Stethoscope className="size-3.5" />
-                              {item.provider_name}
+                              {statusLabel(item.status)}
                             </span>
-                          ) : null}
-                        </div>
-                        <p className="mt-3 truncate text-xs font-medium text-slate-500">
-                          {operationalScopeReason(
-                            item,
-                            operationalScope,
-                            user?.role,
-                            attentionIndex,
-                            tr,
-                          )}
-                        </p>
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="rounded-2xl"
-                            onClick={() => openDetailSheet(item.id)}
-                          >
-                            {t.providers_open}
-                          </Button>
-                          {permissions.canManageStatus &&
-                          item.status !== "confirmed" &&
-                          item.status !== "completed" &&
-                          item.status !== "cancelled" ? (
+                          </div>
+                          <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                            <span className="inline-flex items-center gap-1">
+                              <Clock3 className="size-3.5" />
+                              {slotLabel(item)}
+                            </span>
+                            {item.provider_name ? (
+                              <span className="inline-flex items-center gap-1">
+                                <Stethoscope className="size-3.5" />
+                                {item.provider_name}
+                              </span>
+                            ) : null}
+                          </div>
+                          <p className="truncate text-xs font-medium text-muted-foreground">
+                            {operationalScopeReason(
+                              item,
+                              operationalScope,
+                              user?.role,
+                              attentionIndex,
+                              tr,
+                            )}
+                          </p>
+                          <div className="flex flex-wrap gap-2">
                             <Button
                               type="button"
                               size="sm"
                               variant="outline"
-                              className="rounded-2xl"
-                              disabled={Boolean(actionBusy)}
-                              onClick={() =>
-                                void performStatusChange(item.id, "confirmed")
-                              }
+                              className="h-8 rounded-lg"
+                              onClick={() => openDetailSheet(item.id)}
                             >
-                              {actionBusy ===
-                              statusActionKey(item.id, "confirmed") ? (
-                                <LoaderCircle className="size-4 animate-spin" />
-                              ) : null}
-                              {t.common_confirm}
+                              {t.providers_open}
                             </Button>
-                          ) : null}
-                          {permissions.canManageStatus &&
-                          item.status !== "completed" &&
-                          item.status !== "cancelled" ? (
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              className="rounded-2xl"
-                              disabled={Boolean(actionBusy)}
-                              onClick={() =>
-                                void performStatusChange(item.id, "completed")
-                              }
-                            >
-                              {actionBusy ===
-                              statusActionKey(item.id, "completed") ? (
-                                <LoaderCircle className="size-4 animate-spin" />
-                              ) : null}
-                              {t.dash_completed}
-                            </Button>
-                          ) : null}
-                          {permissions.canManageStatus &&
-                          item.recurrence_frequency &&
-                          item.status !== "completed" &&
-                          item.status !== "cancelled" ? (
-                            <>
+                            {permissions.canManageStatus &&
+                            item.status !== "confirmed" &&
+                            item.status !== "completed" &&
+                            item.status !== "cancelled" ? (
                               <Button
                                 type="button"
                                 size="sm"
                                 variant="outline"
-                                className="rounded-2xl border-rose-200 text-rose-700 hover:bg-rose-50"
+                                className="h-8 rounded-lg"
                                 disabled={Boolean(actionBusy)}
                                 onClick={() =>
-                                  void performStatusChange(
+                                  void performStatusChange(item.id, "confirmed")
+                                }
+                              >
+                                {actionBusy ===
+                                statusActionKey(item.id, "confirmed") ? (
+                                  <LoaderCircle className="size-3.5 animate-spin" />
+                                ) : null}
+                                {t.common_confirm}
+                              </Button>
+                            ) : null}
+                            {permissions.canManageStatus &&
+                            item.status !== "completed" &&
+                            item.status !== "cancelled" ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="h-8 rounded-lg"
+                                disabled={Boolean(actionBusy)}
+                                onClick={() =>
+                                  void performStatusChange(item.id, "completed")
+                                }
+                              >
+                                {actionBusy ===
+                                statusActionKey(item.id, "completed") ? (
+                                  <LoaderCircle className="size-3.5 animate-spin" />
+                                ) : null}
+                                {t.dash_completed}
+                              </Button>
+                            ) : null}
+                            {permissions.canManageStatus &&
+                            item.recurrence_frequency &&
+                            item.status !== "completed" &&
+                            item.status !== "cancelled" ? (
+                              <>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-8 rounded-lg border-rose-200 text-rose-700 hover:bg-rose-50"
+                                  disabled={Boolean(actionBusy)}
+                                  onClick={() =>
+                                    void performStatusChange(
+                                      item.id,
+                                      "cancelled",
+                                      "following",
+                                    )
+                                  }
+                                >
+                                  {actionBusy ===
+                                  statusActionKey(
                                     item.id,
                                     "cancelled",
                                     "following",
-                                  )
-                                }
-                              >
-                                {actionBusy ===
-                                statusActionKey(
-                                  item.id,
-                                  "cancelled",
-                                  "following",
-                                ) ? (
-                                  <LoaderCircle className="size-4 animate-spin" />
-                                ) : null}
-                                {t.appointments_cancel_this_and_following}
-                              </Button>
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                className="rounded-2xl border-rose-200 text-rose-700 hover:bg-rose-50"
-                                disabled={Boolean(actionBusy)}
-                                onClick={() =>
-                                  void performStatusChange(
+                                  ) ? (
+                                    <LoaderCircle className="size-3.5 animate-spin" />
+                                  ) : null}
+                                  {t.appointments_cancel_this_and_following}
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-8 rounded-lg border-rose-200 text-rose-700 hover:bg-rose-50"
+                                  disabled={Boolean(actionBusy)}
+                                  onClick={() =>
+                                    void performStatusChange(
+                                      item.id,
+                                      "cancelled",
+                                      "series",
+                                    )
+                                  }
+                                >
+                                  {actionBusy ===
+                                  statusActionKey(
                                     item.id,
                                     "cancelled",
                                     "series",
-                                  )
-                                }
-                              >
-                                {actionBusy ===
-                                statusActionKey(
-                                  item.id,
-                                  "cancelled",
-                                  "series",
-                                ) ? (
-                                  <LoaderCircle className="size-4 animate-spin" />
-                                ) : null}
-                                {t.appointments_cancel_whole_series}
-                              </Button>
-                            </>
-                          ) : null}
-                        </div>
-                      </div>
-                    ))
+                                  ) ? (
+                                    <LoaderCircle className="size-3.5 animate-spin" />
+                                  ) : null}
+                                  {t.appointments_cancel_whole_series}
+                                </Button>
+                              </>
+                            ) : null}
+                          </div>
+                        </ListItem>
+                      ))}
+                    </div>
                   )}
-                </div>
-                    </section>
-                  </SheetContent>
-                ) : null}
-              </Sheet>
+                </AppointmentPreviewSheet>
+              ) : null}
 
               <div className="appointments-scheduler-divider w-full rounded-[6px] p-3">
                 <div className="appointments-scheduler-toolbar flex w-full flex-col gap-2 lg:flex-row lg:items-start">
@@ -13677,215 +15152,128 @@ function StaffAppointmentsPage() {
         onAssign={handleAssignLinkedPatient}
         onOpenChange={handleLinkedPatientOpenChange}
         onRefresh={refreshLinkedPatient}
-        onOpenCases={() =>
-          linkedPatientDetail
-            ? staffGo(`/cases?patient=${linkedPatientDetail.id}`)
-            : undefined
-        }
-        onOpenOrders={() =>
-          linkedPatientDetail
-            ? staffGo(`/orders?patient=${linkedPatientDetail.id}`)
-            : undefined
-        }
-        onOpenAppointments={() =>
-          linkedPatientDetail
-            ? staffGo(`/appointments?patient=${linkedPatientDetail.id}`)
-            : undefined
-        }
-        onOpenContracts={() =>
-          linkedPatientDetail
-            ? staffGo(`/contracts?patient=${linkedPatientDetail.id}`)
-            : undefined
-        }
-        onOpenDocuments={() =>
-          linkedPatientDetail
-            ? staffGo(`/documents?patient=${linkedPatientDetail.id}`)
-            : undefined
-        }
+        hideWorkspaceActions
+        onOpenCases={() => undefined}
+        onOpenOrders={() => undefined}
+        onOpenAppointments={() => undefined}
+        onOpenContracts={() => undefined}
+        onOpenDocuments={() => undefined}
       />
 
-      <Sheet
+      <AppointmentPreviewSheet
         open={linkedProviderOpen}
         onOpenChange={handleLinkedProviderOpenChange}
+        title={linkedProviderDetail?.name || t.providers_detail}
+        maxWidthClassName="sm:max-w-[920px]"
       >
-        <SheetContent side="right" className="w-full sm:max-w-[880px]">
-          {linkedProviderDetailLoading ? (
-            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-              <LoaderCircle className="mr-2 size-4 animate-spin" />
-              {appointmentText(
-                "Anbieter wird geladen",
-                "Загрузка провайдера",
-                "Loading provider",
-              )}
-            </div>
-          ) : linkedProviderDetail ? (
-            <>
-              <SheetHeader className="shrink-0 border-b border-border/60 px-4 pt-3 pb-3">
-                <SheetTitle>
-                  {linkedProviderDetail.name || t.providers_detail}
-                </SheetTitle>
-              </SheetHeader>
-              <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
-                {linkedProviderDetailError ? (
-                  <Banner tone="error">{linkedProviderDetailError}</Banner>
-                ) : null}
-                <ProviderOverviewSection
-                  detail={linkedProviderDetail}
-                  providerActionBusy={null}
-                  permissions={PROVIDER_PREVIEW_PERMISSIONS}
-                  onActivate={() => undefined}
-                  onDeactivate={() => undefined}
-                  onDelete={() => undefined}
-                  onOpenPatients={() =>
-                    staffGo(`/patients?provider=${linkedProviderDetail.id}`)
-                  }
-                  onOpenAppointments={() =>
-                    staffGo(`/appointments?provider=${linkedProviderDetail.id}`)
-                  }
-                />
-                <ProviderLinkedPatientsSection
-                  detail={linkedProviderDetail}
-                  onOpenPatient={(patientId) =>
-                    staffGo(`/patients?patient=${patientId}`)
-                  }
-                  onOpenAppointments={(patientId) =>
-                    staffGo(
-                      `/appointments?patient=${patientId}&provider=${linkedProviderDetail.id}`,
-                    )
-                  }
-                />
-                <ProviderInteractionHistorySection
-                  detail={linkedProviderDetail}
-                  onOpenPatient={(patientId) =>
-                    staffGo(`/patients?patient=${patientId}`)
-                  }
-                  onOpenAppointments={(patientId) =>
-                    staffGo(
-                      `/appointments?patient=${patientId}&provider=${linkedProviderDetail.id}`,
-                    )
-                  }
-                  onOpenAppointment={(appointmentId) =>
-                    staffGo(`/appointments?appointment=${appointmentId}`)
-                  }
-                  onOpenOrder={(orderId) => staffGo(`/orders?order=${orderId}`)}
-                />
-              </div>
-            </>
-          ) : linkedProviderDetailError ? (
-            <div className="p-4">
-              <Banner tone="error">{linkedProviderDetailError}</Banner>
-            </div>
-          ) : (
-            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-              {appointmentText(
-                "Keine Klinikdaten verfügbar.",
-                "Нет данных клиники.",
-                "No provider data available.",
-              )}
-            </div>
-          )}
-        </SheetContent>
-      </Sheet>
-
-      <Sheet open={linkedCasesOpen} onOpenChange={handleLinkedCasesOpenChange}>
-        <SheetContent side="right" className="w-full sm:max-w-[980px]">
-          <SheetHeader className="shrink-0 border-b border-border/60 px-4 pt-3 pb-3">
-            <SheetTitle>{t.cases_roster}</SheetTitle>
-            <SheetDescription>
-              {linkedCasesLoading
-                ? `${t.cases_subtitle} · ${t.patients_syncing}`
-                : `${t.cases_subtitle} · ${linkedCasesItems.length} ${t.patients_records}`}
-            </SheetDescription>
-          </SheetHeader>
-          <div className="flex-1 overflow-y-auto px-4 py-4">
-            {/*
-              <div className="flex min-h-[220px] items-center justify-center text-sm text-muted-foreground">
-                <LoaderCircle className="mr-2 size-4 animate-spin" />
-                {appointmentText(
-                  "Falle werden geladen",
-                  "Загрузка кейсов",
-                  "Loading cases",
-                )}
-              </div>
-            ) : linkedCasesError ? (
-              <Banner tone="error">{linkedCasesError}</Banner>
-            ) : linkedCasesItems.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-border/70 px-4 py-8 text-center text-sm text-muted-foreground">
-                {appointmentText(
-                  "Keine Falle fur diesen Patienten.",
-                  "Для этого пациента нет кейсов.",
-                  "No cases for this patient.",
-                )}
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {linkedCasesItems.map((item) => (
-                  <div
-                    key={item.id}
-                    className="rounded-xl border border-border/60 bg-card px-3.5 py-3"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <p className="text-sm font-semibold text-foreground">
-                        {item.case_id}
-                      </p>
-                      <span className="rounded-full border border-border/60 bg-muted/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                        {item.status.replaceAll("_", " ")}
-                      </span>
-                    </div>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {item.patient_pid} · {item.patient_name}
-                    </p>
-                    <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">
-                      {item.hauptanfragegrund || t.common_not_set}
-                    </p>
-                    <p className="mt-2 text-[11px] text-muted-foreground/80">
-                      {formatDateTimeLabel(item.created_at)}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            */}
-            <CasesRosterSection
-              title={t.cases_roster}
-              subtitle={t.cases_subtitle}
-              counterLabel={
-                linkedCasesLoading
-                  ? t.patients_syncing
-                  : `${linkedCasesItems.length} ${t.patients_records}`
-              }
-              loading={linkedCasesLoading}
-              loadingLabel={appointmentText(
-                "Falle werden geladen",
-                "Загрузка кейсов",
-                "Loading cases",
-              )}
-              error={linkedCasesError}
-              renderError={(message) => <Banner tone="error">{message}</Banner>}
-              items={linkedCasesItems}
-              onCaseClick={(item) => {
-                if (!item.id) return;
-                setLinkedCasePreviewId(item.id);
-                setLinkedCasePreviewOpen(true);
-              }}
-              emptyState={
-                <div className="rounded-xl border border-dashed border-border/70 px-4 py-8 text-center text-sm text-muted-foreground">
-                  {appointmentText(
-                    "Keine Falle fur diesen Patienten.",
-                    "Для этого пациента нет кейсов.",
-                    "No cases for this patient.",
-                  )}
-                </div>
-              }
-              caseStatusLabel={(status) => status.replaceAll("_", " ")}
-              reasonLabel={t.cases_reason}
-              createdLabel={t.users_created}
-              notSetLabel={t.common_not_set}
-              formatDateTimeLabel={formatDateTimeLabel}
-              showHeader={false}
-            />
+        {linkedProviderDetailLoading ? (
+          <div className="flex min-h-[220px] items-center justify-center text-sm text-muted-foreground">
+            <LoaderCircle className="mr-2 size-4 animate-spin" />
+            {appointmentText(
+              "Anbieter wird geladen",
+              "Загрузка провайдера",
+              "Loading provider",
+            )}
           </div>
-        </SheetContent>
-      </Sheet>
+        ) : linkedProviderDetail ? (
+          <>
+            {linkedProviderDetailError ? (
+              <Banner tone="error" withIcon>{linkedProviderDetailError}</Banner>
+            ) : null}
+            <AppointmentLinkedProviderOverviewSection
+              detail={linkedProviderDetail}
+              formatDateTimeLabel={formatDateTimeLabel}
+            />
+            <AppointmentLinkedProviderPatientsSection
+              detail={linkedProviderDetail}
+              formatDateTimeLabel={formatDateTimeLabel}
+              onOpenPatient={(patientId) => {
+                setLinkedProviderOpen(false);
+                setLinkedProviderId("");
+                setLinkedPatientId(patientId);
+                setLinkedPatientVersion((current) => current + 1);
+                setLinkedPatientOpen(true);
+              }}
+            />
+            <AppointmentLinkedProviderInteractionsSection
+              detail={linkedProviderDetail}
+              formatDateTimeLabel={formatDateTimeLabel}
+              onOpenPatient={(patientId) => {
+                setLinkedProviderOpen(false);
+                setLinkedProviderId("");
+                setLinkedPatientId(patientId);
+                setLinkedPatientVersion((current) => current + 1);
+                setLinkedPatientOpen(true);
+              }}
+              onOpenAppointment={(appointmentId) => {
+                handleLinkedProviderOpenChange(false);
+                openDetailSheet(appointmentId);
+              }}
+            />
+          </>
+        ) : linkedProviderDetailError ? (
+          <Banner tone="error" withIcon>{linkedProviderDetailError}</Banner>
+        ) : (
+          <EmptyCell>
+            {appointmentText(
+              "Keine Klinikdaten verfügbar.",
+              "Нет данных клиники.",
+              "No provider data available.",
+            )}
+          </EmptyCell>
+        )}
+      </AppointmentPreviewSheet>
+
+      <AppointmentPreviewSheet
+        open={linkedCasesOpen}
+        onOpenChange={handleLinkedCasesOpenChange}
+        title={t.cases_roster}
+        description={
+          linkedCasesLoading
+            ? `${t.cases_subtitle} · ${t.patients_syncing}`
+            : `${t.cases_subtitle} · ${linkedCasesItems.length} ${t.patients_records}`
+        }
+        maxWidthClassName="sm:max-w-[980px]"
+      >
+        <CasesRosterSection
+          title={t.cases_roster}
+          subtitle={t.cases_subtitle}
+          counterLabel={
+            linkedCasesLoading
+              ? t.patients_syncing
+              : `${linkedCasesItems.length} ${t.patients_records}`
+          }
+          loading={linkedCasesLoading}
+          loadingLabel={appointmentText(
+            "Falle werden geladen",
+            "Загрузка кейсов",
+            "Loading cases",
+          )}
+          error={linkedCasesError}
+          renderError={(message) => <Banner tone="error" withIcon>{message}</Banner>}
+          items={linkedCasesItems}
+          onCaseClick={(item) => {
+            if (!item.id) return;
+            setLinkedCasePreviewId(item.id);
+            setLinkedCasePreviewOpen(true);
+          }}
+          emptyState={
+            <EmptyCell>
+              {appointmentText(
+                "Keine Falle fur diesen Patienten.",
+                "Для этого пациента нет кейсов.",
+                "No cases for this patient.",
+              )}
+            </EmptyCell>
+          }
+          caseStatusLabel={(status) => status.replaceAll("_", " ")}
+          reasonLabel={t.cases_reason}
+          createdLabel={t.users_created}
+          notSetLabel={t.common_not_set}
+          formatDateTimeLabel={formatDateTimeLabel}
+          showHeader={false}
+        />
+      </AppointmentPreviewSheet>
 
       <CaseWorkspaceModal
         caseId={linkedCasePreviewId || null}
@@ -13894,224 +15282,106 @@ function StaffAppointmentsPage() {
         onOpenChange={handleLinkedCasePreviewOpenChange}
       />
 
-      {/*
-      <Sheet
+      <AppointmentPreviewSheet
         open={linkedDocumentsOpen}
         onOpenChange={handleLinkedDocumentsOpenChange}
+        title={appointmentText("Dokumente", "Документы", "Documents")}
+        description={appointmentText(
+          "Dokumente aus dem aktuellen Termin-Kontext.",
+          "Документы из контекста текущего приёма.",
+          "Documents from the current appointment context.",
+        )}
+        maxWidthClassName="sm:max-w-[760px]"
+        bodyClassName="px-4 pb-6 pt-4"
       >
-        <SheetContent side="right" className="w-full sm:max-w-[760px] gap-0">
-          <SheetHeader className="border-b border-border/70 pb-4">
-            <SheetTitle>
-              {appointmentText("Dokumente", "Документы", "Documents")}
-            </SheetTitle>
-            <SheetDescription>
-              {appointmentText(
-                "Dokumente aus dem aktuellen Termin-Kontext.",
-                "Документы из контекста текущего приема.",
-                "Documents from the current appointment context.",
-              )}
-            </SheetDescription>
-          </SheetHeader>
-          <div className="flex-1 overflow-y-auto px-4 pb-6 pt-4">
-            {linkedDocumentsLoading ? (
-              <div className="flex min-h-[220px] items-center justify-center text-sm text-muted-foreground">
-                <LoaderCircle className="mr-2 size-4 animate-spin" />
-                {appointmentText(
-                  "Dokumente werden geladen",
-                  "Загрузка документов",
-                  "Loading documents",
-                )}
-              </div>
-            ) : linkedDocumentsError ? (
-              <Banner tone="error">{linkedDocumentsError}</Banner>
-            ) : linkedDocumentsItems.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-border/70 px-4 py-8 text-center text-sm text-muted-foreground">
-                {appointmentText(
-                  "Keine Dokumente im aktuellen Kontext.",
-                  "В текущем контексте нет документов.",
-                  "No documents in this context.",
-                )}
-              </div>
-            ) : (
-              <div className="space-y-2.5">
-                {linkedDocumentsItems.map((item) => (
-                  <div
-                    key={item.id}
-                    className="rounded-xl border border-border/60 bg-card px-3.5 py-3"
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-2">
-                      <p className="text-sm font-semibold text-foreground">
-                        {item.auto_name || item.original_filename || item.id}
-                      </p>
-                      <span className="rounded-full border border-border/60 bg-muted/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                        {item.status}
-                      </span>
-                    </div>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {[item.art, item.category, item.visibility]
-                        .filter((value) => Boolean(value))
-                        .join(" • ")}
-                    </p>
-                    <div className="mt-2 grid gap-1 text-[12px] text-muted-foreground sm:grid-cols-2">
-                      <p>
-                        {appointmentText("Patient", "Пациент", "Patient")}:{" "}
-                        {item.patient_name
-                          ? `${item.patient_pid ?? ""} · ${item.patient_name}`.trim()
-                          : t.common_not_set}
-                      </p>
-                      <p>
-                        {appointmentText(
-                          "Termin",
-                          "Прием",
-                          "Appointment",
-                        )}:{" "}
-                        {item.appointment_title || t.common_not_set}
-                      </p>
-                      <p>
-                        {appointmentText("Hochgeladen", "Загружено", "Uploaded")}:{" "}
-                        {formatDateTimeLabel(item.created_at)}
-                      </p>
-                      <p>
-                        {appointmentText("Freigaben", "Шеры", "Shares")}:{" "}
-                        {item.share_count}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
+        {linkedDocumentsLoading ? (
+          <div className="flex min-h-[220px] items-center justify-center text-sm text-muted-foreground">
+            <LoaderCircle className="mr-2 size-4 animate-spin" />
+            {appointmentText(
+              "Dokumente werden geladen",
+              "Загрузка документов",
+              "Loading documents",
             )}
           </div>
-        </SheetContent>
-      </Sheet>
-      */}
-
-      <Sheet
-        open={linkedDocumentsOpen}
-        onOpenChange={handleLinkedDocumentsOpenChange}
-      >
-        <SheetContent side="right" className="w-full sm:max-w-[760px] gap-0">
-          <SheetHeader className="border-b border-border/70 pb-4">
-            <SheetTitle>
-              {appointmentText("Dokumente", "Documents", "Documents")}
-            </SheetTitle>
-            <SheetDescription>
-              {appointmentText(
-                "Dokumente aus dem aktuellen Termin-Kontext.",
-                "Documents from the current appointment context.",
-                "Documents from the current appointment context.",
-              )}
-            </SheetDescription>
-          </SheetHeader>
-          <div className="flex-1 overflow-y-auto px-4 pb-6 pt-4">
-            {linkedDocumentsLoading ? (
-              <div className="flex min-h-[220px] items-center justify-center text-sm text-muted-foreground">
-                <LoaderCircle className="mr-2 size-4 animate-spin" />
-                {appointmentText(
-                  "Dokumente werden geladen",
-                  "Loading documents",
-                  "Loading documents",
-                )}
-              </div>
-            ) : linkedDocumentsError ? (
-              <Banner tone="error">{linkedDocumentsError}</Banner>
-            ) : linkedDocumentsItems.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-border/70 px-4 py-8 text-center text-sm text-muted-foreground">
-                {appointmentText(
-                  "Keine Dokumente im aktuellen Kontext.",
-                  "No documents in this context.",
-                  "No documents in this context.",
-                )}
-              </div>
-            ) : (
-              <DocumentsGrid
-                documents={linkedDocumentsItems.map((item) => ({
-                  ...item,
-                  is_latest_version: item.version_number >= item.version_count,
-                  needs_categorization: false,
-                  data_sensitivity: "standard",
-                }))}
-                showSelection={false}
-                selectedDocumentIds={linkedDocumentSelectedIds}
-                selectedId={null}
-                labels={{
-                  selectBulkShare: t.documents_select_bulk_share,
-                  filename: t.documents_filename,
-                  patient: t.orders_patient,
-                  category: t.documents_category,
-                  status: t.users_status,
-                  visibility: appointmentText(
-                    "Sichtbarkeit",
-                    "Видимость",
-                    "Visibility",
-                  ),
-                  size: t.documents_size,
-                  uploadedBy: t.documents_uploaded_by,
-                  unclassified: t.documents_unclassified,
-                  current: appointmentText("aktuell", "текущая", "current"),
-                  pidFallback: "PID",
-                  notSet: t.common_not_set,
-                  unknownUploader: t.documents_unknown_uploader,
-                  needsCategorization: appointmentText(
-                    "Kategorisierung erforderlich",
-                    "Требуется категоризация",
-                    "Needs categorization",
-                  ),
-                }}
-                localizeCode={(value) => localizeDocumentCode(value, appointmentText)}
-                onSelectionChange={setLinkedDocumentSelectedIds}
-                onToggleSelection={(id, checked) =>
-                  setLinkedDocumentSelectedIds((current) =>
-                    checked
-                      ? current.includes(id)
-                        ? current
-                        : [...current, id]
-                      : current.filter((itemId) => itemId !== id),
-                  )
-                }
-                onOpenDocument={() => {}}
-                statusBadge={linkedDocumentStatusBadge}
-                visibilityBadge={linkedDocumentVisibilityBadge}
-                sensitivityBadge={linkedDocumentSensitivityBadge}
-                formatStatusLabel={(value) => value}
-                formatVisibilityLabel={(value) => value}
-                formatSensitivityLabel={() =>
-                  appointmentText("Standard", "Стандарт", "Standard")
-                }
-                formatFileSize={formatDocumentFileSize}
-                formatDateTime={formatDateTimeLabel}
-              />
+        ) : linkedDocumentsError ? (
+          <Banner tone="error" withIcon>{linkedDocumentsError}</Banner>
+        ) : linkedDocumentsItems.length === 0 ? (
+          <EmptyCell>
+            {appointmentText(
+              "Keine Dokumente im aktuellen Kontext.",
+              "В текущем контексте нет документов.",
+              "No documents in this context.",
             )}
-          </div>
-        </SheetContent>
-      </Sheet>
+          </EmptyCell>
+        ) : (
+          <DocumentsGrid
+            documents={linkedDocumentsItems.map((item) => ({
+              ...item,
+              is_latest_version: item.version_number >= item.version_count,
+              needs_categorization: false,
+              data_sensitivity: "standard",
+            }))}
+            showSelection={false}
+            selectedDocumentIds={linkedDocumentSelectedIds}
+            selectedId={null}
+            labels={{
+              selectBulkShare: t.documents_select_bulk_share,
+              filename: t.documents_filename,
+              patient: t.orders_patient,
+              category: t.documents_category,
+              status: t.users_status,
+              visibility: appointmentText("Sichtbarkeit", "Видимость", "Visibility"),
+              size: t.documents_size,
+              uploadedBy: t.documents_uploaded_by,
+              unclassified: t.documents_unclassified,
+              current: appointmentText("aktuell", "текущая", "current"),
+              pidFallback: "PID",
+              notSet: t.common_not_set,
+              unknownUploader: t.documents_unknown_uploader,
+              needsCategorization: appointmentText(
+                "Kategorisierung erforderlich",
+                "Требуется категоризация",
+                "Needs categorization",
+              ),
+            }}
+            localizeCode={(value) => localizeDocumentCode(value, appointmentText)}
+            onSelectionChange={setLinkedDocumentSelectedIds}
+            onToggleSelection={(id, checked) =>
+              setLinkedDocumentSelectedIds((current) =>
+                checked
+                  ? current.includes(id)
+                    ? current
+                    : [...current, id]
+                  : current.filter((itemId) => itemId !== id),
+              )
+            }
+            onOpenDocument={() => {}}
+            statusBadge={linkedDocumentStatusBadge}
+            visibilityBadge={linkedDocumentVisibilityBadge}
+            sensitivityBadge={linkedDocumentSensitivityBadge}
+            formatStatusLabel={(value) => value}
+            formatVisibilityLabel={(value) => value}
+            formatSensitivityLabel={() =>
+              appointmentText("Standard", "Стандарт", "Standard")
+            }
+            formatFileSize={formatDocumentFileSize}
+            formatDateTime={formatDateTimeLabel}
+          />
+        )}
+      </AppointmentPreviewSheet>
 
-      <Sheet
+      <AppointmentPreviewSheet
         open={linkedPreviewOpen}
         onOpenChange={handleLinkedPreviewOpenChange}
+        title={
+          linkedPreviewLabel ||
+          appointmentText("Verknupfte Daten", "Связанные данные", "Linked records")
+        }
+        maxWidthClassName="sm:max-w-[540px]"
+        bodyClassName="px-4 pb-6 pt-4"
       >
-        <SheetContent side="right" className="w-full sm:max-w-[540px] gap-0">
-          <SheetHeader className="border-b border-border/70 pb-4">
-            <SheetTitle>
-              {linkedPreviewLabel ||
-                appointmentText(
-                  "Verknupfte Daten",
-                  "Linked records",
-                  "Linked records",
-                )}
-            </SheetTitle>
-            <SheetDescription>
-              {appointmentText(
-                "Schneller Kontext ohne Seitenwechsel.",
-                "Quick context without leaving this appointment.",
-                "Quick context without leaving this appointment.",
-              )}
-            </SheetDescription>
-          </SheetHeader>
-          <div className="flex-1 overflow-y-auto px-4 pb-6 pt-4">
-            {renderLinkedPreviewContent()}
-          </div>
-        </SheetContent>
-      </Sheet>
+        {renderLinkedPreviewContent()}
+      </AppointmentPreviewSheet>
 
       {isMobile ? (
       <Sheet
@@ -14125,23 +15395,24 @@ function StaffAppointmentsPage() {
         }}
       >
         {shouldRenderDetailSheetContent ? (
-        <SheetContent side="right" className="w-full sm:max-w-[860px]">
-          <SheetHeader className="border-b border-border/70 pb-4">
-            <SheetTitle>{tr.appointments_title}</SheetTitle>
-            <SheetDescription>
-              Review context, reschedule, manage interpreter flow and close the
-              operational loop from one sheet.
-            </SheetDescription>
-          </SheetHeader>
-          <div className="flex-1 overflow-y-auto px-4 pb-6">
+        <SheetContent side="right" className="w-full gap-0 sm:max-w-[860px]">
+          <div className="flex flex-col flex-1 min-h-0">
+            <SheetHeader className="px-4 py-3">
+              <SheetTitle>{tr.appointments_title}</SheetTitle>
+            </SheetHeader>
+            <div className="flex-1 overflow-y-auto overscroll-y-contain px-4 pb-6 pt-4">
             {detailLoading ? (
               <div className="flex min-h-[320px] items-center justify-center text-muted-foreground">
                 <LoaderCircle className="mr-2 size-4 animate-spin" />
-                Loading appointment
+                {appointmentText(
+                  "Termin wird geladen",
+                  "Загрузка приёма",
+                  "Loading appointment",
+                )}
               </div>
             ) : detailError ? (
               <div className="pt-5">
-                <Banner tone="error">{detailError}</Banner>
+                <Banner tone="error" withIcon>{detailError}</Banner>
               </div>
             ) : detail ? (
               <div className="space-y-6 pt-5">
@@ -14157,7 +15428,6 @@ function StaffAppointmentsPage() {
                 ) : null}
                 <MemoizedAppointmentLinksSection
                   detail={detail}
-                  staffGo={staffGo}
                   onOpenPreview={openLinkedPreview}
                 />
                 <MemoizedAppointmentTimelineSection
@@ -14404,9 +15674,14 @@ function StaffAppointmentsPage() {
               </div>
             ) : (
               <div className="flex min-h-[320px] items-center justify-center text-muted-foreground">
-                Select an appointment from the calendar or list.
+                {appointmentText(
+                  "Termin im Kalender oder in der Liste auswahlen.",
+                  "Выберите приём в календаре или списке.",
+                  "Select an appointment from the calendar or list.",
+                )}
               </div>
             )}
+            </div>
           </div>
         </SheetContent>
         ) : null}
@@ -14635,7 +15910,7 @@ function MobileAgendaCard({
           className="rounded-2xl"
           onClick={onOpen}
         >
-          Open
+          {appointmentText("Öffnen", "Открыть", "Open")}
         </Button>
       </div>
     </div>
@@ -14713,7 +15988,12 @@ function TextPanel({ title, text }: { title: string; text: string | null }) {
         {title}
       </p>
       <p className="mt-2 text-sm leading-6 text-foreground">
-        {text?.trim() || "No notes captured yet."}
+        {text?.trim() ||
+          appointmentText(
+            "Noch keine Notizen erfasst.",
+            "Заметки пока не зафиксированы.",
+            "No notes captured yet.",
+          )}
       </p>
     </div>
   );
@@ -14724,17 +16004,21 @@ function ConflictPanel({ conflicts }: { conflicts: ConflictSummary | null }) {
   const items = [
     ...conflicts.patient_conflicts.map((item) => ({
       ...item,
-      scope: "Patient",
+      scope: appointmentText("Patient", "Пациент", "Patient"),
     })),
     ...conflicts.interpreter_conflicts.map((item) => ({
       ...item,
-      scope: "Interpreter",
+      scope: appointmentText("Dolmetscher", "Переводчик", "Interpreter"),
     })),
   ].slice(0, 6);
   if (!conflicts.has_conflicts)
     return (
       <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-        No patient or interpreter overlaps detected for the current slot.
+        {appointmentText(
+          "Für dieses Zeitfenster wurden keine Patienten- oder Dolmetscherüberschneidungen gefunden.",
+          "Для этого слота не найдено пересечений по пациенту или переводчику.",
+          "No patient or interpreter overlaps detected for the current slot.",
+        )}
       </div>
     );
   return (
@@ -14745,7 +16029,11 @@ function ConflictPanel({ conflicts }: { conflicts: ConflictSummary | null }) {
           <p className="font-semibold">
             {conflicts.patient_conflict_count +
               conflicts.interpreter_conflict_count}{" "}
-            overlap(s) detected
+            {appointmentText(
+              "Überschneidung(en) erkannt",
+              "Обнаружены пересечения",
+              "Overlap(s) detected",
+            )}
           </p>
           <div className="mt-3 space-y-2">
             {items.map((item) => (

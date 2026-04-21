@@ -4,6 +4,7 @@ import { useLang } from "@/lib/i18n";
 import { canAccessPatientPortalRoute, canAccessStaffRoute } from "@/lib/staff-route-access";
 import { NavStateProvider } from "@/lib/nav-state";
 import { AppointmentWorkspaceNav } from "./appointment-workspace-nav";
+import { CaseWorkspaceNav } from "./case-workspace-nav";
 import { NavPanel } from "./nav-panel";
 import { PatientWorkspaceNav } from "./patient-workspace-nav";
 import { Topbar } from "./topbar";
@@ -48,6 +49,7 @@ function AppLayoutInner() {
   const { user } = useAuth();
   const location = useLocation();
   const showPatientWorkspaceNav = Boolean(matchPath("/patients/:id", location.pathname));
+  const showCaseWorkspaceNav = Boolean(matchPath("/cases/:caseId", location.pathname));
   const appointmentParams = new URLSearchParams(location.search);
   const showAppointmentWorkspaceNav =
     user?.role !== "patient" &&
@@ -70,6 +72,8 @@ function AppLayoutInner() {
           <NavPanel />
           {showPatientWorkspaceNav ? (
             <PatientWorkspaceNav />
+          ) : showCaseWorkspaceNav ? (
+            <CaseWorkspaceNav />
           ) : showAppointmentWorkspaceNav ? (
             <AppointmentWorkspaceNav />
           ) : null}

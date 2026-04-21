@@ -1,0 +1,271 @@
+import { useCallback, useState, type FormEvent, type ReactNode } from "react";
+import { Plus } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
+import { useLang } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
+
+import { CaseItemEditSheet } from "./item-sheet";
+import { Panel } from "./primitives";
+
+function tri(lang: string, de: string, ru: string, en: string) {
+  if (lang === "de") return de;
+  if (lang === "ru") return ru;
+  return en;
+}
+
+type SheetState =
+  | { mode: "closed" }
+  | { mode: "create" }
+  | { mode: "edit"; index: number };
+
+export type CaseItemListProps<T> = {
+  title: string;
+  description: string;
+  items: readonly T[];
+  blankItem: T;
+  cloneItem: (item: T) => T;
+  isValid: (form: T) => boolean;
+  validate?: (form: T) => string | null;
+  save: (nextItems: T[]) => Promise<boolean>;
+  renderCard: (item: T, index: number) => ReactNode;
+  renderForm: (args: {
+    form: T;
+    setForm: (next: T) => void;
+    updateField: <K extends keyof T>(field: K, value: T[K]) => void;
+    disabled: boolean;
+  }) => ReactNode;
+  busy: boolean;
+  sectionError: string;
+  canEdit: boolean;
+  sheetTitle: { create: string; edit: string };
+  sheetDescription?: string;
+  sheetWidth?: "default" | "wide";
+  emptyTitle: string;
+  emptyHint?: string;
+  addFirstLabel: string;
+  missingPrimaryMessage: string;
+};
+
+export function CaseItemList<T>({
+  title,
+  description,
+  items,
+  blankItem,
+  cloneItem,
+  isValid,
+  validate,
+  save,
+  renderCard,
+  renderForm,
+  busy,
+  sectionError,
+  canEdit,
+  sheetTitle,
+  sheetDescription,
+  sheetWidth = "default",
+  emptyTitle,
+  emptyHint,
+  addFirstLabel,
+  missingPrimaryMessage,
+}: CaseItemListProps<T>) {
+  const { lang } = useLang();
+  const [sheet, setSheet] = useState<SheetState>({ mode: "closed" });
+  const [form, setForm] = useState<T>(blankItem);
+  const [sheetError, setSheetError] = useState("");
+
+  const closeSheet = useCallback(() => {
+    setSheet({ mode: "closed" });
+    setSheetError("");
+  }, []);
+
+  const updateField = useCallback(
+    <K extends keyof T>(field: K, value: T[K]) => {
+      setForm((current) => ({ ...current, [field]: value }));
+    },
+    [],
+  );
+
+  function openCreate() {
+    if (!canEdit) return;
+    setForm({ ...blankItem });
+    setSheetError("");
+    setSheet({ mode: "create" });
+  }
+
+  function openEdit(index: number) {
+    const item = items[index];
+    if (!item) return;
+    setForm(cloneItem(item));
+    setSheetError("");
+    setSheet({ mode: "edit", index });
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!canEdit) return;
+
+    if (!isValid(form)) {
+      setSheetError(missingPrimaryMessage);
+      return;
+    }
+    const customError = validate?.(form);
+    if (customError) {
+      setSheetError(customError);
+      return;
+    }
+
+    const mutable = [...items];
+    if (sheet.mode === "create") {
+      mutable.push(form);
+    } else if (sheet.mode === "edit") {
+      mutable[sheet.index] = form;
+    } else {
+      return;
+    }
+    const ok = await save(mutable);
+    if (ok) {
+      closeSheet();
+    } else {
+      setSheetError(
+        tri(
+          lang,
+          "Speichern fehlgeschlagen. Versuchen Sie es erneut.",
+          "Не удалось сохранить. Попробуйте ещё раз.",
+          "Failed to save. Please try again.",
+        ),
+      );
+    }
+  }
+
+  async function handleDelete() {
+    if (sheet.mode !== "edit") return;
+    if (!canEdit) return;
+    const mutable = items.filter((_, idx) => idx !== sheet.index);
+    const ok = await save(mutable);
+    if (ok) {
+      closeSheet();
+    } else {
+      setSheetError(
+        tri(
+          lang,
+          "Entfernen fehlgeschlagen.",
+          "Не удалось удалить.",
+          "Failed to remove.",
+        ),
+      );
+    }
+  }
+
+  const populated = items.length > 0;
+
+  return (
+    <>
+      <Panel
+        title={title}
+        description={description}
+        action={
+          <>
+            <span
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.08em]",
+                populated
+                  ? "border-orange-200 bg-orange-50 text-orange-700"
+                  : "border-slate-200 bg-slate-50 text-slate-500",
+              )}
+            >
+              {populated ? (
+                <span aria-hidden className="size-1.5 rounded-full bg-orange-500" />
+              ) : null}
+              {items.length} {tri(lang, "Einträge", "записей", "items")}
+            </span>
+            {canEdit ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="rounded-2xl"
+                onClick={openCreate}
+                disabled={busy}
+              >
+                <Plus className="size-4" />
+                {tri(lang, "Hinzufügen", "Добавить", "Add")}
+              </Button>
+            ) : null}
+          </>
+        }
+      >
+        {sectionError ? (
+          <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+            {sectionError}
+          </div>
+        ) : null}
+
+        {!populated ? (
+          <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/70 px-5 py-10 text-center">
+            <p className="text-sm font-semibold text-slate-700">{emptyTitle}</p>
+            {emptyHint ? (
+              <p className="mt-1 text-[13px] leading-relaxed text-slate-500">
+                {emptyHint}
+              </p>
+            ) : null}
+            {canEdit ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="mt-4 rounded-2xl"
+                onClick={openCreate}
+                disabled={busy}
+              >
+                <Plus className="size-4" />
+                {addFirstLabel}
+              </Button>
+            ) : null}
+          </div>
+        ) : (
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {items.map((item, index) => (
+              <button
+                type="button"
+                key={`case-item-${index}`}
+                onClick={() => openEdit(index)}
+                disabled={busy || !canEdit}
+                className={cn(
+                  "group relative flex flex-col gap-2 rounded-2xl border border-slate-200 bg-white p-4 text-left transition",
+                  "hover:border-orange-300 hover:shadow-[0_6px_22px_rgba(15,23,42,0.05)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-300",
+                  "disabled:opacity-60 disabled:cursor-not-allowed",
+                )}
+              >
+                {renderCard(item, index)}
+              </button>
+            ))}
+          </div>
+        )}
+      </Panel>
+
+      <CaseItemEditSheet
+        open={sheet.mode !== "closed"}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) closeSheet();
+        }}
+        mode={sheet.mode === "edit" ? "edit" : "create"}
+        title={sheet.mode === "edit" ? sheetTitle.edit : sheetTitle.create}
+        description={sheetDescription}
+        busy={busy}
+        error={sheetError}
+        canSubmit={canEdit && isValid(form)}
+        canDelete={canEdit}
+        onSubmit={handleSubmit}
+        onDelete={sheet.mode === "edit" ? handleDelete : undefined}
+        width={sheetWidth}
+      >
+        {renderForm({
+          form,
+          setForm,
+          updateField,
+          disabled: !canEdit || busy,
+        })}
+      </CaseItemEditSheet>
+    </>
+  );
+}

@@ -1,0 +1,200 @@
+import { useMemo, useState, type FormEvent } from "react";
+import { LoaderCircle } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
+import { useLang } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
+
+import { Banner, Field, Panel, textareaBaseClassName } from "./primitives";
+
+function tri(lang: string, de: string, ru: string, en: string) {
+  if (lang === "de") return de;
+  if (lang === "ru") return ru;
+  return en;
+}
+
+type TextFieldLabels = { de: string; ru: string; en: string };
+type TextFieldHint = { de: string; ru: string; en: string };
+
+export type SpecialtyBooleanFlag<T> = {
+  key: keyof T & string;
+  labels: TextFieldLabels;
+};
+
+export type SpecialtyTextField<T> = {
+  key: keyof T & string;
+  labels: TextFieldLabels;
+  hint?: TextFieldHint;
+  rows?: number;
+};
+
+export type SpecialtySectionProps<T extends Record<string, unknown>> = {
+  title: string;
+  description: string;
+  blankValue: T;
+  rawValue: Partial<T> | null | undefined;
+  booleanFlags: ReadonlyArray<SpecialtyBooleanFlag<T>>;
+  textFields: ReadonlyArray<SpecialtyTextField<T>>;
+  save: (form: T) => Promise<boolean>;
+  busy: boolean;
+  sectionError: string;
+  canEdit: boolean;
+  revisionKey: string;
+};
+
+export function SpecialtySection<T extends Record<string, unknown>>({
+  revisionKey,
+  ...props
+}: SpecialtySectionProps<T>) {
+  return <SpecialtySectionContent key={revisionKey} {...props} />;
+}
+
+type SpecialtySectionContentProps<T extends Record<string, unknown>> = Omit<
+  SpecialtySectionProps<T>,
+  "revisionKey"
+>;
+
+function SpecialtySectionContent<T extends Record<string, unknown>>({
+  title,
+  description,
+  blankValue,
+  rawValue,
+  booleanFlags,
+  textFields,
+  save,
+  busy,
+  sectionError,
+  canEdit,
+}: SpecialtySectionContentProps<T>) {
+  const { lang } = useLang();
+
+  const hydrate = useMemo<T>(
+    () => ({ ...blankValue, ...(rawValue ?? {}) }) as T,
+    [blankValue, rawValue],
+  );
+
+  const [form, setForm] = useState<T>(() => hydrate);
+
+  function toggleBoolean(key: keyof T & string) {
+    setForm((current) => ({ ...current, [key]: !current[key] }) as T);
+  }
+
+  function updateText(key: keyof T & string, value: string) {
+    setForm((current) => ({ ...current, [key]: value }) as T);
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!canEdit) return;
+    await save(form);
+  }
+
+  const isRelevant = Boolean((form as { is_relevant?: boolean }).is_relevant);
+
+  return (
+    <Panel title={title} description={description}>
+      <form onSubmit={handleSubmit} className="space-y-5">
+        {sectionError ? <Banner tone="error">{sectionError}</Banner> : null}
+
+        <label
+          className={cn(
+            "flex cursor-pointer items-center justify-between gap-3 rounded-2xl border px-4 py-3 transition",
+            isRelevant
+              ? "border-orange-300 bg-orange-50/60"
+              : "border-slate-200 bg-slate-50/60",
+          )}
+        >
+          <div>
+            <p className="text-sm font-semibold text-slate-900">
+              {tri(lang, "Fachrelevant", "Относится к специальности", "Specialty relevant")}
+            </p>
+            <p className="mt-0.5 text-[12.5px] leading-relaxed text-slate-500">
+              {tri(
+                lang,
+                "Aktivieren, wenn dieser Fachbereich für den Fall berücksichtigt werden soll.",
+                "Включите, если этот раздел относится к кейсу.",
+                "Enable when this specialty applies to the case.",
+              )}
+            </p>
+          </div>
+          <input
+            type="checkbox"
+            className="size-4 rounded border-slate-300 text-orange-600 focus:ring-orange-500"
+            checked={isRelevant}
+            onChange={() => toggleBoolean("is_relevant" as keyof T & string)}
+            disabled={!canEdit || busy}
+          />
+        </label>
+
+        {booleanFlags.length > 0 ? (
+          <div>
+            <p className="mb-2 inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-600">
+              <span aria-hidden className="size-1.5 rounded-full bg-orange-500" />
+              {tri(lang, "Leitsymptome", "Ключевые симптомы", "Key signs")}
+            </p>
+            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+              {booleanFlags.map((flag) => {
+                const checked = Boolean(form[flag.key]);
+                return (
+                  <label
+                    key={flag.key}
+                    className={cn(
+                      "flex cursor-pointer items-center gap-2.5 rounded-xl border px-3 py-2.5 text-sm transition",
+                      checked
+                        ? "border-orange-200 bg-orange-50/70 text-slate-900"
+                        : "border-slate-200 bg-white text-slate-700 hover:border-slate-300",
+                    )}
+                  >
+                    <input
+                      type="checkbox"
+                      className="size-4 rounded border-slate-300 text-orange-600 focus:ring-orange-500"
+                      checked={checked}
+                      onChange={() => toggleBoolean(flag.key)}
+                      disabled={!canEdit || busy}
+                    />
+                    <span className="leading-tight">
+                      {tri(lang, flag.labels.de, flag.labels.ru, flag.labels.en)}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
+
+        <div className="grid gap-4 md:grid-cols-2">
+          {textFields.map((field) => (
+            <Field
+              key={field.key}
+              label={tri(lang, field.labels.de, field.labels.ru, field.labels.en)}
+              hint={
+                field.hint
+                  ? tri(lang, field.hint.de, field.hint.ru, field.hint.en)
+                  : undefined
+              }
+            >
+              <textarea
+                value={(form[field.key] as string | undefined) ?? ""}
+                onChange={(event) => updateText(field.key, event.target.value)}
+                className={textareaBaseClassName}
+                rows={field.rows ?? 3}
+                disabled={!canEdit || busy}
+              />
+            </Field>
+          ))}
+        </div>
+
+        <div className="flex justify-end border-t border-slate-100 pt-4">
+          <Button
+            type="submit"
+            className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+            disabled={busy || !canEdit}
+          >
+            {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+            {tri(lang, "Abschnitt speichern", "Сохранить раздел", "Save section")}
+          </Button>
+        </div>
+      </form>
+    </Panel>
+  );
+}

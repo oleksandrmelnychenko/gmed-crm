@@ -377,11 +377,15 @@ type PanelProps = {
   action?: ReactNode;
   children: ReactNode;
   className?: string;
+  accent?: boolean;
+  tone?: "default" | "clinical" | "subtle";
 };
 
 type FieldProps = {
   label: string;
   children: ReactNode;
+  required?: boolean;
+  hint?: string;
 };
 
 type BannerProps = {
@@ -1512,9 +1516,12 @@ export function CasesPage({
   }
 
   function openCase(caseId: string) {
-    setSelectedId(caseId);
-    setDetailOpen(true);
-    updateQuery({ case: caseId });
+    if (embedded) {
+      setSelectedId(caseId);
+      setDetailOpen(true);
+      return;
+    }
+    staffGo(`/cases/${caseId}`);
   }
 
   async function runSectionSave(
@@ -2127,7 +2134,7 @@ export function CasesPage({
           </DialogHeader>
           <form onSubmit={handleCreateCase} className="space-y-4">
             {createError ? <Banner tone="error">{createError}</Banner> : null}
-            <Field label={t.cases_patient}>
+            <Field label={t.cases_patient} required>
               <ShadSelect value={createForm.patientId} onValueChange={(v) => setCreateForm((current) => ({ ...current, patientId: v ?? "" }))}>
                 <SelectTrigger className="w-full h-10 rounded-xl bg-slate-50">
                   <SelectValue placeholder={t.cases_patient} />
@@ -2139,7 +2146,7 @@ export function CasesPage({
                 </SelectContent>
               </ShadSelect>
             </Field>
-            <Field label={t.cases_reason}>
+            <Field label={t.cases_reason} required>
               <Input
                 value={createForm.hauptanfragegrund}
                 onChange={(event) =>
@@ -2151,7 +2158,7 @@ export function CasesPage({
                 className="h-10 rounded-xl bg-slate-50"
               />
             </Field>
-            <Field label={t.cases_anamnesis}>
+            <Field label={t.cases_anamnesis} required>
               <textarea
                 value={createForm.aktuelleAnamnese}
                 onChange={(event) =>
@@ -2233,10 +2240,22 @@ export function CasesPage({
         }}
       >
         <SheetContent side="right" className="w-full overflow-y-auto border-l border-slate-200 p-0 sm:max-w-[980px]">
-          <SheetHeader className="border-b border-border/70 px-6 py-5">
-            <SheetTitle>{detail?.case_id ?? selectedSummary?.case_id ?? t.cases_title}</SheetTitle>
-            <SheetDescription>
-              Full narrative and structured anamnesis editor for the selected patient case.
+          <SheetHeader className="border-b border-slate-200 bg-gradient-to-b from-orange-50/40 to-transparent px-6 py-5">
+            <div className="flex items-center gap-2.5">
+              <span
+                aria-hidden
+                className="size-2.5 shrink-0 rounded-full bg-orange-500 shadow-[0_0_0_4px_rgba(249,115,22,0.15)]"
+              />
+              <SheetTitle className="text-lg font-semibold tracking-tight text-slate-950">
+                {detail?.case_id ?? selectedSummary?.case_id ?? t.cases_title}
+              </SheetTitle>
+            </div>
+            <SheetDescription className="text-[13px] leading-relaxed text-slate-500">
+              {caseText(
+                "Vollständiger Verlauf und strukturierter Anamnese-Editor für den ausgewählten Patientenfall.",
+                "Полный нарратив и структурированный редактор анамнеза для выбранного кейса пациента.",
+                "Full narrative and structured anamnesis editor for the selected patient case.",
+              )}
             </SheetDescription>
           </SheetHeader>
           <div className="space-y-6 px-6 py-6">
@@ -2361,7 +2380,7 @@ export function CasesPage({
                   <form onSubmit={handleSaveOverview} className="space-y-4">
                     {sectionErrors.overview ? <Banner tone="error">{sectionErrors.overview}</Banner> : null}
                     <div className="grid gap-4 md:grid-cols-2">
-                      <Field label={t.cases_reason}>
+                      <Field label={t.cases_reason} required>
                         <Input
                           value={overviewForm.hauptanfragegrund}
                           onChange={(event) =>
@@ -2408,7 +2427,7 @@ export function CasesPage({
                         />
                       </Field>
                     </div>
-                    <Field label={t.cases_narrative}>
+                    <Field label={t.cases_narrative} required>
                       <textarea
                         value={overviewForm.aktuelle_anamnese}
                         onChange={(event) =>
@@ -2573,7 +2592,7 @@ export function CasesPage({
                         {snippetSaveError ? (
                           <Banner tone="error">{snippetSaveError}</Banner>
                         ) : null}
-                        <Field label={t.cases_snippets_label}>
+                        <Field label={t.cases_snippets_label} required>
                           <Input
                             value={snippetForm.label}
                             onChange={(event) =>
@@ -2597,7 +2616,7 @@ export function CasesPage({
                             className="h-10 rounded-xl bg-white"
                           />
                         </Field>
-                        <Field label={t.cases_snippets_body}>
+                        <Field label={t.cases_snippets_body} required>
                           <textarea
                             value={snippetForm.body}
                             onChange={(event) =>
@@ -2667,7 +2686,7 @@ export function CasesPage({
                   {vorerkrankungen.map((item, index) => (
                     <div key={`vor-${index}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                       <div className="grid gap-4 md:grid-cols-2">
-                        <Field label={t.cases_preconditions}><Input value={item.erkrankung} onChange={(event) => setVorerkrankungen((current) => updateItemAtIndex(current, index, { erkrankung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.cases_preconditions} required><Input value={item.erkrankung} onChange={(event) => setVorerkrankungen((current) => updateItemAtIndex(current, index, { erkrankung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_preconditions}><Input value={item.erstdiagnose ?? ""} onChange={(event) => setVorerkrankungen((current) => updateItemAtIndex(current, index, { erstdiagnose: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                       </div>
                       <Field label={t.cases_note}>
@@ -2682,7 +2701,7 @@ export function CasesPage({
                   {allergien.map((item, index) => (
                     <div key={`alg-${index}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                       <div className="grid gap-4 md:grid-cols-2">
-                        <Field label={t.cases_allergies}><Input value={item.allergie} onChange={(event) => setAllergien((current) => updateItemAtIndex(current, index, { allergie: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.cases_allergies} required><Input value={item.allergie} onChange={(event) => setAllergien((current) => updateItemAtIndex(current, index, { allergie: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_subtitle}><Input value={item.reaktion ?? ""} onChange={(event) => setAllergien((current) => updateItemAtIndex(current, index, { reaktion: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                       </div>
                       <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-2xl" onClick={() => setAllergien((current) => removeItemAtIndex(current, index))}>{caseText("Entfernen", "Удалить", "Remove")}</Button></div>
@@ -2695,7 +2714,7 @@ export function CasesPage({
                     <div key={`op-${index}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
                         <Field label={t.appointments_date}><Input type="date" value={item.datum ?? ""} onChange={(event) => setOperationen((current) => updateItemAtIndex(current, index, { datum: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label={t.cases_reason}><Input value={item.grund} onChange={(event) => setOperationen((current) => updateItemAtIndex(current, index, { grund: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.cases_reason} required><Input value={item.grund} onChange={(event) => setOperationen((current) => updateItemAtIndex(current, index, { grund: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={caseText("Arzt aus Register", "Врач из реестра", "Doctor registry")}>
                           <select
                             value={item.arzt_id ?? ""}
@@ -2733,7 +2752,7 @@ export function CasesPage({
                   {medikamente.map((item, index) => (
                     <div key={`med-${index}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                        <Field label={t.cases_medications}><Input value={item.handelsname} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { handelsname: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.cases_medications} required><Input value={item.handelsname} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { handelsname: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_medications}><Input value={item.wirkstoff ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { wirkstoff: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.documents_category}><Input value={item.med_typ ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { med_typ: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={caseText("Gültig bis", "Действительно до", "Valid until")}>
@@ -2842,7 +2861,7 @@ export function CasesPage({
                   {painRecords.map((item, index) => (
                     <div key={`pain-${index}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                        <Field label={t.appointments_location}><Input value={item.lokalisierung} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { lokalisierung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.appointments_location} required><Input value={item.lokalisierung} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { lokalisierung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.providers_service_valid_from}><Input value={item.seit_wann ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { seit_wann: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_preconditions}><Input value={item.ursache ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { ursache: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_symptoms}><Input value={item.qualitaet ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { qualitaet: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
@@ -2864,7 +2883,7 @@ export function CasesPage({
                   {symptome.map((item, index) => (
                     <div key={`sym-${index}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                       <div className="grid gap-4 md:grid-cols-2">
-                        <Field label={t.patients_notes}><Input value={item.beschreibung} onChange={(event) => setSymptome((current) => updateItemAtIndex(current, index, { beschreibung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.patients_notes} required><Input value={item.beschreibung} onChange={(event) => setSymptome((current) => updateItemAtIndex(current, index, { beschreibung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_title}><Input value={item.fachrichtung ?? ""} onChange={(event) => setSymptome((current) => updateItemAtIndex(current, index, { fachrichtung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                       </div>
                       <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-2xl" onClick={() => setSymptome((current) => removeItemAtIndex(current, index))}>{caseText("Entfernen", "Удалить", "Remove")}</Button></div>
@@ -3809,38 +3828,71 @@ export function CasesPage({
 function MetricCard({ label, value, description, icon }: MetricCardProps) {
   return (
     <div className="rounded-[1.5rem] border border-white/90 bg-white/88 p-4 shadow-sm backdrop-blur">
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">{label}</span>
+      <div className="flex items-center justify-between gap-3">
+        <span className="inline-flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+          <span aria-hidden className="size-1.5 rounded-full bg-orange-500" />
+          {label}
+        </span>
         <span className="rounded-2xl bg-slate-100 p-2 text-slate-700">{icon}</span>
       </div>
       <p className="mt-4 text-3xl font-semibold tracking-tight text-slate-950">{value}</p>
-      <p className="mt-2 text-sm text-slate-600">{description}</p>
+      <p className="mt-2 text-sm leading-relaxed text-slate-600">{description}</p>
     </div>
   );
 }
 
-function Panel({ title, description, action, children, className }: PanelProps) {
+function Panel({ title, description, action, children, className, accent = true, tone = "default" }: PanelProps) {
+  const toneClass =
+    tone === "clinical"
+      ? "border-orange-200/70 bg-orange-50/30"
+      : tone === "subtle"
+        ? "border-slate-200/70 bg-slate-50/60"
+        : "";
   return (
-    <section className={cardClass(cn("p-5", className))}>
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-semibold text-slate-950">{title}</h3>
-          {description ? <p className="mt-1 text-sm text-slate-600">{description}</p> : null}
+    <section className={cardClass(cn("p-6", toneClass, className))}>
+      <header className="flex items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            {accent ? (
+              <span
+                aria-hidden
+                className="size-2 shrink-0 rounded-full bg-orange-500 shadow-[0_0_0_3px_rgba(249,115,22,0.15)]"
+              />
+            ) : null}
+            <h3 className="text-[15px] font-semibold tracking-tight text-slate-950">
+              {title}
+            </h3>
+          </div>
+          {description ? (
+            <p className="mt-1.5 text-[13px] leading-relaxed text-slate-500">
+              {description}
+            </p>
+          ) : null}
         </div>
-        {action}
-      </div>
-      <div className="mt-5">{children}</div>
+        {action ? <div className="flex shrink-0 items-center gap-2">{action}</div> : null}
+      </header>
+      <div className="mt-5 border-t border-slate-100 pt-5">{children}</div>
     </section>
   );
 }
 
-function Field({ label, children }: FieldProps) {
+function Field({ label, children, required, hint }: FieldProps) {
   return (
     <label className="flex flex-col gap-1.5">
-      <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
+      <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] leading-tight text-slate-600">
+        {required ? (
+          <span
+            aria-hidden
+            title="Required"
+            className="size-1.5 shrink-0 rounded-full bg-orange-500"
+          />
+        ) : null}
         {label}
       </span>
       {children}
+      {hint ? (
+        <span className="text-[11.5px] leading-snug text-slate-500">{hint}</span>
+      ) : null}
     </label>
   );
 }
@@ -3887,29 +3939,53 @@ function ItemEditorSection({
   children,
 }: ItemEditorSectionProps) {
   const hasContent = Array.isArray(children) ? children.length > 0 : Boolean(children);
+  const populated = count > 0;
+  const itemsLabel = caseText("Einträge", "записей", "items");
   return (
     <Panel
       title={title}
       description={description}
       action={
-        <div className="flex items-center gap-3">
-          <span className="text-xs uppercase tracking-[0.12em] text-slate-500">{count} items</span>
+        <>
+          <span
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.08em]",
+              populated
+                ? "border-orange-200 bg-orange-50 text-orange-700"
+                : "border-slate-200 bg-slate-50 text-slate-500",
+            )}
+          >
+            {populated ? (
+              <span aria-hidden className="size-1.5 rounded-full bg-orange-500" />
+            ) : null}
+            {count} {itemsLabel}
+          </span>
           {canEdit ? (
-            <Button type="button" variant="outline" size="sm" className="rounded-2xl" onClick={onAdd}>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="rounded-2xl"
+              onClick={onAdd}
+            >
               <Plus className="size-4" />
               {addLabel}
             </Button>
           ) : null}
-        </div>
+        </>
       }
     >
       <form onSubmit={onSave} className="space-y-4">
         {error ? <Banner tone="error">{error}</Banner> : null}
         {!hasContent ? <EmptyPanel title={emptyTitle} text={emptyText} /> : children}
-        <div className="flex justify-end border-t border-border/70 pt-4">
-          <Button type="submit" className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800" disabled={busy || !canEdit}>
+        <div className="flex justify-end border-t border-slate-100 pt-4">
+          <Button
+            type="submit"
+            className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+            disabled={busy || !canEdit}
+          >
             {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-            Save section
+            {caseText("Abschnitt speichern", "Сохранить раздел", "Save section")}
           </Button>
         </div>
       </form>

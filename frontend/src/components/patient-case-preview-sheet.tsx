@@ -546,7 +546,13 @@ function MetricCard({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Field({ label, value }: { label: string; value: string | null }) {
+function Field({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | null | undefined;
+}) {
   return (
     <div className="rounded-lg border border-border/60 bg-card px-3 py-2.5">
       <p className="text-[11.5px] font-medium leading-tight text-muted-foreground">

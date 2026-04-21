@@ -46,6 +46,7 @@ import {
   parseFunctionalLabels,
   textareaClassName,
 } from "@/components/patient-form-primitives";
+import { Banner, tokens } from "@/components/ui-shell";
 import {
   Sheet,
   SheetContent,
@@ -411,6 +412,7 @@ type PatientDetailSheetProps = {
   onOpenContracts: () => void;
   onOpenDocuments: () => void;
   hideFooterActions?: boolean;
+  hideWorkspaceActions?: boolean;
 };
 
 function PatientDetailSheet({
@@ -437,6 +439,7 @@ function PatientDetailSheet({
   onOpenContracts,
   onOpenDocuments,
   hideFooterActions = false,
+  hideWorkspaceActions = false,
 }: PatientDetailSheetProps) {
   const [form, setForm] = useState<PatientFormState>(blankPatientForm);
   const [busy, setBusy] = useState(false);
@@ -526,6 +529,7 @@ function PatientDetailSheet({
                 onOpenAppointments={onOpenAppointments}
                 onOpenContracts={onOpenContracts}
                 onOpenDocuments={onOpenDocuments}
+                hideActions={hideWorkspaceActions}
               />
               <PatientProfileSection
                 detail={detail}
@@ -674,13 +678,6 @@ function fieldValue(value: string | string[] | null | undefined, fallback = "Not
     return value.length ? value.join(", ") : fallback;
   }
   return value && value.trim() ? value : fallback;
-}
-
-function cardClass(extra?: string) {
-  return cn(
-    "rounded-xl border border-border/50 bg-card/40",
-    extra
-  );
 }
 
 function useOutsideClose(ref: React.RefObject<HTMLDivElement | null>, onClose: () => void) {
@@ -892,21 +889,6 @@ function ColumnFilterPopover({
           {tr.common_confirm ?? "OK"}
         </button>
       </div>
-    </div>
-  );
-}
-
-function Banner({ tone, children }: { tone: "error" | "warning"; children: ReactNode }) {
-  return (
-    <div
-      className={cn(
-        "rounded-2xl border px-4 py-3 text-sm",
-        tone === "error"
-          ? "border-rose-200 bg-rose-50 text-rose-700"
-          : "border-amber-200 bg-amber-50 text-amber-700"
-      )}
-    >
-      {children}
     </div>
   );
 }
@@ -1333,30 +1315,49 @@ export function PatientsPage() {
   }, [patients]);
 
   const sortedAndFilteredPatients = useMemo(() => {
-    const hasFilter = Object.values(columnFilters).some((v) => v.trim() !== "");
-    const filtered = hasFilter
-      ? patients.filter((p) => {
-          for (const key of columnOrder) {
-            const raw = columnFilters[key].trim();
-            if (!raw) continue;
-            if (key === "status") {
-              if (raw === "active" && !p.is_active) return false;
-              if (raw === "inactive" && p.is_active) return false;
-            } else if (key === "insurance") {
-              if ((p.insurance_type ?? "") !== raw) return false;
-            } else if (key === "birth") {
-              const [from, to] = raw.split("..");
+    type CompiledFilter =
+      | { kind: "status"; value: string }
+      | { kind: "insurance"; value: string }
+      | { kind: "birth"; from: string; to: string }
+      | { kind: "text"; key: ColumnKey; needle: string };
+
+    const compiled: CompiledFilter[] = [];
+    for (const [rawKey, rawValue] of Object.entries(columnFilters) as [ColumnKey, string][]) {
+      const raw = rawValue.trim();
+      if (!raw) continue;
+      if (rawKey === "status") {
+        compiled.push({ kind: "status", value: raw });
+      } else if (rawKey === "insurance") {
+        compiled.push({ kind: "insurance", value: raw });
+      } else if (rawKey === "birth") {
+        const [from = "", to = ""] = raw.split("..");
+        compiled.push({ kind: "birth", from, to });
+      } else {
+        compiled.push({ kind: "text", key: rawKey, needle: raw.toLowerCase() });
+      }
+    }
+
+    const filtered = compiled.length === 0
+      ? patients
+      : patients.filter((p) => {
+          for (const f of compiled) {
+            if (f.kind === "status") {
+              if (f.value === "active" && !p.is_active) return false;
+              if (f.value === "inactive" && p.is_active) return false;
+            } else if (f.kind === "insurance") {
+              if ((p.insurance_type ?? "") !== f.value) return false;
+            } else if (f.kind === "birth") {
               const bd = p.birth_date ?? "";
-              if (from && (bd === "" || bd < from)) return false;
-              if (to && (bd === "" || bd > to)) return false;
+              if (f.from && (bd === "" || bd < f.from)) return false;
+              if (f.to && (bd === "" || bd > f.to)) return false;
             } else {
-              const haystack = patientColumnText(p, key, tr).toLowerCase();
-              if (!haystack.includes(raw.toLowerCase())) return false;
+              const haystack = patientColumnText(p, f.key, tr).toLowerCase();
+              if (!haystack.includes(f.needle)) return false;
             }
           }
           return true;
-        })
-      : patients;
+        });
+
     if (!sortBy) return filtered;
     const arr = [...filtered];
     arr.sort((a, b) => {
@@ -1364,7 +1365,7 @@ export function PatientsPage() {
       return sortBy.dir === "asc" ? cmp : -cmp;
     });
     return arr;
-  }, [patients, columnFilters, columnOrder, sortBy, tr]);
+  }, [patients, columnFilters, sortBy, tr]);
 
   const totalPages = Math.max(1, Math.ceil(sortedAndFilteredPatients.length / pageSize));
   const paginatedPatients = useMemo(
@@ -1607,7 +1608,9 @@ export function PatientsPage() {
   if (!permissions.canViewPage) {
     return (
       <div className="space-y-6">
-        <section className={cardClass("p-8")}>
+        <section
+          className={cn("rounded-xl p-8", tokens.surface.softCard)}
+        >
           <h1 className="text-3xl font-semibold tracking-tight text-slate-950">
             Patient registry
           </h1>
@@ -2080,6 +2083,7 @@ function PatientOverviewSection({
   onOpenAppointments,
   onOpenContracts,
   onOpenDocuments,
+  hideActions = false,
 }: {
   detail: PatientDetail;
   onOpenCases: () => void;
@@ -2087,12 +2091,15 @@ function PatientOverviewSection({
   onOpenAppointments: () => void;
   onOpenContracts: () => void;
   onOpenDocuments: () => void;
+  hideActions?: boolean;
 }) {
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
 
   return (
-    <section className={cardClass("p-3.5 space-y-3")}>
+    <section
+      className={cn("rounded-xl p-3.5 space-y-3", tokens.surface.softCard)}
+    >
       <div className="flex flex-wrap items-center gap-1.5">
         <span
           className={cn(
@@ -2142,23 +2149,25 @@ function PatientOverviewSection({
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-1.5 pt-1">
-        <Button type="button" variant="outline" size="sm" className="h-8 rounded-lg" onClick={onOpenCases}>
-          {t.cases_title}
-        </Button>
-        <Button type="button" variant="outline" size="sm" className="h-8 rounded-lg" onClick={onOpenOrders}>
-          {t.orders_title}
-        </Button>
-        <Button type="button" variant="outline" size="sm" className="h-8 rounded-lg" onClick={onOpenAppointments}>
-          {t.appointments_title}
-        </Button>
-        <Button type="button" variant="outline" size="sm" className="h-8 rounded-lg" onClick={onOpenContracts}>
-          {t.nav_contracts}
-        </Button>
-        <Button type="button" variant="outline" size="sm" className="h-8 rounded-lg" onClick={onOpenDocuments}>
-          {t.nav_documents}
-        </Button>
-      </div>
+      {!hideActions ? (
+        <div className="flex flex-wrap gap-1.5 pt-1">
+          <Button type="button" variant="outline" size="sm" className="h-8 rounded-lg" onClick={onOpenCases}>
+            {t.cases_title}
+          </Button>
+          <Button type="button" variant="outline" size="sm" className="h-8 rounded-lg" onClick={onOpenOrders}>
+            {t.orders_title}
+          </Button>
+          <Button type="button" variant="outline" size="sm" className="h-8 rounded-lg" onClick={onOpenAppointments}>
+            {t.appointments_title}
+          </Button>
+          <Button type="button" variant="outline" size="sm" className="h-8 rounded-lg" onClick={onOpenContracts}>
+            {t.nav_contracts}
+          </Button>
+          <Button type="button" variant="outline" size="sm" className="h-8 rounded-lg" onClick={onOpenDocuments}>
+            {t.nav_documents}
+          </Button>
+        </div>
+      ) : null}
     </section>
   );
 }

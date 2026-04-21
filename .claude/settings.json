@@ -17,7 +17,16 @@
       "Bash(grep -nE \"^        '[A-Z][a-z]+[^']{20,}',\" /c/Users/123/Downloads/dev/migrations/20260417143000_refresh_demo_seed_data.sql)",
       "Bash(awk '/jsonb,$/ { getline next1; if \\(next1 ~ /^        '\\\\''[A-Z]/\\) print NR\": \"next1 }' /c/Users/123/Downloads/dev/migrations/20260417143000_refresh_demo_seed_data.sql)",
       "Bash(awk '/^        ARRAY[[\\(]/ { getline next1; if \\(next1 ~ /^        '\\\\''[A-Z]/\\) print NR\": \"next1 }' /c/Users/123/Downloads/dev/migrations/20260417143000_refresh_demo_seed_data.sql)",
-      "Bash(python -)"
+      "Bash(python -)",
+      "Read(//c/c/Users/123/Downloads/dev/frontend/**)",
+      "Bash(grep -E '^\\(activity|ban|bone|brain|droplets|file-text|heart-pulse|history|pill|scan|scissors|stethoscope|thermometer|wind|zap\\)\\\\.js$')",
+      "Bash(find /c/Users/123/Downloads/dev/frontend/src -type f \\\\\\( -name \"*.tsx\" -o -name \"*.ts\" \\\\\\) ! -name \"*.test.ts\" ! -name \"*.test.tsx\" -exec wc -l {} +)",
+      "Bash(xargs wc *)",
+      "Bash(mv src/pages/case-workspace-sections.ts src/pages/case-workspace/sections.ts)",
+      "Bash(mv src/pages/case-workspace.tsx src/pages/case-workspace/index.tsx)",
+      "Bash(rg 'caseText\\\\\\(' --count-matches)",
+      "Bash(rg '\\\\btri\\\\\\(' --count-matches)",
+      "Bash(rg '\\\\bl\\\\\\(\"' --count-matches)"
     ],
     "additionalDirectories": [
       "C:\\Users\\123\\Downloads\\dev\\frontend",

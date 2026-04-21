@@ -1,5 +1,5 @@
 import { type ReactNode } from "react";
-import { Pencil } from "lucide-react";
+import { AlertCircle, Pencil, ShieldAlert } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
@@ -37,6 +37,8 @@ export const tokens = {
 } as const;
 
 export const inputClass = cn(tokens.control.inputHeight, "rounded-lg bg-card");
+export const selectClass =
+  "h-9 w-full rounded-lg border border-input bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
 export const textareaClass =
   "min-h-[80px] w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
 
@@ -251,6 +253,40 @@ export function StatusBadge({
   );
 }
 
+export function Banner({
+  tone,
+  children,
+  withIcon = false,
+}: {
+  tone: "error" | "warning";
+  children: ReactNode;
+  withIcon?: boolean;
+}) {
+  const classes =
+    tone === "error"
+      ? "border-rose-200 bg-rose-50 text-rose-700"
+      : "border-amber-200 bg-amber-50 text-amber-700";
+
+  return (
+    <div
+      className={cn(
+        "rounded-2xl border px-4 py-3 text-sm",
+        withIcon && "flex items-start gap-3",
+        classes,
+      )}
+    >
+      {withIcon ? (
+        tone === "error" ? (
+          <AlertCircle className="mt-0.5 size-4 shrink-0" />
+        ) : (
+          <ShieldAlert className="mt-0.5 size-4 shrink-0" />
+        )
+      ) : null}
+      <div>{children}</div>
+    </div>
+  );
+}
+
 // ====================================================================
 // INFO ROW
 // Label above value, optional pencil on hover.
@@ -260,13 +296,19 @@ export function InfoRow({
   label,
   value,
   onEdit,
+  editLabel,
   className,
 }: {
   label: ReactNode;
   value: ReactNode;
   onEdit?: () => void;
+  editLabel?: string;
   className?: string;
 }) {
+  const resolvedEditLabel =
+    editLabel ??
+    (typeof label === "string" ? `Edit ${label}` : "Edit");
+
   return (
     <div className={cn("group relative flex flex-col gap-1", className)}>
       <span className={tokens.text.label}>{label}</span>
@@ -275,7 +317,7 @@ export function InfoRow({
         <button
           type="button"
           onClick={onEdit}
-          aria-label="edit"
+          aria-label={resolvedEditLabel}
           className="absolute top-0 right-0 rounded-md p-1 text-muted-foreground/70 opacity-0 group-hover:opacity-100 hover:bg-muted hover:text-foreground transition"
         >
           <Pencil className={tokens.control.iconButton} />

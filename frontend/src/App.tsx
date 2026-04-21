@@ -62,6 +62,12 @@ const CasesPage = lazy(() =>
   })),
 );
 
+const CaseWorkspacePage = lazy(() =>
+  import("@/pages/case-workspace").then((module) => ({
+    default: module.CaseWorkspacePage,
+  })),
+);
+
 const DocumentsPage = lazy(() =>
   import("@/pages/documents").then((module) => ({
     default: module.DocumentsPage,
@@ -197,6 +203,7 @@ export default function App() {
                   <Route path="feedback" element={<FeedbackPage />} />
                   <Route path="privacy" element={<PatientPrivacyPage />} />
                   <Route path="cases" element={<CasesPage />} />
+                  <Route path="cases/:caseId" element={<CaseWorkspacePage />} />
                   <Route path="appointments" element={<AppointmentsPage />} />
                   <Route path="admin/users" element={<AdminUsersPage />} />
                   <Route path="admin/access" element={<AdminAccessPage />} />

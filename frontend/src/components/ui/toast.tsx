@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Check, CircleAlert, Info, TriangleAlert, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useLang } from "@/lib/i18n";
 
 export type ToastKind = "success" | "error" | "warning" | "info";
 
@@ -72,6 +73,7 @@ export function Toaster() {
 
 function ToastCard({ item }: { item: ToastItem }) {
   const { kind, message } = item;
+  const { t } = useLang();
   const palette = {
     success: {
       Icon: Check,
@@ -110,7 +112,7 @@ function ToastCard({ item }: { item: ToastItem }) {
       <p className="flex-1 text-[13px] text-foreground leading-[1.35] pt-0.5">{message}</p>
       <button
         type="button"
-        aria-label="Dismiss"
+        aria-label={t.common_dismiss}
         onClick={() => remove(item.id)}
         className="shrink-0 size-6 rounded-md inline-flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
       >

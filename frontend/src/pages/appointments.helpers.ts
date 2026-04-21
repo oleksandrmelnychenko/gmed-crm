@@ -159,6 +159,9 @@ type TimelineCommunicationEntry = {
   doctor_name: string | null;
 };
 
+const CONCIERGE_TRANSFER_COMPLETED_TEXT =
+  "Completed airport arrival step. Driver waited at hotel lobby and escorted patient to admission desk. Completed concierge-linked transfer.";
+
 const FINDINGS_PREFIX = "Findings:";
 const INCOMING_DATA_PREFIX = "Incoming data:";
 const DOCTOR_FOLLOW_UP_PREFIX = "Doctor-directed:";
@@ -238,6 +241,20 @@ function communicationTargetLabel(entry: TimelineCommunicationEntry) {
     default:
       return entry.provider_name || "Clinic";
   }
+}
+
+function localizeKnownTimelineText(
+  value: string | null | undefined,
+  labels: {
+    appointments_timeline_concierge_transfer_completed: string;
+  },
+) {
+  if (!value) return value ?? "";
+  const normalized = value.trim();
+  if (normalized === CONCIERGE_TRANSFER_COMPLETED_TEXT) {
+    return labels.appointments_timeline_concierge_transfer_completed;
+  }
+  return value;
 }
 
 function formatInterpreterMobileAgendaDateLabel(
@@ -339,6 +356,7 @@ export function buildAppointmentTimelineEvents(args: {
     | "appointments_timeline_interpreter_report_submitted"
     | "appointments_timeline_interpreter_report_approved"
     | "appointments_timeline_interpreter_report_rejected"
+    | "appointments_timeline_concierge_transfer_completed"
   >;
 }) {
   const {
@@ -372,6 +390,8 @@ export function buildAppointmentTimelineEvents(args: {
       "Interpreter report approved",
     appointments_timeline_interpreter_report_rejected:
       "Interpreter report rejected",
+    appointments_timeline_concierge_transfer_completed:
+      CONCIERGE_TRANSFER_COMPLETED_TEXT,
     ...args.labels,
   };
 
@@ -435,7 +455,7 @@ export function buildAppointmentTimelineEvents(args: {
       title: item.is_completed
         ? labels.appointments_timeline_checklist_completed
         : labels.appointments_timeline_checklist_pending,
-      detail: item.item_text,
+      detail: localizeKnownTimelineText(item.item_text, labels),
       kind: kindFromTitle(item.item_text),
       tone: item.is_completed ? "success" : "warning",
     });
@@ -445,8 +465,8 @@ export function buildAppointmentTimelineEvents(args: {
     events.push({
       id: `reminder:${item.id}`,
       occurredAt: item.completed_at ?? item.remind_at,
-      title: item.title,
-      detail: [item.user_name, item.description ?? ""]
+      title: localizeKnownTimelineText(item.title, labels),
+      detail: [item.user_name, localizeKnownTimelineText(item.description, labels)]
         .filter(Boolean)
         .join(" · "),
       kind: kindFromTitle(item.title),
@@ -458,11 +478,11 @@ export function buildAppointmentTimelineEvents(args: {
     events.push({
       id: `task:${task.id}`,
       occurredAt: task.completed_at ?? task.due_date ?? task.created_at,
-      title: task.title,
+      title: localizeKnownTimelineText(task.title, labels),
       detail: [
         task.assigned_to_name,
         task.assigned_to_role,
-        task.description ?? "",
+        localizeKnownTimelineText(task.description, labels),
       ]
         .filter(Boolean)
         .join(" · "),
@@ -476,7 +496,7 @@ export function buildAppointmentTimelineEvents(args: {
       id: `service:${service.id}`,
       occurredAt:
         service.completed_at ?? service.starts_at ?? service.created_at,
-      title: service.title,
+      title: localizeKnownTimelineText(service.title, labels),
       detail: [service.assigned_concierge_name, service.status]
         .filter(Boolean)
         .join(" · "),
@@ -489,12 +509,12 @@ export function buildAppointmentTimelineEvents(args: {
     events.push({
       id: `communication:${item.id}:created`,
       occurredAt: item.created_at,
-      title: item.subject,
+      title: localizeKnownTimelineText(item.subject, labels),
       detail: [
         `${item.direction} via ${item.channel}`,
         communicationTargetLabel(item),
         item.contact_name ?? "",
-        item.message ?? "",
+        localizeKnownTimelineText(item.message, labels),
       ]
         .filter(Boolean)
         .join(" · "),
@@ -510,7 +530,7 @@ export function buildAppointmentTimelineEvents(args: {
         detail: [
           communicationTargetLabel(item),
           item.created_by_name,
-          item.message ?? "",
+          localizeKnownTimelineText(item.message, labels),
         ]
           .filter(Boolean)
           .join(" · "),
@@ -554,7 +574,7 @@ export function buildAppointmentTimelineEvents(args: {
           report.approval_status === "approved"
             ? labels.appointments_timeline_interpreter_report_approved
             : labels.appointments_timeline_interpreter_report_rejected,
-        detail: [report.approved_by_name, report.notes ?? ""]
+        detail: [report.approved_by_name, localizeKnownTimelineText(report.notes, labels)]
           .filter(Boolean)
           .join(" · "),
         kind: "interpreter",
