@@ -44,3 +44,18 @@ export { useLocalStorage, useVersionedLocalStorage } from "./use-local-storage";
 export { useOutsideClose } from "./use-outside-close";
 export { DensityToggle, DENSITY_ROW_HEIGHT, type DensityOption, type DensityToggleProps } from "./density-toggle";
 export { ColumnVisibilityMenu, type ColumnVisibilityMenuProps } from "./column-visibility-menu";
+export {
+  DEFAULT_OPERATOR_LABELS,
+  OPERATORS_BY_FIELD_TYPE,
+  defaultOperatorForFieldType,
+  defaultValueForOperator,
+  labelForOperator,
+  operatorTakesValue,
+  operatorExpectsArray,
+  operatorExpectsDateRange,
+  operatorExpectsSingleDate,
+  operatorExpectsDays,
+  type FilterOperatorLabels,
+} from "./filter-operator-meta";
+export { FilterValueInput } from "./filter-value-input";
+export { FilterBuilder, type FilterBuilderProps, type FilterBuilderTranslations } from "./filter-builder";
