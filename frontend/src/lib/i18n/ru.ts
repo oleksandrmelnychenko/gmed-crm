@@ -109,6 +109,11 @@ export const ru: Translations = {
   common_reset: "Сбросить",
   common_show_stats: "Показать статистику",
   common_create: "Создать",
+  common_refresh: "Обновить",
+  common_registry: "Реестр",
+  common_configuration: "Конфигурация",
+  common_monitoring: "Мониторинг",
+  common_last_updated: "Последнее обновление",
   pagination_per_page: "Показывать по",
   pagination_go_to_page: "Перейти на страницу",
   pagination_go: "Перейти",
@@ -472,6 +477,8 @@ export const ru: Translations = {
     "Отчёт переводчика согласован",
   appointments_timeline_interpreter_report_rejected:
     "Отчёт переводчика отклонён",
+  appointments_timeline_concierge_transfer_completed:
+    "Этап прибытия в аэропорт завершён. Водитель ожидал в лобби отеля и сопроводил пациента к стойке оформления. Трансфер, связанный с concierge-сервисом, завершён.",
 
   nav_overview: "ОБЗОР",
   nav_crm: "CRM",
@@ -515,6 +522,7 @@ export const ru: Translations = {
   settings_no_sessions: "Нет активных сессий.",
   settings_last_active: "Последняя активность",
   settings_updated: "Сохранено",
+  settings_no_changes: "Нет изменений для сохранения.",
 
   nav_activity: "Журнал активности",
   activity_title: "Журнал активности",
@@ -548,6 +556,7 @@ export const ru: Translations = {
   security_subtitle: "IP-фильтрация, блокировки и режим обслуживания",
   security_ip_whitelist: "Белый список IP",
   security_ip_add: "Добавить IP",
+  security_ip_add_hint: "Управляемые сетевые диапазоны с рабочим доступом и статусом допуска.",
   security_ip_cidr: "CIDR (напр. 192.168.1.0/24)",
   security_ip_desc: "Описание",
   security_ip_none: "IP-адреса не добавлены.",
@@ -558,6 +567,8 @@ export const ru: Translations = {
   security_login_history: "История входов",
   security_maintenance: "Режим обслуживания",
   security_maintenance_msg: "Сообщение",
+  security_maintenance_hint:
+    "Включайте режим обслуживания только для плановых работ. Сообщение будет показано всем затронутым пользователям.",
   security_maintenance_on: "Включить",
   security_maintenance_off: "Выключить",
   security_audit_analytics: "Аудит-аналитика",
@@ -585,6 +596,10 @@ export const ru: Translations = {
   health_db_size: "Размер БД",
   health_connections: "Активные подключения",
   health_tables: "Таблицы (топ-10)",
+  health_attention: "Требуется операционное внимание",
+  health_section_database: "След базы данных",
+  health_section_access: "Состояние доступа и сессий",
+  health_section_data: "Объем данных",
   health_users_total: "Всего пользователей",
   health_users_active: "Активных",
   health_users_locked: "Заблокированных",
@@ -708,7 +723,12 @@ export const ru: Translations = {
   topbar_online: "Онлайн",
 
   common_back: "Назад",
+  common_close: "Закрыть",
+  common_dismiss: "Скрыть",
   common_lang_native: "Русский",
+  nav_back: "Назад",
+  nav_forward: "Вперёд",
+  ui_toggle_sidebar: "Переключить боковую панель",
 
   nav_security: "Безопасность",
   nav_health: "Состояние системы",
@@ -732,6 +752,7 @@ export const ru: Translations = {
   notif_user: "Пользователь",
   notif_url: "URL",
   notif_test_ok: "OK",
+  notif_config_invalid: "Введите валидный JSON или оставьте поле пустым.",
 
   cf_title: "Пользовательские поля",
   cf_subtitle: "Добавление полей к лидам, пациентам и заказам без миграций",

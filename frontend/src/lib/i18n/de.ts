@@ -109,6 +109,11 @@ export const de: Translations = {
   common_reset: "Zurücksetzen",
   common_show_stats: "Statistik anzeigen",
   common_create: "Anlegen",
+  common_refresh: "Aktualisieren",
+  common_registry: "Register",
+  common_configuration: "Konfiguration",
+  common_monitoring: "Monitoring",
+  common_last_updated: "Zuletzt aktualisiert",
   pagination_per_page: "Pro Seite",
   pagination_go_to_page: "Zu Seite",
   pagination_go: "Los",
@@ -472,6 +477,8 @@ export const de: Translations = {
     "Dolmetscherbericht freigegeben",
   appointments_timeline_interpreter_report_rejected:
     "Dolmetscherbericht abgelehnt",
+  appointments_timeline_concierge_transfer_completed:
+    "Ankunft am Flughafen abgeschlossen. Der Fahrer wartete in der Hotellobby und begleitete den Patienten bis zum Aufnahmeschalter. Der concierge-verknüpfte Transfer wurde abgeschlossen.",
 
   nav_overview: "ÜBERSICHT",
   nav_crm: "CRM",
@@ -516,6 +523,7 @@ export const de: Translations = {
   settings_no_sessions: "Keine aktiven Sitzungen.",
   settings_last_active: "Letzte Aktivität",
   settings_updated: "Gespeichert",
+  settings_no_changes: "Keine Änderungen zum Speichern.",
 
   nav_activity: "Aktivitätsprotokoll",
   activity_title: "Aktivitätsprotokoll",
@@ -549,6 +557,7 @@ export const de: Translations = {
   security_subtitle: "IP-Filterung, Kontosperren und Wartungsmodus",
   security_ip_whitelist: "IP-Whitelist",
   security_ip_add: "IP hinzufügen",
+  security_ip_add_hint: "Verwaltete Netzbereiche mit produktivem Zugriff und Freigabestatus.",
   security_ip_cidr: "CIDR (z.B. 192.168.1.0/24)",
   security_ip_desc: "Beschreibung",
   security_ip_none: "Keine IP-Adressen hinzugefügt.",
@@ -559,6 +568,8 @@ export const de: Translations = {
   security_login_history: "Anmeldeverlauf",
   security_maintenance: "Wartungsmodus",
   security_maintenance_msg: "Nachricht",
+  security_maintenance_hint:
+    "Aktivieren Sie den Wartungsmodus nur für geplante Eingriffe. Die Nachricht wird allen betroffenen Benutzern angezeigt.",
   security_maintenance_on: "Aktivieren",
   security_maintenance_off: "Deaktivieren",
   security_audit_analytics: "Audit-Analytik",
@@ -586,6 +597,10 @@ export const de: Translations = {
   health_db_size: "DB-Größe",
   health_connections: "Aktive Verbindungen",
   health_tables: "Tabellen (Top 10)",
+  health_attention: "Operative Aufmerksamkeit erforderlich",
+  health_section_database: "Datenbank-Footprint",
+  health_section_access: "Zugriffs- und Sitzungsstatus",
+  health_section_data: "Datenvolumen",
   health_users_total: "Benutzer gesamt",
   health_users_active: "Aktiv",
   health_users_locked: "Gesperrt",
@@ -710,7 +725,12 @@ export const de: Translations = {
   topbar_online: "Online",
 
   common_back: "Zurück",
+  common_close: "Schließen",
+  common_dismiss: "Ausblenden",
   common_lang_native: "Deutsch",
+  nav_back: "Zurück",
+  nav_forward: "Vorwärts",
+  ui_toggle_sidebar: "Seitenleiste umschalten",
 
   nav_security: "Sicherheit",
   nav_health: "Systemstatus",
@@ -734,6 +754,7 @@ export const de: Translations = {
   notif_user: "Benutzer",
   notif_url: "URL",
   notif_test_ok: "OK",
+  notif_config_invalid: "Geben Sie valides JSON ein oder lassen Sie das Feld leer.",
 
   cf_title: "Benutzerdefinierte Felder",
   cf_subtitle: "Felder zu Leads, Patienten und Aufträgen hinzufügen",

@@ -1,18 +1,28 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Activity,
+  Database,
+  FileStack,
+  RefreshCcw,
+  UsersRound,
+} from "lucide-react";
+
+import {
+  AdminInlineMetric,
+  AdminTableCard,
+} from "@/components/admin-page-patterns";
+import { Button } from "@/components/ui/button";
 import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
+import { formatAdminDateTime } from "@/pages/admin-pages.helpers";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+  Banner,
+  EmptyCell,
+  PageHeader,
+  Section,
+  StatCard,
+  TabLoader,
+} from "@/components/ui-shell";
 
 interface HealthData {
   database: {
@@ -37,136 +47,224 @@ interface HealthData {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Stat card
-// ---------------------------------------------------------------------------
-
-function StatCard({
-  label,
-  value,
-  sub,
-  warn,
-}: {
-  label: string;
-  value: string | number;
-  sub?: string;
-  warn?: string;
-}) {
-  return (
-    <div className="bg-white rounded-xl border p-5 space-y-1">
-      <p className="text-muted-foreground text-xs font-medium">{label}</p>
-      <p className="text-2xl font-semibold">{value}</p>
-      {sub && (
-        <p className="text-muted-foreground text-xs">{sub}</p>
-      )}
-      {warn && (
-        <p className="text-xs text-red-600">{warn}</p>
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
-
 export function AdminHealthPage() {
-  const { t } = useLang();
-
+  const { t, lang } = useLang();
   const [data, setData] = useState<HealthData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
+  const [error, setError] = useState("");
+  const [refreshedAt, setRefreshedAt] = useState<Date | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
-    setError(false);
+    setError("");
     try {
-      const d = await apiFetch<HealthData>("/admin/health");
-      setData(d);
-    } catch {
-      setError(true);
+      const payload = await apiFetch<HealthData>("/admin/health");
+      setData(payload);
+      setRefreshedAt(new Date());
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : t.common_error);
+      setData(null);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t.common_error]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-semibold">{t.health_title}</h1>
-        <p className="text-muted-foreground text-sm">{t.health_subtitle}</p>
-      </div>
+  const operationalAttention = useMemo(() => {
+    if (!data) return [];
+    const attention: string[] = [];
+    if (data.users.locked > 0) {
+      attention.push(`${t.health_users_locked}: ${data.users.locked}`);
+    }
+    if (data.sessions.pending_mfa > 0) {
+      attention.push(`${t.health_mfa_pending}: ${data.sessions.pending_mfa}`);
+    }
+    return attention;
+  }, [data, t.health_mfa_pending, t.health_users_locked]);
 
-      {loading ? (
-        <p className="text-muted-foreground py-12 text-center">
-          {t.common_loading}
-        </p>
-      ) : error || !data ? (
-        <p className="py-12 text-center text-red-600">{t.common_error}</p>
-      ) : (
+  const datasetVolume = data
+    ? data.data.patients + data.data.leads + data.data.orders
+    : 0;
+
+  return (
+    <div className="space-y-4">
+      <PageHeader
+        title={t.health_title}
+        description={
+          refreshedAt
+            ? `${t.health_subtitle} · ${t.common_last_updated}: ${formatAdminDateTime(refreshedAt, lang)}`
+            : t.health_subtitle
+        }
+        actions={(
+          <Button
+            type="button"
+            variant="outline"
+            className="h-9 rounded-lg gap-1.5 bg-card px-3.5"
+            disabled={loading}
+            onClick={() => void load()}
+          >
+            <RefreshCcw className="size-3.5" />
+            {t.common_refresh}
+          </Button>
+        )}
+      />
+
+      {loading ? <TabLoader /> : null}
+      {!loading && error ? <Banner tone="error">{error}</Banner> : null}
+
+      {!loading && data ? (
         <>
-          {/* Stats grid */}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <StatCard
+          <div className="flex flex-wrap gap-x-8 gap-y-4">
+            <AdminInlineMetric
+              icon={Database}
+              tone="sky"
               label={t.health_db_size}
               value={data.database.size}
-              sub={`${data.database.active_connections} ${t.health_connections}`}
+              description={`${data.database.active_connections} ${t.health_connections}`}
             />
-            <StatCard
-              label={t.health_users_total}
-              value={data.users.total}
-              sub={`${data.users.active} ${t.health_users_active}`}
-              warn={
-                data.users.locked > 0
-                  ? `${data.users.locked} ${t.health_users_locked}`
-                  : undefined
-              }
+            <AdminInlineMetric
+              icon={UsersRound}
+              tone="emerald"
+              label={t.health_users_active}
+              value={data.users.active}
+              description={`${data.users.total} ${t.health_users_total}`}
             />
-            <StatCard
+            <AdminInlineMetric
+              icon={Activity}
+              tone="amber"
               label={t.health_sessions_active}
               value={data.sessions.active}
-              sub={
-                data.sessions.pending_mfa > 0
-                  ? `${data.sessions.pending_mfa} ${t.health_mfa_pending}`
-                  : undefined
-              }
+              description={`${data.sessions.pending_mfa} ${t.health_mfa_pending}`}
             />
-            <StatCard
+            <AdminInlineMetric
+              icon={FileStack}
+              tone="slate"
               label={t.health_data}
-              value={`P:${data.data.patients} L:${data.data.leads} O:${data.data.orders}`}
-              sub={`${data.data.audit_entries} ${t.health_audit_suffix}`}
+              value={datasetVolume}
+              description={`${data.data.audit_entries} ${t.health_audit_suffix}`}
             />
           </div>
 
-          {/* Tables list */}
-          <div className="bg-white rounded-xl border">
-            <div className="p-4 border-b">
-              <h2 className="text-lg font-medium">{t.health_tables}</h2>
-            </div>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{t.health_col_table}</TableHead>
-                  <TableHead>{t.health_col_size}</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data.database.tables.map((tbl) => (
-                  <TableRow key={tbl.table}>
-                    <TableCell className="font-medium">{tbl.table}</TableCell>
-                    <TableCell className="font-mono">{tbl.size}</TableCell>
-                  </TableRow>
+          {operationalAttention.length > 0 ? (
+            <Banner tone="warning" withIcon>
+              <div className="space-y-1">
+                <div className="font-medium">{t.health_attention}</div>
+                {operationalAttention.map((line) => (
+                  <div key={line}>{line}</div>
                 ))}
-              </TableBody>
-            </Table>
-          </div>
+              </div>
+            </Banner>
+          ) : null}
+
+          <Section title={t.health_section_database}>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              <StatCard
+                label={t.health_db_size}
+                value={data.database.size}
+                description={`${data.database.active_connections} ${t.health_connections}`}
+              />
+              <StatCard
+                label={t.health_tables}
+                value={data.database.tables.length}
+                description={t.common_monitoring}
+              />
+              <StatCard
+                label={t.common_last_updated}
+                value={refreshedAt ? formatAdminDateTime(refreshedAt, lang) : "—"}
+                description={t.health_title}
+              />
+            </div>
+
+            <AdminTableCard
+              title={t.health_tables}
+              description={t.health_subtitle}
+              count={data.database.tables.length}
+            >
+              {data.database.tables.length === 0 ? (
+                <div className="p-4">
+                  <EmptyCell>{t.health_tables}</EmptyCell>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-[13px]">
+                    <thead className="bg-muted/40">
+                      <tr className="text-left text-[11px] uppercase tracking-wider text-muted-foreground">
+                        <th className="px-4 py-2.5 font-medium">{t.health_col_table}</th>
+                        <th className="w-[180px] px-4 py-2.5 font-medium">{t.health_col_size}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.database.tables.map((table) => (
+                        <tr key={table.table} className="border-t border-border">
+                          <td className="px-4 py-3 font-medium text-foreground">
+                            {table.table}
+                          </td>
+                          <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
+                            {table.size}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </AdminTableCard>
+          </Section>
+
+          <Section title={t.health_section_access}>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <StatCard
+                label={t.health_users_total}
+                value={data.users.total}
+                description={t.health_title}
+              />
+              <StatCard
+                label={t.health_users_active}
+                value={data.users.active}
+                description={t.users_status}
+              />
+              <StatCard
+                label={t.health_users_locked}
+                value={data.users.locked}
+                description={t.security_title}
+              />
+              <StatCard
+                label={t.health_mfa_pending}
+                value={data.sessions.pending_mfa}
+                description={t.settings_active_sessions}
+              />
+            </div>
+          </Section>
+
+          <Section title={t.health_section_data}>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <StatCard
+                label={t.patients_title}
+                value={data.data.patients}
+                description={t.health_data}
+              />
+              <StatCard
+                label={t.nav_crm}
+                value={data.data.leads}
+                description={t.health_data}
+              />
+              <StatCard
+                label={t.orders_title}
+                value={data.data.orders}
+                description={t.health_data}
+              />
+              <StatCard
+                label={t.activity_title}
+                value={data.data.audit_entries}
+                description={t.health_audit_suffix}
+              />
+            </div>
+          </Section>
         </>
-      )}
+      ) : null}
     </div>
   );
 }

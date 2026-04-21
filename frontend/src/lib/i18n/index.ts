@@ -108,6 +108,11 @@ export interface Translations {
   common_reset: string;
   common_show_stats: string;
   common_create: string;
+  common_refresh: string;
+  common_registry: string;
+  common_configuration: string;
+  common_monitoring: string;
+  common_last_updated: string;
   pagination_per_page: string;
   pagination_go_to_page: string;
   pagination_go: string;
@@ -377,6 +382,7 @@ export interface Translations {
   appointments_timeline_interpreter_report_submitted: string;
   appointments_timeline_interpreter_report_approved: string;
   appointments_timeline_interpreter_report_rejected: string;
+  appointments_timeline_concierge_transfer_completed: string;
 
   nav_overview: string;
   nav_crm: string;
@@ -417,6 +423,7 @@ export interface Translations {
   settings_no_sessions: string;
   settings_last_active: string;
   settings_updated: string;
+  settings_no_changes: string;
 
   nav_activity: string;
   activity_title: string;
@@ -450,6 +457,7 @@ export interface Translations {
   security_subtitle: string;
   security_ip_whitelist: string;
   security_ip_add: string;
+  security_ip_add_hint: string;
   security_ip_cidr: string;
   security_ip_desc: string;
   security_ip_none: string;
@@ -460,6 +468,7 @@ export interface Translations {
   security_login_history: string;
   security_maintenance: string;
   security_maintenance_msg: string;
+  security_maintenance_hint: string;
   security_maintenance_on: string;
   security_maintenance_off: string;
   security_audit_analytics: string;
@@ -485,6 +494,10 @@ export interface Translations {
   health_db_size: string;
   health_connections: string;
   health_tables: string;
+  health_attention: string;
+  health_section_database: string;
+  health_section_access: string;
+  health_section_data: string;
   health_users_total: string;
   health_users_active: string;
   health_users_locked: string;
@@ -597,7 +610,12 @@ export interface Translations {
   topbar_online: string;
 
   common_back: string;
+  common_close: string;
+  common_dismiss: string;
   common_lang_native: string;
+  nav_back: string;
+  nav_forward: string;
+  ui_toggle_sidebar: string;
 
   nav_security: string;
   nav_health: string;
@@ -621,6 +639,7 @@ export interface Translations {
   notif_user: string;
   notif_url: string;
   notif_test_ok: string;
+  notif_config_invalid: string;
 
   cf_title: string;
   cf_subtitle: string;
