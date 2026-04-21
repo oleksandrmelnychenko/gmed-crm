@@ -11,6 +11,8 @@ import {
 } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
+  Archive,
+  ArchiveRestore,
   CalendarClock,
   Copy,
   Download,
@@ -19,7 +21,6 @@ import {
   Info,
   LoaderCircle,
   Mail,
-  MoreHorizontal,
   Phone,
   Plus,
   RefreshCw,
@@ -865,6 +866,26 @@ export function PatientsPage() {
     syncQuery({ patient: patientId });
   }
 
+  async function handleToggleArchive(patient: PatientSummary) {
+    const nextActive = !patient.is_active;
+    const path = patient.is_active
+      ? `/patients/${patient.id}/deactivate`
+      : `/patients/${patient.id}/activate`;
+
+    setPatients((current) =>
+      current.map((p) => (p.id === patient.id ? { ...p, is_active: nextActive } : p)),
+    );
+
+    try {
+      await apiFetch(path, { method: "POST" });
+    } catch (error) {
+      setPatients((current) =>
+        current.map((p) => (p.id === patient.id ? { ...p, is_active: !nextActive } : p)),
+      );
+      setListError(error instanceof Error ? error.message : "Failed to update patient status");
+    }
+  }
+
   async function handleAssignPatient() {
     if (!detail || !selectedAssignee) return;
 
@@ -1226,15 +1247,22 @@ export function PatientsPage() {
                 >
                   <Edit3 className="size-3" />
                 </button>
-                <button
-                  type="button"
-                  onClick={() => openPatient(p.id)}
-                  title="More"
-                  aria-label="More"
-                  className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-                >
-                  <MoreHorizontal className="size-3" />
-                </button>
+                {permissions.canCreateEdit ? (
+                  <button
+                    type="button"
+                    onClick={() => handleToggleArchive(p)}
+                    title={p.is_active ? (tr.patients_archive ?? "Archive") : (tr.patients_reactivate ?? "Reactivate")}
+                    aria-label={p.is_active ? (tr.patients_archive ?? "Archive") : (tr.patients_reactivate ?? "Reactivate")}
+                    className={cn(
+                      "inline-flex size-6 items-center justify-center rounded-md transition-colors",
+                      p.is_active
+                        ? "text-muted-foreground hover:bg-muted hover:text-amber-700"
+                        : "text-muted-foreground hover:bg-muted hover:text-emerald-700",
+                    )}
+                  >
+                    {p.is_active ? <Archive className="size-3" /> : <ArchiveRestore className="size-3" />}
+                  </button>
+                ) : null}
               </>
             )}
             selectedIds={selectedIds}
