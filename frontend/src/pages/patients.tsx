@@ -11,11 +11,14 @@ import {
 import { useSearchParams } from "react-router-dom";
 import {
   CalendarClock,
+  Copy,
   Download,
+  Edit3,
   Filter,
   Info,
   LoaderCircle,
   Mail,
+  MoreHorizontal,
   Phone,
   Plus,
   RefreshCw,
@@ -1122,6 +1125,39 @@ export function PatientsPage() {
             rowId={(p) => p.id}
             activeRowId={selectedId}
             onRowClick={(p) => openPatient(p.id)}
+            rowActions={(p) => (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void navigator.clipboard?.writeText(p.patient_id);
+                  }}
+                  title="Copy ID"
+                  aria-label="Copy ID"
+                  className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                >
+                  <Copy className="size-3" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openPatient(p.id)}
+                  title={t.patients_edit ?? "Edit"}
+                  aria-label={t.patients_edit ?? "Edit"}
+                  className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                >
+                  <Edit3 className="size-3" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openPatient(p.id)}
+                  title="More"
+                  aria-label="More"
+                  className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                >
+                  <MoreHorizontal className="size-3" />
+                </button>
+              </>
+            )}
             selectedIds={selectedIds}
             onSelectedIdsChange={setSelectedIds}
             selectionEnabled={permissions.canCreateEdit}
