@@ -30,6 +30,7 @@ import { ColumnVisibilityMenu } from "@/components/data-table/column-visibility-
 import { DataTable } from "@/components/data-table/data-table";
 import { DensityToggle } from "@/components/data-table/density-toggle";
 import { FilterBuilder } from "@/components/data-table/filter-builder";
+import { exportCsv } from "@/components/data-table/csv-export";
 import { applyFilters } from "@/components/data-table/filter-logic";
 import { buildSearchIndex, searchWithIndex } from "@/components/data-table/search";
 import { SortBuilder } from "@/components/data-table/sort-builder";
@@ -1050,6 +1051,13 @@ export function PatientsPage() {
               size="icon-sm"
               title={t.common_export ?? "Export"}
               aria-label={t.common_export ?? "Export"}
+              onClick={() => {
+                const visibleCols = columns.filter(
+                  (c) => !hiddenColumns.includes(c.id) || c.required,
+                );
+                const stamp = new Date().toISOString().slice(0, 10);
+                exportCsv(sortedAndFilteredPatients, visibleCols, `patients-${stamp}.csv`);
+              }}
             >
               <Download className="size-3.5" />
             </Button>
