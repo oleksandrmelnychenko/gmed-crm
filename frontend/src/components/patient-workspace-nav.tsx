@@ -20,8 +20,9 @@ type WorkspaceItem = {
 };
 
 export function PatientWorkspaceNav() {
-  const { id } = useParams<{ id: string }>();
+  const { id: routeId } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
+  const id = routeId ?? searchParams.get("patient") ?? undefined;
   const { user } = useAuth();
   const { t, lang } = useLang();
   const l = (de: string, ru: string, en: string) =>
@@ -31,12 +32,14 @@ export function PatientWorkspaceNav() {
   const canViewDocuments = canViewPatientDocumentsSurface(user?.role);
   const canViewContracts = canViewPatientContractsSurface(user?.role);
   const canViewInvoices = canViewPatientInvoicesSurface(user?.role);
-  const currentTab = normalizePatientDetailTab(searchParams.get("tab"), {
-    canViewOperationalSurface,
-    canViewDocuments,
-    canViewContracts,
-    canViewInvoices,
-  });
+  const currentTab = routeId
+    ? normalizePatientDetailTab(searchParams.get("tab"), {
+        canViewOperationalSurface,
+        canViewDocuments,
+        canViewContracts,
+        canViewInvoices,
+      })
+    : null;
 
   const items: WorkspaceItem[] = [
     {
@@ -133,7 +136,7 @@ export function PatientWorkspaceNav() {
       <div className="flex-1 overflow-y-auto px-3 py-4">
         <div className="space-y-1">
           {items.map((item) => {
-            const isActive = currentTab === item.key;
+            const isActive = currentTab !== null && currentTab === item.key;
             const Icon = item.icon;
             const to =
               item.key === "profile" ? `/patients/${id}` : `/patients/${id}?tab=${item.key}`;

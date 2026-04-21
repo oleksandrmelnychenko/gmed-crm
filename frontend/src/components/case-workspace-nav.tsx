@@ -19,8 +19,22 @@ export function CaseWorkspaceNav() {
   const [searchParams] = useSearchParams();
   const { t, lang } = useLang();
   const currentSection = normalizeCaseSectionKey(searchParams.get("section"));
+  const patientContext = searchParams.get("patient");
 
   if (!caseId) return null;
+
+  function buildSectionLink(sectionKey: string) {
+    const params = new URLSearchParams();
+    if (patientContext) params.set("patient", patientContext);
+    if (sectionKey !== "overview") params.set("section", sectionKey);
+    const query = params.toString();
+    return query ? `/cases/${caseId}?${query}` : `/cases/${caseId}`;
+  }
+
+  const backHref = patientContext ? `/patients/${patientContext}?tab=cases` : "/cases";
+  const backLabel = patientContext
+    ? (lang === "de" ? "Patient" : lang === "ru" ? "Пациент" : "Patient")
+    : t.cases_title;
 
   const groupedSections = GROUP_ORDER.map((group) => ({
     group,
@@ -31,11 +45,11 @@ export function CaseWorkspaceNav() {
     <aside className="hidden lg:flex lg:w-64 xl:w-72 shrink-0 flex-col overflow-hidden rounded-xl border border-border/70 bg-card shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
       <div className="px-4 pt-4">
         <StaffLink
-          to="/cases"
+          to={backHref}
           className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
         >
           <ArrowLeft className="size-3.5" />
-          {t.cases_title}
+          {backLabel}
         </StaffLink>
       </div>
 
@@ -55,10 +69,7 @@ export function CaseWorkspaceNav() {
               {items.map((item) => {
                 const isActive = currentSection === item.key;
                 const Icon = item.icon;
-                const to =
-                  item.key === "overview"
-                    ? `/cases/${caseId}`
-                    : `/cases/${caseId}?section=${item.key}`;
+                const to = buildSectionLink(item.key);
                 return (
                   <StaffLink
                     key={item.key}

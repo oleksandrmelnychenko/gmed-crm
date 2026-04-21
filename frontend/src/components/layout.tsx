@@ -48,13 +48,17 @@ export function AppLayout() {
 function AppLayoutInner() {
   const { user } = useAuth();
   const location = useLocation();
-  const showPatientWorkspaceNav = Boolean(matchPath("/patients/:id", location.pathname));
-  const showCaseWorkspaceNav = Boolean(matchPath("/cases/:caseId", location.pathname));
-  const appointmentParams = new URLSearchParams(location.search);
+  const isPatientDetailRoute = Boolean(matchPath("/patients/:id", location.pathname));
+  const isCaseWorkspaceRoute = Boolean(matchPath("/cases/:caseId", location.pathname));
+  const routeSearchParams = new URLSearchParams(location.search);
+  const hasPatientContextOnCase =
+    isCaseWorkspaceRoute && Boolean(routeSearchParams.get("patient"));
+  const showPatientWorkspaceNav = isPatientDetailRoute || hasPatientContextOnCase;
+  const showCaseWorkspaceNav = isCaseWorkspaceRoute;
   const showAppointmentWorkspaceNav =
     user?.role !== "patient" &&
     location.pathname === "/appointments" &&
-    Boolean(appointmentParams.get("appointment"));
+    Boolean(routeSearchParams.get("appointment"));
 
   if (
     user &&
@@ -70,11 +74,11 @@ function AppLayoutInner() {
         <Topbar />
         <div className="flex-1 flex overflow-hidden gap-[6px] p-[6px] bg-muted/50">
           <NavPanel />
-          {showPatientWorkspaceNav ? (
-            <PatientWorkspaceNav />
-          ) : showCaseWorkspaceNav ? (
-            <CaseWorkspaceNav />
-          ) : showAppointmentWorkspaceNav ? (
+          {showPatientWorkspaceNav ? <PatientWorkspaceNav /> : null}
+          {showCaseWorkspaceNav ? <CaseWorkspaceNav /> : null}
+          {!showPatientWorkspaceNav &&
+          !showCaseWorkspaceNav &&
+          showAppointmentWorkspaceNav ? (
             <AppointmentWorkspaceNav />
           ) : null}
           <main

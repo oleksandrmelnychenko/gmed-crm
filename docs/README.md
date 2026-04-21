@@ -40,6 +40,7 @@
 ### Architecture
 
 - `architecture/01_target-architecture_ua.md`
+- `architecture/03_frontend-workspace-refactor-plan_ua.md` - канонічний tracker для frontend refactor `app-shell -> record-workspace -> feature modules`
 
 ### Testing
 

@@ -26,7 +26,22 @@
       "Bash(mv src/pages/case-workspace.tsx src/pages/case-workspace/index.tsx)",
       "Bash(rg 'caseText\\\\\\(' --count-matches)",
       "Bash(rg '\\\\btri\\\\\\(' --count-matches)",
-      "Bash(rg '\\\\bl\\\\\\(\"' --count-matches)"
+      "Bash(rg '\\\\bl\\\\\\(\"' --count-matches)",
+      "Bash(grep -v \"test\\\\|//\")",
+      "Bash(git checkout *)",
+      "Bash(npm install *)",
+      "Bash(git reset *)",
+      "Bash(npx skills@latest add mattpocock/skills/tdd --global)",
+      "Bash(npx -y skills@latest add mattpocock/skills/tdd -y -g)",
+      "Bash(curl -s https://api.github.com/repos/mattpocock/skills/contents/)",
+      "Bash(python -c \"import json,sys; [print\\(f\\\\\"- {x['name']} \\({x['type']}\\)\\\\\"\\) for x in json.load\\(sys.stdin\\)]\")",
+      "Bash(curl -s https://raw.githubusercontent.com/mattpocock/skills/main/README.md)",
+      "Bash(npx -y skills@latest add mattpocock/skills/request-refactor-plan -y -g)",
+      "Bash(npx -y skills@latest add mattpocock/skills/triage-issue -y -g)",
+      "Bash(npx -y skills@latest add mattpocock/skills/git-guardrails-claude-code -y -g)",
+      "WebFetch(domain:github.com)",
+      "Bash(npm run *)",
+      "Bash(grep -n \"path === \\\\\"/patients\\\\\"\\\\|/patients\\\\\"\\\\s*&&\\\\s*route\\\\|/patients$\" tests/e2e/staff-smoke.spec.ts)"
     ],
     "additionalDirectories": [
       "C:\\Users\\123\\Downloads\\dev\\frontend",

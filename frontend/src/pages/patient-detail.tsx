@@ -4327,7 +4327,7 @@ export function PatientDetailPage() {
                   <button
                     key={c.id}
                     type="button"
-                    onClick={() => staffGo(`/cases/${c.id}`)}
+                    onClick={() => staffGo(`/cases/${c.id}?patient=${id}`)}
                     className="rounded-xl border border-border/50 bg-card px-4 py-3 text-left transition-colors hover:border-border hover:bg-muted/30"
                   >
                     <div className="flex items-center justify-between gap-3">
