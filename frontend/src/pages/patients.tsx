@@ -4,6 +4,7 @@ import {
   useDeferredValue,
   useEffect,
   useMemo,
+  useRef,
   useState,
   useTransition,
   type FormEvent,
@@ -543,6 +544,22 @@ export function PatientsPage() {
   const showStats = true;
   const [helpOpen, setHelpOpen] = useState(false);
   const [, startFilterTransition] = useTransition();
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      const isTyping =
+        target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.isContentEditable;
+      if (event.key === "/" && !isTyping) {
+        event.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const [filterPredicates, setFilterPredicatesState] = useState<FilterPredicate[]>(() => {
     if (typeof window === "undefined") return [];
@@ -927,10 +944,17 @@ export function PatientsPage() {
           <div className="relative">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
             <Input
+              ref={searchInputRef}
               value={filters.search}
               onChange={(event) =>
                 setFilters((current) => ({ ...current, search: event.target.value }))
               }
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  setFilters((current) => ({ ...current, search: "" }));
+                  (event.target as HTMLInputElement).blur();
+                }
+              }}
               placeholder={t.common_search}
               className="h-8 w-[280px] rounded-lg bg-card pl-8 text-[13px]"
             />
@@ -1132,11 +1156,23 @@ export function PatientsPage() {
                 <span className="text-muted-foreground">selected</span>
               </div>
               <div className="flex items-center gap-1">
-                <Button type="button" variant="outline" size="xs" disabled>
-                  Archive
-                </Button>
-                <Button type="button" variant="outline" size="xs" disabled>
-                  Export
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  onClick={() => {
+                    const selectedRows = sortedAndFilteredPatients.filter((p) =>
+                      selectedIds.includes(p.id),
+                    );
+                    const visibleCols = columns.filter(
+                      (c) => !hiddenColumns.includes(c.id) || c.required,
+                    );
+                    const stamp = new Date().toISOString().slice(0, 10);
+                    exportCsv(selectedRows, visibleCols, `patients-selected-${stamp}.csv`);
+                  }}
+                >
+                  <Download className="size-3" />
+                  {t.common_export ?? "Export"}
                 </Button>
                 <Button
                   type="button"
@@ -1145,7 +1181,7 @@ export function PatientsPage() {
                   onClick={() => setSelectedIds([])}
                 >
                   <X className="size-3" />
-                  Clear
+                  {t.common_reset}
                 </Button>
               </div>
             </div>
