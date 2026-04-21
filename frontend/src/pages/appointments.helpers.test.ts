@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildInterpreterMobileAgendaSections,
   buildAppointmentTimelineEvents,
+  buildAppointmentWorkflowSummary,
   canResubmitInterpreterReport,
   shouldUseInterpreterMobileAgenda,
 } from "./appointments.helpers";
@@ -34,6 +35,57 @@ describe("canResubmitInterpreterReport", () => {
         interpreterId: "user-1",
       })
     ).toBe(false);
+  });
+});
+
+describe("buildAppointmentWorkflowSummary", () => {
+  it("summarizes visible workflow surfaces and backlog counts", () => {
+    expect(
+      buildAppointmentWorkflowSummary({
+        showCompletionSection: true,
+        showStatusSection: true,
+        showScheduleSection: true,
+        showInterpreterSection: true,
+        showChecklistSection: true,
+        showReminderSection: true,
+        showTaskSection: true,
+        checklistTotalCount: 6,
+        openChecklistCount: 2,
+        openTaskCount: 3,
+        pendingReminderCount: 1,
+        interpreterRequired: true,
+        interpreterReady: false,
+      }),
+    ).toEqual({
+      visibleSurfaceCount: 7,
+      transitionSurfaceCount: 2,
+      logisticsSurfaceCount: 2,
+      backlogSurfaceCount: 3,
+      openIssueCount: 6,
+      checklistCompletedCount: 4,
+      followUpQueueCount: 4,
+      interpreterGate: "pending",
+    });
+  });
+
+  it("treats missing interpreters as no workflow gate", () => {
+    expect(
+      buildAppointmentWorkflowSummary({
+        showCompletionSection: false,
+        showStatusSection: false,
+        showScheduleSection: true,
+        showInterpreterSection: false,
+        showChecklistSection: false,
+        showReminderSection: true,
+        showTaskSection: false,
+        checklistTotalCount: 0,
+        openChecklistCount: 0,
+        openTaskCount: 0,
+        pendingReminderCount: 2,
+        interpreterRequired: false,
+        interpreterReady: false,
+      }).interpreterGate,
+    ).toBe("not_required");
   });
 });
 

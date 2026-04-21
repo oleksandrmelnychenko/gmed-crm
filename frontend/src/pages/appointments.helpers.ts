@@ -53,6 +53,17 @@ export type AppointmentTimelineEvent = {
   tone: AppointmentTimelineTone;
 };
 
+export type AppointmentWorkflowSummary = {
+  visibleSurfaceCount: number;
+  transitionSurfaceCount: number;
+  logisticsSurfaceCount: number;
+  backlogSurfaceCount: number;
+  openIssueCount: number;
+  checklistCompletedCount: number;
+  followUpQueueCount: number;
+  interpreterGate: "not_required" | "ready" | "pending";
+};
+
 export type InterpreterMobileAgendaItem = {
   id: string;
   date: string;
@@ -329,6 +340,51 @@ export function canResubmitInterpreterReport(params: {
     Boolean(params.currentUserId) &&
     params.currentUserId === params.interpreterId
   );
+}
+
+export function buildAppointmentWorkflowSummary(args: {
+  showCompletionSection: boolean;
+  showStatusSection: boolean;
+  showScheduleSection: boolean;
+  showInterpreterSection: boolean;
+  showChecklistSection: boolean;
+  showReminderSection: boolean;
+  showTaskSection: boolean;
+  checklistTotalCount: number;
+  openChecklistCount: number;
+  openTaskCount: number;
+  pendingReminderCount: number;
+  interpreterRequired: boolean;
+  interpreterReady: boolean;
+}): AppointmentWorkflowSummary {
+  const transitionSurfaceCount =
+    Number(args.showCompletionSection) + Number(args.showStatusSection);
+  const logisticsSurfaceCount =
+    Number(args.showScheduleSection) + Number(args.showInterpreterSection);
+  const backlogSurfaceCount =
+    Number(args.showChecklistSection) +
+    Number(args.showReminderSection) +
+    Number(args.showTaskSection);
+
+  return {
+    visibleSurfaceCount:
+      transitionSurfaceCount + logisticsSurfaceCount + backlogSurfaceCount,
+    transitionSurfaceCount,
+    logisticsSurfaceCount,
+    backlogSurfaceCount,
+    openIssueCount:
+      args.openChecklistCount + args.openTaskCount + args.pendingReminderCount,
+    checklistCompletedCount: Math.max(
+      args.checklistTotalCount - args.openChecklistCount,
+      0,
+    ),
+    followUpQueueCount: args.openTaskCount + args.pendingReminderCount,
+    interpreterGate: !args.interpreterRequired
+      ? "not_required"
+      : args.interpreterReady
+        ? "ready"
+        : "pending",
+  };
 }
 
 export function buildAppointmentTimelineEvents(args: {

@@ -104,6 +104,7 @@ import { cn } from "@/lib/utils";
 import {
   buildInterpreterMobileAgendaSections,
   buildAppointmentTimelineEvents,
+  buildAppointmentWorkflowSummary,
   canResubmitInterpreterReport,
   normalizeAppointmentWorkspaceTab,
   shouldUseInterpreterMobileAgenda,
@@ -5212,6 +5213,374 @@ function AppointmentTimelineSection({
 
 const MemoizedAppointmentTimelineSection = memo(AppointmentTimelineSection);
 
+function AppointmentWorkflowTab({
+  detail,
+  detailReport,
+  appointments,
+  providers,
+  staff,
+  interpreters,
+  currentUserId,
+  permissions,
+  handoffStakeholders,
+  followUpAssigneeId,
+  setFollowUpAssigneeId,
+  openChecklistCount,
+  openTaskCount,
+  pendingReminderCount,
+  interpreterReportReady,
+  completionWarnings,
+  checklistItems,
+  reminders,
+  tasks,
+  taskAssignableStaff,
+  onRefresh,
+  onError,
+  onNotice,
+  onSaved,
+}: {
+  detail: AppointmentDetail;
+  detailReport: ReportSummary | null;
+  appointments: AppointmentListItem[];
+  providers: ProviderSummary[];
+  staff: StaffOption[];
+  interpreters: InterpreterOption[];
+  currentUserId?: string;
+  permissions: AppointmentPermissions;
+  handoffStakeholders: HandoffStakeholder[];
+  followUpAssigneeId: string;
+  setFollowUpAssigneeId: Dispatch<SetStateAction<string>>;
+  openChecklistCount: number;
+  openTaskCount: number;
+  pendingReminderCount: number;
+  interpreterReportReady: boolean;
+  completionWarnings: string[];
+  checklistItems: ChecklistItem[];
+  reminders: ReminderEntry[];
+  tasks: TaskEntry[];
+  taskAssignableStaff: StaffOption[];
+  onRefresh: () => void;
+  onError: (message: string) => void;
+  onNotice: (message: string) => void;
+  onSaved: (notice: string) => void;
+}) {
+  const showCompletionSection = permissions.canManageStatus;
+  const showStatusSection = permissions.canManageStatus;
+  const showScheduleSection = permissions.canEditSchedule;
+  const showInterpreterSection =
+    permissions.canAssignInterpreter ||
+    (permissions.canRespondToAssignment && detail.interpreter_id === currentUserId);
+  const showChecklistSection = permissions.canManageChecklist;
+  const showReminderSection = permissions.canViewReminders;
+  const showTaskSection = permissions.canViewTasks;
+
+  const workflowSummary = useMemo(
+    () =>
+      buildAppointmentWorkflowSummary({
+        showCompletionSection,
+        showStatusSection,
+        showScheduleSection,
+        showInterpreterSection,
+        showChecklistSection,
+        showReminderSection,
+        showTaskSection,
+        checklistTotalCount: checklistItems.length,
+        openChecklistCount,
+        openTaskCount,
+        pendingReminderCount,
+        interpreterRequired: Boolean(detail.interpreter_id),
+        interpreterReady: interpreterReportReady,
+      }),
+    [
+      checklistItems.length,
+      detail.interpreter_id,
+      interpreterReportReady,
+      openChecklistCount,
+      openTaskCount,
+      pendingReminderCount,
+      showChecklistSection,
+      showCompletionSection,
+      showInterpreterSection,
+      showReminderSection,
+      showScheduleSection,
+      showStatusSection,
+      showTaskSection,
+    ],
+  );
+
+  const showTransitionLane = workflowSummary.transitionSurfaceCount > 0;
+  const showLogisticsLane = workflowSummary.logisticsSurfaceCount > 0;
+  const showBacklogLane = workflowSummary.backlogSurfaceCount > 0;
+
+  const checklistProgressValue = checklistItems.length
+    ? `${workflowSummary.checklistCompletedCount}/${checklistItems.length}`
+    : appointmentText("Keine", "Нет", "None");
+  const interpreterGateValue =
+    workflowSummary.interpreterGate === "not_required"
+      ? appointmentText("Nicht erforderlich", "Не требуется", "Not required")
+      : workflowSummary.interpreterGate === "ready"
+        ? appointmentText("Freigegeben", "Согласовано", "Approved")
+        : appointmentText("Ausstehend", "Ожидается", "Pending");
+  const interpreterGateDescription =
+    workflowSummary.interpreterGate === "not_required"
+      ? appointmentText(
+          "Kein Dolmetscher für diesen Termin verknüpft.",
+          "Для этого приёма переводчик не привязан.",
+          "No interpreter linked to this appointment.",
+        )
+      : detailReport
+        ? reportApprovalLabel(detailReport.approval_status)
+        : appointmentText(
+            "Bericht oder Freigabe noch ausstehend.",
+            "Отчёт или согласование ещё ожидается.",
+            "Report or approval is still pending.",
+          );
+
+  return (
+    <>
+      <AppointmentWorkspaceSectionIntro
+        title={appointmentText(
+          "Workflow-Cockpit",
+          "Панель workflow",
+          "Workflow cockpit",
+        )}
+        description={appointmentText(
+          "Abschluss, Slot-Logistik und operative Nachverfolgung in einem appointment-zentrierten Workspace.",
+          "Закрытие, логистика слота и операционный follow-up в одном workspace приёма.",
+          "Closure, slot logistics and operational follow-up in one appointment-centered workspace.",
+        )}
+        accessory={<CountBadge>{workflowSummary.visibleSurfaceCount}</CountBadge>}
+      />
+
+      <Section
+        title={appointmentText(
+          "Operativer Überblick",
+          "Операционный обзор",
+          "Operational overview",
+        )}
+        accessory={<CountBadge>{workflowSummary.openIssueCount}</CountBadge>}
+      >
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <StatCard
+            label={appointmentText(
+              "Offene Punkte",
+              "Открытые пункты",
+              "Open issues",
+            )}
+            value={workflowSummary.openIssueCount}
+            description={appointmentText(
+              "Checklisten, Reminder und Aufgaben mit offener Nachverfolgung.",
+              "Чек-листы, напоминания и задачи с открытым follow-up.",
+              "Checklist, reminder and task items still requiring follow-up.",
+            )}
+          />
+          <StatCard
+            label={appointmentText(
+              "Checklisten-Fortschritt",
+              "Прогресс чек-листа",
+              "Checklist progress",
+            )}
+            value={checklistProgressValue}
+            description={appointmentText(
+              "Abgeschlossene gegen alle appointment-gebundenen Schritte.",
+              "Завершённые против всех шагов, привязанных к приёму.",
+              "Completed versus total appointment-bound workflow steps.",
+            )}
+          />
+          <StatCard
+            label={appointmentText(
+              "Follow-up-Warteschlange",
+              "Очередь follow-up",
+              "Follow-up queue",
+            )}
+            value={workflowSummary.followUpQueueCount}
+            description={appointmentText(
+              "Offene Aufgaben plus ausstehende Erinnerungen.",
+              "Открытые задачи плюс ожидающие напоминания.",
+              "Open tasks plus pending reminders.",
+            )}
+          />
+          <StatCard
+            label={appointmentText(
+              "Dolmetscher-Gate",
+              "Гейт переводчика",
+              "Interpreter gate",
+            )}
+            value={interpreterGateValue}
+            description={interpreterGateDescription}
+          />
+        </div>
+
+        {completionWarnings.length > 0 ? (
+          <Banner tone="warning" withIcon>
+            <div className="space-y-1">
+              <p className="font-medium">
+                {appointmentText(
+                  "Vor dem Abschluss bleiben noch operative Blocker offen.",
+                  "Перед закрытием остаются открытые операционные блокеры.",
+                  "Operational blockers remain before closure.",
+                )}
+              </p>
+              {completionWarnings.map((warning) => (
+                <p key={warning}>{warning}</p>
+              ))}
+            </div>
+          </Banner>
+        ) : null}
+      </Section>
+
+      {showTransitionLane ? (
+        <Section
+          title={appointmentText(
+            "Abschluss & Status",
+            "Закрытие и статус",
+            "Closure and status",
+          )}
+          accessory={<CountBadge>{workflowSummary.transitionSurfaceCount}</CountBadge>}
+        >
+          <p className={tokens.text.muted}>
+            {appointmentText(
+              "Finalisiere den Slot, plane Standard-Follow-up und steuere Statusänderungen über den aktuellen Termin oder die Serie.",
+              "Закрой слот, запланируй стандартный follow-up и управляй сменой статуса для текущего приёма или серии.",
+              "Close the slot, schedule standard follow-up and control status changes for the current appointment or its series.",
+            )}
+          </p>
+          <div className="grid gap-4 xl:grid-cols-2">
+            {showCompletionSection ? (
+              <MemoizedAppointmentCompletionSection
+                detail={detail}
+                detailReport={detailReport}
+                handoffStakeholders={handoffStakeholders}
+                openChecklistCount={openChecklistCount}
+                openTaskCount={openTaskCount}
+                pendingReminderCount={pendingReminderCount}
+                interpreterReportReady={interpreterReportReady}
+                completionWarnings={completionWarnings}
+                followUpAssigneeId={followUpAssigneeId}
+                setFollowUpAssigneeId={setFollowUpAssigneeId}
+                onRefresh={onRefresh}
+                onError={onError}
+                onNotice={onNotice}
+              />
+            ) : null}
+            {showStatusSection ? (
+              <MemoizedAppointmentStatusSection
+                detail={detail}
+                openChecklistCount={openChecklistCount}
+                onRefresh={onRefresh}
+                onError={onError}
+              />
+            ) : null}
+          </div>
+        </Section>
+      ) : null}
+
+      {showLogisticsLane ? (
+        <Section
+          title={appointmentText(
+            "Terminlogistik",
+            "Логистика приёма",
+            "Appointment logistics",
+          )}
+          accessory={<CountBadge>{workflowSummary.logisticsSurfaceCount}</CountBadge>}
+        >
+          <p className={tokens.text.muted}>
+            {appointmentText(
+              "Halte Slot, Zuständigkeiten und Dolmetscherbesetzung im selben Workflow-Kontext synchron.",
+              "Держи слот, ответственных и назначение переводчика синхронизированными в одном workflow-контексте.",
+              "Keep the slot, ownership and interpreter staffing aligned in the same workflow context.",
+            )}
+          </p>
+          <div className="grid gap-4 xl:grid-cols-2">
+            {showScheduleSection ? (
+              <MemoizedEditAppointmentSection
+                detail={detail}
+                appointments={appointments}
+                providers={providers}
+                staff={staff}
+                interpreters={interpreters}
+                onSaved={onSaved}
+              />
+            ) : null}
+            {showInterpreterSection ? (
+              <MemoizedAppointmentInterpreterSection
+                detail={detail}
+                interpreters={interpreters}
+                currentUserId={currentUserId}
+                canAssign={permissions.canAssignInterpreter}
+                canRespond={permissions.canRespondToAssignment}
+                onRefresh={onRefresh}
+                onError={onError}
+              />
+            ) : null}
+          </div>
+        </Section>
+      ) : null}
+
+      {showBacklogLane ? (
+        <Section
+          title={appointmentText(
+            "Operativer Backlog",
+            "Операционный backlog",
+            "Operational backlog",
+          )}
+          accessory={<CountBadge>{workflowSummary.backlogSurfaceCount}</CountBadge>}
+        >
+          <p className={tokens.text.muted}>
+            {appointmentText(
+              "Arbeite checklisten, Erinnerungen und appointment-verknüpfte Aufgaben in einer durchgehenden Bearbeitungsschicht ab.",
+              "Закрывай чек-листы, напоминания и привязанные к приёму задачи в одном непрерывном operational layer.",
+              "Work through checklist items, reminders and appointment-linked tasks in one continuous operational layer.",
+            )}
+          </p>
+          <div className="space-y-4">
+            {showChecklistSection ? (
+              <MemoizedAppointmentChecklistSection
+                detail={detail}
+                items={checklistItems}
+                onRefresh={onRefresh}
+                onError={onError}
+              />
+            ) : null}
+
+            {showReminderSection || showTaskSection ? (
+              <div
+                className={cn(
+                  "grid gap-4",
+                  showReminderSection && showTaskSection ? "xl:grid-cols-2" : "",
+                )}
+              >
+                {showReminderSection ? (
+                  <MemoizedAppointmentRemindersSection
+                    detail={detail}
+                    reminders={reminders}
+                    staff={staff}
+                    canManageReminders={permissions.canManageReminders}
+                    onRefresh={onRefresh}
+                    onError={onError}
+                  />
+                ) : null}
+                {showTaskSection ? (
+                  <MemoizedAppointmentTasksSection
+                    detail={detail}
+                    tasks={tasks}
+                    assignableStaff={taskAssignableStaff}
+                    canCreateTasks={permissions.canCreateTasks}
+                    onRefresh={onRefresh}
+                    onError={onError}
+                  />
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        </Section>
+      ) : null}
+    </>
+  );
+}
+
+const MemoizedAppointmentWorkflowTab = memo(AppointmentWorkflowTab);
+
 function AppointmentInterpreterSection({
   detail,
   interpreters,
@@ -5299,7 +5668,11 @@ function AppointmentInterpreterSection({
       {canAssign && !detail.is_blocked ? (
         <section className={sectionCardClass("p-5")}>
           <h3 className="text-sm font-semibold text-slate-950">
-            {t.role_interpreter}
+            {appointmentText(
+              "Dolmetscherbesetzung",
+              "Назначение переводчика",
+              "Interpreter assignment",
+            )}
           </h3>
           <form
             onSubmit={handleAssignInterpreter}
@@ -5328,7 +5701,11 @@ function AppointmentInterpreterSection({
                 {busyAction === "assign" ? (
                   <LoaderCircle className="size-4 animate-spin" />
                 ) : null}
-                Assign interpreter
+                {appointmentText(
+                  "Dolmetscher zuweisen",
+                  "Назначить переводчика",
+                  "Assign interpreter",
+                )}
               </Button>
             </div>
           </form>
@@ -5337,7 +5714,11 @@ function AppointmentInterpreterSection({
       {canRespond && detail.interpreter_id === currentUserId ? (
         <section className={sectionCardClass("p-5")}>
           <h3 className="text-sm font-semibold text-slate-950">
-            {t.role_interpreter}
+            {appointmentText(
+              "Dolmetscherantwort",
+              "Ответ переводчика",
+              "Interpreter response",
+            )}
           </h3>
           <div className="mt-4 flex flex-wrap gap-2">
             {INTERPRETER_RESPONSE_OPTIONS.map((value) => (
@@ -5443,10 +5824,18 @@ function AppointmentChecklistSection({
 
   return (
     <section className={sectionCardClass("p-5")}>
-      <h3 className="text-sm font-semibold text-slate-950">{t.orders_phase}</h3>
+      <h3 className="text-sm font-semibold text-slate-950">
+        {appointmentText("Checkliste", "Чек-лист", "Checklist")}
+      </h3>
       <div className="mt-4 space-y-3">
         {items.length === 0 ? (
-          <EmptyState text={t.common_not_set} />
+          <EmptyState
+            text={appointmentText(
+              "Für diesen Termin gibt es noch keine Workflow-Schritte.",
+              "Для этого приёма ещё нет шагов workflow.",
+              "No workflow steps exist for this appointment yet.",
+            )}
+          />
         ) : (
           items.map((item) => (
             <div
@@ -5476,7 +5865,11 @@ function AppointmentChecklistSection({
                   {completingId === item.id ? (
                     <LoaderCircle className="size-4 animate-spin" />
                   ) : null}
-                  {t.common_active}
+                  {appointmentText(
+                    "Als erledigt markieren",
+                    "Отметить выполненным",
+                    "Mark complete",
+                  )}
                 </Button>
               )}
             </div>
@@ -5526,7 +5919,11 @@ function AppointmentChecklistSection({
             disabled={submitBusy || !form.itemText.trim()}
           >
             {submitBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-            Add checklist item
+            {appointmentText(
+              "Checklistenpunkt hinzufügen",
+              "Добавить пункт чек-листа",
+              "Add checklist item",
+            )}
           </Button>
         </div>
       </form>
@@ -5618,11 +6015,17 @@ function AppointmentRemindersSection({
   return (
     <section className={sectionCardClass("p-5")}>
       <h3 className="text-sm font-semibold text-slate-950">
-        {t.patients_notes}
+        {appointmentText("Erinnerungen", "Напоминания", "Reminders")}
       </h3>
       <div className="mt-4 space-y-3">
         {reminders.length === 0 ? (
-          <EmptyState text={t.common_not_set} />
+          <EmptyState
+            text={appointmentText(
+              "Für diesen Termin gibt es noch keine Erinnerungen.",
+              "Для этого приёма ещё нет напоминаний.",
+              "No reminders exist for this appointment yet.",
+            )}
+          />
         ) : (
           reminders.map((item) => (
             <div
@@ -5644,7 +6047,12 @@ function AppointmentRemindersSection({
               </div>
               {item.is_completed ? (
                 <span className="text-xs font-medium text-emerald-700">
-                  Completed {formatDateTimeLabel(item.completed_at)}
+                  {appointmentText(
+                    "Abgeschlossen",
+                    "Завершено",
+                    "Completed",
+                  )}{" "}
+                  {formatDateTimeLabel(item.completed_at)}
                 </span>
               ) : (
                 <Button
@@ -5657,7 +6065,11 @@ function AppointmentRemindersSection({
                   {completingId === item.id ? (
                     <LoaderCircle className="size-4 animate-spin" />
                   ) : null}
-                  {t.common_active}
+                  {appointmentText(
+                    "Als erledigt markieren",
+                    "Отметить выполненным",
+                    "Mark complete",
+                  )}
                 </Button>
               )}
             </div>
@@ -5855,15 +6267,27 @@ function AppointmentCompletionSection({
 
       onNotice(
         selectedPresets.length > 0
-          ? `Appointment completed. ${selectedPresets.length} follow-up reminder(s) scheduled.`
-          : t.common_active,
+          ? appointmentText(
+              `Termin abgeschlossen. ${selectedPresets.length} Follow-up-Erinnerung(en) geplant.`,
+              `Приём завершён. Запланировано ${selectedPresets.length} follow-up напоминаний.`,
+              `Appointment completed. ${selectedPresets.length} follow-up reminder(s) scheduled.`,
+            )
+          : appointmentText(
+              "Termin abgeschlossen.",
+              "Приём завершён.",
+              "Appointment completed.",
+            ),
       );
       onRefresh();
     } catch (error) {
       if (completed) {
         onError(
           error instanceof Error
-            ? `Appointment completed, but follow-up scheduling failed: ${error.message}`
+            ? appointmentText(
+                `Termin abgeschlossen, aber Follow-up-Planung fehlgeschlagen: ${error.message}`,
+                `Приём завершён, но планирование follow-up не удалось: ${error.message}`,
+                `Appointment completed, but follow-up scheduling failed: ${error.message}`,
+              )
             : tr.common_error,
         );
         onRefresh();
@@ -5880,40 +6304,79 @@ function AppointmentCompletionSection({
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <div>
           <h3 className="text-sm font-semibold text-slate-950">
-            Completion readiness
+            {appointmentText(
+              "Abschlussbereitschaft",
+              "Готовность к закрытию",
+              "Completion readiness",
+            )}
           </h3>
           <p className="text-xs text-slate-500">
-            Review operational blockers before closing the appointment and
-            launching standard post-care follow-up.
+            {appointmentText(
+              "Prüfen Sie operative Blocker, bevor Sie den Termin schließen und das Standard-Follow-up starten.",
+              "Проверьте операционные блокеры перед закрытием приёма и запуском стандартного follow-up.",
+              "Review operational blockers before closing the appointment and launching standard post-care follow-up.",
+            )}
           </p>
         </div>
         <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
-          {detail.status === "completed" ? "Completed" : statusLabel(detail.status)}
+          {detail.status === "completed"
+            ? appointmentText("Abgeschlossen", "Завершён", "Completed")
+            : statusLabel(detail.status)}
         </span>
       </div>
       <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <ContextCard
           label={t.cases_status}
           value={
-            openChecklistCount === 0 ? "Ready" : `${openChecklistCount} open`
+            openChecklistCount === 0
+              ? appointmentText("Bereit", "Готово", "Ready")
+              : appointmentText(
+                  `${openChecklistCount} offen`,
+                  `${openChecklistCount} открыто`,
+                  `${openChecklistCount} open`,
+                )
           }
           meta={
             openChecklistCount === 0
-              ? "No pending checklist items."
-              : "Finish outstanding preparation or follow-up steps."
+              ? appointmentText(
+                  "Keine offenen Checklistenpunkte.",
+                  "Нет открытых пунктов чек-листа.",
+                  "No pending checklist items.",
+                )
+              : appointmentText(
+                  "Offene Vorbereitungs- oder Follow-up-Schritte zuerst abschließen.",
+                  "Сначала закройте открытые подготовительные или follow-up шаги.",
+                  "Finish outstanding preparation or follow-up steps.",
+                )
           }
         />
         <ContextCard
-          label={t.cases_title}
-          value={openTaskCount === 0 ? "Ready" : `${openTaskCount} open`}
+          label={appointmentText("Aufgaben", "Задачи", "Tasks")}
+          value={
+            openTaskCount === 0
+              ? appointmentText("Bereit", "Готово", "Ready")
+              : appointmentText(
+                  `${openTaskCount} offen`,
+                  `${openTaskCount} открыто`,
+                  `${openTaskCount} open`,
+                )
+          }
           meta={
             openTaskCount === 0
-              ? "No open operational tasks."
-              : "Resolve active PM, interpreter or concierge tasks."
+              ? appointmentText(
+                  "Keine offenen operativen Aufgaben.",
+                  "Нет открытых операционных задач.",
+                  "No open operational tasks.",
+                )
+              : appointmentText(
+                  "Aktive PM-, Dolmetscher- oder Concierge-Aufgaben noch abschließen.",
+                  "Нужно закрыть активные задачи PM, переводчика или concierge.",
+                  "Resolve active PM, interpreter or concierge tasks.",
+                )
           }
         />
         <ContextCard
-          label={t.common_search}
+          label={appointmentText("Erinnerungen", "Напоминания", "Reminders")}
           value={appointmentText(
             `${pendingReminderCount} ausstehend`,
             `${pendingReminderCount} ожидает`,
@@ -5923,7 +6386,7 @@ function AppointmentCompletionSection({
             pendingReminderCount === 0
               ? appointmentText(
                   "Keine offenen Erinnerungen.",
-                  "Нет активных напоминаний.",
+                  "Нет открытых напоминаний.",
                   "No outstanding reminders.",
                 )
               : appointmentText(
@@ -5952,7 +6415,7 @@ function AppointmentCompletionSection({
               : detailReport
                 ? detailReport.approval_status
                 : appointmentText(
-                    "Noch kein Bericht eingereicht.",
+                    "Bericht noch nicht eingereicht.",
                     "Отчёт ещё не отправлен.",
                     "No report submitted yet.",
                   )
@@ -6180,7 +6643,11 @@ function AppointmentStatusSection({
                   ? t.appointments_cancel_this_and_following
                   : statusRecurrenceScope === "series"
                     ? t.appointments_cancel_whole_series
-                    : "Cancel this occurrence"
+                    : appointmentText(
+                        "Diesen Termin absagen",
+                        "Отменить этот приём",
+                        "Cancel this occurrence",
+                      )
                 : statusLabel(status)}
             </Button>
           );
@@ -6804,20 +7271,37 @@ function AppointmentTasksSection({
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <div>
           <h3 className="text-sm font-semibold text-slate-950">
-            Operational tasks
+            {appointmentText(
+              "Operative Aufgaben",
+              "Операционные задачи",
+              "Operational tasks",
+            )}
           </h3>
           <p className="text-xs text-slate-500">
-            Appointment-linked follow-up for PM, teamlead, interpreter and
-            concierge.
+            {appointmentText(
+              "Appointment-gebundenes Follow-up für PM, Teamlead, Dolmetscher und Concierge.",
+              "Привязанный к приёму follow-up для PM, teamlead, переводчика и concierge.",
+              "Appointment-linked follow-up for PM, teamlead, interpreter and concierge.",
+            )}
           </p>
         </div>
         <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
-          {tasks.length} linked
+          {appointmentText(
+            `${tasks.length} verknüpft`,
+            `${tasks.length} связано`,
+            `${tasks.length} linked`,
+          )}
         </span>
       </div>
       <div className="mt-4 space-y-3">
         {tasks.length === 0 ? (
-          <EmptyState text={tr.common_not_set} />
+          <EmptyState
+            text={appointmentText(
+              "Für diesen Termin gibt es noch keine operativen Aufgaben.",
+              "Для этого приёма ещё нет операционных задач.",
+              "No operational tasks exist for this appointment yet.",
+            )}
+          />
         ) : (
           tasks.map((task) => (
             <div
@@ -11919,29 +12403,73 @@ function StaffAppointmentsPage() {
       billingHandoffTasks.length > 0 ||
       billingHandoffReminders.length > 0;
     const billingReadinessWarnings = [
-      detail?.interpreter_id && !interpreterReportReady ? tr.common_error : "",
+      detail?.interpreter_id && !interpreterReportReady
+        ? appointmentText(
+            "Die Abrechnung wartet auf einen freigegebenen Dolmetscherbericht.",
+            "Биллинг ждёт согласованный отчёт переводчика.",
+            "Billing is waiting for an approved interpreter report.",
+          )
+        : "",
       detail?.type === "non_medical" && serviceInFlightCount > 0
-        ? `${serviceInFlightCount} concierge service(s) are still operationally open.`
+        ? appointmentText(
+            `${serviceInFlightCount} Concierge-Leistung(en) sind operativ noch offen.`,
+            `${serviceInFlightCount} concierge-услуг(а) ещё операционно открыты.`,
+            `${serviceInFlightCount} concierge service(s) are still operationally open.`,
+          )
         : "",
       detail?.type === "non_medical" &&
       detailServices.length > 0 &&
       readyConciergeServices.length === 0 &&
       settledConciergeServices.length === 0
-        ? tr.common_not_set
+        ? appointmentText(
+            "Concierge-Leistungen sind noch keinem Billing-Status zugeordnet.",
+            "У concierge-услуг ещё нет статуса биллинга.",
+            "Concierge services are not assigned to a billing status yet.",
+          )
         : "",
-      billingStaff.length === 0 ? tr.common_not_set : "",
+      billingStaff.length === 0
+        ? appointmentText(
+            "Kein Billing-Team für die Übergabe verfügbar.",
+            "Нет команды биллинга для handoff.",
+            "No billing team is available for handoff.",
+          )
+        : "",
     ].filter(Boolean);
     const completionWarnings = [
       openChecklistCount > 0
-        ? `${openChecklistCount} checklist item(s) still open.`
+        ? appointmentText(
+            `${openChecklistCount} Checklistenpunkt(e) sind noch offen.`,
+            `${openChecklistCount} пункт(ов) чек-листа ещё открыты.`,
+            `${openChecklistCount} checklist item(s) are still open.`,
+          )
         : "",
       openIncomingDataChecklistCount > 0
-        ? `${openIncomingDataChecklistCount} incoming data item(s) still need triage.`
+        ? appointmentText(
+            `${openIncomingDataChecklistCount} Intake-Punkt(e) brauchen noch Triage.`,
+            `${openIncomingDataChecklistCount} intake-пункт(ов) ещё ждут triage.`,
+            `${openIncomingDataChecklistCount} incoming data item(s) still need triage.`,
+          )
         : "",
-      openTaskCount > 0 ? `${openTaskCount} operational task(s) still open.` : "",
-      !interpreterReportReady && detail?.interpreter_id ? tr.common_error : "",
+      openTaskCount > 0
+        ? appointmentText(
+            `${openTaskCount} operative Aufgabe(n) sind noch offen.`,
+            `${openTaskCount} операционных задач(и) ещё открыты.`,
+            `${openTaskCount} operational task(s) are still open.`,
+          )
+        : "",
+      !interpreterReportReady && detail?.interpreter_id
+        ? appointmentText(
+            "Dolmetscherbericht oder Freigabe ist noch ausstehend.",
+            "Отчёт переводчика или согласование ещё ожидается.",
+            "Interpreter report or approval is still pending.",
+          )
+        : "",
       detail?.type === "non_medical" && serviceInFlightCount > 0
-        ? `${serviceInFlightCount} concierge service(s) are still in progress.`
+        ? appointmentText(
+            `${serviceInFlightCount} Concierge-Leistung(en) laufen noch.`,
+            `${serviceInFlightCount} concierge-услуг(а) ещё в работе.`,
+            `${serviceInFlightCount} concierge service(s) are still in progress.`,
+          )
         : "",
     ].filter(Boolean);
 
@@ -11987,8 +12515,6 @@ function StaffAppointmentsPage() {
     permissions.canManageConciergeBilling,
     taskAssignableStaff,
     tr.cases_title,
-    tr.common_error,
-    tr.common_not_set,
     tr.patients_assign_owner,
     tr.role_interpreter,
   ]);
@@ -13760,14 +14286,23 @@ function StaffAppointmentsPage() {
       incomingDataTasks.length +
       findingsReminders.length +
       findingsTasks.length;
-    const hasWorkflowContent =
-      permissions.canManageStatus ||
-      permissions.canEditSchedule ||
+    const showWorkflowCompletionSection = permissions.canManageStatus;
+    const showWorkflowStatusSection = permissions.canManageStatus;
+    const showWorkflowScheduleSection = permissions.canEditSchedule;
+    const showWorkflowInterpreterSection =
       permissions.canAssignInterpreter ||
-      permissions.canRespondToAssignment ||
-      permissions.canManageChecklist ||
-      permissions.canViewReminders ||
-      permissions.canViewTasks;
+      (permissions.canRespondToAssignment && detail.interpreter_id === user?.id);
+    const showWorkflowChecklistSection = permissions.canManageChecklist;
+    const showWorkflowRemindersSection = permissions.canViewReminders;
+    const showWorkflowTasksSection = permissions.canViewTasks;
+    const hasWorkflowContent =
+      showWorkflowCompletionSection ||
+      showWorkflowStatusSection ||
+      showWorkflowScheduleSection ||
+      showWorkflowInterpreterSection ||
+      showWorkflowChecklistSection ||
+      showWorkflowRemindersSection ||
+      showWorkflowTasksSection;
     const hasServicesContent =
       canShowConciergeSection || canShowBillingHandoffSection;
 
@@ -14031,80 +14566,32 @@ function StaffAppointmentsPage() {
 
         {showWorkflowTab ? (
           hasWorkflowContent ? (
-            <>
-              {permissions.canManageStatus ? (
-                <MemoizedAppointmentCompletionSection
-                  detail={detail}
-                  detailReport={detailReport}
-                  handoffStakeholders={handoffStakeholders}
-                  openChecklistCount={openChecklistCount}
-                  openTaskCount={openTaskCount}
-                  pendingReminderCount={pendingReminderCount}
-                  interpreterReportReady={interpreterReportReady}
-                  completionWarnings={completionWarnings}
-                  followUpAssigneeId={followUpAssigneeId}
-                  setFollowUpAssigneeId={setFollowUpAssigneeId}
-                  onRefresh={refreshDetail}
-                  onError={reportDetailError}
-                  onNotice={reportAppointmentsNotice}
-                />
-              ) : null}
-              {permissions.canManageStatus ? (
-                <MemoizedAppointmentStatusSection
-                  detail={detail}
-                  openChecklistCount={openChecklistCount}
-                  onRefresh={refreshDetail}
-                  onError={reportDetailError}
-                />
-              ) : null}
-              {permissions.canEditSchedule ? (
-                <MemoizedEditAppointmentSection
-                  detail={detail}
-                  appointments={appointments}
-                  providers={providers}
-                  staff={staff}
-                  interpreters={interpreters}
-                  onSaved={handleEditSaved}
-                />
-              ) : null}
-              <MemoizedAppointmentInterpreterSection
-                detail={detail}
-                interpreters={interpreters}
-                currentUserId={user?.id}
-                canAssign={permissions.canAssignInterpreter}
-                canRespond={permissions.canRespondToAssignment}
-                onRefresh={refreshDetail}
-                onError={reportDetailError}
-              />
-              {permissions.canManageChecklist ? (
-                <MemoizedAppointmentChecklistSection
-                  detail={detail}
-                  items={detailChecklist}
-                  onRefresh={refreshDetail}
-                  onError={reportDetailError}
-                />
-              ) : null}
-              {permissions.canViewReminders ? (
-                <MemoizedAppointmentRemindersSection
-                  detail={detail}
-                  reminders={detailReminders}
-                  staff={staff}
-                  canManageReminders={permissions.canManageReminders}
-                  onRefresh={refreshDetail}
-                  onError={reportDetailError}
-                />
-              ) : null}
-              {permissions.canViewTasks ? (
-                <MemoizedAppointmentTasksSection
-                  detail={detail}
-                  tasks={detailTasks}
-                  assignableStaff={taskAssignableStaff}
-                  canCreateTasks={permissions.canCreateTasks}
-                  onRefresh={refreshDetail}
-                  onError={reportDetailError}
-                />
-              ) : null}
-            </>
+            <MemoizedAppointmentWorkflowTab
+              detail={detail}
+              detailReport={detailReport}
+              appointments={appointments}
+              providers={providers}
+              staff={staff}
+              interpreters={interpreters}
+              currentUserId={user?.id}
+              permissions={permissions}
+              handoffStakeholders={handoffStakeholders}
+              followUpAssigneeId={followUpAssigneeId}
+              setFollowUpAssigneeId={setFollowUpAssigneeId}
+              openChecklistCount={openChecklistCount}
+              openTaskCount={openTaskCount}
+              pendingReminderCount={pendingReminderCount}
+              interpreterReportReady={interpreterReportReady}
+              completionWarnings={completionWarnings}
+              checklistItems={detailChecklist}
+              reminders={detailReminders}
+              tasks={detailTasks}
+              taskAssignableStaff={taskAssignableStaff}
+              onRefresh={refreshDetail}
+              onError={reportDetailError}
+              onNotice={reportAppointmentsNotice}
+              onSaved={handleEditSaved}
+            />
           ) : (
             <section className={sectionCardClass("p-5")}>
               <EmptyState text={workflowEmpty} />
