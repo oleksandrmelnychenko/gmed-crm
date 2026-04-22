@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { Plus, RefreshCcw } from "lucide-react";
+import { Plus, RefreshCcw, X } from "lucide-react";
 
 import {
   AdminSheetScaffold,
@@ -212,7 +212,7 @@ export function AdminCustomFieldsPage() {
                   <div className="space-y-1.5">
                     <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_entity_type}</Label>
                     <Select value={fEntity} onValueChange={(value) => setFEntity(value ?? ENTITY_TYPES[0] ?? "patient")}>
-                      <SelectTrigger className="h-9 rounded-lg bg-card">
+                      <SelectTrigger className="h-9 w-full rounded-lg bg-card">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -248,7 +248,7 @@ export function AdminCustomFieldsPage() {
                   <div className="space-y-1.5">
                     <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_field_type}</Label>
                     <Select value={fType} onValueChange={(value) => setFType(value ?? FIELD_TYPES[0] ?? "text")}>
-                      <SelectTrigger className="h-9 rounded-lg bg-card">
+                      <SelectTrigger className="h-9 w-full rounded-lg bg-card">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -290,29 +290,42 @@ export function AdminCustomFieldsPage() {
       {loading ? <TabLoader /> : null}
 
       {!loading ? (
+        <AdminToolbar>
+          <Select value={filterEntity} onValueChange={(value) => setFilterEntity(value ?? "")}>
+            <SelectTrigger className="h-8 w-[220px] rounded-lg bg-card text-[13px]">
+              <SelectValue placeholder={t.providers_all} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">{t.providers_all}</SelectItem>
+              {ENTITY_TYPES.map((et) => (
+                <SelectItem key={et} value={et}>
+                  {et.charAt(0).toUpperCase() + et.slice(1)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {filterEntity ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 rounded-lg gap-1 text-[12.5px] text-muted-foreground"
+              onClick={() => setFilterEntity("")}
+            >
+              <X className="size-3.5" />
+              {t.common_reset}
+            </Button>
+          ) : null}
+        </AdminToolbar>
+      ) : null}
+
+      {!loading ? (
         <AdminTableCard
-          title={t.cf_title}
-          description={t.cf_subtitle}
+          title={t.common_registry}
+          description={t.cf_title}
           count={activeFields.length}
         >
-          <div className="border-b border-border px-4 py-3">
-            <AdminToolbar>
-              <Select value={filterEntity} onValueChange={(value) => setFilterEntity(value ?? "")}>
-                <SelectTrigger className="h-8 w-[180px] rounded-lg bg-card text-[13px]">
-                  <SelectValue placeholder={t.providers_all} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="">{t.providers_all}</SelectItem>
-                  {ENTITY_TYPES.map((et) => (
-                    <SelectItem key={et} value={et}>
-                      {et.charAt(0).toUpperCase() + et.slice(1)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </AdminToolbar>
-          </div>
-
           {activeFields.length === 0 ? (
             <div className="p-4">
               <EmptyCell>{t.cf_no_fields}</EmptyCell>
