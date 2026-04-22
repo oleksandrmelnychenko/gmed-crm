@@ -41,12 +41,12 @@ import {
   npsBandLabel,
   portalNotSetLabel,
   portalStatusLabel,
-} from "@/pages/patient-portal.shared";
+} from "@/pages/patients/model/portal-shared";
 import type {
   PortalAppointmentItem,
   PortalFeedbackItem,
   PortalFeedbackSummary,
-} from "@/pages/patient-portal.shared";
+} from "@/pages/patients/model/portal-shared";
 import { cn } from "@/lib/utils";
 
 type PatientOption = {

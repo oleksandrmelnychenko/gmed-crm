@@ -26,7 +26,7 @@ import {
   canResubmitInterpreterReport,
   normalizeAppointmentWorkspaceTab,
   shouldUseInterpreterMobileAgenda,
-} from "@/pages/appointments.helpers";
+} from "@/pages/appointments/model/selectors";
 import {
   appointmentPermissions,
   linkedPatientPermissions,
@@ -183,7 +183,7 @@ const EMPTY_DETAIL_DERIVED_STATE = {
 const loadDesktopDetailWorkspaceContent = () =>
   import("@/pages/appointments/ui/workspace/desktop-detail-workspace-content");
 const loadPatientAppointmentsPage = () =>
-  import("@/pages/patient-appointments");
+  import("@/pages/patients/portal-appointments-page");
 
 const LazyDesktopDetailWorkspaceContent = lazy(async () => {
   const mod = await loadDesktopDetailWorkspaceContent();

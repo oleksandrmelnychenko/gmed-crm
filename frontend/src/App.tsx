@@ -75,13 +75,13 @@ const DocumentsPage = lazy(() =>
 );
 
 const PatientPrivacyPage = lazy(() =>
-  import("@/pages/patient-privacy").then((module) => ({
+  import("@/pages/patients/portal-privacy-page").then((module) => ({
     default: module.PatientPrivacyPage,
   })),
 );
 
 const PatientServicesPage = lazy(() =>
-  import("@/pages/patient-services").then((module) => ({
+  import("@/pages/patients/portal-services-page").then((module) => ({
     default: module.PatientServicesPage,
   })),
 );
@@ -105,7 +105,7 @@ const SopsPage = lazy(() =>
 );
 
 const PatientDetailPage = lazy(() =>
-  import("@/pages/patient-detail").then((module) => ({
+  import("@/pages/patients/detail-entry").then((module) => ({
     default: module.PatientDetailPage,
   })),
 );

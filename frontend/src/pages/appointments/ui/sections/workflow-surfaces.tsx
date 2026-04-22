@@ -20,7 +20,7 @@ import {
 import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import { buildAppointmentWorkflowSummary } from "@/pages/appointments.helpers";
+import { buildAppointmentWorkflowSummary } from "@/pages/appointments/model/selectors";
 import {
   appointmentSectionCardClassName,
   appointmentMetaPillClassName,

@@ -37,8 +37,12 @@ frontend/src/components/
   record-workspace/
 
 frontend/src/pages/
-  appointments.tsx
   appointments/
+    index.ts
+    compat/
+      appointments.helpers.ts
+      appointments.helpers.test.ts
+    page.tsx
     model/
     data/
     appearance/
@@ -191,3 +195,4 @@ Dependency law:
 | `2026-04-22` | `P6` | Друга хвиля `appearance` extraction добила shared surface/control recipes у workflow/services/report/notes shells: на `surface-appearance.ts` переведено `notes-section`, `coordination-section`, `services-section`, `handoff-section`, `billing-handoff-section`, `concierge-section`, `edit-appointment-section`, `external-handoff-section`, `follow-up-visit-section`, `workflow-follow-up-sections`, `workflow-surfaces`, `report-section`. Окремо прибрано залишки raw `rounded-2xl bg-slate-50/80` / `h-10 rounded-xl bg-slate-50` / white pill-row recipes з основних appointment sections; grep по цих canonical дублях у `frontend/src/pages/appointments/**/*.tsx` більше не знаходить збігів. `appointments/page.tsx` лишається ~`1730` рядків. Поточний baseline після цього проходу: `appointments-BTAGIZrf.js 346.48 kB / 99.93 kB gzip`. | `npm run lint`, `npm run build`, targeted `rg` по raw duplicated surface/control recipes |
 | `2026-04-22` | `P6` | Preview-sheet surfaces теж підтягнуто під `appearance`: додано `appointmentPreviewInfoCardClassName` у `surface-appearance.ts` і переведено `linked-provider-sheet.tsx` та `linked-records-sheet.tsx` на shared preview info-card recipe замість локального `cn(..., tokens.surface.card)`. Після цього в linked preview flow не лишилось route-local/preview-local дублювання card surface, окрім свідомих shared primitive випадків у `workspace-primitives.tsx` і `tokens.surface.mutedCard` для muted note blocks. Поточний baseline: `appointments-qswi-GR6.js 346.49 kB / 99.93 kB gzip`. | `npm run lint`, `npm run build`, targeted `rg` по preview card recipes |
 | `2026-04-22` | `P6/P9` | Останній appearance tail у `clinical-follow-up-sections.tsx`, `report-section.tsx` і `workspace-primitives.tsx` переведено на shared `surface-appearance` recipes; `appointments-overview.spec.ts` оновлено під поточний intended linked-records UX без старого redirect/schnellvorschau copy. Фінальний baseline цього плану: `appointments-BBgDNQmh.js 346.39 kB / 99.91 kB gzip`, route page лишається ~`1730` рядків. Residual tails свідомо залишені для наступного плану: глобальний `index` chunk warning і deeper SWR/cache-dedupe pass для `appointments/data`. | `npm run lint`, `npm run build`, `npm run test -- src/pages/appointments.helpers.test.ts src/components/app-shell/workspace-rail-resolver.test.tsx src/components/record-workspace/index.test.tsx`, `npm run test:e2e -- tests/e2e/appointments-overview.spec.ts tests/e2e/appointments-workflow.spec.ts tests/e2e/appointments-recurring.spec.ts`, targeted `rg` по raw duplicated surface/control recipes |
+| `2026-04-22` | `P3/P7/P9` | Root `src/pages` і `src/components` cleanup доведено до симетричного feature-local setup: `appointments.tsx` замінено на `frontend/src/pages/appointments/index.ts`, `appointments.helpers.ts` і test перенесено в `frontend/src/pages/appointments/compat/*`, а `AppointmentWorkspaceNav` перенесено в `frontend/src/pages/appointments/ui/appointment-workspace-nav.tsx` з thin compatibility wrapper у `frontend/src/components/appointments/compat/workspace-nav.tsx`. Після цього в коренях `pages/` і `components/` більше немає змішаного `appointments*` clutter. | `frontend npm run lint`; `frontend npm run build`; root inventory via `Get-ChildItem frontend/src/pages -File` і `Get-ChildItem frontend/src/components -File` |

@@ -59,7 +59,7 @@ import {
 import { apiFetch, buildApiUrl, getAccessToken } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { getLang, t as translateCatalog, useLang } from "@/lib/i18n";
-import { PatientDocumentsPage } from "@/pages/patient-documents";
+import { PatientDocumentsPage } from "@/pages/patients/portal-documents-page";
 import { cn } from "@/lib/utils";
 
 type DocumentStatus = "draft" | "active" | "archived";

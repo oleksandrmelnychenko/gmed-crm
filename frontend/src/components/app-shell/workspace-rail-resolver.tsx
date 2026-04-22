@@ -1,8 +1,8 @@
 import { matchPath } from "react-router-dom";
 
-import { AppointmentWorkspaceNav } from "../appointment-workspace-nav";
 import { CaseWorkspaceNav } from "../case-workspace-nav";
-import { PatientWorkspaceNav } from "../patient-workspace-nav";
+import { AppointmentWorkspaceNav } from "@/pages/appointments/ui/appointment-workspace-nav";
+import { PatientWorkspaceNav } from "@/pages/patients/ui/patient-workspace-nav";
 
 export type WorkspaceRailKind = "patient" | "case" | "appointment" | null;
 

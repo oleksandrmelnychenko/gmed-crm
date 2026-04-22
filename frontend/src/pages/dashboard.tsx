@@ -19,9 +19,9 @@ import { Button } from "@/components/ui/button";
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
-import { PatientDashboardPage } from "@/pages/patient-dashboard";
+import { PatientDashboardPage } from "@/pages/patients/portal-dashboard-page";
 import { StaffDashboardPageNew } from "@/pages/staff-dashboard-new";
-import { npsBandLabel, type PortalFeedbackSummary } from "@/pages/patient-portal.shared";
+import { npsBandLabel, type PortalFeedbackSummary } from "@/pages/patients/model/portal-shared";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
 

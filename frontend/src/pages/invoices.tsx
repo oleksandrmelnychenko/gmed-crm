@@ -19,7 +19,7 @@ import { apiFetch, buildApiUrl, getAccessToken } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
-import { PatientInvoicesPage } from "@/pages/patient-invoices";
+import { PatientInvoicesPage } from "@/pages/patients/portal-invoices-page";
 import { cn } from "@/lib/utils";
 
 type InvoiceType = "advance" | "interim" | "final";
