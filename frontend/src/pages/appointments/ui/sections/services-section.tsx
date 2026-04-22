@@ -1,7 +1,6 @@
 import { memo } from "react";
 
-import { tokens } from "@/components/ui-shell";
-import { cn } from "@/lib/utils";
+import { appointmentSectionCardClassName } from "@/pages/appointments/appearance/surface-appearance";
 import { appointmentText } from "@/pages/appointments/model/labels";
 import type {
   AppointmentDetail,
@@ -15,14 +14,6 @@ import type {
 import { MemoizedAppointmentBillingHandoffSection } from "@/pages/appointments/ui/sections/billing-handoff-section";
 import { MemoizedAppointmentConciergeSection } from "@/pages/appointments/ui/sections/concierge-section";
 import { EmptyState } from "@/pages/appointments/ui/shared/workspace-primitives";
-
-function sectionCardClass(extra?: string) {
-  return cn(
-    "rounded-[1.75rem] border border-border/70",
-    tokens.surface.card,
-    extra,
-  );
-}
 
 type AppointmentServicesSectionProps = {
   detail: AppointmentDetail;
@@ -81,7 +72,7 @@ function AppointmentServicesSection({
 
   if (!hasServicesContent) {
     return (
-      <section className={sectionCardClass("p-5")}>
+      <section className={appointmentSectionCardClassName("p-5")}>
         <EmptyState text={servicesEmpty} />
       </section>
     );

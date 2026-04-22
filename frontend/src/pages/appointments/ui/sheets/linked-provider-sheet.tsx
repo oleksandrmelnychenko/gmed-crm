@@ -14,6 +14,7 @@ import {
   tokens,
 } from "@/components/ui-shell";
 import { cn } from "@/lib/utils";
+import { appointmentPreviewInfoCardClassName } from "@/pages/appointments/appearance/surface-appearance";
 import { appointmentText } from "@/pages/appointments/model/labels";
 import { AppointmentPreviewSheet } from "@/pages/appointments/ui/shared/workspace-primitives";
 import type { ProviderDetail as ProviderSheetDetail } from "@/pages/providers";
@@ -108,37 +109,37 @@ function LinkedProviderOverviewSection({
       </div>
 
       <div className="grid gap-3 md:grid-cols-2">
-        <div className={cn("rounded-xl px-4 py-3", tokens.surface.card)}>
+        <div className={appointmentPreviewInfoCardClassName}>
           <InfoRow
             label={appointmentText("Name", "Название", "Name")}
             value={detail.name || notSet}
           />
         </div>
-        <div className={cn("rounded-xl px-4 py-3", tokens.surface.card)}>
+        <div className={appointmentPreviewInfoCardClassName}>
           <InfoRow
             label={appointmentText("Rechtsträger", "Юрлицо", "Legal name")}
             value={detail.legal_name || notSet}
           />
         </div>
-        <div className={cn("rounded-xl px-4 py-3", tokens.surface.card)}>
+        <div className={appointmentPreviewInfoCardClassName}>
           <InfoRow
             label={appointmentText("Standort", "Локация", "Location")}
             value={linkedProviderAddress(detail)}
           />
         </div>
-        <div className={cn("rounded-xl px-4 py-3", tokens.surface.card)}>
+        <div className={appointmentPreviewInfoCardClassName}>
           <InfoRow
             label={appointmentText("Fachbereich", "Специализация", "Specialty")}
             value={detail.fachbereich || notSet}
           />
         </div>
-        <div className={cn("rounded-xl px-4 py-3", tokens.surface.card)}>
+        <div className={appointmentPreviewInfoCardClassName}>
           <InfoRow
             label={appointmentText("Telefon", "Телефон", "Phone")}
             value={detail.phone || notSet}
           />
         </div>
-        <div className={cn("rounded-xl px-4 py-3", tokens.surface.card)}>
+        <div className={appointmentPreviewInfoCardClassName}>
           <InfoRow label="Email" value={detail.email || notSet} />
         </div>
       </div>
@@ -302,13 +303,13 @@ function LinkedProviderInteractionsSection({
               </div>
 
               <div className="grid gap-3 md:grid-cols-2">
-                <div className={cn("rounded-xl px-4 py-3", tokens.surface.card)}>
+                <div className={appointmentPreviewInfoCardClassName}>
                   <InfoRow
                     label={appointmentText("Arzt", "Врач", "Doctor")}
                     value={item.doctor_name || notSet}
                   />
                 </div>
-                <div className={cn("rounded-xl px-4 py-3", tokens.surface.card)}>
+                <div className={appointmentPreviewInfoCardClassName}>
                   <InfoRow
                     label={appointmentText("Standort", "Локация", "Location")}
                     value={item.location || notSet}
@@ -357,7 +358,7 @@ function LinkedProviderInteractionsSection({
   );
 }
 
-type LinkedProviderSheetProps = {
+export type LinkedProviderSheetProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   detail: ProviderSheetDetail | null;

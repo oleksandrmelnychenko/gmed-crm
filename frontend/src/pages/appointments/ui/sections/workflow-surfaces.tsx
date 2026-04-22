@@ -14,15 +14,23 @@ import {
   Banner,
   CountBadge,
   Section,
-  selectClass,
   StatCard,
-  textareaClass,
   tokens,
 } from "@/components/ui-shell";
 import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { buildAppointmentWorkflowSummary } from "@/pages/appointments.helpers";
+import {
+  appointmentSectionCardClassName,
+  appointmentMetaPillClassName,
+  appointmentMiniPillClassName,
+  appointmentSelectControlClassName,
+  appointmentSlateInputClassName,
+  appointmentSoftPanelClassName,
+  appointmentSoftSplitRowClassName,
+  appointmentTextareaControlClassName,
+} from "@/pages/appointments/appearance/surface-appearance";
 import { shiftLocalDateTime } from "@/pages/appointments/model/date-time";
 import {
   blankChecklistForm,
@@ -84,16 +92,8 @@ import {
 } from "@/pages/appointments/ui/shared/workspace-primitives";
 import { ContextCard } from "@/pages/appointments/ui/shared/context-card";
 
-const selectClassName = cn(selectClass, "h-10 rounded-xl");
-const textareaClassName = cn(textareaClass, "min-h-[96px]");
-
-function sectionCardClass(extra?: string) {
-  return cn(
-    "rounded-[1.75rem] border-border/70",
-    tokens.surface.card,
-    extra,
-  );
-}
+const selectClassName = appointmentSelectControlClassName;
+const textareaClassName = appointmentTextareaControlClassName;
 
 function withEllipsis(value: string | null | undefined) {
   const normalized = String(value ?? "").trim();
@@ -541,7 +541,7 @@ function AppointmentInterpreterSection({
   return (
     <>
       {canAssign && !detail.is_blocked ? (
-        <section className={sectionCardClass("p-5")}>
+        <section className={appointmentSectionCardClassName("p-5")}>
           <h3 className="text-sm font-semibold text-slate-950">
             {appointmentText(
               "Dolmetscherbesetzung",
@@ -587,7 +587,7 @@ function AppointmentInterpreterSection({
         </section>
       ) : null}
       {canRespond && detail.interpreter_id === currentUserId ? (
-        <section className={sectionCardClass("p-5")}>
+        <section className={appointmentSectionCardClassName("p-5")}>
           <h3 className="text-sm font-semibold text-slate-950">
             {appointmentText(
               "Dolmetscherantwort",
@@ -694,7 +694,7 @@ function AppointmentChecklistSection({
   }
 
   return (
-    <section className={sectionCardClass("p-5")}>
+    <section className={appointmentSectionCardClassName("p-5")}>
       <h3 className="text-sm font-semibold text-slate-950">
         {appointmentText("Checkliste", "Чек-лист", "Checklist")}
       </h3>
@@ -711,7 +711,7 @@ function AppointmentChecklistSection({
           items.map((item) => (
             <div
               key={item.id}
-              className="flex flex-col gap-3 rounded-2xl border border-slate-200/80 bg-slate-50/80 px-4 py-3 md:flex-row md:items-center md:justify-between"
+              className={appointmentSoftSplitRowClassName}
             >
               <div>
                 <p className="text-sm font-medium text-slate-900">
@@ -779,7 +779,7 @@ function AppointmentChecklistSection({
               }))
             }
             placeholder={withEllipsis(tr.appointments_title_col)}
-            className="h-10 rounded-xl bg-slate-50"
+            className={appointmentSlateInputClassName}
             required
           />
         </Field>
@@ -882,7 +882,7 @@ function AppointmentRemindersSection({
   }
 
   return (
-    <section className={sectionCardClass("p-5")}>
+    <section className={appointmentSectionCardClassName("p-5")}>
       <h3 className="text-sm font-semibold text-slate-950">
         {appointmentText("Erinnerungen", "Напоминания", "Reminders")}
       </h3>
@@ -899,7 +899,7 @@ function AppointmentRemindersSection({
           reminders.map((item) => (
             <div
               key={item.id}
-              className="flex flex-col gap-3 rounded-2xl border border-slate-200/80 bg-slate-50/80 px-4 py-3 md:flex-row md:items-center md:justify-between"
+              className={appointmentSoftSplitRowClassName}
             >
               <div>
                 <p className="text-sm font-medium text-slate-900">
@@ -977,7 +977,7 @@ function AppointmentRemindersSection({
                   remindAt: event.target.value,
                 }))
               }
-              className="h-10 rounded-xl bg-slate-50"
+              className={appointmentSlateInputClassName}
               required
             />
           </Field>
@@ -990,7 +990,7 @@ function AppointmentRemindersSection({
                   title: event.target.value,
                 }))
               }
-              className="h-10 rounded-xl bg-slate-50"
+              className={appointmentSlateInputClassName}
               required
             />
           </Field>
@@ -1167,7 +1167,7 @@ function AppointmentCompletionSection({
   }
 
   return (
-    <section className={sectionCardClass("p-5")}>
+    <section className={appointmentSectionCardClassName("p-5")}>
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <div>
           <h3 className="text-sm font-semibold text-slate-950">
@@ -1185,7 +1185,7 @@ function AppointmentCompletionSection({
             )}
           </p>
         </div>
-        <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+        <span className={appointmentMetaPillClassName}>
           {detail.status === "completed"
             ? appointmentText("Abgeschlossen", "Завершён", "Completed")
             : statusLabel(detail.status)}
@@ -1447,7 +1447,7 @@ function AppointmentStatusSection({
   }
 
   return (
-    <section className={sectionCardClass("p-5")}>
+    <section className={appointmentSectionCardClassName("p-5")}>
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
           <h3 className="text-sm font-semibold text-slate-950">
@@ -1650,7 +1650,7 @@ function AppointmentTasksSection({
   }
 
   return (
-    <section className={sectionCardClass("p-5")}>
+    <section className={appointmentSectionCardClassName("p-5")}>
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <div>
           <h3 className="text-sm font-semibold text-slate-950">
@@ -1668,7 +1668,7 @@ function AppointmentTasksSection({
             )}
           </p>
         </div>
-        <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+        <span className={appointmentMetaPillClassName}>
           {appointmentText(
             `${tasks.length} verknüpft`,
             `${tasks.length} связано`,
@@ -1689,7 +1689,7 @@ function AppointmentTasksSection({
           tasks.map((task) => (
             <div
               key={task.id}
-              className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4"
+              className={appointmentSoftPanelClassName}
             >
               <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                 <div className="min-w-0">
@@ -1697,10 +1697,10 @@ function AppointmentTasksSection({
                     <p className="text-sm font-semibold text-slate-950">
                       {task.title}
                     </p>
-                    <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                    <span className={appointmentMiniPillClassName}>
                       {taskStatusLabel(task.status)}
                     </span>
-                    <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                    <span className={appointmentMiniPillClassName}>
                       {taskPriorityLabel(task.priority)}
                     </span>
                   </div>
@@ -1760,7 +1760,7 @@ function AppointmentTasksSection({
                 }))
               }
               placeholder={withEllipsis(tr.appointments_title_col)}
-              className="h-10 rounded-xl bg-slate-50"
+              className={appointmentSlateInputClassName}
               required
             />
           </Field>
@@ -1794,7 +1794,7 @@ function AppointmentTasksSection({
                   dueDate: event.target.value,
                 }))
               }
-              className="h-10 rounded-xl bg-slate-50"
+              className={appointmentSlateInputClassName}
             />
           </Field>
           <Field label={t.users_status}>

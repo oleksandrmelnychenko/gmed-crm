@@ -1,7 +1,7 @@
 import { memo } from "react";
 
-import { Banner, EmptyCell, InfoRow, ListItem, tokens } from "@/components/ui-shell";
-import { cn } from "@/lib/utils";
+import { Banner, EmptyCell, InfoRow, ListItem } from "@/components/ui-shell";
+import { appointmentPreviewInfoCardClassName } from "@/pages/appointments/appearance/surface-appearance";
 import {
   linkedPreviewText,
   readLinkedPreviewValue,
@@ -13,7 +13,7 @@ import type {
 } from "@/pages/appointments/model/types";
 import { AppointmentPreviewSheet } from "@/pages/appointments/ui/shared/workspace-primitives";
 
-type LinkedRecordsSheetProps = {
+export type LinkedRecordsSheetProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title: string;
@@ -166,7 +166,7 @@ function LinkedRecordsSheet({
           {fields.map((field) => (
             <div
               key={field.label}
-              className={cn("rounded-xl px-4 py-3", tokens.surface.card)}
+              className={appointmentPreviewInfoCardClassName}
             >
               <InfoRow label={field.label} value={field.value} />
             </div>

@@ -1,8 +1,8 @@
 import { memo } from "react";
 import { LoaderCircle } from "lucide-react";
 
-import { EmptyCell, Section, tokens } from "@/components/ui-shell";
-import { cn } from "@/lib/utils";
+import { EmptyCell, Section } from "@/components/ui-shell";
+import { appointmentSectionCardClassName } from "@/pages/appointments/appearance/surface-appearance";
 import type {
   AppointmentCommunicationEntry,
   AppointmentDetail,
@@ -22,14 +22,6 @@ import {
   MemoizedAppointmentDoctorFollowUpSection,
   MemoizedAppointmentPackageEndSection,
 } from "@/pages/appointments/ui/sections/workflow-follow-up-sections";
-
-function sectionCardClass(extra?: string) {
-  return cn(
-    "rounded-[1.75rem] border border-border/70",
-    tokens.surface.card,
-    extra,
-  );
-}
 
 function CoordinationLoadingState({
   title,
@@ -104,7 +96,7 @@ function AppointmentCoordinationSection({
 }: AppointmentCoordinationSectionProps) {
   if (detail.is_blocked) {
     return (
-      <section className={sectionCardClass("p-5")}>
+      <section className={appointmentSectionCardClassName("p-5")}>
         <EmptyCell>{coordinationEmpty}</EmptyCell>
       </section>
     );

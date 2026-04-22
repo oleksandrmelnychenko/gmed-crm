@@ -10,7 +10,7 @@ import { useLang } from "@/lib/i18n";
 import { appointmentText } from "@/pages/appointments/model/labels";
 import { AppointmentPreviewSheet } from "@/pages/appointments/ui/shared/workspace-primitives";
 
-type LinkedCasesSheetProps = {
+export type LinkedCasesSheetProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   loading: boolean;

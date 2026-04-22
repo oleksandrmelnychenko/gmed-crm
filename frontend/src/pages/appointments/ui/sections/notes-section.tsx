@@ -1,19 +1,10 @@
 import { memo } from "react";
 
-import { tokens } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
-import { cn } from "@/lib/utils";
+import { appointmentSectionCardClassName } from "@/pages/appointments/appearance/surface-appearance";
 import type { AppointmentDetail } from "@/pages/appointments/model/types";
 import { MemoizedAppointmentTextPanel } from "@/pages/appointments/ui/shared/text-panel";
 import { EmptyState } from "@/pages/appointments/ui/shared/workspace-primitives";
-
-function sectionCardClass(extra?: string) {
-  return cn(
-    "rounded-[1.75rem] border border-border/70",
-    tokens.surface.card,
-    extra,
-  );
-}
 
 type AppointmentNotesSectionProps = {
   detail: AppointmentDetail;
@@ -33,14 +24,14 @@ function AppointmentNotesSection({
   if (!canViewNotes || detail.is_blocked) {
     if (hideWhenUnavailable) return null;
     return (
-      <section className={sectionCardClass("p-5")}>
+      <section className={appointmentSectionCardClassName("p-5")}>
         <EmptyState text={emptyText} />
       </section>
     );
   }
 
   return (
-    <section className={sectionCardClass("p-5")}>
+    <section className={appointmentSectionCardClassName("p-5")}>
       <h3 className="text-sm font-semibold text-slate-950">
         {t.patients_notes}
       </h3>

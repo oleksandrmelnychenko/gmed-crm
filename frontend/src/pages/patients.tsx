@@ -220,7 +220,7 @@ function CreatePatientSheet({
 
 const MemoizedCreatePatientSheet = memo(CreatePatientSheet);
 
-type PatientDetailSheetProps = {
+export type PatientDetailSheetProps = {
   open: boolean;
   detail: PatientDetail | null;
   detailBusy: boolean;

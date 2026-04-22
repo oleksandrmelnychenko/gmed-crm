@@ -13,16 +13,19 @@ import {
   Banner,
   CountBadge,
   EmptyCell,
-  inputClass,
   Section,
   StatCard,
   StatusBadge,
-  textareaClass,
   tokens,
 } from "@/components/ui-shell";
 import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import {
+  appointmentFilterControlClassName,
+  appointmentPreviewInfoCardClassName,
+  appointmentTextareaControlClassName,
+} from "@/pages/appointments/appearance/surface-appearance";
 import {
   blankReportForm,
 } from "@/pages/appointments/model/form-factories";
@@ -331,7 +334,7 @@ function AppointmentReportSection({
               </div>
             ) : null}
 
-            <div className={cn("rounded-xl px-4 py-4", tokens.surface.card)}>
+            <div className={cn("py-4", appointmentPreviewInfoCardClassName)}>
               <p className={tokens.text.label}>
                 {appointmentText("Berichtstext", "Текст отчёта", "Report text")}
               </p>
@@ -476,7 +479,7 @@ function AppointmentReportSection({
                       hours: event.target.value,
                     }))
                   }
-                  className={cn(inputClass, "h-10 rounded-xl")}
+                  className={appointmentFilterControlClassName}
                   required
                 />
               </Field>
@@ -489,7 +492,7 @@ function AppointmentReportSection({
                       reportText: event.target.value,
                     }))
                   }
-                  className={textareaClass}
+                  className={appointmentTextareaControlClassName}
                   rows={5}
                   placeholder={withEllipsis(tr.patients_notes)}
                 />
@@ -516,7 +519,7 @@ function AppointmentReportSection({
                 <textarea
                   value={rejectReason}
                   onChange={(event) => setRejectReason(event.target.value)}
-                  className={textareaClass}
+                  className={appointmentTextareaControlClassName}
                   rows={4}
                   placeholder={withEllipsis(tr.patients_notes)}
                 />

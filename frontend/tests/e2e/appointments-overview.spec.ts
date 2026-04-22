@@ -259,7 +259,12 @@ test.describe("appointments overview detail", () => {
       .filter({ hasText: "Verknüpfte Datensätze" })
       .first();
     await expect(linkedSection).toBeVisible();
-    await expect(linkedSection).toContainText("Arbeitsbereich öffnen");
-    await expect(linkedSection).toContainText("Schnellvorschau");
+    await expect(linkedSection.getByRole("button", { name: "Patient" })).toBeVisible();
+    await expect(linkedSection.getByRole("button", { name: "Auftrag" })).toBeVisible();
+    await expect(linkedSection.getByRole("button", { name: "Klinik" })).toBeVisible();
+    await expect(linkedSection.getByRole("button", { name: "Dokumente" })).toBeVisible();
+    await expect(linkedSection.getByRole("button", { name: "Fälle" })).toBeVisible();
+    await expect(linkedSection).not.toContainText("Arbeitsbereich öffnen");
+    await expect(linkedSection).not.toContainText("Schnellvorschau");
   });
 });

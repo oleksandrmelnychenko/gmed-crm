@@ -1,9 +1,9 @@
 import { Suspense, lazy, memo } from "react";
 import { LoaderCircle } from "lucide-react";
 
-import { Banner, Section, tokens } from "@/components/ui-shell";
+import { Banner, Section } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
-import { cn } from "@/lib/utils";
+import { appointmentSectionCardClassName } from "@/pages/appointments/appearance/surface-appearance";
 import { appointmentText } from "@/pages/appointments/model/labels";
 import type {
   AppointmentAttentionItem,
@@ -73,14 +73,6 @@ const LazyWorkflowTab = lazy(async () => {
   const mod = await loadWorkflowSurfaces();
   return { default: mod.MemoizedAppointmentWorkflowTab };
 });
-
-function sectionCardClass(extra?: string) {
-  return cn(
-    "rounded-[1.75rem] border border-border/70",
-    tokens.surface.card,
-    extra,
-  );
-}
 
 function loadingSection(title: string, text: string) {
   return (
@@ -252,7 +244,7 @@ function AppointmentDesktopDetailWorkspaceContent({
 
   if (!detail) {
     return (
-      <section className={sectionCardClass("p-5")}>
+      <section className={appointmentSectionCardClassName("p-5")}>
         <EmptyState
           text={appointmentText(
             "Termin im Kalender oder in der Liste auswahlen.",
@@ -515,7 +507,7 @@ function AppointmentDesktopDetailWorkspaceContent({
             )
           )
         ) : (
-          <section className={sectionCardClass("p-5")}>
+          <section className={appointmentSectionCardClassName("p-5")}>
             <EmptyState text={workflowEmpty} />
           </section>
         )
@@ -578,7 +570,9 @@ function AppointmentDesktopDetailWorkspaceContent({
       ) : null}
 
       {showNotesTab ? (
-        <Suspense fallback={<section className={sectionCardClass("p-5")} />}>
+        <Suspense
+          fallback={<section className={appointmentSectionCardClassName("p-5")} />}
+        >
           <LazyNotesSection
             detail={detail}
             canViewNotes={permissions.canViewNotes}

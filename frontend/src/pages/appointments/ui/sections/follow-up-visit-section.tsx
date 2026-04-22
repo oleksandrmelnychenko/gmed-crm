@@ -12,12 +12,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Banner,
-  selectClass,
-  textareaClass,
 } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
 import { apiFetch } from "@/lib/api";
-import { cn } from "@/lib/utils";
+import {
+  appointmentElevatedSectionCardClassName,
+  appointmentSelectControlClassName,
+  appointmentSlateInputClassName,
+  appointmentTextareaControlClassName,
+  appointmentToggleCardClassName,
+} from "@/pages/appointments/appearance/surface-appearance";
 import { shiftLocalDateTime } from "@/pages/appointments/model/date-time";
 import { formatAppointmentSlotLabel as slotLabel } from "@/pages/appointments/model/runtime-formatters";
 import { buildConflictQuery } from "@/pages/appointments/model/query-builders";
@@ -70,10 +74,9 @@ type AppointmentFollowUpVisitSectionProps = {
   onCreated: (result: { id?: string; notice: string }) => void;
 };
 
-const sectionCardClass =
-  "rounded-3xl border border-slate-200/80 bg-white p-5 shadow-[0_20px_50px_-35px_rgba(15,23,42,0.35)]";
-const selectClassName = cn(selectClass, "h-10 rounded-xl");
-const textareaClassName = cn(textareaClass, "min-h-[96px]");
+const sectionCardClass = appointmentElevatedSectionCardClassName;
+const selectClassName = appointmentSelectControlClassName;
+const textareaClassName = appointmentTextareaControlClassName;
 
 function withEllipsis(text: string) {
   return text.trim().endsWith("...") ? text : `${text.trim()}...`;
@@ -328,7 +331,7 @@ function AppointmentFollowUpVisitSection({
             onChange={(event) =>
               setForm((current) => ({ ...current, title: event.target.value }))
             }
-            className="h-10 rounded-xl bg-slate-50"
+            className={appointmentSlateInputClassName}
             required
           />
         </Field>
@@ -340,7 +343,7 @@ function AppointmentFollowUpVisitSection({
               onChange={(event) =>
                 setForm((current) => ({ ...current, date: event.target.value }))
               }
-              className="h-10 rounded-xl bg-slate-50"
+              className={appointmentSlateInputClassName}
               required
             />
           </Field>
@@ -354,7 +357,7 @@ function AppointmentFollowUpVisitSection({
                   timeStart: event.target.value,
                 }))
               }
-              className="h-10 rounded-xl bg-slate-50"
+              className={appointmentSlateInputClassName}
             />
           </Field>
           <Field label={t.appointments_time}>
@@ -367,7 +370,7 @@ function AppointmentFollowUpVisitSection({
                   timeEnd: event.target.value,
                 }))
               }
-              className="h-10 rounded-xl bg-slate-50"
+              className={appointmentSlateInputClassName}
             />
           </Field>
         </div>
@@ -489,7 +492,7 @@ function AppointmentFollowUpVisitSection({
                   location: event.target.value,
                 }))
               }
-              className="h-10 rounded-xl bg-slate-50"
+              className={appointmentSlateInputClassName}
             />
           </Field>
           <Field label={tr.documents_category}>
@@ -501,7 +504,7 @@ function AppointmentFollowUpVisitSection({
                   category: event.target.value,
                 }))
               }
-              className="h-10 rounded-xl bg-slate-50"
+              className={appointmentSlateInputClassName}
             />
           </Field>
         </div>
@@ -517,7 +520,7 @@ function AppointmentFollowUpVisitSection({
           />
         </Field>
         {detail.order_id ? (
-          <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm text-slate-700">
+          <label className={appointmentToggleCardClassName}>
             <input
               type="checkbox"
               checked={form.linkOrder}
@@ -533,7 +536,7 @@ function AppointmentFollowUpVisitSection({
           </label>
         ) : null}
         <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_220px]">
-          <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm text-slate-700">
+          <label className={appointmentToggleCardClassName}>
             <input
               type="checkbox"
               checked={form.createReminder}
@@ -579,7 +582,7 @@ function AppointmentFollowUpVisitSection({
                   reminderAt: event.target.value,
                 }))
               }
-              className="h-10 rounded-xl bg-slate-50"
+              className={appointmentSlateInputClassName}
             />
           </Field>
         ) : null}

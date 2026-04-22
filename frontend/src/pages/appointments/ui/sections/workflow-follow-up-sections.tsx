@@ -10,9 +10,20 @@ import { LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
 import { useLang } from "@/lib/i18n";
 import { apiFetch } from "@/lib/api";
+import {
+  appointmentElevatedSectionCardClassName,
+  appointmentMetaPillClassName,
+  appointmentSelectControlClassName,
+  appointmentSlateInputClassName,
+  appointmentSoftPanelClassName,
+  appointmentSoftRowClassName,
+  appointmentTextareaControlClassName,
+  appointmentToggleCardClassName,
+  appointmentWhiteInputClassName,
+  appointmentWhiteRowClassName,
+} from "@/pages/appointments/appearance/surface-appearance";
 import { shiftLocalDateTime } from "@/pages/appointments/model/date-time";
 import {
   formatAppointmentDateLabel as formatDateLabel,
@@ -49,10 +60,6 @@ import {
   EmptyState,
   Field,
 } from "@/pages/appointments/ui/shared/workspace-primitives";
-import {
-  selectClass,
-  textareaClass,
-} from "@/components/ui-shell";
 
 type AppointmentDoctorFollowUpSectionProps = {
   detail: AppointmentDetail;
@@ -79,10 +86,9 @@ type AppointmentPackageEndSectionProps = {
   onError: (message: string) => void;
 };
 
-const sectionCardClass =
-  "rounded-3xl border border-slate-200/80 bg-white p-5 shadow-[0_20px_50px_-35px_rgba(15,23,42,0.35)]";
-const selectClassName = cn(selectClass, "h-10 rounded-xl");
-const textareaClassName = cn(textareaClass, "min-h-[96px]");
+const sectionCardClass = appointmentElevatedSectionCardClassName;
+const selectClassName = appointmentSelectControlClassName;
+const textareaClassName = appointmentTextareaControlClassName;
 
 function withEllipsis(text: string) {
   return text.trim().endsWith("...") ? text : `${text.trim()}...`;
@@ -192,14 +198,14 @@ function AppointmentDoctorFollowUpSection({
             {t.appointments_doctor_directed_followup_subtitle}
           </p>
         </div>
-        <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+        <span className={appointmentMetaPillClassName}>
           {reminders.length + tasks.length}{" "}
           {reminders.length + tasks.length === 1 ? "item" : "items"}
         </span>
       </div>
       <div className="mt-4 grid gap-4 xl:grid-cols-2">
         <div className="space-y-4">
-          <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
+          <div className={appointmentSoftPanelClassName}>
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
               {t.common_search}
             </p>
@@ -210,7 +216,7 @@ function AppointmentDoctorFollowUpSection({
                 reminders.map((item) => (
                   <div
                     key={item.id}
-                    className="rounded-2xl border border-slate-200 bg-white px-4 py-3"
+                    className={appointmentWhiteRowClassName}
                   >
                     <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                       <div>
@@ -241,7 +247,7 @@ function AppointmentDoctorFollowUpSection({
               )}
             </div>
           </div>
-          <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
+          <div className={appointmentSoftPanelClassName}>
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
               {t.appointments_task_trail}
             </p>
@@ -252,7 +258,7 @@ function AppointmentDoctorFollowUpSection({
                 tasks.map((task) => (
                   <div
                     key={task.id}
-                    className="rounded-2xl border border-slate-200 bg-white px-4 py-3"
+                    className={appointmentWhiteRowClassName}
                   >
                     <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                       <div>
@@ -282,7 +288,7 @@ function AppointmentDoctorFollowUpSection({
         {canManageReminders ? (
           <form
             onSubmit={handleSubmit}
-            className="space-y-4 rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4"
+            className={`space-y-4 ${appointmentSoftPanelClassName}`}
           >
             <Field label={tr.appointments_title_col}>
               <Input
@@ -291,7 +297,7 @@ function AppointmentDoctorFollowUpSection({
                   setForm((current) => ({ ...current, title: event.target.value }))
                 }
                 placeholder={withEllipsis(tr.appointments_title_col)}
-                className="h-10 rounded-xl bg-white"
+                className={appointmentSlateInputClassName}
                 required
               />
             </Field>
@@ -322,7 +328,7 @@ function AppointmentDoctorFollowUpSection({
                 onChange={(event) =>
                   setForm((current) => ({ ...current, dueAt: event.target.value }))
                 }
-                className="h-10 rounded-xl bg-white"
+                className={appointmentSlateInputClassName}
                 required
               />
             </Field>
@@ -338,7 +344,7 @@ function AppointmentDoctorFollowUpSection({
               />
             </Field>
             <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_180px]">
-              <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+              <label className={appointmentToggleCardClassName}>
                 <input
                   type="checkbox"
                   checked={form.createTask}
@@ -392,7 +398,7 @@ function AppointmentDoctorFollowUpSection({
             </div>
           </form>
         ) : (
-          <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
+          <div className={appointmentSoftPanelClassName}>
             <EmptyState text={tr.common_not_set} />
           </div>
         )}
@@ -509,7 +515,7 @@ function AppointmentPackageEndSection({
             or order window ends.
           </p>
         </div>
-        <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+        <span className={appointmentMetaPillClassName}>
           {reminders.length + tasks.length} package item
           {reminders.length + tasks.length === 1 ? "" : "s"}
         </span>
@@ -523,7 +529,7 @@ function AppointmentPackageEndSection({
               {reminders.map((item) => (
                 <div
                   key={item.id}
-                  className="rounded-2xl border border-slate-200/80 bg-slate-50/80 px-4 py-3"
+                  className={appointmentSoftRowClassName}
                 >
                   <p className="text-sm font-medium text-slate-900">
                     {item.title.replace(`${PACKAGE_END_FOLLOW_UP_PREFIX} `, "")}
@@ -541,7 +547,7 @@ function AppointmentPackageEndSection({
               {tasks.map((task) => (
                 <div
                   key={task.id}
-                  className="rounded-2xl border border-slate-200/80 bg-slate-50/80 px-4 py-3"
+                  className={appointmentSoftRowClassName}
                 >
                   <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                     <p className="text-sm font-medium text-slate-900">
@@ -568,7 +574,7 @@ function AppointmentPackageEndSection({
         {canManageReminders ? (
           <form
             onSubmit={handleSubmit}
-            className="space-y-4 rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4"
+            className={`space-y-4 ${appointmentSoftPanelClassName}`}
           >
             <Field label={t.appointments_date}>
               <Input
@@ -580,7 +586,7 @@ function AppointmentPackageEndSection({
                     packageEndDate: event.target.value,
                   }))
                 }
-                className="h-10 rounded-xl bg-white"
+                className={appointmentSlateInputClassName}
                 required
               />
             </Field>
@@ -590,7 +596,7 @@ function AppointmentPackageEndSection({
                 onChange={(event) =>
                   setForm((current) => ({ ...current, title: event.target.value }))
                 }
-                className="h-10 rounded-xl bg-white"
+                className={appointmentWhiteInputClassName}
                 required
               />
             </Field>
@@ -632,7 +638,7 @@ function AppointmentPackageEndSection({
               />
             </Field>
             <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_180px]">
-              <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+              <label className={appointmentToggleCardClassName}>
                 <input
                   type="checkbox"
                   checked={form.createTask}

@@ -12,7 +12,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
-import { cn } from "@/lib/utils";
+import {
+  appointmentElevatedSectionCardClassName,
+  appointmentMetaPillClassName,
+  appointmentMiniPillClassName,
+  appointmentSoftPanelClassName,
+  appointmentWhiteInputClassName,
+  appointmentWhiteSelectControlClassName,
+  appointmentWhiteTextareaControlClassName,
+} from "@/pages/appointments/appearance/surface-appearance";
 import {
   blankConciergeServiceForm,
 } from "@/pages/appointments/model/form-factories";
@@ -59,15 +67,9 @@ type AppointmentConciergeSectionProps = {
   onError: (message: string) => void;
 };
 
-const sectionCardClass = (...tokens: Array<string | false | null | undefined>) =>
-  cn(
-    "rounded-3xl border border-slate-200/80 bg-white shadow-[0_20px_50px_-35px_rgba(15,23,42,0.35)]",
-    ...tokens,
-  );
-const selectClassName =
-  "h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-200";
-const textareaClassName =
-  "w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-200";
+const sectionCardClass = appointmentElevatedSectionCardClassName;
+const selectClassName = appointmentWhiteSelectControlClassName;
+const textareaClassName = appointmentWhiteTextareaControlClassName;
 
 function AppointmentConciergeSection({
   detail,
@@ -227,7 +229,7 @@ function AppointmentConciergeSection({
   }
 
   return (
-    <section className={sectionCardClass("p-5")}>
+    <section className={sectionCardClass}>
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <div>
           <h3 className="text-sm font-semibold text-slate-950">
@@ -237,7 +239,7 @@ function AppointmentConciergeSection({
             Travel, transfer and VIP execution linked to this appointment.
           </p>
         </div>
-        <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+        <span className={appointmentMetaPillClassName}>
           {services.length} service{services.length === 1 ? "" : "s"}
         </span>
       </div>
@@ -250,7 +252,7 @@ function AppointmentConciergeSection({
             return (
               <div
                 key={service.id}
-                className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4"
+                className={appointmentSoftPanelClassName}
               >
                 <div className="flex flex-col gap-4">
                   <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
@@ -259,13 +261,13 @@ function AppointmentConciergeSection({
                         <p className="text-sm font-semibold text-slate-950">
                           {service.title}
                         </p>
-                        <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                        <span className={appointmentMiniPillClassName}>
                           {serviceKindLabel(service.service_kind)}
                         </span>
-                        <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                        <span className={appointmentMiniPillClassName}>
                           {taskStatusLabel(service.status)}
                         </span>
-                        <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                        <span className={appointmentMiniPillClassName}>
                           {billingStatusLabel(service.billing_status)}
                         </span>
                       </div>
@@ -303,7 +305,7 @@ function AppointmentConciergeSection({
                             onChange={(event) =>
                               updateDraft(service.id, { title: event.target.value })
                             }
-                            className="h-10 rounded-xl bg-white"
+                            className={appointmentWhiteInputClassName}
                           />
                         </Field>
                         <Field label={t.common_provider}>
@@ -542,7 +544,7 @@ function AppointmentConciergeSection({
                   title: event.target.value,
                 }))
               }
-              className="h-10 rounded-xl bg-slate-50"
+              className={appointmentWhiteInputClassName}
               required
             />
           </Field>
@@ -606,7 +608,7 @@ function AppointmentConciergeSection({
                   startsAt: event.target.value,
                 }))
               }
-              className="h-10 rounded-xl bg-slate-50"
+              className={appointmentWhiteInputClassName}
             />
           </Field>
           <Field label={tr.providers_service_valid_to}>
@@ -619,7 +621,7 @@ function AppointmentConciergeSection({
                   endsAt: event.target.value,
                 }))
               }
-              className="h-10 rounded-xl bg-slate-50"
+              className={appointmentWhiteInputClassName}
             />
           </Field>
           <Field label={tr.common_provider}>
@@ -631,7 +633,7 @@ function AppointmentConciergeSection({
                   vendorName: event.target.value,
                 }))
               }
-              className="h-10 rounded-xl bg-slate-50"
+              className={appointmentWhiteInputClassName}
             />
           </Field>
           <Field label={tr.field_phone}>
@@ -643,7 +645,7 @@ function AppointmentConciergeSection({
                   vendorContact: event.target.value,
                 }))
               }
-              className="h-10 rounded-xl bg-slate-50"
+              className={appointmentWhiteInputClassName}
             />
           </Field>
           <Field label={tr.contracts_total}>
@@ -658,7 +660,7 @@ function AppointmentConciergeSection({
                   costEstimate: event.target.value,
                 }))
               }
-              className="h-10 rounded-xl bg-slate-50"
+              className={appointmentWhiteInputClassName}
             />
           </Field>
           <Field label={tr.contracts_total}>
@@ -670,7 +672,7 @@ function AppointmentConciergeSection({
                   currency: event.target.value,
                 }))
               }
-              className="h-10 rounded-xl bg-slate-50"
+              className={appointmentWhiteInputClassName}
               maxLength={3}
             />
           </Field>

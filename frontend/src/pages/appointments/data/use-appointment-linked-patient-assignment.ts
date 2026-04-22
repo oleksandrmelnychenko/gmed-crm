@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { assignLinkedPatient } from "@/pages/appointments/data/appointment-mutations";
 
@@ -25,6 +25,11 @@ export function useAppointmentLinkedPatientAssignment({
     setLinkedPatientAssignmentBusy(false);
     setLinkedPatientAssignmentError("");
   }, []);
+
+  useEffect(() => {
+    if (linkedPatientDetailId) return;
+    resetLinkedPatientAssignmentState();
+  }, [linkedPatientDetailId, resetLinkedPatientAssignmentState]);
 
   const handleAssignLinkedPatient = useCallback(async () => {
     if (!linkedPatientDetailId || !linkedPatientSelectedAssignee) return;
@@ -58,7 +63,6 @@ export function useAppointmentLinkedPatientAssignment({
     setLinkedPatientSelectedAssignee,
     linkedPatientAssignmentBusy,
     linkedPatientAssignmentError,
-    resetLinkedPatientAssignmentState,
     handleAssignLinkedPatient,
   };
 }

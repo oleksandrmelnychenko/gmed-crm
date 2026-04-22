@@ -10,13 +10,20 @@ import { LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Banner,
-  selectClass,
-} from "@/components/ui-shell";
+import { Banner } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { apiFetch } from "@/lib/api";
+import {
+  appointmentElevatedSectionCardClassName,
+  appointmentMetaPillClassName,
+  appointmentMiniPillClassName,
+  appointmentSelectControlClassName,
+  appointmentSlateInputClassName,
+  appointmentSlateTextareaControlClassName,
+  appointmentSoftPanelClassName,
+  appointmentWhiteRowClassName,
+} from "@/pages/appointments/appearance/surface-appearance";
 import { shiftLocalDateTime } from "@/pages/appointments/model/date-time";
 import {
   formatAppointmentDateTimeLabel as formatDateTimeLabel,
@@ -74,9 +81,10 @@ type AppointmentBillingHandoffSectionProps = {
   onError: (message: string) => void;
 };
 
-const sectionCardClass = "rounded-3xl border border-slate-200/80 bg-white p-5 shadow-[0_20px_50px_-35px_rgba(15,23,42,0.35)]";
-const textareaClassName =
-  "w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-200";
+const sectionCardClass = appointmentElevatedSectionCardClassName;
+const selectClassName = appointmentSelectControlClassName;
+const inputClassName = appointmentSlateInputClassName;
+const textareaClassName = appointmentSlateTextareaControlClassName;
 
 function withEllipsis(text: string) {
   return text.trim().endsWith("...") ? text : `${text.trim()}...`;
@@ -244,7 +252,7 @@ function AppointmentBillingHandoffSection({
             )}
           </p>
         </div>
-        <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+        <span className={appointmentMetaPillClassName}>
           {tasks.length + reminders.length}{" "}
           {appointmentText("verknupft", "связано", "linked")}
         </span>
@@ -335,7 +343,7 @@ function AppointmentBillingHandoffSection({
       ) : null}
 
       <div className="mt-5 grid gap-4 xl:grid-cols-2">
-        <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
+        <div className={appointmentSoftPanelClassName}>
           <div className="flex items-center justify-between gap-3">
             <h4 className="text-sm font-semibold text-slate-950">
               {appointmentText(
@@ -355,7 +363,7 @@ function AppointmentBillingHandoffSection({
               reminders.map((item) => (
                 <div
                   key={item.id}
-                  className="rounded-2xl border border-slate-200 bg-white px-4 py-3"
+                  className={appointmentWhiteRowClassName}
                 >
                   <p className="text-sm font-medium text-slate-900">{item.title}</p>
                   <p className="mt-1 text-xs text-slate-500">
@@ -370,7 +378,7 @@ function AppointmentBillingHandoffSection({
           </div>
         </div>
 
-        <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
+        <div className={appointmentSoftPanelClassName}>
           <div className="flex items-center justify-between gap-3">
             <h4 className="text-sm font-semibold text-slate-950">
               {appointmentText(
@@ -390,14 +398,14 @@ function AppointmentBillingHandoffSection({
               tasks.map((task) => (
                 <div
                   key={task.id}
-                  className="rounded-2xl border border-slate-200 bg-white px-4 py-3"
+                  className={appointmentWhiteRowClassName}
                 >
                   <div className="flex flex-wrap items-center gap-2">
                     <p className="text-sm font-medium text-slate-900">{task.title}</p>
-                    <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                    <span className={appointmentMiniPillClassName}>
                       {taskStatusLabel(task.status)}
                     </span>
-                    <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                    <span className={appointmentMiniPillClassName}>
                       {taskPriorityLabel(task.priority)}
                     </span>
                   </div>
@@ -432,7 +440,7 @@ function AppointmentBillingHandoffSection({
                   kind: event.target.value as BillingHandoffKind,
                 }))
               }
-              className={selectClass}
+              className={selectClassName}
             >
               {(
                 [
@@ -459,7 +467,7 @@ function AppointmentBillingHandoffSection({
                   assigneeId: event.target.value,
                 }))
               }
-              className={selectClass}
+              className={selectClassName}
               required
             >
               <option value="">
@@ -486,7 +494,7 @@ function AppointmentBillingHandoffSection({
                   dueAt: event.target.value,
                 }))
               }
-              className="h-10 rounded-xl bg-slate-50"
+              className={inputClassName}
               required
             />
           </Field>
@@ -499,7 +507,7 @@ function AppointmentBillingHandoffSection({
                   taskPriority: event.target.value,
                 }))
               }
-              className={selectClass}
+              className={selectClassName}
             >
               {TASK_PRIORITY_OPTIONS.map((priority) => (
                 <option key={priority} value={priority}>
@@ -517,7 +525,7 @@ function AppointmentBillingHandoffSection({
                   title: event.target.value,
                 }))
               }
-              className="h-10 rounded-xl bg-slate-50"
+              className={inputClassName}
               placeholder={withEllipsis(tr.appointments_title_col)}
             />
           </Field>

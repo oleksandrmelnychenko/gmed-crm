@@ -8,71 +8,18 @@ import {
   useMemo,
   useRef,
   useState,
-  type MouseEvent as ReactMouseEvent,
-  type ReactNode,
 } from "react";
 import { useSearchParams } from "react-router-dom";
-import FullCalendar from "@fullcalendar/react";
-import dayGridPlugin from "@fullcalendar/daygrid";
-import timeGridPlugin from "@fullcalendar/timegrid";
-import listPlugin from "@fullcalendar/list";
-import deLocale from "@fullcalendar/core/locales/de";
-import ruLocale from "@fullcalendar/core/locales/ru";
-import interactionPlugin, {
-  type DateClickArg,
-  type EventResizeDoneArg,
-} from "@fullcalendar/interaction";
-import type {
-  DatesSetArg,
-  EventClickArg,
-  EventContentArg,
-  EventDropArg,
-  EventInput,
-} from "@fullcalendar/core";
+import type FullCalendar from "@fullcalendar/react";
+import type { EventClickArg, EventContentArg } from "@fullcalendar/core";
 import {
-  AlertTriangle,
-  CalendarClock,
-  CalendarDays,
-  CheckCircle2,
-  Clock3,
-  MoreHorizontal,
   LoaderCircle,
-  MapPin,
-  Plus,
-  RefreshCw,
-  UsersRound,
 } from "lucide-react";
-
-import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
-import {
-  Select as ShadSelect,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Banner,
-  inputClass,
-  tokens,
 } from "@/components/ui-shell";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
-import { cn } from "@/lib/utils";
 import {
   buildInterpreterMobileAgendaSections,
   buildAppointmentTimelineEvents,
@@ -90,29 +37,23 @@ import {
   readStoredCalendarDate,
   readStoredCalendarView,
   startOfWeekInput,
-  toDateInput,
-  toTimeInput,
 } from "@/pages/appointments/model/date-time";
 import {
   formatAppointmentDateTimeLabel as formatDateTimeLabel,
-  formatAppointmentSlotLabel as slotLabel,
 } from "@/pages/appointments/model/runtime-formatters";
 import {
   blankAppointmentForm,
-  statusActionKey,
 } from "@/pages/appointments/model/form-factories";
 import {
   buildAppointmentsQuery,
 } from "@/pages/appointments/model/query-builders";
+import { toCalendarEvent } from "@/pages/appointments/model/calendar-events";
 import { useAppointmentDetail } from "@/pages/appointments/data/use-appointment-detail";
-import {
-  updateAppointmentSchedule,
-  updateAppointmentStatus,
-} from "@/pages/appointments/data/appointment-mutations";
 import { useAppointmentLinkedPatientAssignment } from "@/pages/appointments/data/use-appointment-linked-patient-assignment";
 import { useAppointmentLinkedRecords } from "@/pages/appointments/data/use-appointment-linked-records";
 import { useAppointmentLinkedPatient } from "@/pages/appointments/data/use-appointment-linked-patient";
 import { useAppointmentsMetadata } from "@/pages/appointments/data/use-appointments-metadata";
+import { useAppointmentSchedulerActions } from "@/pages/appointments/data/use-appointment-scheduler-actions";
 import { useAppointmentsSchedulerData } from "@/pages/appointments/data/use-appointments-scheduler-data";
 import { useProviderDoctorOptions } from "@/pages/appointments/data/use-provider-doctor-options";
 import {
@@ -120,42 +61,54 @@ import {
   operationalScopeOptions,
 } from "@/pages/appointments/model/operational-scopes";
 import {
+  appointmentFilterControlClassName,
+  appointmentSectionCardClassName,
+} from "@/pages/appointments/appearance/surface-appearance";
+import {
   appointmentText,
   appointmentTypeLabel,
-  responseLabel,
-  statusLabel,
 } from "@/pages/appointments/model/labels";
-import {
-  buildLocalScheduleWarnings,
-  buildScheduleNotice,
-} from "@/pages/appointments/model/schedule-warnings";
 import {
   buildHandoffStakeholders,
 } from "@/pages/appointments/model/workflow-helpers";
 import {
-  recurrenceCadenceLabel,
-} from "@/pages/appointments/model/recurrence";
-import { appointmentStatusBadgeClassName } from "@/pages/appointments/appearance/status-appearance";
+  useAppointmentQueryActions,
+  useAppointmentRouteHydration,
+} from "@/pages/appointments/ui/hooks/use-appointment-route-sync";
+import { useAppointmentCalendarQuickActions } from "@/pages/appointments/ui/hooks/use-appointment-calendar-quick-actions";
+import { useAppointmentLinkedSheetState } from "@/pages/appointments/ui/hooks/use-appointment-linked-sheet-state";
+import { useAppointmentOverlayState } from "@/pages/appointments/ui/hooks/use-appointment-overlay-state";
+import { useAppointmentSchedulerControls } from "@/pages/appointments/ui/hooks/use-appointment-scheduler-controls";
+import { useAppointmentWorkspaceSession } from "@/pages/appointments/ui/hooks/use-appointment-workspace-session";
+import { AppointmentCalendarEventCard } from "@/pages/appointments/ui/scheduler/appointment-calendar-event-card";
+import { AppointmentsPageChrome } from "@/pages/appointments/ui/scheduler/appointments-page-chrome";
 import {
-  AppointmentPreviewSheetLoadingState,
-  AptKpi,
-  EmptyState,
-  Field,
-} from "@/pages/appointments/ui/shared/workspace-primitives";
+  AppointmentsSchedulerSurface,
+  preloadSchedulerQueueSheet,
+  preloadSchedulerSearchSheet,
+} from "@/pages/appointments/ui/scheduler/appointments-scheduler-surface";
+import { CreateSheetLayer, preloadCreateSheetLayer } from "@/pages/appointments/ui/sheets/create-sheet-layer";
+import {
+  LinkedCasesSheetLayer,
+  LinkedDocumentsSheetLayer,
+  LinkedPatientSheetLayer,
+  LinkedProviderSheetLayer,
+  LinkedRecordsSheetLayer,
+  preloadLinkedCasesSheet,
+  preloadLinkedDocumentsSheet,
+  preloadLinkedPatientSheet,
+  preloadLinkedProviderSheet,
+  preloadLinkedRecordsSheet,
+} from "@/pages/appointments/ui/sheets/linked-sheet-layers";
+import { MobileDetailSheet, preloadMobileDetailSheet } from "@/pages/appointments/ui/sheets/mobile-detail-sheet";
 import type {
   AppointmentCommunicationEntry,
-  AppointmentFormState,
   AppointmentListItem,
-  AppointmentRecurringActionScope,
-  AppointmentStatus,
-  CalendarEventExtendedProps,
-  CalendarQuickActionMenuState,
   CalendarView,
   ChecklistItem,
   ConciergeServiceEntry,
   FiltersState,
   HandoffStakeholder,
-  LinkedPreviewKind,
   OperationalScope,
   ReminderEntry,
   SchedulerQuickScope,
@@ -227,76 +180,14 @@ const EMPTY_DETAIL_DERIVED_STATE = {
   completionWarnings: [] as string[],
 };
 
-const loadLinkedProviderSheet = () =>
-  import("@/pages/appointments/ui/sheets/linked-provider-sheet");
-const loadLinkedCasesSheet = () =>
-  import("@/pages/appointments/ui/sheets/linked-cases-sheet");
-const loadLinkedDocumentsSheet = () =>
-  import("@/pages/appointments/ui/sheets/linked-documents-sheet");
-const loadLinkedRecordsSheet = () =>
-  import("@/pages/appointments/ui/sheets/linked-records-sheet");
-const loadCreateAppointmentSheet = () =>
-  import("@/pages/appointments/ui/sheets/create-appointment-sheet");
 const loadDesktopDetailWorkspaceContent = () =>
   import("@/pages/appointments/ui/workspace/desktop-detail-workspace-content");
-const loadMobileDetailSheetContent = () =>
-  import("@/pages/appointments/ui/sheets/mobile-detail-sheet-content");
-const loadSearchSheet = () =>
-  import("@/pages/appointments/ui/sheets/search-sheet");
-const loadQueueSheet = () =>
-  import("@/pages/appointments/ui/sheets/queue-sheet");
-const loadPatientDetailSheet = () => import("@/pages/patients");
 const loadPatientAppointmentsPage = () =>
   import("@/pages/patient-appointments");
-
-const LazyLinkedProviderSheet = lazy(async () => {
-  const mod = await loadLinkedProviderSheet();
-  return { default: mod.MemoizedLinkedProviderSheet };
-});
-
-const LazyLinkedCasesSheet = lazy(async () => {
-  const mod = await loadLinkedCasesSheet();
-  return { default: mod.MemoizedLinkedCasesSheet };
-});
-
-const LazyLinkedDocumentsSheet = lazy(async () => {
-  const mod = await loadLinkedDocumentsSheet();
-  return { default: mod.MemoizedLinkedDocumentsSheet };
-});
-
-const LazyLinkedRecordsSheet = lazy(async () => {
-  const mod = await loadLinkedRecordsSheet();
-  return { default: mod.MemoizedLinkedRecordsSheet };
-});
-
-const LazyCreateAppointmentSheet = lazy(async () => {
-  const mod = await loadCreateAppointmentSheet();
-  return { default: mod.MemoizedCreateAppointmentSheet };
-});
 
 const LazyDesktopDetailWorkspaceContent = lazy(async () => {
   const mod = await loadDesktopDetailWorkspaceContent();
   return { default: mod.MemoizedAppointmentDesktopDetailWorkspaceContent };
-});
-
-const LazyMobileDetailSheetContent = lazy(async () => {
-  const mod = await loadMobileDetailSheetContent();
-  return { default: mod.MemoizedAppointmentMobileDetailSheetContent };
-});
-
-const LazySearchSheet = lazy(async () => {
-  const mod = await loadSearchSheet();
-  return { default: mod.MemoizedSearchSheet };
-});
-
-const LazyQueueSheet = lazy(async () => {
-  const mod = await loadQueueSheet();
-  return { default: mod.MemoizedQueueSheet };
-});
-
-const LazyPatientDetailSheet = lazy(async () => {
-  const mod = await loadPatientDetailSheet();
-  return { default: mod.MemoizedPatientDetailSheet };
 });
 
 const LazyPatientAppointmentsPage = lazy(async () => {
@@ -304,59 +195,7 @@ const LazyPatientAppointmentsPage = lazy(async () => {
   return { default: mod.PatientAppointmentsPage };
 });
 
-const createSheetInputClassName = inputClass;
-
-function appointmentEventClass(item: AppointmentListItem) {
-  if (item.is_blocked) return "fc-apt-event fc-apt-event-blocked";
-  if (item.status === "completed") return "fc-apt-event fc-apt-event-completed";
-  if (item.status === "cancelled") return "fc-apt-event fc-apt-event-cancelled";
-  if (item.type === "non_medical") return "fc-apt-event fc-apt-event-concierge";
-  if (item.type === "internal") return "fc-apt-event fc-apt-event-internal";
-  return "fc-apt-event fc-apt-event-medical";
-}
-
-function toCalendarEvent(
-  item: AppointmentListItem,
-  canEditSchedule: boolean,
-): EventInput {
-  const timed = Boolean(item.time_start);
-  return {
-    id: item.id,
-    title: `${item.patient_pid} · ${item.title}`,
-    start: timed ? `${item.date}T${item.time_start}` : item.date,
-    end: timed && item.time_end ? `${item.date}T${item.time_end}` : undefined,
-    allDay: !timed,
-    editable: canEditSchedule && !item.is_blocked,
-    classNames: [appointmentEventClass(item)],
-    extendedProps: {
-      patientName: item.patient_name,
-      patientPid: item.patient_pid,
-      providerName: item.provider_name,
-      doctorName: item.doctor_name,
-      interpreterName: item.interpreter_name,
-      ownerName: item.owner_name,
-      location: item.location,
-      appointmentType: item.type,
-      appointmentStatus: item.status,
-      recurrenceFrequency: item.recurrence_frequency,
-      isBlocked: item.is_blocked,
-    } satisfies CalendarEventExtendedProps,
-  };
-}
-
-function sectionCardClass(extra?: string) {
-  return cn(
-    "rounded-[1.75rem] border-border/70",
-    tokens.surface.card,
-    extra,
-  );
-}
-
-function withEllipsis(value: string | null | undefined) {
-  const normalized = String(value ?? "").trim();
-  if (!normalized) return "";
-  return /[.…]$/u.test(normalized) ? normalized : `${normalized}…`;
-}
+const createSheetInputClassName = appointmentFilterControlClassName;
 
 function StaffAppointmentsPage() {
   const { user } = useAuth();
@@ -380,9 +219,20 @@ function StaffAppointmentsPage() {
   const [operationalScope, setOperationalScope] =
     useState<OperationalScope>("all");
   const deferredSearch = useDeferredValue(filters.search);
-
-  const [appointmentsNotice, setAppointmentsNotice] = useState("");
-  const [appointmentsVersion, setAppointmentsVersion] = useState(0);
+  const {
+    appointmentsNotice,
+    appointmentsVersion,
+    detailOpen,
+    setDetailOpen,
+    selectedId,
+    setSelectedId,
+    detailVersion,
+    followUpAssigneeId,
+    setFollowUpAssigneeId,
+    bumpAppointmentsVersion,
+    bumpDetailVersion,
+    reportAppointmentsNotice,
+  } = useAppointmentWorkspaceSession();
   const {
     patients,
     providers,
@@ -394,18 +244,26 @@ function StaffAppointmentsPage() {
     failedLoadMessage: tr.common_failed_load,
   });
   const filterDoctors = useProviderDoctorOptions(filters.providerId);
-  const [filtersModalOpen, setFiltersModalOpen] = useState(false);
-  const [searchModalOpen, setSearchModalOpen] = useState(false);
-  const [queueModalOpen, setQueueModalOpen] = useState(false);
-
-  const [createOpen, setCreateOpen] = useState(false);
-  const [createSeed, setCreateSeed] = useState<AppointmentFormState>(
-    blankAppointmentForm(),
-  );
-
-  const [detailOpen, setDetailOpen] = useState(false);
-  const [selectedId, setSelectedId] = useState("");
-  const [detailVersion, setDetailVersion] = useState(0);
+  const {
+    filtersModalOpen,
+    searchModalOpen,
+    queueModalOpen,
+    createOpen,
+    createSeed,
+    handleFiltersModalOpenChange,
+    openFiltersModal,
+    handleSearchModalOpenChange,
+    openSearchModal,
+    handleQueueModalOpenChange,
+    openQueueModal,
+    handleCreateOpenChange,
+    openCreateSeedSheet,
+  } = useAppointmentOverlayState({
+    createBlankAppointmentForm: blankAppointmentForm,
+    preloadCreateSheet: preloadCreateSheetLayer,
+    preloadSearchSheet: preloadSchedulerSearchSheet,
+    preloadQueueSheet: preloadSchedulerQueueSheet,
+  });
   const {
     detailLoading,
     detailError,
@@ -432,23 +290,42 @@ function StaffAppointmentsPage() {
   });
   const requiresExtendedDetailResources =
     detailOpen && isMobile && Boolean(selectedId);
-  const [linkedPreviewOpen, setLinkedPreviewOpen] = useState(false);
-  const [linkedPreviewKind, setLinkedPreviewKind] =
-    useState<LinkedPreviewKind | null>(null);
-  const [linkedPreviewLabel, setLinkedPreviewLabel] = useState("");
-  const [linkedPatientOpen, setLinkedPatientOpen] = useState(false);
-  const [linkedPatientId, setLinkedPatientId] = useState("");
-  const [linkedPatientVersion, setLinkedPatientVersion] = useState(0);
-  const refreshLinkedPatient = useCallback(() => {
-    setLinkedPatientVersion((current) => current + 1);
-  }, []);
+  const {
+    linkedPreviewOpen,
+    linkedPreviewKind,
+    linkedPreviewLabel,
+    linkedPatientOpen,
+    linkedPatientId,
+    linkedPatientVersion,
+    linkedProviderOpen,
+    linkedProviderId,
+    linkedCasesOpen,
+    linkedDocumentsOpen,
+    refreshLinkedPatient,
+    resetLinkedSheetState,
+    openLinkedPreview,
+    openLinkedPatientById,
+    handleLinkedPreviewOpenChange,
+    handleLinkedPatientOpenChange,
+    handleLinkedProviderOpenChange,
+    handleLinkedCasesOpenChange,
+    handleLinkedDocumentsOpenChange,
+  } = useAppointmentLinkedSheetState({
+    detailId: detail?.id ?? null,
+    detailPatientId: detail?.patient_id ?? null,
+    detailProviderId: detail?.provider_id ?? null,
+    preloadPatientSheet: preloadLinkedPatientSheet,
+    preloadProviderSheet: preloadLinkedProviderSheet,
+    preloadCasesSheet: preloadLinkedCasesSheet,
+    preloadDocumentsSheet: preloadLinkedDocumentsSheet,
+    preloadLinkedRecordsSheet,
+  });
   const {
     linkedPatientDetailLoading,
     linkedPatientDetailError,
     linkedPatientDetail,
     linkedPatientAssignments,
     linkedPatientAssignableStaff,
-    resetLinkedPatientState,
   } = useAppointmentLinkedPatient({
     linkedPatientOpen,
     linkedPatientId,
@@ -462,17 +339,12 @@ function StaffAppointmentsPage() {
     setLinkedPatientSelectedAssignee,
     linkedPatientAssignmentBusy,
     linkedPatientAssignmentError,
-    resetLinkedPatientAssignmentState,
     handleAssignLinkedPatient,
   } = useAppointmentLinkedPatientAssignment({
     linkedPatientDetailId: linkedPatientDetail?.id ?? null,
     failedAssignMessage: t.common_failed_assign,
     onAssigned: refreshLinkedPatient,
   });
-  const [linkedProviderOpen, setLinkedProviderOpen] = useState(false);
-  const [linkedProviderId, setLinkedProviderId] = useState("");
-  const [linkedCasesOpen, setLinkedCasesOpen] = useState(false);
-  const [linkedDocumentsOpen, setLinkedDocumentsOpen] = useState(false);
   const {
     linkedPreviewLoading,
     linkedPreviewError,
@@ -496,14 +368,6 @@ function StaffAppointmentsPage() {
     linkedDocumentsOpen,
     failedLoadMessage: t.common_failed_load,
   });
-
-  const [followUpAssigneeId, setFollowUpAssigneeId] = useState("");
-  const [actionBusy, setActionBusy] = useState("");
-  const [calendarQuickActionMenu, setCalendarQuickActionMenu] =
-    useState<CalendarQuickActionMenuState | null>(null);
-  const [calendarQuickActionScope, setCalendarQuickActionScope] =
-    useState<AppointmentRecurringActionScope>("single");
-  const calendarQuickActionMenuRef = useRef<HTMLDivElement | null>(null);
 
   const todayDate = currentDateInput();
   const weekStart = startOfWeekInput(todayDate);
@@ -610,8 +474,13 @@ function StaffAppointmentsPage() {
   const canShowConciergeSection =
     permissions.canViewConciergeServices && detail?.type === "non_medical";
   const scopeOptions = operationalScopeOptions(user?.role, tr);
+  const activeOperationalScope = scopeOptions.some(
+    (option) => option.id === operationalScope,
+  )
+    ? operationalScope
+    : "all";
   const selectedOperationalScopeLabel =
-    scopeOptions.find((option) => option.id === operationalScope)?.label ??
+    scopeOptions.find((option) => option.id === activeOperationalScope)?.label ??
     t.providers_all;
   const schedulerQuickScopeOptions: Array<{
     id: SchedulerQuickScope;
@@ -1083,63 +952,32 @@ function StaffAppointmentsPage() {
   const detailAttention = detail
     ? (attentionIndex.get(detail.id) ?? null)
     : null;
-  const activeCalendarQuickActionItem = calendarQuickActionMenu
-    ? (appointmentsIndex.get(calendarQuickActionMenu.appointmentId) ?? null)
-    : null;
-  const activeCalendarQuickActionScope =
-    activeCalendarQuickActionItem?.recurrence_frequency
-      ? calendarQuickActionScope
-      : "single";
-  const syncQuery = useCallback((next: Record<string, string | null>) => {
-    const params = new URLSearchParams(searchParams);
-    Object.entries(next).forEach(([key, value]) => {
-      if (value) {
-        params.set(key, value);
-      } else {
-        params.delete(key);
-      }
-    });
-    setSearchParams(params, { replace: true });
-  }, [searchParams, setSearchParams]);
-  const resetSearchFilters = useCallback(() => {
-    setOperationalScope("all");
-    setFilters(DEFAULT_FILTERS);
-    syncQuery({
-      patient: null,
-      provider: null,
-      doctor: null,
-      appointment: null,
-      detailTab: null,
-    });
-  }, [syncQuery]);
-  const handleSearchPatientChange = useCallback(
-    (patientId: string) => {
-      setFilters((current) => ({ ...current, patientId }));
-      syncQuery({ patient: patientId || null });
-    },
-    [syncQuery],
-  );
-  const handleSearchProviderChange = useCallback(
-    (providerId: string) => {
-      setFilters((current) => ({
-        ...current,
-        providerId,
-        doctorId: "",
-      }));
-      syncQuery({
-        provider: providerId || null,
-        doctor: null,
-      });
-    },
-    [syncQuery],
-  );
-  const handleSearchDoctorChange = useCallback(
-    (doctorId: string) => {
-      setFilters((current) => ({ ...current, doctorId }));
-      syncQuery({ doctor: doctorId || null });
-    },
-    [syncQuery],
-  );
+  const {
+    calendarQuickActionMenu,
+    calendarQuickActionMenuRef,
+    activeCalendarQuickActionItem,
+    activeCalendarQuickActionScope,
+    dismissCalendarQuickActionMenu,
+    handleCalendarQuickActionScopeChange,
+    openCalendarQuickActionLayer,
+  } = useAppointmentCalendarQuickActions({
+    appointmentsIndex,
+  });
+  const resolvedFollowUpAssigneeId =
+    followUpAssigneeId || detailDefaultAssigneeId;
+  const {
+    syncQuery,
+    resetSearchFilters,
+    handleSearchPatientChange,
+    handleSearchProviderChange,
+    handleSearchDoctorChange,
+  } = useAppointmentQueryActions({
+    searchParams,
+    setSearchParams,
+    defaultFilters: DEFAULT_FILTERS,
+    setFilters,
+    setOperationalScope,
+  });
 
   const closeDetailWorkspace = useCallback(
     (clearQuery = true) => {
@@ -1147,19 +985,7 @@ function StaffAppointmentsPage() {
       setSelectedId("");
       resetAppointmentDetailState();
       setFollowUpAssigneeId("");
-      setActionBusy("");
-      setLinkedPreviewOpen(false);
-      setLinkedPreviewKind(null);
-      setLinkedPreviewLabel("");
-      setLinkedPatientOpen(false);
-      setLinkedPatientId("");
-      resetLinkedPatientState();
-      resetLinkedPatientAssignmentState();
-      setLinkedPatientVersion(0);
-      setLinkedProviderOpen(false);
-      setLinkedProviderId("");
-      setLinkedCasesOpen(false);
-      setLinkedDocumentsOpen(false);
+      resetLinkedSheetState();
       if (clearQuery) {
         syncQuery({
           appointment: null,
@@ -1169,58 +995,13 @@ function StaffAppointmentsPage() {
     },
     [
       resetAppointmentDetailState,
-      resetLinkedPatientAssignmentState,
-      resetLinkedPatientState,
+      resetLinkedSheetState,
+      setDetailOpen,
+      setFollowUpAssigneeId,
+      setSelectedId,
       syncQuery,
     ],
   );
-
-  useEffect(() => {
-    if (!detailOpen) return;
-    setFollowUpAssigneeId(detailDefaultAssigneeId);
-  }, [detailDefaultAssigneeId, detailOpen]);
-
-  useEffect(() => {
-    if (!calendarQuickActionMenu) return;
-    function handlePointerDown(event: PointerEvent) {
-      if (
-        calendarQuickActionMenuRef.current &&
-        event.target instanceof Node &&
-        calendarQuickActionMenuRef.current.contains(event.target)
-      ) {
-        return;
-      }
-      setCalendarQuickActionMenu(null);
-    }
-    function dismissMenu() {
-      setCalendarQuickActionMenu(null);
-    }
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        setCalendarQuickActionMenu(null);
-      }
-    }
-    calendarQuickActionMenuRef.current?.focus();
-    window.addEventListener("pointerdown", handlePointerDown, true);
-    window.addEventListener("resize", dismissMenu);
-    window.addEventListener("scroll", dismissMenu, true);
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("pointerdown", handlePointerDown, true);
-      window.removeEventListener("resize", dismissMenu);
-      window.removeEventListener("scroll", dismissMenu, true);
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [calendarQuickActionMenu]);
-
-  useEffect(() => {
-    setCalendarQuickActionMenu(null);
-  }, [calendarView, calendarDate, appointmentsVersion, detailOpen]);
-
-  useEffect(() => {
-    setCalendarQuickActionScope("single");
-  }, [calendarQuickActionMenu?.appointmentId]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1228,86 +1009,35 @@ function StaffAppointmentsPage() {
     window.localStorage.setItem(CALENDAR_STORAGE_DATE_KEY, calendarDate);
   }, [calendarDate, calendarView]);
 
-  useEffect(() => {
-    if (scopeOptions.some((option) => option.id === operationalScope)) return;
-    setOperationalScope("all");
-  }, [operationalScope, scopeOptions]);
-
-  useEffect(() => {
-    const patientParam = searchParams.get("patient") ?? "";
-    const providerParam = searchParams.get("provider") ?? "";
-    const doctorParam = searchParams.get("doctor") ?? "";
-    const appointmentParam = searchParams.get("appointment") ?? "";
-    const createParam = searchParams.get("create") ?? "";
-
-    setFilters((current) => {
-      if (
-        current.patientId === patientParam &&
-        current.providerId === providerParam &&
-        current.doctorId === doctorParam
-      ) {
-        return current;
-      }
-      return {
-        ...current,
-        patientId: patientParam,
-        providerId: providerParam,
-        doctorId: doctorParam,
-      };
-    });
-
-    if (appointmentParam && appointmentParam !== selectedId) {
-      setSelectedId(appointmentParam);
-      setDetailOpen(true);
-    }
-
-    if (!appointmentParam && (selectedId || detailOpen)) {
-      closeDetailWorkspace(false);
-    }
-
-    if (createParam && permissions.canCreate) {
-      const next = blankAppointmentForm();
-      next.patientId = patientParam;
-      setCreateSeed(next);
-      void loadCreateAppointmentSheet();
-      setCreateOpen(true);
-      const params = new URLSearchParams(searchParams);
-      params.delete("create");
-      setSearchParams(params, { replace: true });
-    }
-  }, [
-    closeDetailWorkspace,
-    detailOpen,
-    permissions.canCreate,
+  useAppointmentRouteHydration({
     searchParams,
-    selectedId,
     setSearchParams,
-  ]);
-
-  useEffect(() => {
-    setAppointmentsNotice("");
-  }, [filters]);
-
-  useEffect(() => {
-    if (!filters.providerId) {
-      setFilters((current) =>
-        current.doctorId ? { ...current, doctorId: "" } : current,
-      );
-    }
-  }, [filters.providerId]);
+    selectedId,
+    detailOpen,
+    canCreate: permissions.canCreate,
+    closeDetailWorkspace,
+    setFilters,
+    setSelectedId,
+    setDetailOpen,
+    onOpenCreateFromPatient: (patientId) => {
+      const next = blankAppointmentForm();
+      next.patientId = patientId;
+      openCreateSeedSheet(next);
+    },
+  });
 
   const scopedAppointments = useMemo(
     () =>
       appointments.filter((item) =>
         matchesOperationalScope(
           item,
-          operationalScope,
+          activeOperationalScope,
           user?.id,
           user?.role,
           attentionIds,
         ),
       ),
-    [appointments, operationalScope, user?.id, user?.role, attentionIds],
+    [activeOperationalScope, appointments, attentionIds, user?.id, user?.role],
   );
   const attentionCount = attentionItems.length;
   const {
@@ -1331,7 +1061,7 @@ function StaffAppointmentsPage() {
         activeCount += 1;
       }
       if (item.interpreter_response === "pending") pendingCount += 1;
-      if (operationalScope === "all" ? item.status !== "cancelled" : true) {
+      if (activeOperationalScope === "all" ? item.status !== "cancelled" : true) {
         queueCandidates.push(item);
       }
       if (item.status !== "cancelled" && item.interpreter_response === "pending") {
@@ -1360,7 +1090,7 @@ function StaffAppointmentsPage() {
       mobileAgendaPendingCount: mobilePendingCount,
       mobileAgendaWeekCount: mobileWeekCount,
     };
-  }, [operationalScope, scopedAppointments, todayDate, weekEnd, weekStart]);
+  }, [activeOperationalScope, scopedAppointments, todayDate, weekEnd, weekStart]);
   const useInterpreterMobileAgenda = shouldUseInterpreterMobileAgenda(
     user?.role,
     isMobile,
@@ -1391,229 +1121,79 @@ function StaffAppointmentsPage() {
   const showInlineDetailWorkspace = detailOpen && !isMobile;
 
   const refreshAppointments = useCallback(() => {
-    startTransition(() => setAppointmentsVersion((current) => current + 1));
-  }, []);
+    dismissCalendarQuickActionMenu();
+    bumpAppointmentsVersion();
+  }, [bumpAppointmentsVersion, dismissCalendarQuickActionMenu]);
 
   const refreshDetail = useCallback(() => {
-    startTransition(() => {
-      setDetailVersion((current) => current + 1);
-      setAppointmentsVersion((current) => current + 1);
-    });
-  }, []);
+    dismissCalendarQuickActionMenu();
+    bumpDetailVersion();
+  }, [bumpDetailVersion, dismissCalendarQuickActionMenu]);
+  const {
+    handleDatesSet,
+    applyTodayScope,
+    applyWeekScope,
+    applyMineScope,
+    applyOperationalScope,
+    applySchedulerQuickScope,
+    resetQuickScopes,
+    openCreateSheetFromDate,
+  } = useAppointmentSchedulerControls({
+    calendarRef,
+    canCreate: permissions.canCreate,
+    currentUserId: user?.id,
+    currentUserRole: user?.role,
+    todayDate,
+    weekStart,
+    weekEnd,
+    defaultFilters: DEFAULT_FILTERS,
+    setFilters,
+    setOperationalScope,
+    setCalendarView,
+    setCalendarDate,
+    syncQuery,
+    onRefreshAppointments: refreshAppointments,
+    onOpenCreateSeed: openCreateSeedSheet,
+    onDismissQuickActionMenu: dismissCalendarQuickActionMenu,
+  });
 
   const reportDetailError = useCallback((message: string) => {
     setDetailError(message);
   }, [setDetailError]);
-
-  const reportAppointmentsNotice = useCallback((notice: string) => {
-    setAppointmentsNotice(notice);
-  }, []);
-
-  const handleEditSaved = useCallback((notice: string) => {
-    setAppointmentsNotice(notice);
-    refreshDetail();
-  }, [refreshDetail]);
-
-  function syncCalendar(nextView?: CalendarView, nextDate?: string) {
-    const api = calendarRef.current?.getApi();
-    if (api && nextView && api.view.type !== nextView) {
-      api.changeView(nextView);
-    }
-    if (api && nextDate) {
-      api.gotoDate(nextDate);
-    }
-    if (nextView) setCalendarView(nextView);
-    if (nextDate) setCalendarDate(nextDate);
-  }
-
-  function handleDatesSet(arg: DatesSetArg) {
-    const nextView = arg.view.type as CalendarView;
-    const nextDate = toDateInput(arg.view.calendar.getDate());
-    setCalendarView((current) => (current === nextView ? current : nextView));
-    setCalendarDate((current) => (current === nextDate ? current : nextDate));
-  }
-
-  function applyTodayScope() {
-    startTransition(() => {
-      setFilters((current) => ({
-        ...current,
-        dateFrom: todayDate,
-        dateTo: todayDate,
-      }));
-    });
-    syncCalendar("timeGridDay", todayDate);
-  }
-
-  function applyWeekScope() {
-    startTransition(() => {
-      setFilters((current) => ({
-        ...current,
-        dateFrom: weekStart,
-        dateTo: weekEnd,
-      }));
-    });
-    syncCalendar("timeGridWeek", weekStart);
-  }
-
-  function applyMineScope() {
-    const currentUser = user;
-    if (!currentUser?.id) return;
-    setOperationalScope("all");
-    startTransition(() => {
-      setFilters((current) => ({
-        ...current,
-        ownerUserId: currentUser.role === "interpreter" ? "" : currentUser.id,
-        interpreterId: currentUser.role === "interpreter" ? currentUser.id : "",
-      }));
-    });
-  }
-
-  function applyOperationalScope(scope: OperationalScope) {
-    setOperationalScope(scope);
-  }
-
-  function applySchedulerQuickScope(scope: SchedulerQuickScope) {
-    if (scope === "today") {
-      startTransition(() => {
-        setFilters((current) => ({
-          ...current,
-          dateFrom: todayDate,
-          dateTo: todayDate,
-          ownerUserId: "",
-          interpreterId: "",
-          appointmentType: "",
-        }));
-      });
-      syncCalendar("timeGridDay", todayDate);
-      return;
-    }
-    if (scope === "week") {
-      startTransition(() => {
-        setFilters((current) => ({
-          ...current,
-          dateFrom: weekStart,
-          dateTo: weekEnd,
-          ownerUserId: "",
-          interpreterId: "",
-          appointmentType: "",
-        }));
-      });
-      syncCalendar("timeGridWeek", weekStart);
-      return;
-    }
-    if (scope === "mine") {
-      const currentUser = user;
-      if (!currentUser?.id) return;
-      setOperationalScope("all");
-      startTransition(() => {
-        setFilters((current) => ({
-          ...current,
-          dateFrom: "",
-          dateTo: "",
-          appointmentType: "",
-          ownerUserId: currentUser.role === "interpreter" ? "" : currentUser.id,
-          interpreterId: currentUser.role === "interpreter" ? currentUser.id : "",
-        }));
-      });
-      return;
-    }
-    if (
-      scope === "medical" ||
-      scope === "non_medical" ||
-      scope === "internal"
-    ) {
-      setOperationalScope("all");
-      startTransition(() => {
-        setFilters((current) => ({
-          ...current,
-          dateFrom: "",
-          dateTo: "",
-          ownerUserId: "",
-          interpreterId: "",
-          appointmentType: scope,
-        }));
-      });
-      return;
-    }
-    startTransition(() => {
-      setFilters((current) => ({
-        ...current,
-        dateFrom: "",
-        dateTo: "",
-        ownerUserId: "",
-        interpreterId: "",
-        appointmentType: "",
-      }));
-    });
-  }
-
-  function resetQuickScopes() {
-    setOperationalScope("all");
-    startTransition(() => setFilters(DEFAULT_FILTERS));
-    syncCalendar("timeGridWeek", todayDate);
-    syncQuery({
-      patient: null,
-      provider: null,
-      doctor: null,
-      appointment: null,
-      detailTab: null,
-    });
-  }
-
-  function openCreateSheetFromDate(info?: DateClickArg) {
-    if (!permissions.canCreate) return;
-    const next = blankAppointmentForm();
-    if (info) {
-      next.date = toDateInput(info.date);
-      if (!info.allDay) {
-        next.timeStart = toTimeInput(info.date);
-        next.timeEnd = toTimeInput(
-          new Date(info.date.getTime() + 60 * 60 * 1000),
-        );
-      }
-    }
-    setCreateSeed(next);
-    void loadCreateAppointmentSheet();
-    setCreateOpen(true);
-  }
+  const {
+    actionBusy,
+    resetAppointmentSchedulerActionState,
+    handleInlineReschedule,
+    performStatusChange,
+  } = useAppointmentSchedulerActions({
+    appointments,
+    appointmentsIndex,
+    canEditSchedule: permissions.canEditSchedule,
+    selectedId,
+    dictionary: tr,
+    onNotice: reportAppointmentsNotice,
+    onAppointmentsError: setAppointmentsError,
+    onDetailError: setDetailError,
+    onRefreshAppointments: refreshAppointments,
+    onRefreshDetail: refreshDetail,
+    onDismissQuickActionMenu: dismissCalendarQuickActionMenu,
+  });
 
   useEffect(() => {
-    const handleRefreshRequest = () => {
-      refreshAppointments();
-    };
-    const handleCreateRequest = () => {
-      if (!permissions.canCreate) return;
-      setCreateSeed(blankAppointmentForm());
-      void loadCreateAppointmentSheet();
-      setCreateOpen(true);
-    };
+    if (detailOpen) return;
+    resetAppointmentSchedulerActionState();
+  }, [detailOpen, resetAppointmentSchedulerActionState]);
 
-    window.addEventListener(
-      "appointments:refresh-request",
-      handleRefreshRequest as EventListener,
-    );
-    window.addEventListener(
-      "appointments:create-request",
-      handleCreateRequest as EventListener,
-    );
-
-    return () => {
-      window.removeEventListener(
-        "appointments:refresh-request",
-        handleRefreshRequest as EventListener,
-      );
-      window.removeEventListener(
-        "appointments:create-request",
-        handleCreateRequest as EventListener,
-      );
-    };
-  }, [permissions.canCreate, refreshAppointments]);
+  const handleEditSaved = useCallback((notice: string) => {
+    reportAppointmentsNotice(notice);
+    refreshDetail();
+  }, [refreshDetail, reportAppointmentsNotice]);
 
   const openDetailSheet = useCallback((id: string) => {
     void (isMobile
-      ? loadMobileDetailSheetContent()
+      ? preloadMobileDetailSheet()
       : loadDesktopDetailWorkspaceContent());
-    setCalendarQuickActionMenu(null);
+    dismissCalendarQuickActionMenu();
     startTransition(() => {
       setSelectedId(id);
       setDetailOpen(true);
@@ -1622,118 +1202,17 @@ function StaffAppointmentsPage() {
       appointment: id,
       detailTab: "overview",
     });
-  }, [isMobile, syncQuery]);
-
-  const openLinkedPreview = useCallback(
-    (kind: LinkedPreviewKind, label: string) => {
-      if (kind === "patient") {
-        const patientId = detail?.patient_id ?? "";
-        if (!patientId) return;
-        void loadPatientDetailSheet();
-        setLinkedPreviewOpen(false);
-        setLinkedPreviewKind(null);
-        setLinkedPreviewLabel("");
-        setLinkedProviderOpen(false);
-        setLinkedProviderId("");
-        setLinkedCasesOpen(false);
-        setLinkedDocumentsOpen(false);
-        setLinkedPatientId(patientId);
-        setLinkedPatientVersion((current) => current + 1);
-        setLinkedPatientOpen(true);
-        return;
-      }
-      if (kind === "provider") {
-        const providerId = detail?.provider_id ?? "";
-        if (!providerId) return;
-        void loadLinkedProviderSheet();
-        setLinkedPreviewOpen(false);
-        setLinkedPreviewKind(null);
-        setLinkedPreviewLabel("");
-        setLinkedPatientOpen(false);
-        setLinkedPatientId("");
-        setLinkedCasesOpen(false);
-        setLinkedDocumentsOpen(false);
-        setLinkedProviderId(providerId);
-        setLinkedProviderOpen(true);
-        return;
-      }
-      if (kind === "cases") {
-        void loadLinkedCasesSheet();
-        setLinkedPreviewOpen(false);
-        setLinkedPreviewKind(null);
-        setLinkedPreviewLabel("");
-        setLinkedPatientOpen(false);
-        setLinkedPatientId("");
-        setLinkedProviderOpen(false);
-        setLinkedProviderId("");
-        setLinkedDocumentsOpen(false);
-        setLinkedCasesOpen(true);
-        return;
-      }
-      if (kind === "documents") {
-        if (!detail?.id || !detail.patient_id) return;
-        void loadLinkedDocumentsSheet();
-        setLinkedPreviewOpen(false);
-        setLinkedPreviewKind(null);
-        setLinkedPreviewLabel("");
-        setLinkedPatientOpen(false);
-        setLinkedPatientId("");
-        setLinkedProviderOpen(false);
-        setLinkedProviderId("");
-        setLinkedCasesOpen(false);
-        setLinkedDocumentsOpen(true);
-        return;
-      }
-      setLinkedPatientOpen(false);
-      setLinkedPatientId("");
-      setLinkedProviderOpen(false);
-      setLinkedProviderId("");
-      setLinkedCasesOpen(false);
-      setLinkedDocumentsOpen(false);
-      void loadLinkedRecordsSheet();
-      setLinkedPreviewKind(kind);
-      setLinkedPreviewLabel(label);
-      setLinkedPreviewOpen(true);
-    },
-    [detail?.id, detail?.patient_id, detail?.provider_id],
-  );
-
-  const handleLinkedPreviewOpenChange = useCallback((open: boolean) => {
-    setLinkedPreviewOpen(open);
-    if (!open) {
-      setLinkedPreviewKind(null);
-      setLinkedPreviewLabel("");
-    }
-  }, []);
-
-  const handleLinkedPatientOpenChange = useCallback((open: boolean) => {
-    setLinkedPatientOpen(open);
-    if (!open) {
-      setLinkedPatientId("");
-      resetLinkedPatientState();
-      resetLinkedPatientAssignmentState();
-      setLinkedPatientVersion(0);
-    }
-  }, [resetLinkedPatientAssignmentState, resetLinkedPatientState]);
-
-  const handleLinkedProviderOpenChange = useCallback((open: boolean) => {
-    setLinkedProviderOpen(open);
-    if (!open) {
-      setLinkedProviderId("");
-    }
-  }, []);
-
-  const handleLinkedCasesOpenChange = useCallback((open: boolean) => {
-    setLinkedCasesOpen(open);
-  }, []);
-
-  const handleLinkedDocumentsOpenChange = useCallback((open: boolean) => {
-    setLinkedDocumentsOpen(open);
-  }, []);
+  }, [
+    dismissCalendarQuickActionMenu,
+    isMobile,
+    setDetailOpen,
+    setSelectedId,
+    syncQuery,
+  ]);
 
   const handleFollowUpVisitCreated = useCallback(
     ({ id, notice }: { id?: string; notice: string }) => {
-      setAppointmentsNotice(notice);
+      reportAppointmentsNotice(notice);
       refreshAppointments();
       if (id) {
         openDetailSheet(id);
@@ -1741,264 +1220,38 @@ function StaffAppointmentsPage() {
         refreshDetail();
       }
     },
-    [openDetailSheet, refreshAppointments, refreshDetail],
+    [openDetailSheet, refreshAppointments, refreshDetail, reportAppointmentsNotice],
   );
-
-  function openCalendarQuickActionLayer(
-    event: ReactMouseEvent<HTMLButtonElement>,
-    appointmentId: string,
-  ) {
-    event.preventDefault();
-    event.stopPropagation();
-    const rect = event.currentTarget.getBoundingClientRect();
-    const menuWidth = 220;
-    setCalendarQuickActionMenu((current) =>
-      current?.appointmentId === appointmentId
-        ? null
-        : {
-            appointmentId,
-            top: Math.min(rect.bottom + 8, window.innerHeight - 16),
-            left: Math.min(
-              Math.max(16, rect.right - menuWidth),
-              Math.max(16, window.innerWidth - menuWidth - 16),
-            ),
-          },
-    );
-  }
 
   function handleEventClick(info: EventClickArg) {
     openDetailSheet(info.event.id);
   }
 
-  function handleCalendarDateClick(info: DateClickArg) {
-    openCreateSheetFromDate(info);
-  }
-
-  function renderCalendarEventContent(arg: EventContentArg) {
-    const props = arg.event.extendedProps as CalendarEventExtendedProps;
-    const secondaryLine =
-      props.doctorName ||
-      props.providerName ||
-      props.location ||
-      props.ownerName ||
-      "Appointment";
-    const isListView = arg.view.type.startsWith("list");
-    const canQuickManage =
-      isListView &&
-      permissions.canManageStatus &&
-      !props.isBlocked &&
-      props.appointmentStatus !== "completed" &&
-      props.appointmentStatus !== "cancelled";
-    const canGridQuickManage =
-      !isListView &&
-      permissions.canManageStatus &&
-      !props.isBlocked &&
-      props.appointmentStatus !== "completed" &&
-      props.appointmentStatus !== "cancelled";
-    return (
-      <div
-        className={cn(
-          "fc-apt-event-card relative",
-          isListView && "fc-apt-event-card-list",
-        )}
-      >
-        {canGridQuickManage ? (
-          <button
-            type="button"
-            aria-label={appointmentText(
-              "Schnellaktionen fur Termin offnen",
-              "Открыть быстрые действия по приёму",
-              "Open quick appointment actions",
-            )}
-            aria-haspopup="menu"
-            aria-expanded={
-              calendarQuickActionMenu?.appointmentId === arg.event.id
-            }
-            aria-controls={`appointment-quick-actions-${arg.event.id}`}
-            className="absolute top-1 right-1 inline-flex size-6 items-center justify-center rounded-full border border-slate-300/80 bg-white/90 text-slate-600 shadow-sm transition hover:bg-white hover:text-slate-950"
-            onClick={(event) =>
-              openCalendarQuickActionLayer(event, arg.event.id)
-            }
-          >
-            <MoreHorizontal className="size-3.5" />
-          </button>
-        ) : null}
-        <div className="fc-apt-event-head">
-          <span className="fc-apt-event-tag">
-            {props.isBlocked
-              ? appointmentText("Blockiert", "Заблокировано", "Blocked")
-              : props.appointmentStatus === "completed"
-                ? statusLabel("completed")
-                : props.appointmentStatus === "cancelled"
-                  ? statusLabel("cancelled")
-                  : appointmentTypeLabel(props.appointmentType, tr)}
-          </span>
-          {arg.timeText ? (
-            <span className="fc-apt-event-time">{arg.timeText}</span>
-          ) : null}
-        </div>
-        <div className="fc-apt-event-title">{arg.event.title}</div>
-        <div className="fc-apt-event-meta">{props.patientName}</div>
-        <div className="fc-apt-event-submeta">{secondaryLine}</div>
-        {props.isBlocked ? (
-          <div className="fc-apt-event-note">
-            {appointmentText("Blockierte Sicht", "Заблокированная видимость", "Blocked visibility")}
-          </div>
-        ) : props.interpreterName ? (
-          <div className="fc-apt-event-note">
-            Interpreter: {props.interpreterName}
-          </div>
-        ) : null}
-        {canQuickManage ? (
-          <div className="mt-2 flex flex-wrap gap-1">
-            {props.appointmentStatus !== "confirmed" ? (
-              <button
-                type="button"
-                className="rounded-full border border-slate-300 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-700"
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  void performStatusChange(arg.event.id, "confirmed");
-                }}
-              >
-                {t.common_confirm}
-              </button>
-            ) : null}
-            <button
-              type="button"
-              className="rounded-full border border-slate-300 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-700"
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                void performStatusChange(arg.event.id, "completed");
-              }}
-            >
-              {t.dash_completed}
-            </button>
-            {props.recurrenceFrequency ? (
-              <button
-                type="button"
-                className="rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-rose-700"
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  void performStatusChange(
-                    arg.event.id,
-                    "cancelled",
-                    "following",
-                  );
-                }}
-              >
-                {t.appointments_cancel_this_and_following}
-              </button>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
-    );
-  }
-
-  async function handleInlineReschedule(
-    info: EventDropArg | EventResizeDoneArg,
-  ) {
-    const source = appointmentsIndex.get(info.event.id);
-    if (
-      !source ||
-      !permissions.canEditSchedule ||
-      source.is_blocked ||
-      !info.event.start
-    ) {
-      info.revert();
-      return;
-    }
-    const nextDate = toDateInput(info.event.start);
-    const nextTimeStart = info.event.allDay
-      ? ""
-      : toTimeInput(info.event.start);
-    const nextTimeEnd = info.event.allDay
-      ? ""
-      : info.event.end
-        ? toTimeInput(info.event.end)
-        : source.time_end || "";
-    const localWarnings = buildLocalScheduleWarnings(
-      appointments,
-      {
-        appointmentId: source.id,
-        date: nextDate,
-        timeStart: nextTimeStart,
-        timeEnd: nextTimeEnd,
-        ownerUserId: source.owner_user_id,
-        providerId: source.provider_id,
-        doctorId: source.doctor_id,
-      },
+  const renderCalendarEventContent = useCallback(
+    (arg: EventContentArg) => (
+      <AppointmentCalendarEventCard
+        arg={arg}
+        canManageStatus={permissions.canManageStatus}
+        activeQuickActionAppointmentId={
+          calendarQuickActionMenu?.appointmentId ?? null
+        }
+        dictionary={tr}
+        onOpenQuickActions={openCalendarQuickActionLayer}
+        onStatusChange={performStatusChange}
+      />
+    ),
+    [
+      calendarQuickActionMenu?.appointmentId,
+      openCalendarQuickActionLayer,
+      performStatusChange,
+      permissions.canManageStatus,
       tr,
-    );
-    try {
-      const result = await updateAppointmentSchedule({
-        appointmentId: source.id,
-        providerId: source.provider_id,
-        doctorId: source.doctor_id,
-        ownerUserId: source.owner_user_id,
-        interpreterId: source.interpreter_id,
-        title: source.title,
-        date: nextDate,
-        timeStart: nextTimeStart || null,
-        timeEnd: nextTimeEnd || null,
-        location: source.location,
-      });
-      setAppointmentsNotice(
-        buildScheduleNotice(result.conflicts, localWarnings),
-      );
-      refreshAppointments();
-      if (selectedId === source.id) refreshDetail();
-    } catch (error) {
-      info.revert();
-      setAppointmentsError(
-        error instanceof Error ? error.message : tr.common_failed_update,
-      );
-    }
-  }
-
-  async function performStatusChange(
-    appointmentId: string,
-    status: AppointmentStatus,
-    recurrenceScope: AppointmentRecurringActionScope = "single",
-  ) {
-    setCalendarQuickActionMenu(null);
-    setActionBusy(statusActionKey(appointmentId, status, recurrenceScope));
-    try {
-      await updateAppointmentStatus(
-        appointmentId,
-        status,
-        recurrenceScope,
-      );
-      if (selectedId === appointmentId) {
-        refreshDetail();
-      } else {
-        refreshAppointments();
-      }
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : appointmentText(
-              "Status konnte nicht geändert werden.",
-              "Не удалось изменить статус.",
-              "Failed to change status",
-            );
-      if (selectedId === appointmentId) {
-        setDetailError(message);
-      } else {
-        setAppointmentsError(message);
-      }
-    } finally {
-      setActionBusy("");
-    }
-  }
+    ],
+  );
 
   if (!permissions.canViewPage) {
     return (
-      <div className={sectionCardClass("p-8 text-sm text-muted-foreground")}>
+      <div className={appointmentSectionCardClassName("p-8 text-sm text-muted-foreground")}>
         {appointmentText(
           "Ihre aktuelle Rolle hat keinen Zugriff auf Termine.",
           "У вашей текущей роли нет доступа к приёмам.",
@@ -2042,7 +1295,7 @@ function StaffAppointmentsPage() {
             detailDefaultAssigneeId={detailDefaultAssigneeId}
             doctorFollowUpAssignees={doctorFollowUpAssignees}
             handoffStakeholders={handoffStakeholders}
-            followUpAssigneeId={followUpAssigneeId}
+            followUpAssigneeId={resolvedFollowUpAssigneeId}
             setFollowUpAssigneeId={setFollowUpAssigneeId}
             detailChecklist={detailChecklist}
             detailReminders={detailReminders}
@@ -2094,911 +1347,358 @@ function StaffAppointmentsPage() {
         </Suspense>
       ) : (
       <div className="space-y-4">
-        {/* Page header */}
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <h1 className="text-[22px] font-semibold tracking-tight text-foreground leading-tight">
-              {tr.appointments_title ?? "Appointments"}
-            </h1>
-            {permissions.canCreate ? (
-              <Button
-                type="button"
-                size="sm"
-                className="h-9 rounded-lg gap-1.5 px-3.5"
-                onClick={() => openCreateSheetFromDate()}
-              >
-                <Plus className="size-3.5" />
-                {tr.appointments_new ?? "New appointment"}
-              </Button>
-            ) : null}
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-9 w-9 rounded-lg p-0 text-muted-foreground"
-            onClick={refreshAppointments}
-            title="Refresh"
-          >
-            <RefreshCw className="size-3.5" />
-          </Button>
-        </div>
+        <AppointmentsPageChrome
+          title={tr.appointments_title ?? "Appointments"}
+          createLabel={tr.appointments_new ?? "New appointment"}
+          canCreate={permissions.canCreate}
+          onCreate={() => openCreateSheetFromDate()}
+          onRefresh={refreshAppointments}
+          todayLabel={tr.dash_patients_today ?? "Today"}
+          activeLabel={tr.common_active ?? "Active"}
+          pendingLabel={tr.mfa_pending ?? "Pending"}
+          attentionLabel={tr.common_error ?? "Attention"}
+          totalLabel={tr.providers_all ?? "All"}
+          todayAppointments={todayAppointments}
+          activeAppointments={activeAppointments}
+          pendingInterpreterResponses={pendingInterpreterResponses}
+          attentionCount={attentionCount}
+          totalAppointments={scopedAppointments.length}
+          appointmentsError={appointmentsError}
+          appointmentsNotice={appointmentsNotice}
+          metadataError={metadataError}
+        />
 
-        {/* KPI row */}
-        <div className="grid grid-cols-2 xl:grid-cols-5 divide-x divide-border/60">
-          <AptKpi icon={CalendarDays} tone="sky" label={tr.dash_patients_today ?? "Today"} value={todayAppointments} />
-          <AptKpi icon={CheckCircle2} tone="emerald" label={tr.common_active ?? "Active"} value={activeAppointments} />
-          <AptKpi icon={Clock3} tone="amber" label={tr.mfa_pending ?? "Pending"} value={pendingInterpreterResponses} />
-          <AptKpi icon={AlertTriangle} tone="rose" label={tr.common_error ?? "Attention"} value={attentionCount} />
-          <AptKpi icon={UsersRound} tone="neutral" label={tr.providers_all ?? "All"} value={scopedAppointments.length} />
-        </div>
-
-        {appointmentsError ? (
-          <Banner tone="error" withIcon>{appointmentsError}</Banner>
-        ) : null}
-        {appointmentsNotice ? (
-          <Banner tone="warning" withIcon>{appointmentsNotice}</Banner>
-        ) : null}
-        {metadataError ? <Banner tone="warning" withIcon>{metadataError}</Banner> : null}
-
-        {useInterpreterMobileAgenda ? (
-          <div className="space-y-4">
-            <section className={sectionCardClass("p-4")}>
-              <div className="grid gap-3 sm:grid-cols-3">
-                <StatsCard
-                  icon={CalendarDays}
-                  label={t.dash_patients_today}
-                  value={String(todayAppointments)}
-                  tone="sky"
-                />
-                <StatsCard
-                  icon={UsersRound}
-                  label={tr.mfa_pending ?? "Pending interpreter"}
-                  value={String(mobileAgendaPendingCount)}
-                  tone="amber"
-                />
-                <StatsCard
-                  icon={CalendarClock}
-                  label={tr.dash_this_week ?? "This week"}
-                  value={String(mobileAgendaWeekCount)}
-                  tone="slate"
-                />
-              </div>
-            </section>
-
-            <section className={sectionCardClass("p-4")}>
-              <div className="space-y-4">
-                <Field label={t.common_search}>
-                  <Input
-                    value={filters.search}
-                    onChange={(event) =>
-                      setFilters((current) => ({
-                        ...current,
-                        search: event.target.value,
-                      }))
-                    }
-                    placeholder={withEllipsis(tr.common_search)}
-                    className="h-10 rounded-xl bg-slate-50"
-                  />
-                </Field>
-                <div className="flex flex-wrap items-center gap-2">
-                  <QuickScopeButton
-                    active={
-                      filters.dateFrom === todayDate &&
-                      filters.dateTo === todayDate
-                    }
-                    onClick={applyTodayScope}
-                  >
-                    Today
-                  </QuickScopeButton>
-                  <QuickScopeButton
-                    active={
-                      filters.dateFrom === weekStart &&
-                      filters.dateTo === weekEnd
-                    }
-                    onClick={applyWeekScope}
-                  >
-                    This week
-                  </QuickScopeButton>
-                  <QuickScopeButton
-                    active={mineFilterActive}
-                    onClick={applyMineScope}
-                  >
-                    Mine
-                  </QuickScopeButton>
-                  {scopeOptions.length > 1
-                    ? scopeOptions.map((option) => (
-                        <QuickScopeButton
-                          key={option.id}
-                          active={operationalScope === option.id}
-                          onClick={() => applyOperationalScope(option.id)}
-                        >
-                          {option.label}
-                        </QuickScopeButton>
-                      ))
-                    : null}
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="rounded-full px-3"
-                    onClick={resetQuickScopes}
-                  >
-                    {t.common_reset}
-                  </Button>
-                </div>
-              </div>
-            </section>
-
-            {mobileAgendaSections.length === 0 ? (
-              <section className={sectionCardClass("p-5")}>
-                <EmptyState
-                  text={appointmentText(
-                    "Im aktuellen mobilen Scope sind keine Termine vorhanden.",
-                    "В текущем мобильном scope нет приёмов.",
-                    "No appointments in the current mobile scope.",
-                  )}
-                />
-              </section>
-            ) : (
-              mobileAgendaSections.map((section) => (
-                <section
-                  key={section.date}
-                  className={sectionCardClass("p-4 md:p-5")}
-                >
-                  <div className="mb-3 flex items-start justify-between gap-3">
-                    <div>
-                      <h2 className="text-sm font-semibold text-slate-950">
-                        {section.label}
-                      </h2>
-                      <p className="text-xs text-muted-foreground">
-                        {section.itemCount} slot(s)
-                        {section.pendingResponseCount > 0
-                          ? ` · ${section.pendingResponseCount} response pending`
-                          : ""}
-                      </p>
-                    </div>
-                    <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">
-                      {section.itemCount}
-                    </span>
-                  </div>
-                  <div className="space-y-3">
-                    {section.items.map((item) => (
-                      <MobileAgendaCard
-                        key={item.id}
-                        item={item}
-                        onOpen={() => openDetailSheet(item.id)}
-                      />
-                    ))}
-                  </div>
-                </section>
-              ))
-            )}
-          </div>
-        ) : (
-          <div className="grid gap-1">
-
-              <Dialog open={filtersModalOpen} onOpenChange={setFiltersModalOpen}>
-                {shouldRenderFiltersDialog ? (
-                  <DialogContent className="sm:max-w-[420px]">
-                    <DialogHeader className="space-y-0">
-                      <DialogTitle className="text-sm font-semibold text-slate-950">
-                        {appointmentText("Filter", "Фильтры", "Filters")}
-                      </DialogTitle>
-                    </DialogHeader>
-                    <div className="grid gap-3 pt-1">
-                      <Field
-                        compact
-                        label={appointmentText(
-                          "Operativer Bereich",
-                          "Операционная область",
-                          "Operational scope",
-                        )}
-                      >
-                        <ShadSelect
-                          value={operationalScope}
-                          onValueChange={(value) =>
-                            applyOperationalScope((value as OperationalScope) ?? "all")
-                          }
-                        >
-                          <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
-                            <SelectValue>{selectedOperationalScopeLabel}</SelectValue>
-                          </SelectTrigger>
-                          <SelectContent>
-                            {scopeOptions.map((option) => (
-                              <SelectItem key={`scheduler-sheet-${option.id}`} value={option.id}>
-                                {option.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </ShadSelect>
-                      </Field>
-                      <Field
-                        compact
-                        label={appointmentText(
-                          "Schnellbereich",
-                          "Быстрая область",
-                          "Quick scope",
-                        )}
-                      >
-                        <ShadSelect
-                          value={schedulerQuickScopeValue}
-                          onValueChange={(value) =>
-                            applySchedulerQuickScope((value as SchedulerQuickScope) ?? "all")
-                          }
-                        >
-                          <SelectTrigger className={cn("w-full", createSheetInputClassName)}>
-                            <SelectValue>{selectedSchedulerQuickScopeLabel}</SelectValue>
-                          </SelectTrigger>
-                          <SelectContent>
-                            {schedulerQuickScopeOptions.map((option) => (
-                              <SelectItem key={`scheduler-quick-${option.id}`} value={option.id}>
-                                {option.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </ShadSelect>
-                      </Field>
-                    </div>
-                  </DialogContent>
-                ) : null}
-              </Dialog>
-
-              {shouldRenderSearchSheet ? (
-                <Suspense
-                  fallback={
-                    <AppointmentPreviewSheetLoadingState
-                      open={searchModalOpen}
-                      onOpenChange={setSearchModalOpen}
-                      title={t.common_search}
-                      maxWidthClassName="sm:max-w-[460px]"
-                      loadingLabel={appointmentText(
-                        "Suchfilter werden geladen",
-                        "Загрузка фильтров поиска",
-                        "Loading search filters",
-                      )}
-                    />
-                  }
-                >
-                  <LazySearchSheet
-                    open={searchModalOpen}
-                    onOpenChange={setSearchModalOpen}
-                    filters={filters}
-                    setFilters={setFilters}
-                    patients={patients}
-                    providers={providers}
-                    filterDoctors={filterDoctors}
-                    staff={staff}
-                    interpreters={interpreters}
-                    onReset={resetSearchFilters}
-                    onPatientChange={handleSearchPatientChange}
-                    onProviderChange={handleSearchProviderChange}
-                    onDoctorChange={handleSearchDoctorChange}
-                  />
-                </Suspense>
-              ) : null}
-
-              {shouldRenderQueueSheet ? (
-                <Suspense
-                  fallback={
-                    <AppointmentPreviewSheetLoadingState
-                      open={queueModalOpen}
-                      onOpenChange={setQueueModalOpen}
-                      title={t.appointments_title}
-                      maxWidthClassName="sm:max-w-[640px]"
-                      loadingLabel={appointmentText(
-                        "Auftragswarteschlange wird geladen",
-                        "Загрузка очереди приёмов",
-                        "Loading appointment queue",
-                      )}
-                    />
-                  }
-                >
-                  <LazyQueueSheet
-                    open={queueModalOpen}
-                    onOpenChange={setQueueModalOpen}
-                    appointmentsLoading={appointmentsLoading}
-                    metadataLoading={metadataLoading}
-                    items={queueAppointments}
-                    openDetailSheet={openDetailSheet}
-                    operationalScope={operationalScope}
-                    userRole={user?.role}
-                    attentionIndex={attentionIndex}
-                    canManageStatus={permissions.canManageStatus}
-                    actionBusy={actionBusy}
-                    onStatusChange={performStatusChange}
-                  />
-                </Suspense>
-              ) : null}
-
-              <div className="appointments-scheduler-divider w-full rounded-[6px] p-3">
-                <div className="appointments-scheduler-toolbar flex w-full flex-col gap-2 lg:flex-row lg:items-start">
-                  <div className="appointments-scheduler-search flex w-full items-center gap-2 lg:w-auto">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      className="h-8 w-8 shrink-0 rounded-full border-slate-200 bg-transparent hover:cursor-pointer hover:bg-transparent"
-                      onClick={() => setFiltersModalOpen(true)}
-                      aria-label={t.common_search}
-                    >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        width="24"
-                        height="24"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.5"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        className="size-4"
-                      >
-                        <path stroke="none" d="M0 0h24v24H0z" fill="none" />
-                        <path d="M4 4h16v2.172a2 2 0 0 1 -.586 1.414l-4.414 4.414v7l-6 2v-8.5l-4.48 -4.928a2 2 0 0 1 -.52 -1.345v-2.227" />
-                      </svg>
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="h-8 w-full justify-start rounded-full border-slate-200 bg-transparent px-3 text-xs font-normal text-slate-500 lg:w-[18rem] hover:cursor-pointer hover:bg-transparent"
-                      onClick={() => {
-                        void loadSearchSheet();
-                        setSearchModalOpen(true);
-                      }}
-                    >
-                      {t.common_search.replace(/[.…]+$/u, "")}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 shrink-0 rounded-full bg-transparent px-3 hover:cursor-pointer hover:bg-transparent"
-                      onClick={() => {
-                        void loadQueueSheet();
-                        setQueueModalOpen(true);
-                      }}
-                    >
-                      {t.appointments_title}
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            <section className="overflow-hidden rounded-xl border border-border bg-card">
-              <div className="appointments-calendar-shell p-3">
-                <FullCalendar
-                  ref={calendarRef}
-                  plugins={[
-                    dayGridPlugin,
-                    timeGridPlugin,
-                    listPlugin,
-                    interactionPlugin,
-                  ]}
-                  locale={lang === "de" ? deLocale : ruLocale}
-                  eventTimeFormat={{
-                    hour: "2-digit",
-                    minute: "2-digit",
-                    hour12: false,
-                    omitZeroMinute: false,
-                  }}
-                  displayEventEnd={false}
-                  initialView={calendarView}
-                  initialDate={calendarDate}
-                  headerToolbar={{
-                    left: "prev,next today",
-                    center: "title",
-                    right: "dayGridMonth,timeGridWeek,timeGridDay,listWeek",
-                  }}
-                  buttonText={{
-                    today: tr.dash_patients_today ?? "Today",
-                    month: tr.dash_this_month ?? "Month",
-                    week: tr.dash_this_week ?? "Week",
-                    day: tr.appointments_date ?? "Day",
-                    list: tr.providers_all ?? "List",
-                  }}
-                  height="auto"
-                  firstDay={1}
-                  slotMinTime="06:00:00"
-                  slotMaxTime="22:00:00"
-                  dayMaxEvents={3}
-                  nowIndicator
-                  editable={permissions.canEditSchedule}
-                  eventStartEditable={permissions.canEditSchedule}
-                  eventDurationEditable={permissions.canEditSchedule}
-                  eventResizableFromStart={permissions.canEditSchedule}
-                  dateClick={handleCalendarDateClick}
-                  eventClick={handleEventClick}
-                  eventDrop={handleInlineReschedule}
-                  eventResize={handleInlineReschedule}
-                  eventContent={renderCalendarEventContent}
-                  datesSet={handleDatesSet}
-                  events={calendarEvents}
-                />
-              </div>
-              {calendarQuickActionMenu && activeCalendarQuickActionItem ? (
-                <div
-                  ref={calendarQuickActionMenuRef}
-                  id={`appointment-quick-actions-${activeCalendarQuickActionItem.id}`}
-                  role="menu"
-                  tabIndex={-1}
-                  aria-label={t.appointments_quick_actions}
-                  className="fixed z-50 w-56 rounded-2xl border border-slate-200 bg-white p-2 shadow-[0_24px_60px_rgba(15,23,42,0.18)]"
-                  style={{
-                    top: `${calendarQuickActionMenu.top}px`,
-                    left: `${calendarQuickActionMenu.left}px`,
-                  }}
-                >
-                  <div className="border-b border-slate-200 px-2 pb-2">
-                    <p className="truncate text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                      {t.appointments_quick_actions}
-                    </p>
-                    <p className="mt-1 truncate text-sm font-semibold text-slate-950">
-                      {activeCalendarQuickActionItem.title}
-                    </p>
-                    <p className="truncate text-xs text-slate-500">
-                      {activeCalendarQuickActionItem.patient_pid} ·{" "}
-                      {activeCalendarQuickActionItem.patient_name}
-                    </p>
-                  </div>
-                  <div className="mt-2 space-y-1">
-                    {activeCalendarQuickActionItem.recurrence_frequency ? (
-                      <label className="block rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                        <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                          {t.appointments_scope_apply_status}
-                        </span>
-                        <select
-                          value={calendarQuickActionScope}
-                          onChange={(event) =>
-                            setCalendarQuickActionScope(
-                              event.target
-                                .value as AppointmentRecurringActionScope,
-                            )
-                          }
-                          className="mt-2 h-9 w-full rounded-xl border border-slate-200 bg-card px-3 text-sm text-foreground"
-                        >
-                          <option value="single">
-                            {t.appointments_scope_single}
-                          </option>
-                          <option value="following">
-                            {t.appointments_scope_following}
-                          </option>
-                          <option value="series">
-                            {t.appointments_scope_series}
-                          </option>
-                        </select>
-                      </label>
-                    ) : null}
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100 hover:text-slate-950"
-                      onClick={() =>
-                        openDetailSheet(activeCalendarQuickActionItem.id)
-                      }
-                    >
-                      <span>{t.appointments_open_detail}</span>
-                    </button>
-                    {activeCalendarQuickActionItem.status !== "confirmed" ? (
-                      <button
-                        type="button"
-                        role="menuitem"
-                        className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
-                        disabled={Boolean(actionBusy)}
-                        onClick={() =>
-                          void performStatusChange(
-                            activeCalendarQuickActionItem.id,
-                            "confirmed",
-                            activeCalendarQuickActionScope,
-                          )
-                        }
-                      >
-                        <span>{t.common_confirm}</span>
-                        {actionBusy ===
-                        statusActionKey(
-                          activeCalendarQuickActionItem.id,
-                          "confirmed",
-                          activeCalendarQuickActionScope,
-                        ) ? (
-                          <LoaderCircle className="size-4 animate-spin" />
-                        ) : null}
-                      </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
-                      disabled={Boolean(actionBusy)}
-                      onClick={() =>
-                        void performStatusChange(
-                          activeCalendarQuickActionItem.id,
-                          "completed",
-                          activeCalendarQuickActionScope,
-                        )
-                      }
-                    >
-                      <span>{t.dash_completed}</span>
-                      {actionBusy ===
-                      statusActionKey(
-                        activeCalendarQuickActionItem.id,
-                        "completed",
-                        activeCalendarQuickActionScope,
-                      ) ? (
-                        <LoaderCircle className="size-4 animate-spin" />
-                      ) : null}
-                    </button>
-                    {activeCalendarQuickActionItem.recurrence_frequency ? (
-                      <button
-                        type="button"
-                        role="menuitem"
-                        className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
-                        disabled={Boolean(actionBusy)}
-                        onClick={() =>
-                          void performStatusChange(
-                            activeCalendarQuickActionItem.id,
-                            "cancelled",
-                            activeCalendarQuickActionScope,
-                          )
-                        }
-                      >
-                        <span>
-                          {activeCalendarQuickActionScope === "following"
-                            ? t.appointments_cancel_this_and_following
-                            : activeCalendarQuickActionScope === "series"
-                              ? t.appointments_cancel_whole_series
-                              : statusLabel("cancelled")}
-                        </span>
-                        {actionBusy ===
-                        statusActionKey(
-                          activeCalendarQuickActionItem.id,
-                          "cancelled",
-                          activeCalendarQuickActionScope,
-                        ) ? (
-                          <LoaderCircle className="size-4 animate-spin" />
-                        ) : null}
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-              ) : null}
-            </section>
-          </div>
-        )}
+        <AppointmentsSchedulerSurface
+          useMobileAgenda={useInterpreterMobileAgenda}
+          mobileAgenda={{
+            todayLabel: t.dash_patients_today,
+            pendingLabel: tr.mfa_pending ?? "Pending interpreter",
+            weekLabel: tr.dash_this_week ?? "This week",
+            searchLabel: t.common_search,
+            searchPlaceholder: tr.common_search,
+            resetLabel: t.common_reset,
+            todayScopeLabel: "Today",
+            weekScopeLabel: "This week",
+            mineScopeLabel: "Mine",
+            todayAppointments,
+            mobileAgendaPendingCount,
+            mobileAgendaWeekCount,
+            searchValue: filters.search,
+            onSearchChange: (value) =>
+              setFilters((current) => ({
+                ...current,
+                search: value,
+              })),
+            todayScopeActive:
+              filters.dateFrom === todayDate && filters.dateTo === todayDate,
+            weekScopeActive:
+              filters.dateFrom === weekStart && filters.dateTo === weekEnd,
+            mineScopeActive: mineFilterActive,
+            onApplyTodayScope: applyTodayScope,
+            onApplyWeekScope: applyWeekScope,
+            onApplyMineScope: applyMineScope,
+            scopeOptions,
+            activeOperationalScope,
+            onApplyOperationalScope: applyOperationalScope,
+            onResetQuickScopes: resetQuickScopes,
+            sections: mobileAgendaSections,
+            emptyText: appointmentText(
+              "Im aktuellen mobilen Scope sind keine Termine vorhanden.",
+              "В текущем мобильном scope нет приёмов.",
+              "No appointments in the current mobile scope.",
+            ),
+            onOpenDetail: openDetailSheet,
+          }}
+          filtersDialog={{
+            open: filtersModalOpen && shouldRenderFiltersDialog,
+            onOpenChange: handleFiltersModalOpenChange,
+            title: appointmentText("Filter", "Фильтры", "Filters"),
+            operationalScopeLabel: appointmentText(
+              "Operativer Bereich",
+              "Операционная область",
+              "Operational scope",
+            ),
+            quickScopeLabel: appointmentText(
+              "Schnellbereich",
+              "Быстрая область",
+              "Quick scope",
+            ),
+            activeOperationalScope,
+            onApplyOperationalScope: applyOperationalScope,
+            selectedOperationalScopeLabel,
+            schedulerQuickScopeValue,
+            onApplySchedulerQuickScope: applySchedulerQuickScope,
+            selectedSchedulerQuickScopeLabel,
+            scopeOptions,
+            schedulerQuickScopeOptions,
+            controlClassName: createSheetInputClassName,
+          }}
+          searchSheet={{
+            shouldRender: shouldRenderSearchSheet,
+            loadingTitle: t.common_search,
+            loadingLabel: appointmentText(
+              "Suchfilter werden geladen",
+              "Загрузка фильтров поиска",
+              "Loading search filters",
+            ),
+            open: searchModalOpen,
+            onOpenChange: handleSearchModalOpenChange,
+            filters,
+            setFilters,
+            patients,
+            providers,
+            filterDoctors,
+            staff,
+            interpreters,
+            onReset: resetSearchFilters,
+            onPatientChange: handleSearchPatientChange,
+            onProviderChange: handleSearchProviderChange,
+            onDoctorChange: handleSearchDoctorChange,
+          }}
+          queueSheet={{
+            shouldRender: shouldRenderQueueSheet,
+            loadingTitle: t.appointments_title,
+            loadingLabel: appointmentText(
+              "Auftragswarteschlange wird geladen",
+              "Загрузка очереди приёмов",
+              "Loading appointment queue",
+            ),
+            open: queueModalOpen,
+            onOpenChange: handleQueueModalOpenChange,
+            appointmentsLoading,
+            metadataLoading,
+            items: queueAppointments,
+            openDetailSheet,
+            operationalScope: activeOperationalScope,
+            userRole: user?.role,
+            attentionIndex,
+            canManageStatus: permissions.canManageStatus,
+            actionBusy,
+            onStatusChange: performStatusChange,
+          }}
+          toolbar={{
+            searchAriaLabel: t.common_search,
+            searchPlaceholder: t.common_search.replace(/[.…]+$/u, ""),
+            queueLabel: t.appointments_title,
+            onOpenFilters: openFiltersModal,
+            onOpenSearch: openSearchModal,
+            onOpenQueue: openQueueModal,
+          }}
+          calendarSurface={{
+            calendarRef,
+            lang,
+            dictionary: tr,
+            calendarView,
+            calendarDate,
+            canEditSchedule: permissions.canEditSchedule,
+            dateClick: openCreateSheetFromDate,
+            eventClick: handleEventClick,
+            eventDrop: handleInlineReschedule,
+            eventResize: handleInlineReschedule,
+            eventContent: renderCalendarEventContent,
+            datesSet: handleDatesSet,
+            events: calendarEvents,
+            calendarQuickActionMenu,
+            calendarQuickActionMenuRef,
+            activeCalendarQuickActionItem,
+            activeCalendarQuickActionScope,
+            actionBusy,
+            onCalendarQuickActionScopeChange:
+              handleCalendarQuickActionScopeChange,
+            onOpenDetail: openDetailSheet,
+            onStatusChange: performStatusChange,
+          }}
+        />
       </div>
       )}
 
-      {createOpen ? (
-        <Suspense
-          fallback={
-            <AppointmentPreviewSheetLoadingState
-              open={createOpen}
-              onOpenChange={setCreateOpen}
-              title={tr.appointments_new}
-              maxWidthClassName="sm:max-w-[760px]"
-              loadingLabel={appointmentText(
-                "Terminformular wird geladen",
-                "Загрузка формы приёма",
-                "Loading appointment form",
-              )}
-            />
+      <CreateSheetLayer
+        open={createOpen}
+        title={tr.appointments_new}
+        loadingLabel={appointmentText(
+          "Terminformular wird geladen",
+          "Загрузка формы приёма",
+          "Loading appointment form",
+        )}
+        seed={createSeed}
+        appointments={appointments}
+        patients={patients}
+        providers={providers}
+        interpreters={interpreters}
+        staff={staff}
+        userId={user?.id}
+        onOpenChange={handleCreateOpenChange}
+        onCreated={({ id, notice }) => {
+          reportAppointmentsNotice(notice);
+          refreshAppointments();
+          if (id) {
+            openDetailSheet(id);
           }
-        >
-          <Sheet open={createOpen} onOpenChange={setCreateOpen}>
-            <SheetContent side="right" className="w-full gap-0 sm:max-w-[760px]">
-              <SheetHeader className="px-4 py-3">
-                <SheetTitle>{tr.appointments_new}</SheetTitle>
-              </SheetHeader>
-              <LazyCreateAppointmentSheet
-                open={createOpen}
-                seed={createSeed}
-                appointments={appointments}
-                patients={patients}
-                providers={providers}
-                interpreters={interpreters}
-                staff={staff}
-                userId={user?.id}
-                onOpenChange={setCreateOpen}
-                onCreated={({ id, notice }) => {
-                  setAppointmentsNotice(notice);
-                  refreshAppointments();
-                  if (id) {
-                    openDetailSheet(id);
-                  }
-                }}
-              />
-            </SheetContent>
-          </Sheet>
-        </Suspense>
-      ) : null}
+        }}
+      />
 
-      {linkedPatientOpen ? (
-        <Suspense
-          fallback={
-            <AppointmentPreviewSheetLoadingState
-              open={linkedPatientOpen}
-              onOpenChange={handleLinkedPatientOpenChange}
-              title={appointmentText("Patient", "Пациент", "Patient")}
-              maxWidthClassName="sm:max-w-[860px]"
-              loadingLabel={appointmentText(
-                "Patient wird geladen",
-                "Загрузка пациента",
-                "Loading patient",
-              )}
-            />
-          }
-        >
-          <LazyPatientDetailSheet
-            open={linkedPatientOpen}
-            detail={linkedPatientDetail}
-            detailBusy={linkedPatientDetailLoading}
-            detailError={linkedPatientDetailError}
-            hideFooterActions
-            dictionary={tr as unknown as PatientsDictionary}
-            canCreateEdit={patientSheetPermissions.canCreateEdit}
-            canViewAssignments={patientSheetPermissions.canViewAssignments}
-            canManageAssignments={patientSheetPermissions.canManageAssignments}
-            assignments={linkedPatientAssignments}
-            assignableStaff={linkedPatientAssignableStaff}
-            selectedAssignee={linkedPatientSelectedAssignee}
-            assignmentBusy={linkedPatientAssignmentBusy}
-            assignmentError={linkedPatientAssignmentError}
-            onAssigneeChange={setLinkedPatientSelectedAssignee}
-            onAssign={handleAssignLinkedPatient}
-            onOpenChange={handleLinkedPatientOpenChange}
-            onRefresh={refreshLinkedPatient}
-            hideWorkspaceActions
-            onOpenCases={() => undefined}
-            onOpenOrders={() => undefined}
-            onOpenAppointments={() => undefined}
-            onOpenContracts={() => undefined}
-            onOpenDocuments={() => undefined}
-          />
-        </Suspense>
-      ) : null}
+      <LinkedPatientSheetLayer
+        open={linkedPatientOpen}
+        onOpenChange={handleLinkedPatientOpenChange}
+        detail={linkedPatientDetail}
+        detailBusy={linkedPatientDetailLoading}
+        detailError={linkedPatientDetailError}
+        hideFooterActions
+        dictionary={tr as unknown as PatientsDictionary}
+        canCreateEdit={patientSheetPermissions.canCreateEdit}
+        canViewAssignments={patientSheetPermissions.canViewAssignments}
+        canManageAssignments={patientSheetPermissions.canManageAssignments}
+        assignments={linkedPatientAssignments}
+        assignableStaff={linkedPatientAssignableStaff}
+        selectedAssignee={linkedPatientSelectedAssignee}
+        assignmentBusy={linkedPatientAssignmentBusy}
+        assignmentError={linkedPatientAssignmentError}
+        onAssigneeChange={setLinkedPatientSelectedAssignee}
+        onAssign={handleAssignLinkedPatient}
+        onRefresh={refreshLinkedPatient}
+        hideWorkspaceActions
+        onOpenCases={() => undefined}
+        onOpenOrders={() => undefined}
+        onOpenAppointments={() => undefined}
+        onOpenContracts={() => undefined}
+        onOpenDocuments={() => undefined}
+      />
 
-      {linkedProviderOpen ? (
-        <Suspense
-          fallback={
-            <AppointmentPreviewSheetLoadingState
-              open={linkedProviderOpen}
-              onOpenChange={handleLinkedProviderOpenChange}
-              title={linkedProviderDetail?.name || t.providers_detail}
-              maxWidthClassName="sm:max-w-[920px]"
-              loadingLabel={appointmentText(
-                "Anbieter wird geladen",
-                "Загрузка провайдера",
-                "Loading provider",
-              )}
-            />
-          }
-        >
-          <LazyLinkedProviderSheet
-            open={linkedProviderOpen}
-            onOpenChange={handleLinkedProviderOpenChange}
-            detail={linkedProviderDetail}
-            loading={linkedProviderDetailLoading}
-            error={linkedProviderDetailError}
-            fallbackTitle={t.providers_detail}
-            formatDateTimeLabel={formatDateTimeLabel}
-            onOpenPatient={(patientId) => {
-              void loadPatientDetailSheet();
-              setLinkedProviderOpen(false);
-              setLinkedProviderId("");
-              setLinkedPatientId(patientId);
-              setLinkedPatientVersion((current) => current + 1);
-              setLinkedPatientOpen(true);
-            }}
-            onOpenAppointment={(appointmentId) => {
-              handleLinkedProviderOpenChange(false);
-              openDetailSheet(appointmentId);
-            }}
-          />
-        </Suspense>
-      ) : null}
+      <LinkedProviderSheetLayer
+        open={linkedProviderOpen}
+        onOpenChange={handleLinkedProviderOpenChange}
+        detail={linkedProviderDetail}
+        loading={linkedProviderDetailLoading}
+        error={linkedProviderDetailError}
+        fallbackTitle={t.providers_detail}
+        formatDateTimeLabel={formatDateTimeLabel}
+        onOpenPatient={openLinkedPatientById}
+        onOpenAppointment={(appointmentId) => {
+          handleLinkedProviderOpenChange(false);
+          openDetailSheet(appointmentId);
+        }}
+      />
 
-      {linkedCasesOpen ? (
-        <Suspense
-          fallback={
-            <AppointmentPreviewSheetLoadingState
-              open={linkedCasesOpen}
-              onOpenChange={handleLinkedCasesOpenChange}
-              title={t.cases_roster}
-              description={`${t.cases_subtitle} · ${t.patients_syncing}`}
-              maxWidthClassName="sm:max-w-[980px]"
-              loadingLabel={appointmentText(
-                "Falle werden geladen",
-                "Загрузка кейсов",
-                "Loading cases",
-              )}
-            />
-          }
-        >
-          <LazyLinkedCasesSheet
-            open={linkedCasesOpen}
-            onOpenChange={handleLinkedCasesOpenChange}
-            loading={linkedCasesLoading}
-            error={linkedCasesError}
-            items={linkedCasesItems}
-            patientId={detail?.patient_id ?? null}
-            formatDateTimeLabel={formatDateTimeLabel}
-          />
-        </Suspense>
-      ) : null}
+      <LinkedCasesSheetLayer
+        open={linkedCasesOpen}
+        onOpenChange={handleLinkedCasesOpenChange}
+        loading={linkedCasesLoading}
+        error={linkedCasesError}
+        items={linkedCasesItems}
+        patientId={detail?.patient_id ?? null}
+        formatDateTimeLabel={formatDateTimeLabel}
+      />
 
-      {linkedDocumentsOpen ? (
-        <Suspense
-          fallback={
-            <AppointmentPreviewSheetLoadingState
-              open={linkedDocumentsOpen}
-              onOpenChange={handleLinkedDocumentsOpenChange}
-              title={appointmentText("Dokumente", "Документы", "Documents")}
-              description={appointmentText(
-                "Dokumente aus dem aktuellen Termin-Kontext.",
-                "Документы из контекста текущего приёма.",
-                "Documents from the current appointment context.",
-              )}
-              maxWidthClassName="sm:max-w-[760px]"
-              bodyClassName="px-4 pb-6 pt-4"
-              loadingLabel={appointmentText(
-                "Dokumente werden geladen",
-                "Загрузка документов",
-                "Loading documents",
-              )}
-            />
-          }
-        >
-          <LazyLinkedDocumentsSheet
-            open={linkedDocumentsOpen}
-            onOpenChange={handleLinkedDocumentsOpenChange}
-            loading={linkedDocumentsLoading}
-            error={linkedDocumentsError}
-            items={linkedDocumentsItems}
-            formatDateTime={formatDateTimeLabel}
-          />
-        </Suspense>
-      ) : null}
+      <LinkedDocumentsSheetLayer
+        open={linkedDocumentsOpen}
+        onOpenChange={handleLinkedDocumentsOpenChange}
+        loading={linkedDocumentsLoading}
+        error={linkedDocumentsError}
+        items={linkedDocumentsItems}
+        formatDateTime={formatDateTimeLabel}
+      />
 
-      {linkedPreviewOpen ? (
-        <Suspense
-          fallback={
-            <AppointmentPreviewSheetLoadingState
-              open={linkedPreviewOpen}
-              onOpenChange={handleLinkedPreviewOpenChange}
-              title={
-                linkedPreviewLabel ||
-                appointmentText(
-                  "Verknupfte Daten",
-                  "Связанные данные",
-                  "Linked records",
-                )
-              }
-              maxWidthClassName="sm:max-w-[540px]"
-              bodyClassName="px-4 pb-6 pt-4"
-              loadingLabel={appointmentText(
-                "Verknupfte Daten werden geladen…",
-                "Загрузка связанных данных…",
-                "Loading linked records…",
-              )}
-            />
-          }
-        >
-          <LazyLinkedRecordsSheet
-            open={linkedPreviewOpen}
-            onOpenChange={handleLinkedPreviewOpenChange}
-            title={
-              linkedPreviewLabel ||
-              appointmentText(
-                "Verknupfte Daten",
-                "Связанные данные",
-                "Linked records",
-              )
-            }
-            loading={linkedPreviewLoading}
-            error={linkedPreviewError}
-            payload={linkedPreviewPayload}
-            kind={linkedPreviewKind}
-          />
-        </Suspense>
-      ) : null}
+      <LinkedRecordsSheetLayer
+        open={linkedPreviewOpen}
+        onOpenChange={handleLinkedPreviewOpenChange}
+        title={
+          linkedPreviewLabel ||
+          appointmentText(
+            "Verknupfte Daten",
+            "Связанные данные",
+            "Linked records",
+          )
+        }
+        loading={linkedPreviewLoading}
+        error={linkedPreviewError}
+        payload={linkedPreviewPayload}
+        kind={linkedPreviewKind}
+      />
 
       {isMobile ? (
-      <Sheet
-        open={detailOpen}
-        onOpenChange={(open) => {
-          if (open) {
-            setDetailOpen(true);
-            return;
-          }
-          closeDetailWorkspace();
-        }}
-      >
-        {shouldRenderDetailSheetContent ? (
-          <Suspense
-            fallback={
-              <SheetContent side="right" className="w-full gap-0 sm:max-w-[860px]">
-                <div className="flex flex-col flex-1 min-h-0">
-                  <SheetHeader className="px-4 py-3">
-                    <SheetTitle>{tr.appointments_title}</SheetTitle>
-                  </SheetHeader>
-                  <div className="flex flex-1 items-center justify-center px-4 pb-6 pt-4 text-muted-foreground">
-                    <LoaderCircle className="mr-2 size-4 animate-spin" />
-                    {appointmentText(
-                      "Detailbereich wird geladen",
-                      "Загрузка detail-блока",
-                      "Loading detail workspace",
-                    )}
-                  </div>
-                </div>
-              </SheetContent>
+        <MobileDetailSheet
+          open={detailOpen}
+          onOpenChange={(open) => {
+            if (open) {
+              setDetailOpen(true);
+              return;
             }
-          >
-            <LazyMobileDetailSheetContent
-              detailLoading={
-                detailLoading ||
-                (requiresExtendedDetailResources && detailExtendedLoading)
-              }
-              detailError={detailError}
-              detail={detail}
-              detailVersion={detailVersion}
-              detailAttention={detailAttention}
-              timelineEvents={timelineEvents}
-              appointments={appointments}
-              providers={providers}
-              staff={staff}
-              interpreters={interpreters}
-              permissions={permissions}
-              currentUserId={user?.id}
-              detailDefaultAssigneeId={detailDefaultAssigneeId}
-              doctorFollowUpAssignees={doctorFollowUpAssignees}
-              handoffStakeholders={handoffStakeholders}
-              followUpAssigneeId={followUpAssigneeId}
-              setFollowUpAssigneeId={setFollowUpAssigneeId}
-              detailChecklist={detailChecklist}
-              detailReminders={detailReminders}
-              detailTasks={detailTasks}
-              detailServices={detailServices}
-              detailReport={detailReport}
-              doctorDirectedReminders={doctorDirectedReminders}
-              doctorDirectedTasks={doctorDirectedTasks}
-              incomingDataChecklist={incomingDataChecklist}
-              incomingDataReminders={incomingDataReminders}
-              incomingDataTasks={incomingDataTasks}
-              packageEndReminders={packageEndReminders}
-              packageEndTasks={packageEndTasks}
-              externalCommunicationEntries={externalCommunicationEntries}
-              externalHandoffReminders={externalHandoffReminders}
-              externalHandoffTasks={externalHandoffTasks}
-              findingsChecklist={findingsChecklist}
-              findingsReminders={findingsReminders}
-              findingsTasks={findingsTasks}
-              openChecklistCount={openChecklistCount}
-              openTaskCount={openTaskCount}
-              pendingReminderCount={pendingReminderCount}
-              interpreterReportReady={interpreterReportReady}
-              completionWarnings={completionWarnings}
-              taskAssignableStaff={taskAssignableStaff}
-              reportReviewMeta={reportReviewMeta}
-              canSubmitInterpreterReport={canSubmitInterpreterReport}
-              canResubmitRejectedReport={canResubmitRejectedReport}
-              showReportReviewActions={showReportReviewActions}
-              canShowConciergeSection={canShowConciergeSection}
-              nonMedicalProviders={nonMedicalProviders}
-              conciergeStaff={conciergeStaff}
-              canShowBillingHandoffSection={canShowBillingHandoffSection}
-              billingStaff={billingStaff}
-              billingHandoffReminders={billingHandoffReminders}
-              billingHandoffTasks={billingHandoffTasks}
-              openBillingHandoffTasks={openBillingHandoffTasks}
-              readyConciergeServices={readyConciergeServices}
-              settledConciergeServices={settledConciergeServices}
-              billingReadinessWarnings={billingReadinessWarnings}
-              openDetailSheet={openDetailSheet}
-              openLinkedPreview={openLinkedPreview}
-              onRefresh={refreshDetail}
-              onError={reportDetailError}
-              onNotice={reportAppointmentsNotice}
-              onFollowUpVisitCreated={handleFollowUpVisitCreated}
-              onEditSaved={handleEditSaved}
-            />
-          </Suspense>
-        ) : null}
-      </Sheet>
+            closeDetailWorkspace();
+          }}
+          shouldRenderContent={shouldRenderDetailSheetContent}
+          title={tr.appointments_title}
+          loadingLabel={appointmentText(
+            "Detailbereich wird geladen",
+            "Загрузка detail-блока",
+            "Loading detail workspace",
+          )}
+          detailLoading={
+            detailLoading ||
+            (requiresExtendedDetailResources && detailExtendedLoading)
+          }
+          detailError={detailError}
+          detail={detail}
+          detailVersion={detailVersion}
+          detailAttention={detailAttention}
+          timelineEvents={timelineEvents}
+          appointments={appointments}
+          providers={providers}
+          staff={staff}
+          interpreters={interpreters}
+          permissions={permissions}
+          currentUserId={user?.id}
+          detailDefaultAssigneeId={detailDefaultAssigneeId}
+          doctorFollowUpAssignees={doctorFollowUpAssignees}
+          handoffStakeholders={handoffStakeholders}
+          followUpAssigneeId={resolvedFollowUpAssigneeId}
+          setFollowUpAssigneeId={setFollowUpAssigneeId}
+          detailChecklist={detailChecklist}
+          detailReminders={detailReminders}
+          detailTasks={detailTasks}
+          detailServices={detailServices}
+          detailReport={detailReport}
+          doctorDirectedReminders={doctorDirectedReminders}
+          doctorDirectedTasks={doctorDirectedTasks}
+          incomingDataChecklist={incomingDataChecklist}
+          incomingDataReminders={incomingDataReminders}
+          incomingDataTasks={incomingDataTasks}
+          packageEndReminders={packageEndReminders}
+          packageEndTasks={packageEndTasks}
+          externalCommunicationEntries={externalCommunicationEntries}
+          externalHandoffReminders={externalHandoffReminders}
+          externalHandoffTasks={externalHandoffTasks}
+          findingsChecklist={findingsChecklist}
+          findingsReminders={findingsReminders}
+          findingsTasks={findingsTasks}
+          openChecklistCount={openChecklistCount}
+          openTaskCount={openTaskCount}
+          pendingReminderCount={pendingReminderCount}
+          interpreterReportReady={interpreterReportReady}
+          completionWarnings={completionWarnings}
+          taskAssignableStaff={taskAssignableStaff}
+          reportReviewMeta={reportReviewMeta}
+          canSubmitInterpreterReport={canSubmitInterpreterReport}
+          canResubmitRejectedReport={canResubmitRejectedReport}
+          showReportReviewActions={showReportReviewActions}
+          canShowConciergeSection={canShowConciergeSection}
+          nonMedicalProviders={nonMedicalProviders}
+          conciergeStaff={conciergeStaff}
+          canShowBillingHandoffSection={canShowBillingHandoffSection}
+          billingStaff={billingStaff}
+          billingHandoffReminders={billingHandoffReminders}
+          billingHandoffTasks={billingHandoffTasks}
+          openBillingHandoffTasks={openBillingHandoffTasks}
+          readyConciergeServices={readyConciergeServices}
+          settledConciergeServices={settledConciergeServices}
+          billingReadinessWarnings={billingReadinessWarnings}
+          openDetailSheet={openDetailSheet}
+          openLinkedPreview={openLinkedPreview}
+          onRefresh={refreshDetail}
+          onError={reportDetailError}
+          onNotice={reportAppointmentsNotice}
+          onFollowUpVisitCreated={handleFollowUpVisitCreated}
+          onEditSaved={handleEditSaved}
+        />
       ) : null}
     </>
   );
@@ -3027,220 +1727,4 @@ export function AppointmentsPage() {
   }
 
   return <StaffAppointmentsPage />;
-}
-
-function StatsCard({
-  icon: Icon,
-  label,
-  value,
-  tone,
-  compact = false,
-  hideIcon = false,
-  largeValue = false,
-  valueRight = false,
-}: {
-  icon: typeof CalendarDays;
-  label: string;
-  value: string;
-  tone: "sky" | "emerald" | "amber" | "rose" | "slate";
-  compact?: boolean;
-  hideIcon?: boolean;
-  largeValue?: boolean;
-  valueRight?: boolean;
-}) {
-  const toneClass =
-    tone === "sky"
-      ? "bg-sky-100 text-sky-700"
-      : tone === "emerald"
-        ? "bg-emerald-100 text-emerald-700"
-        : tone === "amber"
-          ? "bg-amber-100 text-amber-700"
-          : tone === "rose"
-            ? "bg-rose-100 text-rose-700"
-            : "bg-slate-100 text-slate-700";
-  return (
-    <div
-      className={cn(
-        "relative flex h-full min-w-0 flex-col backdrop-blur",
-        compact
-          ? "min-h-[5.4rem] rounded-xl border border-slate-200 bg-slate-50 p-2"
-          : "rounded-[1.2rem] border border-white/90 bg-white/88 p-3 pr-10",
-      )}
-    >
-      {valueRight ? (
-        <div className="flex items-end justify-between gap-2">
-          <span
-            className={cn(
-              "block min-w-0 whitespace-normal break-words text-left font-semibold uppercase leading-tight text-slate-600",
-              compact
-                ? "text-[9px] tracking-[0.05em]"
-                : "text-[11px] tracking-[0.08em]",
-            )}
-          >
-            {label}
-          </span>
-          <p
-            className={cn(
-              "shrink-0 leading-none font-semibold tracking-tight text-slate-950",
-              compact
-                ? largeValue
-                  ? "text-[1.9rem]"
-                  : "text-xl"
-                : "text-[2rem]",
-            )}
-          >
-            {value}
-          </p>
-        </div>
-      ) : (
-        <>
-          <span
-            className={cn(
-              "block w-full whitespace-normal break-words text-left font-semibold uppercase leading-tight text-slate-600",
-              compact
-                ? "min-h-[1.9rem] text-[9px] tracking-[0.05em]"
-                : "text-[11px] tracking-[0.08em]",
-            )}
-          >
-            {label}
-          </span>
-          <p
-            className={cn(
-              "leading-none font-semibold tracking-tight text-slate-950",
-              compact
-                ? largeValue
-                  ? "mt-auto pt-1 text-[1.9rem]"
-                  : "mt-auto pt-1 text-xl"
-                : "mt-auto pt-2 text-[2rem]",
-            )}
-          >
-            {value}
-          </p>
-        </>
-      )}
-      {hideIcon ? null : (
-        <span
-          className={cn(
-            "absolute right-2 bottom-2 shrink-0",
-            compact ? "rounded-lg p-1" : "rounded-xl p-1.5",
-            toneClass,
-          )}
-        >
-          <Icon className={compact ? "size-3" : "size-3.5"} />
-        </span>
-      )}
-    </div>
-  );
-}
-
-function QuickScopeButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <Button
-      type="button"
-      variant={active ? "default" : "outline"}
-      size="sm"
-      className={cn(
-        "h-8 rounded-full px-3 text-xs",
-        active ? "bg-slate-950 text-white hover:bg-slate-800" : "bg-white/80",
-      )}
-      onClick={onClick}
-    >
-      {children}
-    </Button>
-  );
-}
-
-function MobileAgendaCard({
-  item,
-  onOpen,
-}: {
-  item: AppointmentListItem;
-  onOpen: () => void;
-}) {
-  const summary =
-    item.doctor_name ||
-    item.provider_name ||
-    item.location ||
-    item.owner_name ||
-    "Operational slot";
-
-  return (
-    <div className="rounded-[1.5rem] border border-slate-200/80 bg-slate-50/85 p-4 shadow-sm">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <button
-            type="button"
-            onClick={onOpen}
-            className="truncate text-left text-sm font-semibold text-slate-950 hover:text-sky-700"
-          >
-            {item.title}
-          </button>
-          <p className="mt-1 truncate text-xs text-slate-500">
-            {item.patient_pid} · {item.patient_name}
-          </p>
-        </div>
-        <span
-          className={cn(
-            "rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em]",
-            appointmentStatusBadgeClassName(item.status),
-          )}
-        >
-          {statusLabel(item.status)}
-        </span>
-      </div>
-
-      <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-slate-500">
-        <span className="inline-flex items-center gap-1">
-          <Clock3 className="size-3.5" />
-          {slotLabel(item)}
-        </span>
-        {item.location ? (
-          <span className="inline-flex items-center gap-1">
-            <MapPin className="size-3.5" />
-            {item.location}
-          </span>
-        ) : null}
-      </div>
-
-      <p className="mt-3 text-xs font-medium text-slate-600">{summary}</p>
-
-      <div className="mt-3 flex flex-wrap gap-2">
-        {item.interpreter_response ? (
-          <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-sky-700">
-            Interpreter {responseLabel(item.interpreter_response)}
-          </span>
-        ) : null}
-        {item.recurrence_frequency ? (
-          <span className="rounded-full border border-slate-200 bg-white px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">
-            {recurrenceCadenceLabel(item)}
-          </span>
-        ) : null}
-        {item.is_blocked ? (
-          <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-amber-700">
-            {appointmentText("Blockierte Sicht", "Заблокированная видимость", "Blocked visibility")}
-          </span>
-        ) : null}
-      </div>
-
-      <div className="mt-4 flex justify-end">
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          className="rounded-2xl"
-          onClick={onOpen}
-        >
-          {appointmentText("Öffnen", "Открыть", "Open")}
-        </Button>
-      </div>
-    </div>
-  );
 }

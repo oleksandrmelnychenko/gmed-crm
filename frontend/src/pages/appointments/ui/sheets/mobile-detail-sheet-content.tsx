@@ -57,7 +57,7 @@ import {
   MemoizedAppointmentTasksSection,
 } from "@/pages/appointments/ui/sections/workflow-surfaces";
 
-type AppointmentMobileDetailSheetContentProps = {
+export type AppointmentMobileDetailSheetContentProps = {
   detailLoading: boolean;
   detailError: string;
   detail: AppointmentDetail | null;

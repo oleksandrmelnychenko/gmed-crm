@@ -16,15 +16,18 @@ import {
   Section,
   StatCard,
   StatusBadge,
-  inputClass,
-  selectClass,
-  textareaClass,
-  tokens,
 } from "@/components/ui-shell";
 import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
+import {
+  appointmentFilterControlClassName,
+  appointmentPreviewInfoCardClassName,
+  appointmentSelectControlClassName,
+  appointmentSoftPanelClassName,
+  appointmentTextareaControlClassName,
+} from "@/pages/appointments/appearance/surface-appearance";
 import { shiftLocalDateTime } from "@/pages/appointments/model/date-time";
 import {
   blankFindingsFollowUpForm,
@@ -72,8 +75,9 @@ import {
   Field,
 } from "@/pages/appointments/ui/shared/workspace-primitives";
 
-const clinicalSelectClassName = cn(selectClass, "h-10 rounded-xl");
-const clinicalTextareaClassName = cn(textareaClass, "min-h-[96px]");
+const clinicalInputClassName = appointmentFilterControlClassName;
+const clinicalSelectClassName = appointmentSelectControlClassName;
+const clinicalTextareaClassName = appointmentTextareaControlClassName;
 
 function withEllipsis(value: string) {
   return value.endsWith("...") || value.endsWith("…") ? value : `${value}…`;
@@ -362,8 +366,8 @@ function AppointmentIncomingDataSection({
                 <div
                   key={item.id}
                   className={cn(
-                    "flex flex-col gap-3 rounded-xl px-4 py-3 md:flex-row md:items-start md:justify-between",
-                    tokens.surface.card,
+                    "flex flex-col gap-3 md:flex-row md:items-start md:justify-between",
+                    appointmentPreviewInfoCardClassName,
                   )}
                 >
                   <div className="space-y-1">
@@ -440,7 +444,7 @@ function AppointmentIncomingDataSection({
               {reminders.map((item) => (
                 <div
                   key={item.id}
-                  className={cn("space-y-2.5 rounded-xl px-4 py-3", tokens.surface.card)}
+                  className={cn("space-y-2.5", appointmentPreviewInfoCardClassName)}
                 >
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="space-y-1">
@@ -465,7 +469,7 @@ function AppointmentIncomingDataSection({
               {tasks.map((task) => (
                 <div
                   key={task.id}
-                  className={cn("space-y-2.5 rounded-xl px-4 py-3", tokens.surface.card)}
+                  className={cn("space-y-2.5", appointmentPreviewInfoCardClassName)}
                 >
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="space-y-1">
@@ -544,10 +548,7 @@ function AppointmentIncomingDataSection({
         }
       >
         <div
-          className={cn(
-            "rounded-xl px-4 py-3 text-sm text-muted-foreground",
-            tokens.surface.mutedCard,
-          )}
+          className={cn("text-sm text-muted-foreground", appointmentSoftPanelClassName)}
         >
           {appointmentText(
             "Alle Änderungen werden direkt am Termin gespeichert und danach sofort in der klinischen Übersicht angezeigt.",
@@ -631,7 +632,7 @@ function AppointmentIncomingDataSection({
                   dueAt: event.target.value,
                 }))
               }
-              className={cn(inputClass, "h-10 rounded-xl")}
+              className={clinicalInputClassName}
               required
             />
           </Field>
@@ -1039,8 +1040,8 @@ function AppointmentFindingsSection({
                   <div
                     key={item.id}
                     className={cn(
-                      "flex flex-col gap-3 rounded-xl px-4 py-3 md:flex-row md:items-start md:justify-between",
-                      tokens.surface.card,
+                      "flex flex-col gap-3 md:flex-row md:items-start md:justify-between",
+                      appointmentPreviewInfoCardClassName,
                     )}
                   >
                     <div className="space-y-1">
@@ -1114,7 +1115,7 @@ function AppointmentFindingsSection({
                 {reminders.map((item) => (
                   <div
                     key={item.id}
-                    className={cn("space-y-2.5 rounded-xl px-4 py-3", tokens.surface.card)}
+                    className={cn("space-y-2.5", appointmentPreviewInfoCardClassName)}
                   >
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div className="space-y-1">
@@ -1139,7 +1140,7 @@ function AppointmentFindingsSection({
                 {tasks.map((task) => (
                   <div
                     key={task.id}
-                    className={cn("space-y-2.5 rounded-xl px-4 py-3", tokens.surface.card)}
+                    className={cn("space-y-2.5", appointmentPreviewInfoCardClassName)}
                   >
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div className="space-y-1">
@@ -1219,10 +1220,7 @@ function AppointmentFindingsSection({
         }
       >
         <div
-          className={cn(
-            "rounded-xl px-4 py-3 text-sm text-muted-foreground",
-            tokens.surface.mutedCard,
-          )}
+          className={cn("text-sm text-muted-foreground", appointmentSoftPanelClassName)}
         >
           {appointmentText(
             "Die erstellten Reminder, Aufgaben und Checklisteneinträge erscheinen sofort im klinischen Befundblock dieses Termins.",
@@ -1285,7 +1283,7 @@ function AppointmentFindingsSection({
                   dueAt: event.target.value,
                 }))
               }
-              className={cn(inputClass, "h-10 rounded-xl")}
+              className={clinicalInputClassName}
               required
             />
           </Field>

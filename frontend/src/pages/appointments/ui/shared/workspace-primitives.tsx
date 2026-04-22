@@ -1,7 +1,7 @@
 import type { ElementType, FormEvent, ReactNode } from "react";
 import { LoaderCircle } from "lucide-react";
 
-import { EmptyCell, tokens } from "@/components/ui-shell";
+import { EmptyCell } from "@/components/ui-shell";
 import {
   Sheet,
   SheetContent,
@@ -10,6 +10,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
+import { appointmentPreviewInfoCardClassName } from "@/pages/appointments/appearance/surface-appearance";
 
 export function AppointmentWorkspaceSectionIntro({
   title,
@@ -47,8 +48,8 @@ export function AppointmentClinicalToggleCard({
   return (
     <label
       className={cn(
-        "flex items-start gap-3 rounded-xl px-4 py-3",
-        tokens.surface.card,
+        "flex items-start gap-3",
+        appointmentPreviewInfoCardClassName,
         disabled && "opacity-60",
       )}
     >

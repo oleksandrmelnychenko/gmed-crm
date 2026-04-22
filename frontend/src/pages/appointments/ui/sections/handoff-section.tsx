@@ -7,10 +7,16 @@ import {
 import { LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { selectClass } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { apiFetch } from "@/lib/api";
+import {
+  appointmentElevatedSectionCardClassName,
+  appointmentMetaPillClassName,
+  appointmentMiniPillClassName,
+  appointmentSelectControlClassName,
+  appointmentSoftSplitRowClassName,
+} from "@/pages/appointments/appearance/surface-appearance";
 import { shiftLocalDateTime } from "@/pages/appointments/model/date-time";
 import { formatAppointmentSlotLabel as slotLabel } from "@/pages/appointments/model/runtime-formatters";
 import { appointmentText, roleLabel } from "@/pages/appointments/model/labels";
@@ -35,8 +41,8 @@ type AppointmentHandoffSectionProps = {
   onError: (message: string) => void;
 };
 
-const sectionCardClass =
-  "rounded-3xl border border-slate-200/80 bg-white p-5 shadow-[0_20px_50px_-35px_rgba(15,23,42,0.35)]";
+const sectionCardClass = appointmentElevatedSectionCardClassName;
+const selectClassName = appointmentSelectControlClassName;
 
 function AppointmentHandoffSection({
   detail,
@@ -110,7 +116,7 @@ function AppointmentHandoffSection({
             the appointment itself.
           </p>
         </div>
-        <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+        <span className={appointmentMetaPillClassName}>
           {handoffStakeholders.length} stakeholder
           {handoffStakeholders.length === 1 ? "" : "s"}
         </span>
@@ -122,20 +128,20 @@ function AppointmentHandoffSection({
           handoffStakeholders.map((peer) => (
             <div
               key={peer.id}
-              className="flex flex-col gap-3 rounded-2xl border border-slate-200/80 bg-slate-50/80 px-4 py-3 md:flex-row md:items-center md:justify-between"
+              className={appointmentSoftSplitRowClassName}
             >
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <p className="text-sm font-semibold text-slate-950">
                     {peer.name}
                   </p>
-                  <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                  <span className={appointmentMiniPillClassName}>
                     {roleLabel(peer.role)}
                   </span>
                   {peer.badges.map((badge) => (
                     <span
                       key={badge}
-                      className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600"
+                      className={appointmentMiniPillClassName}
                     >
                       {badge}
                     </span>
@@ -163,7 +169,7 @@ function AppointmentHandoffSection({
             <select
               value={followUpAssigneeId}
               onChange={(event) => setFollowUpAssigneeId(event.target.value)}
-              className={selectClass}
+              className={selectClassName}
             >
               <option value="">{tr.common_not_set}</option>
               {handoffStakeholders.map((peer) => (

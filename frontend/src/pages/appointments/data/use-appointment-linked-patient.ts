@@ -43,6 +43,11 @@ export function useAppointmentLinkedPatient({
   }, []);
 
   useEffect(() => {
+    if (linkedPatientOpen && linkedPatientId) return;
+    resetLinkedPatientState();
+  }, [linkedPatientId, linkedPatientOpen, resetLinkedPatientState]);
+
+  useEffect(() => {
     if (!linkedPatientOpen || !linkedPatientId) return;
 
     let active = true;
@@ -107,6 +112,5 @@ export function useAppointmentLinkedPatient({
     linkedPatientDetail,
     linkedPatientAssignments,
     linkedPatientAssignableStaff,
-    resetLinkedPatientState,
   };
 }

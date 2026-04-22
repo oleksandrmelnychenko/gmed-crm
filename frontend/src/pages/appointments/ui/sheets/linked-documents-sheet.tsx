@@ -15,7 +15,7 @@ import {
 } from "@/pages/appointments/appearance/linked-document-badges";
 import { AppointmentPreviewSheet } from "@/pages/appointments/ui/shared/workspace-primitives";
 
-type LinkedDocumentsSheetProps = {
+export type LinkedDocumentsSheetProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   loading: boolean;

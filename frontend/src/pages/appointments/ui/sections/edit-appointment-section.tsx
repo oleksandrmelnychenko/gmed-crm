@@ -9,10 +9,13 @@ import { LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Banner, selectClass } from "@/components/ui-shell";
+import { Banner } from "@/components/ui-shell";
 import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
-import { cn } from "@/lib/utils";
+import {
+  appointmentSelectControlClassName,
+  appointmentSlateInputClassName,
+} from "@/pages/appointments/appearance/surface-appearance";
 import { getProviderDoctors } from "@/pages/appointments/data/provider-doctors";
 import { useDebouncedValue } from "@/pages/appointments/data/use-debounced-value";
 import { buildConflictQuery } from "@/pages/appointments/model/query-builders";
@@ -63,7 +66,8 @@ type EditAppointmentSectionProps = {
   onSaved: (notice: string) => void;
 };
 
-const selectClassName = cn(selectClass, "h-10 rounded-xl");
+const selectClassName = appointmentSelectControlClassName;
+const inputClassName = appointmentSlateInputClassName;
 
 function withEllipsis(value: string | null | undefined) {
   const normalized = String(value ?? "").trim();
@@ -282,7 +286,7 @@ function EditAppointmentSection({
                 title: event.target.value,
               }))
             }
-            className="h-10 rounded-xl bg-slate-50"
+            className={inputClassName}
           />
         </Field>
         <Field
@@ -321,7 +325,7 @@ function EditAppointmentSection({
                   date: event.target.value,
                 }))
               }
-              className="h-10 rounded-xl bg-slate-50"
+              className={inputClassName}
             />
           </Field>
           <Field label={t.appointments_time}>
@@ -334,7 +338,7 @@ function EditAppointmentSection({
                   timeStart: event.target.value,
                 }))
               }
-              className="h-10 rounded-xl bg-slate-50"
+              className={inputClassName}
             />
           </Field>
           <Field label={t.appointments_time}>
@@ -347,7 +351,7 @@ function EditAppointmentSection({
                   timeEnd: event.target.value,
                 }))
               }
-              className="h-10 rounded-xl bg-slate-50"
+              className={inputClassName}
             />
           </Field>
         </div>
@@ -443,7 +447,7 @@ function EditAppointmentSection({
                 location: event.target.value,
               }))
             }
-            className="h-10 rounded-xl bg-slate-50"
+            className={inputClassName}
           />
         </Field>
         {detail.recurrence_frequency ? (
