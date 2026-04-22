@@ -21,6 +21,7 @@ const EXCLUDED_BASENAMES = new Set(
     "topbar.tsx",
     "nav-panel.tsx",
     "layout.tsx",
+    "authenticated-app-shell.tsx",
     "patient-dashboard.tsx",
     "patient-invoices.tsx",
     "patient-appointments.tsx",

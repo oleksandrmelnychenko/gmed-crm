@@ -1,0 +1,253 @@
+import type { ElementType, FormEvent, ReactNode } from "react";
+import { LoaderCircle } from "lucide-react";
+
+import { EmptyCell, tokens } from "@/components/ui-shell";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import { cn } from "@/lib/utils";
+
+export function AppointmentWorkspaceSectionIntro({
+  title,
+  description,
+  accessory,
+}: {
+  title: ReactNode;
+  description: ReactNode;
+  accessory?: ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-3 rounded-2xl border border-border/60 bg-muted/20 px-4 py-4 sm:flex-row sm:items-start sm:justify-between">
+      <div className="space-y-1">
+        <h2 className="text-sm font-semibold text-foreground">{title}</h2>
+        <p className="max-w-3xl text-xs text-muted-foreground">{description}</p>
+      </div>
+      {accessory ? <div className="shrink-0">{accessory}</div> : null}
+    </div>
+  );
+}
+
+export function AppointmentClinicalToggleCard({
+  checked,
+  disabled = false,
+  title,
+  description,
+  onChange,
+}: {
+  checked: boolean;
+  disabled?: boolean;
+  title: string;
+  description: string;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label
+      className={cn(
+        "flex items-start gap-3 rounded-xl px-4 py-3",
+        tokens.surface.card,
+        disabled && "opacity-60",
+      )}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.checked)}
+        className="mt-0.5 size-4 rounded border-border/60 text-[var(--brand)] focus:ring-[var(--brand)]/30"
+      />
+      <span className="min-w-0 space-y-1">
+        <span className="block text-sm font-medium text-foreground">{title}</span>
+        <span className="block text-xs text-muted-foreground">
+          {description}
+        </span>
+      </span>
+    </label>
+  );
+}
+
+export function AppointmentEditorSheet({
+  open,
+  onOpenChange,
+  title,
+  description,
+  maxWidthClassName = "sm:max-w-[560px]",
+  onSubmit,
+  children,
+  footer,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: ReactNode;
+  description?: ReactNode;
+  maxWidthClassName?: string;
+  onSubmit?: (event: FormEvent<HTMLFormElement>) => void;
+  children: ReactNode;
+  footer: ReactNode;
+}) {
+  const content = (
+    <>
+      <SheetHeader className="px-4 py-3">
+        <SheetTitle>{title}</SheetTitle>
+        {description ? <SheetDescription>{description}</SheetDescription> : null}
+      </SheetHeader>
+      <div className="flex-1 overflow-y-auto overscroll-y-contain px-4 py-4 space-y-4">
+        {children}
+      </div>
+      <div className="flex shrink-0 justify-end gap-2 px-4 py-3 bg-popover">
+        {footer}
+      </div>
+    </>
+  );
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent side="right" className={cn("w-full gap-0", maxWidthClassName)}>
+        {onSubmit ? (
+          <form className="flex flex-col flex-1 min-h-0" onSubmit={onSubmit}>
+            {content}
+          </form>
+        ) : (
+          <div className="flex flex-col flex-1 min-h-0">{content}</div>
+        )}
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+export function AppointmentPreviewSheet({
+  open,
+  onOpenChange,
+  title,
+  description,
+  maxWidthClassName = "sm:max-w-[560px]",
+  headerClassName,
+  bodyClassName,
+  children,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: ReactNode;
+  description?: ReactNode;
+  maxWidthClassName?: string;
+  headerClassName?: string;
+  bodyClassName?: string;
+  children: ReactNode;
+}) {
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent side="right" className={cn("w-full gap-0", maxWidthClassName)}>
+        <div className="flex flex-col flex-1 min-h-0">
+          <SheetHeader className={cn("px-4 py-3", headerClassName)}>
+            <SheetTitle>{title}</SheetTitle>
+            {description ? <SheetDescription>{description}</SheetDescription> : null}
+          </SheetHeader>
+          <div
+            className={cn(
+              "flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-4",
+              "overscroll-y-contain",
+              bodyClassName,
+            )}
+          >
+            {children}
+          </div>
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+export function AppointmentPreviewSheetLoadingState({
+  open,
+  onOpenChange,
+  title,
+  description,
+  maxWidthClassName = "sm:max-w-[560px]",
+  bodyClassName,
+  loadingLabel,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: ReactNode;
+  description?: ReactNode;
+  maxWidthClassName?: string;
+  bodyClassName?: string;
+  loadingLabel: ReactNode;
+}) {
+  return (
+    <AppointmentPreviewSheet
+      open={open}
+      onOpenChange={onOpenChange}
+      title={title}
+      description={description}
+      maxWidthClassName={maxWidthClassName}
+      bodyClassName={bodyClassName}
+    >
+      <div className="flex min-h-[220px] items-center justify-center text-sm text-muted-foreground">
+        <LoaderCircle className="mr-2 size-4 animate-spin" />
+        {loadingLabel}
+      </div>
+    </AppointmentPreviewSheet>
+  );
+}
+
+export function AptKpi({
+  icon: Icon,
+  tone,
+  label,
+  value,
+}: {
+  icon: ElementType;
+  tone: "sky" | "emerald" | "amber" | "rose" | "neutral";
+  label: string;
+  value: number | string;
+}) {
+  const toneColor = {
+    sky: "text-sky-600",
+    emerald: "text-emerald-600",
+    amber: "text-amber-600",
+    rose: "text-rose-600",
+    neutral: "text-muted-foreground",
+  }[tone];
+  return (
+    <div className="flex items-center gap-3 px-4 py-3 min-w-0">
+      <Icon
+        strokeWidth={1.6}
+        className={cn("size-[22px] shrink-0", toneColor)}
+      />
+      <div className="min-w-0">
+        <p className="text-[22px] font-semibold tracking-tight text-foreground leading-none tabular-nums">
+          {value}
+        </p>
+        <p className="mt-1 text-[11.5px] text-muted-foreground truncate">
+          {label}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+export function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+  compact?: boolean;
+}) {
+  return (
+    <label className="flex flex-col gap-1.5">
+      <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
+        {label}
+      </span>
+      {children}
+    </label>
+  );
+}
+
+export function EmptyState({ text }: { text: string }) {
+  return <EmptyCell>{text}</EmptyCell>;
+}
