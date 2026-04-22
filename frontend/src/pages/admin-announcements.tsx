@@ -291,7 +291,7 @@ export function AdminAnnouncementsPage() {
                   </Field>
                   <Field label={t.ann_variant} htmlFor="announcement-variant">
                     <Select value={fVariant} onValueChange={(value) => setFVariant(value ?? "info")}>
-                      <SelectTrigger id="announcement-variant" className="h-9 rounded-lg bg-card">
+                      <SelectTrigger id="announcement-variant" className="!h-9 w-full rounded-lg bg-card">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>

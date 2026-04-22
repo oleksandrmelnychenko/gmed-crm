@@ -276,7 +276,7 @@ export function AdminNotificationsPage() {
           </div>
 
           <Select value={typeFilter} onValueChange={(value) => setTypeFilter(value ?? "")}>
-            <SelectTrigger size="sm" className="h-8 min-w-[150px] bg-card text-[13px]">
+            <SelectTrigger size="sm" className="h-8 w-[240px] rounded-lg bg-card text-[13px]">
               <SelectValue>
                 {typeFilter === "smtp"
                   ? t.notif_smtp
@@ -296,7 +296,7 @@ export function AdminNotificationsPage() {
             value={statusFilter}
             onValueChange={(value) => setStatusFilter(value ?? "")}
           >
-            <SelectTrigger size="sm" className="h-8 min-w-[150px] bg-card text-[13px]">
+            <SelectTrigger size="sm" className="h-8 w-[240px] rounded-lg bg-card text-[13px]">
               <SelectValue>
                 {statusFilter === "active"
                   ? t.common_active
@@ -508,7 +508,7 @@ export function AdminNotificationsPage() {
                     <Select value={formType} onValueChange={(value) => setFormType(value ?? "smtp")}>
                       <SelectTrigger
                         id="channel-type"
-                        className="h-9 w-full rounded-lg bg-card"
+                        className="!h-9 w-full rounded-lg bg-card"
                       >
                         <SelectValue />
                       </SelectTrigger>

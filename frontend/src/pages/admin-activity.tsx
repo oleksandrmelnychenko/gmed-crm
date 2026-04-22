@@ -243,7 +243,7 @@ export function AdminActivityPage() {
             value={filterAction}
             onValueChange={(value) => setFilterAction(value && value !== "__all__" ? value : "")}
           >
-            <SelectTrigger size="sm" className="h-8 min-w-[220px] bg-card text-[13px]">
+            <SelectTrigger size="sm" className="h-8 w-[240px] rounded-lg bg-card text-[13px]">
               <SelectValue placeholder={t.activity_filter_action}>
                 {filterAction ? actionLabel(filterAction) : t.activity_filter_action}
               </SelectValue>

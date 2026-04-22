@@ -292,7 +292,7 @@ export function AdminCustomFieldsPage() {
       {!loading ? (
         <AdminToolbar>
           <Select value={filterEntity} onValueChange={(value) => setFilterEntity(value ?? "")}>
-            <SelectTrigger className="h-8 w-[220px] rounded-lg bg-card text-[13px]">
+            <SelectTrigger className="h-8 w-[240px] rounded-lg bg-card text-[13px]">
               <SelectValue placeholder={t.providers_all} />
             </SelectTrigger>
             <SelectContent>
