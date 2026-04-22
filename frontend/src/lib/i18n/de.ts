@@ -222,6 +222,9 @@ export const de: Translations = {
   insurance_foreign: "Ausland",
 
   patients_first_name: "Vorname",
+  patients_col_age: "Alter",
+  patients_created_at: "Erstellt",
+  patients_functional_labels: "Merkmale",
   patients_birth_date: "Geburtsdatum",
   patients_nationality: "Staatsangehörigkeit",
   patients_residence_country: "Wohnsitzland",

@@ -1,264 +1,104 @@
-# Frontend Workspace Refactor Plan (UA)
+# Frontend Workspace Refactor Tracker (UA)
 
-> Канонічний tracker для рефактора `app-shell -> record-workspace -> feature modules` у frontend.
+> Канонічний tracker для frontend-рефактора `app-shell -> record-workspace -> appointments split`.
 >
-> Цей файл є робочим source of truth для:
->
-> - розбиття `frontend/src/pages/appointments.tsx`;
-> - винесення shared workspace vocabulary з patient-driven current state;
-> - нормалізації `src/components/layout.tsx` у окремий `app-shell` layer;
-> - performance, memory і bundle-size оптимізації для staff workspace.
+> Файл відновлено `2026-04-21` після зникнення попереднього канонічного tracker-а з поточного worktree. Далі саме цей документ є source of truth для фаз, performance goals і tracking protocol.
 
 ## 1. Статус
 
-- Поточний статус: `Planned`
-- Owner: `Codex + user`
-- Останній review context: `2026-04-21`
+- Поточний статус: `In progress`
+- Активна фаза: `P4`
+- Scope: staff frontend workspace
+- Review context: `2026-04-21`
 
-## 2. Основна мета
+## 2. Ціль і межі
 
-Перебудувати frontend так, щоб:
+Ціль рефактора:
 
-- глобальна оболонка застосунку жила в окремому `app-shell` layer;
-- shared workspace pattern жив у нейтральному `record-workspace` layer;
-- `patients`, `appointments`, `cases` стали consumer-features, а не неформальними master-файлами;
-- `appointments` перестав бути монолітним page-module;
-- hidden tabs і heavy right sheets перестали вантажитися eagerly;
-- style decisions, workspace shells, feature appearance bindings і data orchestration жили в окремих папках і файлах.
+- винести глобальну authenticated-оболонку в окремий `app-shell` layer;
+- зафіксувати нейтральний shared `record-workspace` layer;
+- перестати тримати `appointments` як монолітний page-module;
+- розвести feature responsibilities на `model / data / appearance / ui`;
+- зменшити eager loading, зайві rerender-и і bundle pressure у staff workspace.
 
-## 3. Scope
-
-У рамках цього рефактора в scope входять:
-
-- [frontend/src/components/layout.tsx](/c:/Users/123/Downloads/dev/frontend/src/components/layout.tsx)
-- [frontend/src/components/ui-shell.tsx](/c:/Users/123/Downloads/dev/frontend/src/components/ui-shell.tsx)
-- [frontend/src/components/patient-form-primitives.tsx](/c:/Users/123/Downloads/dev/frontend/src/components/patient-form-primitives.tsx)
-- [frontend/src/components/appointment-workspace-nav.tsx](/c:/Users/123/Downloads/dev/frontend/src/components/appointment-workspace-nav.tsx)
-- [frontend/src/components/patient-workspace-nav.tsx](/c:/Users/123/Downloads/dev/frontend/src/components/patient-workspace-nav.tsx)
-- [frontend/src/components/case-workspace-nav.tsx](/c:/Users/123/Downloads/dev/frontend/src/components/case-workspace-nav.tsx)
-- [frontend/src/pages/appointments.tsx](/c:/Users/123/Downloads/dev/frontend/src/pages/appointments.tsx)
-- [frontend/src/pages/patient-detail.tsx](/c:/Users/123/Downloads/dev/frontend/src/pages/patient-detail.tsx)
-- пов'язані appointment/patient shared helpers, sheets і section components
-
-## 4. Out of Scope
-
-Поза межами цього плану, якщо окремо не буде розширення:
+Поза scope цього tracker-а:
 
 - backend API redesign;
-- product-scope зміни до appointment workflows;
-- глобальна міграція всіх сторінок проекту на новий shell поза `patients / appointments / cases`;
-- перепис на іншу state-management бібліотеку для всього frontend.
+- зміна product behavior у самих appointment workflows;
+- глобальна міграція всіх сторінок frontend поза `patients / cases / appointments`.
 
-## 5. Архітектурний контракт
+## 3. Архітектурний контракт
 
-### 5.1 Layers
-
-Після рефактора діють 4 шари:
-
-1. `app-shell`
-2. `record-workspace`
-3. `feature appearance + data + model`
-4. `feature ui`
-
-### 5.2 Layer responsibilities
-
-`app-shell`
-
-- authenticated application frame;
-- topbar, left navigation, workspace rail mounting;
-- route-aware shell orchestration;
-- route access/loading boundaries.
-
-`record-workspace`
-
-- shared control recipes;
-- shared surfaces;
-- workspace header/nav/section/sheet shells;
-- empty, list, field, stat, banner primitives.
-
-`feature model`
-
-- types, constants, selectors, mappers, query keys;
-- zero React imports.
-
-`feature data`
-
-- fetchers, cache, dedupe, tab-specific data loaders;
-- no UI imports.
-
-`feature appearance`
-
-- status/timeline/action/section/sheet bindings;
-- feature-local style decisions;
-- no API or data-fetch logic.
-
-`feature ui`
-
-- scheduler, workspace, sections, sheets;
-- only composition from shared shells + model + data + appearance.
-
-## 6. Naming Law
-
-Заборонені generic file names, якщо файл не вузький і не самоочевидний:
-
-- `helpers.ts`
-- `utils.ts`
-- `styles.ts`
-- `common.ts`
-
-Дозволені й рекомендовані суфікси:
-
-- `*-selectors.ts`
-- `*-mappers.ts`
-- `*-query-keys.ts`
-- `*-appearance.ts`
-- `*-recipes.ts`
-- `*-slots.ts`
-- `*-shell.tsx`
-- `*-panel.tsx`
-- `*-sheet.tsx`
-
-Shared naming:
-
-- `app-shell` для зовнішньої оболонки;
-- `record-workspace` для shared workspace language;
-- `appearance` для feature visual bindings.
-
-Feature naming:
-
-- не префіксувати всі файли словом `appointments` усередині `src/pages/appointments/`;
-- називати файли за реальною роллю: `timeline-panel.tsx`, `editor-sheet-shell.tsx`, `workspace-rail-shell.tsx`.
-
-## 7. Dependency Rules
-
-Правила імпорту після рефактора:
-
-- `model` не імпортує React, `data`, `appearance`, `ui`;
-- `data` не імпортує `ui`;
-- `appearance` не імпортує `data`;
-- `ui` може імпортувати `model`, `data`, `appearance`, shared shells;
-- `appointments` не імпортує `patients` UI;
-- `patients` не є master-source для shared design;
-- глобальний shell не знає деталей feature helpers напряму.
-
-## 8. Target Structure
+### Target shape
 
 ```text
 frontend/src/components/
   app-shell/
-    authenticated-app-shell.tsx
-    app-shell-frame.tsx
-    app-shell-content.tsx
-    workspace-rail-resolver.tsx
-    workspace-rail-shell.tsx
-    app-shell-slots.ts
-
   record-workspace/
-    recipes/
-      control-recipes.ts
-      surface-recipes.ts
-      sheet-recipes.ts
-      typography-recipes.ts
-    primitives/
-      field.tsx
-      section-card.tsx
-      stat-tile.tsx
-      list-row.tsx
-      empty-state.tsx
-      status-pill.tsx
-      banner.tsx
-    shells/
-      page-header.tsx
-      workspace-nav-shell.tsx
-      editor-sheet-shell.tsx
-      preview-sheet-shell.tsx
-      section-intro.tsx
 
 frontend/src/pages/
   appointments.tsx
   appointments/
-    page.tsx
     model/
-      types.ts
-      constants.ts
-      selectors.ts
-      mappers.ts
-      query-keys.ts
     data/
-      appointments-api.ts
-      use-scheduler-data.ts
-      use-detail-core.ts
-      use-detail-tab-data.ts
-      use-linked-records.ts
     appearance/
-      status-appearance.ts
-      timeline-appearance.ts
-      sheet-appearance.ts
-      section-appearance.ts
-      action-appearance.ts
-      scheduler-slots.ts
-      workspace-slots.ts
     ui/
-      scheduler/
-      workspace/
-      sections/
-      sheets/
 ```
 
-## 9. Current-State Risks
+### Layer law
 
-Поточні ризики, які цей план закриває:
+| Layer | Відповідальність | Не повинен робити |
+|------|------|------|
+| `app-shell` | authenticated frame, nav, route-aware shell mounting, loading/access boundaries | знати feature-specific helpers напряму |
+| `record-workspace` | shared header/nav/surface/sheet primitives і recipes | залежати від `patients` або `appointments` як design master |
+| `model` | types, constants, selectors, mappers, query keys | імпортувати React, `data`, `appearance`, `ui` |
+| `data` | fetchers, tab loaders, cache/dedupe, on-demand data orchestration | імпортувати UI |
+| `appearance` | status/timeline/action/section bindings, feature-local visual vocabulary | тягнути API/data-fetch logic |
+| `ui` | scheduler, workspace, sections, sheets, route composition | змішувати shared shell rules з data/model contract |
 
-- `appointments.tsx` є монолітним client module;
-- detail page eagerly вантажить таби, які ще не відкривались;
-- mobile і desktop detail tree дублюються;
-- global `layout.tsx` залежить від feature-specific workspace nav;
-- patient-side зараз де-факто виконує роль design master;
-- style vocabulary і class decisions розкидані по великих page files;
-- right sheets і edit flows не мають єдиного architectural contract.
+Dependency law:
 
-## 10. Performance Targets
+- `model ->` imports nothing from React/UI layers.
+- `data ->` may use `model`, never `ui`.
+- `appearance ->` may use `model`, never `data`.
+- `ui ->` may compose `model + data + appearance + shared shells`.
 
-Рефактор вважається успішним тільки якщо дає вимірюваний виграш:
-
-- main `appointments` chunk зменшується від current-state;
-- hidden tabs не fetchаться до відкриття;
-- heavy sheets lazy-load only on demand;
-- відкриття/закриття right sheets не ререндерить весь scheduler shell;
-- mobile/desktop detail працюють від одного shared content tree;
-- ephemeral preview/detail payloads очищаються на close;
-- нові feature files не створюють barrel-import regressions.
-
-## 11. Phase Tracker
+## 4. Фазовий tracker
 
 | Phase | Status | Deliverable | Done when |
 |------|------|------|------|
-| P0 | `Planned` | Architecture freeze | Зафіксовані `app-shell`, `record-workspace`, naming law, dependency rules |
-| P1 | `Planned` | `app-shell` extraction | `layout.tsx` перестає бути generic dump, shell стає окремим layer |
-| P2 | `Planned` | `record-workspace` extraction | `ui-shell` розпиляний на shared recipes/primitives/shells |
-| P3 | `Planned` | Workspace rail normalization | `patient/case/appointment` rails сидять на одному shell pattern |
-| P4 | `Planned` | Patient-side de-mastering | `patients` споживає shared layer, а не задає його |
-| P5 | `Planned` | `appointments/` feature skeleton | route file thin, feature code живе в окремій папці |
-| P6 | `Planned` | Pure `model` extraction | types/selectors/mappers/query keys без React |
-| P7 | `Planned` | `data` layer split | core/tab data loaders, cache, dedupe, on-demand loading |
-| P8 | `Planned` | Shared workspace content | mobile/desktop мають один content tree |
-| P9 | `Planned` | `appearance` extraction | status/timeline/sheet/section/action bindings винесені |
-| P10 | `Planned` | Scheduler split | scheduler/search/queue/create ізольовані від detail workspace |
-| P11 | `Planned` | Section split | overview/timeline/coordination/clinical/workflow/services/notes по окремих panel files |
-| P12 | `Planned` | Right-sheet split + lazy | linked sheets і editors винесені й lazy-loaded |
-| P13 | `Planned` | Rerender/memory cleanup | state локалізований, hidden work defer-иться, close cleanup зафіксований |
-| P14 | `Planned` | Guardrails | lint/import boundary rules захищають нову архітектуру |
-| P15 | `Planned` | Final validation | build/lint/tests/perf sanity green, residual debt documented |
+| `P0` | `Done` | Freeze vocabulary | зафіксовані `app-shell`, `record-workspace`, layer law, naming rules |
+| `P1` | `Done` | `app-shell` extraction | global layout стає thin adapter, shell chrome живе в окремому layer |
+| `P2` | `Done` | `record-workspace` extraction | shared workspace primitives/shells більше не сидять у feature pages |
+| `P3` | `Done` | `appointments` split skeleton | route entry thin, feature code живе в `appointments/` |
+| `P4` | `In progress` | `model` layer extraction | types/selectors/mappers/query keys винесені й не тягнуть React |
+| `P5` | `In progress` | `data` layer split | detail/tab loaders, cache/dedupe і on-demand loading винесені з page-module |
+| `P6` | `Planned` | `appearance` layer split | status/timeline/sheet/section/action bindings живуть окремо від data/UI orchestration |
+| `P7` | `In progress` | `ui` layer split | scheduler, workspace, panels, sheets розбиті на feature-local UI modules |
+| `P8` | `In progress` | Performance hardening | hidden tabs не fetchаться upfront, heavy sheets lazy-load, rerender footprint локалізований |
+| `P9` | `Planned` | Final validation | lint/build green, targeted sanity checks green, residual tails documented |
 
-## 12. Tracking Protocol
+## 5. Performance goals
 
-Після кожної суттєвої зміни цей файл треба оновлювати:
+Рефактор вважається успішним лише якщо після `P8-P9` зафіксовано:
 
-- змінити `Status` відповідної фази;
-- додати touched files;
-- зафіксувати, що саме стало canonical after change;
-- додати verification steps;
-- за потреби зафіксувати нові ризики або відкладені tails.
+- baseline з `frontend npm run build` знятий до активного split і порівняний після нього;
+- `appointments` route chunk не гірший за baseline, бажано менший;
+- hidden tabs не роблять code/data load до відкриття;
+- heavy right sheets і editors відкриваються через lazy/on-demand path;
+- відкриття/закриття sheet не ререндерить весь scheduler shell;
+- mobile і desktop detail використовують один shared content tree;
+- після close очищається ephemeral detail/sheet state;
+- не додаються barrel exports для heavy feature areas.
+
+## 6. Tracking protocol
+
+Після кожної суттєвої зміни цей файл оновлюється обов'язково:
+
+1. змінити статус рівно однієї активної фази;
+2. додати короткий log row з датою, owner, touched paths і canonical outcome;
+3. вписати verification, яким це підтверджено;
+4. окремо зафіксувати blocker або deferred tail, якщо він лишився.
 
 Допустимі статуси:
 
@@ -268,124 +108,61 @@ frontend/src/pages/
 - `Done`
 - `Deferred`
 
-## 13. Execution Rules
+Правила ведення:
 
-Поки цей план активний, діють жорсткі правила:
+- одночасно лише одна фаза має бути `In progress`;
+- `Done` без verification не ставиться;
+- після старту `P3` новий великий код не додається в монолітний `appointments.tsx`, якщо його можна класти в target structure одразу;
+- якщо concurrent work блокує фазу, статус змінюється на `Blocked` із короткою причиною, без переписування чужого коду.
 
-- не додавати новий великий код у монолітний [appointments.tsx](/c:/Users/123/Downloads/dev/frontend/src/pages/appointments.tsx), якщо його можна одразу покласти в нову feature structure;
-- не створювати нові shared abstraction у `patients` або `appointments`, якщо вони мають жити в `record-workspace`;
-- не додавати нові route-aware branching rules прямо в global shell, якщо їх можна винести в resolver;
-- не дублювати desktop/mobile section tree;
-- не вантажити hidden tab data upfront без явної причини;
-- не використовувати barrel exports для heavy feature areas;
-- не змішувати style bindings і business/data logic в одному файлі.
+## 7. Verification baseline
 
-## 14. Phase Detail
-
-### P0. Architecture freeze
-
-Ціль:
-
-- зафіксувати vocabulary, names, folder law і dependency law.
-
-Artifacts:
-
-- цей документ.
-
-### P1. `app-shell` extraction
-
-В scope:
-
-- [frontend/src/components/layout.tsx](/c:/Users/123/Downloads/dev/frontend/src/components/layout.tsx)
-- глобальний shell chrome;
-- workspace rail mounting;
-- route-aware shell resolution.
-
-Очікуваний результат:
-
-- `layout.tsx` стає thin adapter або зникає;
-- з'являється чесний `authenticated-app-shell.tsx`;
-- feature rails більше не монтуються хаотично прямо в generic shell.
-
-### P2. `record-workspace` extraction
-
-В scope:
-
-- [frontend/src/components/ui-shell.tsx](/c:/Users/123/Downloads/dev/frontend/src/components/ui-shell.tsx)
-- shared surfaces, controls, headers, sheets, empty/list/stat patterns.
-
-Очікуваний результат:
-
-- shared design vocabulary більше не залежить від patient pages;
-- shared shell names і slot names стають canonical.
-
-### P3. Workspace rail normalization
-
-В scope:
-
-- [frontend/src/components/appointment-workspace-nav.tsx](/c:/Users/123/Downloads/dev/frontend/src/components/appointment-workspace-nav.tsx)
-- [frontend/src/components/patient-workspace-nav.tsx](/c:/Users/123/Downloads/dev/frontend/src/components/patient-workspace-nav.tsx)
-- [frontend/src/components/case-workspace-nav.tsx](/c:/Users/123/Downloads/dev/frontend/src/components/case-workspace-nav.tsx)
-
-Очікуваний результат:
-
-- один shared rail shell;
-- feature-specific лише item configs і labels.
-
-### P4. Patient-side de-mastering
-
-В scope:
-
-- [frontend/src/pages/patient-detail.tsx](/c:/Users/123/Downloads/dev/frontend/src/pages/patient-detail.tsx)
-- [frontend/src/components/patient-form-primitives.tsx](/c:/Users/123/Downloads/dev/frontend/src/components/patient-form-primitives.tsx)
-
-Очікуваний результат:
-
-- patient flow споживає shared patterns;
-- patient files більше не є архітектурним джерелом для інших feature slices.
-
-### P5-P13. `appointments` split and optimization
-
-В scope:
-
-- [frontend/src/pages/appointments.tsx](/c:/Users/123/Downloads/dev/frontend/src/pages/appointments.tsx)
-- усі appointment sections, sheets, state orchestration, appearance bindings і data loaders.
-
-Очікуваний результат:
-
-- thin route entry;
-- feature-local folders;
-- tab-level data loading;
-- lazy-loaded heavy editors and previews;
-- локалізований state;
-- менший bundle і контрольований rerender footprint.
-
-### P14-P15. Guardrails and final validation
-
-В scope:
-
-- lint/import boundaries;
-- build/lint/tests;
-- bundle/perf sanity;
-- residual debt log.
-
-## 15. Verification Baseline
-
-Мінімальна перевірка після кожної великої фази:
+Мінімум для `Done` по великих фазах:
 
 - `frontend npm run lint`
 - `frontend npm run build`
 
-Додатково для appointment-heavy фаз:
+Додатково для `appointments`-heavy фаз:
 
-- relevant unit tests
-- relevant e2e/live appointment flows
-- sanity check mobile detail + linked right sheets + clinical editors
+- targeted sanity check для scheduler/workspace;
+- sanity check для linked sheets/editors;
+- якщо змінюється detail composition: mobile + desktop detail smoke.
 
-## 16. First Practical Step
+## 8. Change log
 
-Перший execution step після затвердження цього tracker:
-
-- створити `app-shell` і `record-workspace` skeleton без зміни поведінки;
-- паралельно зробити thin feature skeleton для `appointments`;
-- тільки після цього переносити logic/state/appearance секціями.
+| Date | Phase | Note | Verification |
+|------|------|------|------|
+| `2026-04-21` | `Recovery` | Відновлено канонічний tracker на історичному шляху `docs/architecture/03_frontend-workspace-refactor-plan_ua.md`; README знову посилається на нього | doc presence + README link update |
+| `2026-04-21` | `P0-P4` | Винесено `app-shell` з `layout.tsx`, розбито `ui-shell` у `record-workspace/*`, перенесено route entry у `pages/appointments/page.tsx`, додано `appointments/model/*` і переведено `appointments.helpers.ts` у compatibility adapter; поточний post-foundation baseline: `appointments-B4CokLKA.js 580.17 kB / 146.13 kB gzip` | `npm test -- src/components/app-shell/workspace-rail-resolver.test.tsx src/components/record-workspace/index.test.tsx`, `npm run lint`, `npm run build` |
+| `2026-04-21` | `P4` | У `appointments/model/*` винесено основний domain type block, option/constants vocabulary і permission selectors; `page.tsx` тепер споживає model-layer замість локальних type/constant/policy declarations. Поточний baseline після цього кроку: `appointments-DQLeC6E2.js 580.41 kB / 146.11 kB gzip` | `npm run lint`, `npm run build` |
+| `2026-04-21` | `P4` | Додано `appointments/model/labels.ts`, `appointments/model/query-builders.ts`, `appointments/model/schedule-warnings.ts`, `appointments/model/operational-scopes.ts` і `appointments/appearance/linked-document-badges.ts`; з `appointments/page.tsx` прибрано локальні label/query/document/schedule scope helper-и. Поточний baseline після цього кроку: `appointments-CYG_oyuk.js 580.43 kB / 146.24 kB gzip` | `npm run lint`, `npm run build` |
+| `2026-04-21` | `P4` | Додано `appointments/model/recurrence.ts` і розширено `appointments/model/labels.ts` для recurrence/entity/workflow display helper-ів; з `appointments/page.tsx` прибрано локальні recurrence, patient/provider/staff display та task/billing/incoming-data label helper-и. Поточний baseline після цього кроку: `appointments-85bQPA3F.js 580.43 kB / 146.05 kB gzip` | `npm run lint`, `npm run build` |
+| `2026-04-22` | `P4` | Додано `appointments/appearance/status-appearance.ts`, `appointments/appearance/timeline-appearance.ts` і `appointments/model/runtime-formatters.ts`; з `appointments/page.tsx` прибрано локальні status/timeline badge recipes та runtime date/time/money formatters. Поточний baseline після цього кроку: `appointments-DtOGfdrX.js 580.49 kB / 145.83 kB gzip` | `npm run lint`, `npm run build` |
+| `2026-04-22` | `P4` | Додано `appointments/model/linked-preview.ts`, `appointments/model/workflow-helpers.ts` і `appointments/ui/shared/workspace-primitives.tsx`; з `appointments/page.tsx` прибрано локальні linked-preview/workflow helper-и та перший набір appointments-local UI primitives (`Editor/Preview sheet`, `Section intro`, `Field`, `EmptyState`, `KPI`, `Clinical toggle`). Поточний baseline після цього кроку: `appointments-Cb394VhR.js 580.49 kB / 145.94 kB gzip` | `npm run lint`, `npm run build` |
+| `2026-04-22` | `P4/P7` | Додано `appointments/ui/shared/context-card.tsx` і перші section-level UI modules: `appointments/ui/sections/snapshot-section.tsx`, `attention-section.tsx`, `links-section.tsx`; відповідні локальні секції прибрано з `appointments/page.tsx`, який тепер споживає shared/section modules. Поточний baseline після цього кроку: `appointments-D4j8DZQ7.js 580.49 kB / 146.01 kB gzip` | `npm run lint`, `npm run build` |
+| `2026-04-22` | `P4/P7` | Додано `appointments/ui/sections/timeline-section.tsx` і `overview-section.tsx`; з `appointments/page.tsx` прибрано локальні `timeline/overview` блоки, а `timeline` додатково отримав precomputed filter counts замість повторних `filter(...)` у render. Поточний baseline після цього кроку: `appointments-BAeMkRhL.js 580.61 kB / 145.91 kB gzip` | `npm run lint`, `npm run build` |
+| `2026-04-22` | `P7/P8` | Додано `appointments/ui/sheets/linked-provider-sheet.tsx` і `appointments/ui/sheets/linked-documents-sheet.tsx`; з `appointments/page.tsx` прибрано локальний provider preview flow, documents preview flow і мертвий `linkedDocumentSelectedIds` state для `DocumentsGrid` при `showSelection={false}`. Поточний baseline після цього кроку: `appointments-zGjItDeu.js 580.92 kB / 145.91 kB gzip` | `npm run lint`, `npm run build` |
+| `2026-04-22` | `P7/P8` | Додано `appointments/ui/sheets/linked-cases-sheet.tsx` і `appointments/ui/sheets/linked-records-sheet.tsx`; з `appointments/page.tsx` прибрано локальні `linked cases`/generic linked preview render-блоки, а preview state для `CaseWorkspaceModal` локалізовано всередину `linked-cases-sheet`. Поточний baseline після цього кроку: `appointments-DuOey-i1.js 581.24 kB / 145.85 kB gzip` | `npm run lint`, `npm run build` |
+| `2026-04-22` | `P8` | Для `linked-provider`, `linked-cases`, `linked-documents`, `linked-records` увімкнено `React.lazy` + conditional mount + preload у `openLinkedPreview`; додано `AppointmentPreviewSheetLoadingState` як lightweight suspense fallback. Після цього `appointments` route chunk впав до `appointments-aSKfkEir.js 557.22 kB / 140.43 kB gzip`, а preview-flow винесені в окремі async chunks (`linked-provider-sheet`, `linked-cases-sheet`, `linked-documents-sheet`, `linked-records-sheet`). | `npm run lint`, `npm run build` |
+| `2026-04-22` | `P8` | `MemoizedPatientDetailSheet` і `PatientAppointmentsPage` переведено на role/intent-gated lazy path: linked patient sheet preload-иться перед open, а patient appointments workspace тепер вантажиться через `Suspense` тільки для `user.role === "patient"`. Після цього з’явився окремий async chunk `patient-appointments-BDjaQimg.js 22.53 kB / 6.56 kB gzip`, а `appointments` route chunk знизився до `appointments-CkhpMfY6.js 536.42 kB / 135.38 kB gzip`. | `npm run lint`, `npm run build` |
+| `2026-04-22` | `P4/P5/P8` | `CreateAppointmentSheet` винесено з моноліту в `appointments/ui/sheets/create-appointment-sheet.tsx` і переведено на `React.lazy` + preload перед open; супутню create-flow логіку для provider doctors і debounced conflict query винесено в `appointments/data/provider-doctors.ts` та `appointments/data/use-debounced-value.ts`, а shared conflict/warning panels у `appointments/ui/shared/schedule-panels.tsx`. Після цього з’явився окремий async chunk `create-appointment-sheet-6tcML8qQ.js 11.45 kB / 3.31 kB gzip`, `schedule-panels-Cyw4c0QG.js 10.70 kB / 3.97 kB gzip`, а `appointments` route chunk знизився до `appointments-BrzaIuLx.js 516.44 kB / 130.79 kB gzip`. | `npm run lint`, `npm run build` |
+| `2026-04-22` | `P7/P8` | Scheduler-side `search` і `queue` sheet-и винесено в `appointments/ui/sheets/search-sheet.tsx` і `queue-sheet.tsx` та переведено на `React.lazy` + preload перед open. Після цього з’явилися окремі async chunks `search-sheet-BfYz99J7.js 4.05 kB / 1.23 kB gzip` і `queue-sheet-DGOyck7q.js 3.83 kB / 1.26 kB gzip`, а `appointments` route chunk знизився до `appointments-zL0bldnm.js 503.88 kB / 128.11 kB gzip`. | `npm run lint`, `npm run build` |
+| `2026-04-22` | `P7/P8` | `AppointmentReportSection` винесено з моноліту в `appointments/ui/sections/report-section.tsx` і переведено на hidden-tab `React.lazy` path для desktop і mobile detail. Після цього з’явився окремий async chunk `report-section-Bmb-orsw.js 9.26 kB / 3.34 kB gzip`, а `appointments` route chunk знизився до `appointments-BpU0_uT1.js 496.18 kB / 126.00 kB gzip`, тобто основний route chunk вперше пішов нижче `500 kB`. | `npm run lint`, `npm run build` |
+| `2026-04-22` | `P7/P8` | `AppointmentIncomingDataSection` і `AppointmentFindingsSection` винесено з моноліту в спільний async module `appointments/ui/sections/clinical-follow-up-sections.tsx` і переведено на `React.lazy` path для desktop clinical tab та mobile detail. Після цього з’явився окремий async chunk `clinical-follow-up-sections-CFVcDeKl.js 27.39 kB / 6.83 kB gzip`, а `appointments` route chunk знизився до `appointments-BUcfvAa7.js 471.85 kB / 121.65 kB gzip`. | `npm run lint`, `npm run build` |
+| `2026-04-22` | `P7/P8` | `AppointmentConciergeSection` винесено з моноліту в `appointments/ui/sections/concierge-section.tsx` і переведено на hidden-tab `React.lazy` path для services tab та mobile detail. Після цього з’явився окремий async chunk `concierge-section-D6rajZcd.js 12.23 kB / 3.01 kB gzip`, а `appointments` route chunk знизився до `appointments-CPkaYCSi.js 461.63 kB / 120.16 kB gzip`. | `npm run lint`, `npm run build` |
+| `2026-04-22` | `P7/P8` | `AppointmentBillingHandoffSection` винесено з моноліту в `appointments/ui/sections/billing-handoff-section.tsx` і переведено на hidden-tab `React.lazy` path для services tab та mobile detail. Після цього з’явився окремий async chunk `billing-handoff-section-9R2GqjlQ.js 11.07 kB / 3.89 kB gzip`, а `appointments` route chunk знизився до `appointments-MZDsdQyW.js 452.18 kB / 118.50 kB gzip`. | `npm run lint`, `npm run build` |
+| `2026-04-22` | `P7/P8` | `AppointmentExternalHandoffSection` винесено з моноліту в `appointments/ui/sections/external-handoff-section.tsx` і переведено на hidden-tab `React.lazy` path для workflow/co-ordination surface та mobile detail. Після цього з’явився окремий async chunk `external-handoff-section-hPscKUHt.js 11.74 kB / 3.61 kB gzip`, а `appointments` route chunk знизився до `appointments-Bd4Fw5C2.js 442.49 kB / 117.09 kB gzip`. | `npm run lint`, `npm run build` |
+| `2026-04-22` | `P7/P8` | `AppointmentHandoffSection` винесено з моноліту в `appointments/ui/sections/handoff-section.tsx` і переведено на hidden-tab `React.lazy` path для workflow surface та mobile detail. Після цього з’явився окремий async chunk `handoff-section-o3Otg2Qv.js 4.03 kB / 1.69 kB gzip`, а `appointments` route chunk знизився до `appointments-Blq75asq.js 440.10 kB / 116.74 kB gzip`. | `npm run lint`, `npm run build` |
+| `2026-04-22` | `P7/P8` | `AppointmentDoctorFollowUpSection` і `AppointmentPackageEndSection` винесено з моноліту в спільний async module `appointments/ui/sections/workflow-follow-up-sections.tsx` і переведено на hidden-tab `React.lazy` path для workflow surface та mobile detail. Після цього з’явився окремий async chunk `workflow-follow-up-sections-DNWN_HyS.js 12.90 kB / 3.03 kB gzip`, а `appointments` route chunk знизився до `appointments-Cib6E_WG.js 430.01 kB / 115.24 kB gzip`. | `npm run lint`, `npm run build` |
+| `2026-04-22` | `P7/P8` | `AppointmentFollowUpVisitSection` винесено з моноліту в `appointments/ui/sections/follow-up-visit-section.tsx` і переведено на hidden-tab `React.lazy` path для workflow surface та mobile detail. Після цього з’явився окремий async chunk `follow-up-visit-section-Cu5hIo5l.js 9.86 kB / 3.10 kB gzip`, а `appointments` route chunk знизився до `appointments-GilvDBul.js 422.28 kB / 113.84 kB gzip`. | `npm run lint`, `npm run build` |
+| `2026-04-22` | `P7/P8` | Залишок workflow core (`WorkflowTab`, `completion/status/interpreter/checklist/reminders/tasks`) винесено з моноліту в спільний async module `appointments/ui/sections/workflow-surfaces.tsx`. Desktop workflow tab тепер іде через `React.lazy`, а mobile detail споживає ті самі lazy workflow surfaces замість локальних inline component block-ів. Після цього з’явився окремий async chunk `workflow-surfaces-RGAXiP76.js 32.24 kB / 8.42 kB gzip`, а `appointments` route chunk знизився до `appointments-DzSFufoP.js 380.72 kB / 104.67 kB gzip`. | `npm run lint`, `npm run build` |
+| `2026-04-22` | `P7/P8` | `EditAppointmentSection` винесено з route-моноліту в `appointments/ui/sections/edit-appointment-section.tsx` і переведено на lazy path для desktop workflow logistics lane та mobile detail. Після цього з’явився окремий async chunk `edit-appointment-section-DoiVIOO_.js 9.22 kB / 3.02 kB gzip`, а `appointments` route chunk знизився до `appointments-DBolPglf.js 372.94 kB / 102.98 kB gzip`. | `npm run lint`, `npm run build` |
+| `2026-04-22` | `P7/P8` | Mobile detail body винесено з route-моноліту в async module `appointments/ui/sheets/mobile-detail-sheet-content.tsx`, а спільний notes surface стабілізовано через `appointments/ui/shared/text-panel.tsx`, щоб desktop/mobile більше не дублювали локальну `TextPanel` реалізацію. Після цього з’явився окремий async chunk `mobile-detail-sheet-content-DzHfyU5G.js 8.26 kB / 2.51 kB gzip`, а `appointments` route chunk знизився до `appointments-CDaFvTBS.js 342.76 kB / 97.78 kB gzip`. | `npm run lint`, `npm run build` |
+| `2026-04-22` | `P7/P8` | Notes surface винесено в shared section module `appointments/ui/sections/notes-section.tsx` і підключено як єдиний consumer для desktop notes tab та mobile detail stack; shared note cards живуть у `appointments/ui/shared/text-panel.tsx`, а mobile зберігає попередню поведінку через `hideWhenUnavailable`. Після цього з’явився окремий async chunk `notes-section-D9F1f-VZ.js 1.41 kB / 0.75 kB gzip`, а `appointments` route chunk знизився до `appointments-CAmv_1lj.js 342.62 kB / 97.75 kB gzip`. | `npm run lint`, `npm run build` |
+| `2026-04-22` | `P7/P8` | Desktop coordination tab orchestration винесено з route-моноліту в lazy module `appointments/ui/sections/coordination-section.tsx`; `page.tsx` більше не тримає inline handoff/follow-up/external-handoff desktop composition. Після цього з’явився окремий async chunk `coordination-section-DAJYh2HQ.js 2.30 kB / 0.88 kB gzip`, а `appointments` route chunk знизився до `appointments-9eAVBp9G.js 339.32 kB / 97.08 kB gzip`. | `npm run lint`, `npm run build` |
+| `2026-04-22` | `P7/P8` | Desktop clinical tab orchestration винесено з route-моноліту в lazy module `appointments/ui/sections/clinical-section.tsx`; із `page.tsx` прибрано inline clinical summary/counts/gating для intake/findings/report. Після цього з’явився окремий async chunk `clinical-section-BdsQQ9wh.js 3.66 kB / 1.68 kB gzip`, а `appointments` route chunk знизився до `appointments-CEnocy-G.js 335.45 kB / 96.00 kB gzip`. | `npm run lint`, `npm run build` |
+| `2026-04-22` | `P7/P8` | Desktop services tab orchestration винесено з route-моноліту в lazy module `appointments/ui/sections/services-section.tsx`; `page.tsx` більше не тримає inline concierge/billing desktop composition і service empty-state routing. Після цього з’явився окремий async chunk `services-section-DhAQjuVZ.js 1.65 kB / 0.83 kB gzip`, а `appointments` route chunk знизився до `appointments-swDgOnD7.js 334.42 kB / 95.73 kB gzip`. | `npm run lint`, `npm run build` |
+| `2026-04-22` | `P7/P8` | Увесь desktop detail workspace винесено з route-моноліту в lazy module `appointments/ui/workspace/desktop-detail-workspace-content.tsx`; `page.tsx` тепер лишається orchestration shell і монтує detail content через окремий `Suspense` boundary. Додатково hidden-tab lazy semantics збережено вже всередині нового workspace module, щоб `workflow/clinical/coordination/services/notes` не підвантажувались наперед при open detail. Після цього з’явився окремий async chunk `desktop-detail-workspace-content-CxhqQEit.js 10.36 kB / 3.30 kB gzip`, `workflow-surfaces` повернувся до `32.32 kB / 8.46 kB gzip`, а `appointments` route chunk знизився до `appointments-DjbgIRhz.js 329.33 kB / 94.63 kB gzip`. | `npm run lint`, `npm run build` |
+| `2026-04-22` | `P8` | Для `openDetailSheet` додано `bundle-preload`: desktop заздалегідь тягне `desktop-detail-workspace-content`, а mobile одразу preload-ить `mobile-detail-sheet-content` ще до mount. Це не змінює структуру chunk-ів, але зменшує latency при відкритті detail view. Поточний baseline після цього кроку: `appointments-CMq0hCNW.js 329.35 kB / 94.64 kB gzip`. | `npm run lint`, `npm run build` |
+| `2026-04-22` | `P5/P8` | Detail loading розрізано на `core + permission-aware resource groups`: `appointments/model/detail-resource-needs.ts` тепер визначає потрібні resource groups по `detailTab` і ролі, а `appointments/data/detail-resource-groups.ts` забирає checklist/reminders/report/tasks/services/communications окремими fetchers. На desktop `overview/timeline/notes` більше не тягнуть розширені payload-и при першому open detail, а `coordination/clinical/workflow/services` добирають тільки потрібні групи; mobile detail лишається full-context surface. Поточний baseline після цього кроку: `appointments-Dfy4os7c.js 331.53 kB / 95.29 kB gzip`. | `npm run lint`, `npm run build` |
+| `2026-04-22` | `P8` | Для detail-derived render work додано deferred gating: expensive reminders/tasks/services/communications derivations більше не рахуються на desktop `overview/timeline/notes`, а `buildAppointmentTimelineEvents(...)` викликається лише коли timeline реально видимий або відкритий mobile detail. Структура chunk-ів майже не змінилась, але `page.tsx` перестав робити зайві loops на cold open detail. Новий baseline: `appointments-C-OtNTN4.js 332.34 kB / 95.44 kB gzip`. | `npm run lint`, `npm run build` |

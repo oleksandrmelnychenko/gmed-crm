@@ -6,33 +6,48 @@ import {
   useMemo,
   useRef,
   useState,
+  useTransition,
   type FormEvent,
-  type ReactNode,
 } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
-  ArrowDown,
-  ArrowUp,
-  BadgeCheck,
+  Archive,
+  ArchiveRestore,
   CalendarClock,
-  ChevronLeft,
-  ChevronRight,
-  ChevronsLeft,
-  ChevronsRight,
-  FileSpreadsheet,
+  Copy,
+  Download,
+  Edit3,
   Filter,
+  Info,
   LoaderCircle,
   Mail,
-  MoreHorizontal,
   Phone,
   Plus,
+  RefreshCw,
   Search,
-  Shield,
-  type LucideIcon,
-  UsersRound,
-  Wallet,
   X,
 } from "lucide-react";
+
+import { ColumnVisibilityMenu } from "@/components/data-table/column-visibility-menu";
+import { DataTable } from "@/components/data-table/data-table";
+import { DensityToggle } from "@/components/data-table/density-toggle";
+import { FilterBuilder } from "@/components/data-table/filter-builder";
+import { exportCsv } from "@/components/data-table/csv-export";
+import { applyFilters } from "@/components/data-table/filter-logic";
+import { formatRelativeTime } from "@/components/data-table/relative-time";
+import { buildSearchIndex, searchWithIndex } from "@/components/data-table/search";
+import { SortBuilder } from "@/components/data-table/sort-builder";
+import { applySort } from "@/components/data-table/sort-logic";
+import { SplitView } from "@/components/data-table/split-view";
+import type { DensityLevel, FilterPredicate, SortStack } from "@/components/data-table/types";
+import { useLocalStorage, useVersionedLocalStorage } from "@/components/data-table/use-local-storage";
+import { useResponsiveViewMode } from "@/components/data-table/use-responsive-view-mode";
+import { readDataTableState, writeDataTableState } from "@/components/data-table/url-state";
+import {
+  DEFAULT_PATIENT_HIDDEN_COLUMNS,
+  PATIENT_COLUMN_GROUPS,
+  buildPatientColumns,
+} from "./patients.columns";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -67,213 +82,30 @@ import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 import { getPatientLegalStatusSummary, normalizePatientLegalStatus } from "./patient-legal-status";
+import {
+  DEFAULT_PATIENT_FILTERS as DEFAULT_FILTERS,
+  blankPatientForm,
+  parseLanguages,
+  patientPermissions,
+  patientToForm,
+  toOptional,
+  type DoctorOption,
+  type PatientAssignment,
+  type PatientDetail,
+  type PatientFilters,
+  type PatientFormState,
+  type PatientSummary,
+  type PatientsDictionary,
+  type ProviderOption,
+  type StaffOption,
+} from "./patients.helpers";
 
-type PatientSummary = {
-  id: string;
-  patient_id: string;
-  title?: string | null;
-  first_name?: string | null;
-  last_name?: string | null;
-  birth_date?: string | null;
-  gender: string;
-  nationality?: string | null;
-  residence_country?: string | null;
-  languages?: string[];
-  functional_labels?: string[];
-  phone_primary?: string | null;
-  email?: string | null;
-  insurance_provider?: string | null;
-  insurance_type?: string | null;
-  is_active: boolean;
-  created_at: string;
-};
-
-export type PatientDetail = PatientSummary & {
-  updated_at?: string;
-  phone_secondary?: string | null;
-  address_street?: string | null;
-  address_city?: string | null;
-  address_zip?: string | null;
-  address_country?: string | null;
-  insurance_number?: string | null;
-  emergency_contact_name?: string | null;
-  emergency_contact_phone?: string | null;
-  emergency_contact_relation?: string | null;
-  legal_status?: unknown;
-  notes?: string | null;
-};
-
-export type PatientAssignment = {
-  user_id: string;
-  user_name: string;
-  user_role: string;
-  user_active: boolean;
-  assigned_by_name: string | null;
-  assigned_at: string;
-  revoked_at: string | null;
-};
-
-export type StaffOption = {
-  id: string;
-  name: string;
-  role: string;
-};
-
-type ProviderOption = {
-  id: string;
-  name: string;
-  provider_type: string;
-  address_city: string | null;
-};
-
-type DoctorOption = {
-  id: string;
-  name: string;
-  title: string | null;
-  fachbereich: string | null;
-};
-
-type PatientFilters = {
-  search: string;
-  activeOnly: string;
-  providerId: string;
-  doctorId: string;
-};
-
-type PatientFormState = {
-  title: string;
-  firstName: string;
-  lastName: string;
-  birthDate: string;
-  gender: string;
-  nationality: string;
-  residenceCountry: string;
-  languages: string;
-  functionalLabels: string;
-  phonePrimary: string;
-  phoneSecondary: string;
-  email: string;
-  addressStreet: string;
-  addressCity: string;
-  addressZip: string;
-  addressCountry: string;
-  insuranceProvider: string;
-  insuranceNumber: string;
-  insuranceType: string;
-  emergencyContactName: string;
-  emergencyContactPhone: string;
-  emergencyContactRelation: string;
-  notes: string;
-};
-
-type PatientPermissions = {
-  canViewPage: boolean;
-  canCreateEdit: boolean;
-  canViewAssignments: boolean;
-  canManageAssignments: boolean;
-};
-
-const DEFAULT_FILTERS: PatientFilters = {
-  search: "",
-  activeOnly: "true",
-  providerId: "",
-  doctorId: "",
-};
-
-
-function patientPermissions(role?: string): PatientPermissions {
-  return {
-    canViewPage: [
-      "ceo",
-      "ceo_assistant",
-      "patient_manager",
-      "billing",
-      "teamlead_interpreter",
-      "interpreter",
-      "concierge",
-    ].includes(role ?? ""),
-    canCreateEdit: role === "ceo" || role === "patient_manager",
-    canViewAssignments: [
-      "ceo",
-      "patient_manager",
-      "teamlead_interpreter",
-      "interpreter",
-      "concierge",
-    ].includes(role ?? ""),
-    canManageAssignments:
-      role === "ceo" || role === "patient_manager" || role === "teamlead_interpreter",
-  };
-}
-
-function blankPatientForm(): PatientFormState {
-  return {
-    title: "",
-    firstName: "",
-    lastName: "",
-    birthDate: "",
-    gender: "male",
-    nationality: "",
-    residenceCountry: "",
-    languages: "",
-    functionalLabels: "",
-    phonePrimary: "",
-    phoneSecondary: "",
-    email: "",
-    addressStreet: "",
-    addressCity: "",
-    addressZip: "",
-    addressCountry: "",
-    insuranceProvider: "",
-    insuranceNumber: "",
-    insuranceType: "",
-    emergencyContactName: "",
-    emergencyContactPhone: "",
-    emergencyContactRelation: "",
-    notes: "",
-  };
-}
-
-function toOptional(value: string) {
-  const trimmed = value.trim();
-  return trimmed ? trimmed : null;
-}
-
-function parseLanguages(value: string) {
-  return value
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function patientToForm(detail: PatientDetail): PatientFormState {
-  return {
-    title: detail.title ?? "",
-    firstName: detail.first_name ?? "",
-    lastName: detail.last_name ?? "",
-    birthDate: detail.birth_date ?? "",
-    gender: detail.gender ?? "male",
-    nationality: detail.nationality ?? "",
-    residenceCountry: detail.residence_country ?? "",
-    languages: detail.languages?.join(", ") ?? "",
-    functionalLabels: detail.functional_labels?.join(", ") ?? "",
-    phonePrimary: detail.phone_primary ?? "",
-    phoneSecondary: detail.phone_secondary ?? "",
-    email: detail.email ?? "",
-    addressStreet: detail.address_street ?? "",
-    addressCity: detail.address_city ?? "",
-    addressZip: detail.address_zip ?? "",
-    addressCountry: detail.address_country ?? "",
-    insuranceProvider: detail.insurance_provider ?? "",
-    insuranceNumber: detail.insurance_number ?? "",
-    insuranceType: detail.insurance_type ?? "",
-    emergencyContactName: detail.emergency_contact_name ?? "",
-    emergencyContactPhone: detail.emergency_contact_phone ?? "",
-    emergencyContactRelation: detail.emergency_contact_relation ?? "",
-    notes: detail.notes ?? "",
-  };
-}
-
-export type PatientsDictionary = Record<string, string>;
+export type {
+  PatientAssignment,
+  PatientDetail,
+  PatientsDictionary,
+  StaffOption,
+} from "./patients.helpers";
 
 type CreatePatientSheetProps = {
   open: boolean;
@@ -680,512 +512,6 @@ function fieldValue(value: string | string[] | null | undefined, fallback = "Not
   return value && value.trim() ? value : fallback;
 }
 
-function useOutsideClose(ref: React.RefObject<HTMLDivElement | null>, onClose: () => void) {
-  useEffect(() => {
-    function handle(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        onClose();
-      }
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("mousedown", handle);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("mousedown", handle);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [ref, onClose]);
-}
-
-function PopoverShell({ children, refEl }: { children: ReactNode; refEl: React.RefObject<HTMLDivElement | null> }) {
-  return (
-    <div
-      ref={refEl}
-      onClick={(e) => e.stopPropagation()}
-      className="absolute left-0 top-full z-30 mt-1 w-[240px] rounded-lg border border-border bg-popover p-2 shadow-md"
-    >
-      {children}
-    </div>
-  );
-}
-
-function PopoverFooter({
-  onClear,
-  onClose,
-  clearDisabled,
-  tr,
-}: {
-  onClear: () => void;
-  onClose: () => void;
-  clearDisabled: boolean;
-  tr: Record<string, string>;
-}) {
-  return (
-    <div className="mt-2 flex items-center justify-between">
-      <button
-        type="button"
-        onClick={onClear}
-        disabled={clearDisabled}
-        className="text-[12px] text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:pointer-events-none"
-      >
-        {tr.common_reset}
-      </button>
-      <button
-        type="button"
-        onClick={onClose}
-        className="text-[12px] text-foreground hover:text-[var(--brand)]"
-      >
-        {tr.common_confirm ?? "OK"}
-      </button>
-    </div>
-  );
-}
-
-function ColumnFilterSelectPopover({
-  value,
-  onChange,
-  onClear,
-  onClose,
-  options,
-  tr,
-}: {
-  value: string;
-  onChange: (next: string) => void;
-  onClear: () => void;
-  onClose: () => void;
-  options: { value: string; label: string }[];
-  tr: Record<string, string>;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  useOutsideClose(ref, onClose);
-  return (
-    <PopoverShell refEl={ref}>
-      <div className="flex flex-col gap-0.5">
-        {options.map((opt) => {
-          const checked = value === opt.value;
-          return (
-            <button
-              key={opt.value || "__all__"}
-              type="button"
-              onClick={() => onChange(opt.value)}
-              className={cn(
-                "flex items-center justify-between rounded-md px-2 py-1.5 text-[13px] text-left transition-colors",
-                checked ? "bg-[var(--brand-soft)] text-[var(--brand)] font-medium" : "hover:bg-muted"
-              )}
-            >
-              <span>{opt.label}</span>
-              {checked ? <span className="text-[var(--brand)]">✓</span> : null}
-            </button>
-          );
-        })}
-      </div>
-      <PopoverFooter onClear={onClear} onClose={onClose} clearDisabled={value === ""} tr={tr} />
-    </PopoverShell>
-  );
-}
-
-function ColumnFilterDateRangePopover({
-  value,
-  onChange,
-  onClear,
-  onClose,
-  tr,
-}: {
-  value: string;
-  onChange: (next: string) => void;
-  onClear: () => void;
-  onClose: () => void;
-  tr: Record<string, string>;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  useOutsideClose(ref, onClose);
-  const [from, to] = value.split("..");
-  const update = (nextFrom: string, nextTo: string) => {
-    if (!nextFrom && !nextTo) onChange("");
-    else onChange(`${nextFrom}..${nextTo}`);
-  };
-  return (
-    <PopoverShell refEl={ref}>
-      <div className="flex flex-col gap-2">
-        <Input
-          type="date"
-          value={from ?? ""}
-          onChange={(e) => update(e.target.value, to ?? "")}
-          className="h-9 text-[13px] rounded-md bg-card"
-        />
-        <Input
-          type="date"
-          value={to ?? ""}
-          onChange={(e) => update(from ?? "", e.target.value)}
-          className="h-9 text-[13px] rounded-md bg-card"
-        />
-      </div>
-      <PopoverFooter onClear={onClear} onClose={onClose} clearDisabled={value === ""} tr={tr} />
-    </PopoverShell>
-  );
-}
-
-function ColumnFilterPopover({
-  value,
-  onChange,
-  onClear,
-  onClose,
-  placeholder,
-  tr,
-}: {
-  value: string;
-  onChange: (next: string) => void;
-  onClear: () => void;
-  onClose: () => void;
-  placeholder: string;
-  tr: Record<string, string>;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    function handle(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        onClose();
-      }
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("mousedown", handle);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("mousedown", handle);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [onClose]);
-  return (
-    <div
-      ref={ref}
-      onClick={(e) => e.stopPropagation()}
-      className="absolute left-0 top-full z-30 mt-1 w-[220px] rounded-lg border border-border bg-popover p-2 shadow-md"
-    >
-      <Input
-        autoFocus
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        className="h-8 text-[13px] rounded-md bg-card normal-case tracking-normal"
-      />
-      <div className="mt-2 flex items-center justify-between">
-        <button
-          type="button"
-          onClick={onClear}
-          disabled={value.trim() === ""}
-          className="text-[12px] text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:pointer-events-none"
-        >
-          {tr.common_reset}
-        </button>
-        <button
-          type="button"
-          onClick={onClose}
-          className="text-[12px] text-foreground hover:text-[var(--brand)]"
-        >
-          {tr.common_confirm ?? "OK"}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function KpiInlineStat({
-  icon: Icon,
-  label,
-  value,
-  tone,
-}: {
-  icon: LucideIcon;
-  label: string;
-  value: string | number;
-  tone: "sky" | "emerald" | "amber" | "slate";
-}) {
-  const toneClass = {
-    sky: "bg-sky-100 text-sky-700",
-    emerald: "bg-emerald-100 text-emerald-700",
-    amber: "bg-amber-100 text-amber-700",
-    slate: "bg-slate-100 text-slate-700",
-  }[tone];
-
-  return (
-    <div className="flex min-w-[170px] items-center gap-3">
-      <span
-        className={cn(
-          "flex size-10 shrink-0 items-center justify-center rounded-2xl",
-          toneClass
-        )}
-      >
-        <Icon className="size-4.5" />
-      </span>
-      <div className="min-w-0">
-        <span className="text-[12px] text-muted-foreground">{label}</span>
-        <p className="mt-1 text-[20px] font-semibold tracking-tight text-foreground leading-none">
-          {value}
-        </p>
-      </div>
-    </div>
-  );
-}
-
-type ColumnFilterKind = "text" | "select" | "daterange" | "none";
-
-const COLUMN_META: Record<
-  "status" | "no" | "patient" | "birth" | "phone" | "email" | "insurance",
-  { labelKey: string; widthClass?: string; sortable?: boolean; filter: ColumnFilterKind }
-> = {
-  status: { labelKey: "patients_col_status", widthClass: "w-[120px]", sortable: true, filter: "select" },
-  no: { labelKey: "patients_col_no", widthClass: "w-[56px]", sortable: true, filter: "text" },
-  patient: { labelKey: "patients_col_patient", sortable: true, filter: "text" },
-  birth: { labelKey: "patients_birth_date", widthClass: "w-[120px]", sortable: true, filter: "daterange" },
-  phone: { labelKey: "patients_phone_primary", widthClass: "w-[140px]", sortable: true, filter: "text" },
-  email: { labelKey: "patients_email", sortable: true, filter: "text" },
-  insurance: { labelKey: "patients_insurance_type", widthClass: "w-[130px]", sortable: true, filter: "select" },
-};
-
-type ColumnMetaKey = keyof typeof COLUMN_META;
-
-function patientColumnText(p: PatientSummary, key: ColumnMetaKey, tr: Record<string, string>): string {
-  switch (key) {
-    case "status":
-      return p.is_active ? (tr.common_active ?? "active") : (tr.common_inactive ?? "inactive");
-    case "no":
-      return p.patient_id ?? "";
-    case "patient":
-      return [p.last_name, p.first_name, p.title, p.patient_id].filter(Boolean).join(" ");
-    case "birth":
-      return p.birth_date ?? "";
-    case "phone":
-      return p.phone_primary ?? "";
-    case "email":
-      return p.email ?? "";
-    case "insurance":
-      return [p.insurance_type, p.insurance_provider].filter(Boolean).join(" ");
-  }
-}
-
-function comparePatientsByColumn(a: PatientSummary, b: PatientSummary, key: ColumnMetaKey): number {
-  switch (key) {
-    case "status":
-      return Number(b.is_active) - Number(a.is_active);
-    case "no":
-      return (a.patient_id ?? "").localeCompare(b.patient_id ?? "", undefined, { numeric: true });
-    case "patient": {
-      const an = `${a.last_name ?? ""} ${a.first_name ?? ""}`.trim().toLowerCase();
-      const bn = `${b.last_name ?? ""} ${b.first_name ?? ""}`.trim().toLowerCase();
-      return an.localeCompare(bn);
-    }
-    case "birth":
-      return (a.birth_date ?? "").localeCompare(b.birth_date ?? "");
-    case "phone":
-      return (a.phone_primary ?? "").localeCompare(b.phone_primary ?? "");
-    case "email":
-      return (a.email ?? "").localeCompare(b.email ?? "");
-    case "insurance":
-      return (a.insurance_type ?? "").localeCompare(b.insurance_type ?? "");
-  }
-}
-
-function PatientCell({
-  colKey,
-  patient,
-  rowNumber,
-  tr,
-}: {
-  colKey: keyof typeof COLUMN_META;
-  patient: PatientSummary;
-  rowNumber: number;
-  tr: Record<string, string>;
-}) {
-  switch (colKey) {
-    case "status":
-      return (
-        <td className="px-3 py-2.5">
-          <StatusPill active={patient.is_active} tr={tr} />
-        </td>
-      );
-    case "no":
-      return (
-        <td className="px-3 py-2.5 text-muted-foreground font-mono text-[12px] tabular-nums">
-          {rowNumber}
-        </td>
-      );
-    case "patient":
-      return (
-        <td className="px-3 py-2.5">
-          <div className="flex items-center gap-2.5">
-            <div className="flex items-center justify-center size-7 rounded-full bg-muted text-[11px] font-medium text-foreground shrink-0">
-              {patientName(patient)
-                .split(/\s+/)
-                .slice(0, 2)
-                .map((w) => w[0]?.toUpperCase() ?? "")
-                .join("")}
-            </div>
-            <div className="min-w-0">
-              <div className="font-medium text-foreground truncate">
-                {patientName(patient)}
-              </div>
-              <div className="text-[11.5px] text-muted-foreground truncate">
-                {genderLabel(patient.gender, tr)}
-                {patient.functional_labels?.length
-                  ? ` · ${patient.functional_labels.map(humanizeFunctionalLabel).join(", ")}`
-                  : ""}
-              </div>
-            </div>
-          </div>
-        </td>
-      );
-    case "birth":
-      return (
-        <td className="px-3 py-2.5 text-muted-foreground">
-          {formatDate(patient.birth_date, "—")}
-        </td>
-      );
-    case "phone":
-      return (
-        <td className="px-3 py-2.5 text-muted-foreground">
-          {patient.phone_primary ?? "—"}
-        </td>
-      );
-    case "email":
-      return (
-        <td className="px-3 py-2.5 text-muted-foreground truncate max-w-[200px]">
-          {patient.email ?? "—"}
-        </td>
-      );
-    case "insurance":
-      return (
-        <td className="px-3 py-2.5 text-muted-foreground">
-          {insuranceLabel(patient.insurance_type, tr)}
-        </td>
-      );
-  }
-}
-
-function StatusPill({ active, tr }: { active: boolean; tr: Record<string, string> }) {
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[11.5px] font-medium",
-        active
-          ? "bg-emerald-50 text-emerald-700"
-          : "bg-neutral-100 text-neutral-600"
-      )}
-    >
-      <span
-        className={cn(
-          "size-1.5 rounded-full",
-          active ? "bg-emerald-500" : "bg-neutral-400"
-        )}
-      />
-      {active ? tr.common_active : tr.common_inactive}
-    </span>
-  );
-}
-
-function PaginationControls({
-  page,
-  totalPages,
-  onPage,
-}: {
-  page: number;
-  totalPages: number;
-  onPage: (p: number) => void;
-}) {
-  const { t } = useLang();
-  if (totalPages <= 1) return <div />;
-
-  const pageBtnClass =
-    "size-7 inline-flex items-center justify-center rounded-md text-[12.5px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:pointer-events-none";
-
-  const pagesToShow = buildPageSequence(page, totalPages);
-
-  return (
-    <div className="flex items-center gap-0.5">
-      <button
-        type="button"
-        className={pageBtnClass}
-        disabled={page === 0}
-        onClick={() => onPage(0)}
-        title={t.pagination_first}
-      >
-        <ChevronsLeft className="size-3.5" />
-      </button>
-      <button
-        type="button"
-        className={pageBtnClass}
-        disabled={page === 0}
-        onClick={() => onPage(Math.max(0, page - 1))}
-        title={t.pagination_previous}
-      >
-        <ChevronLeft className="size-3.5" />
-      </button>
-      {pagesToShow.map((entry, idx) =>
-        entry === "…" ? (
-          <span key={`gap-${idx}`} className="px-1 text-muted-foreground">…</span>
-        ) : (
-          <button
-            key={entry}
-            type="button"
-            onClick={() => onPage(entry)}
-            className={cn(
-              "size-7 inline-flex items-center justify-center rounded-md text-[12.5px] transition-colors",
-              entry === page
-                ? "bg-[var(--brand)] text-white font-medium"
-                : "text-foreground hover:bg-muted"
-            )}
-          >
-            {entry + 1}
-          </button>
-        )
-      )}
-      <button
-        type="button"
-        className={pageBtnClass}
-        disabled={page >= totalPages - 1}
-        onClick={() => onPage(Math.min(totalPages - 1, page + 1))}
-        title={t.pagination_next}
-      >
-        <ChevronRight className="size-3.5" />
-      </button>
-      <button
-        type="button"
-        className={pageBtnClass}
-        disabled={page >= totalPages - 1}
-        onClick={() => onPage(totalPages - 1)}
-        title={t.pagination_last}
-      >
-        <ChevronsRight className="size-3.5" />
-      </button>
-    </div>
-  );
-}
-
-function buildPageSequence(current: number, total: number): (number | "…")[] {
-  if (total <= 7) {
-    return Array.from({ length: total }, (_, i) => i);
-  }
-  const pages: (number | "…")[] = [];
-  const windowSize = 1;
-  const first = 0;
-  const last = total - 1;
-
-  pages.push(first);
-  if (current - windowSize > first + 1) pages.push("…");
-  for (
-    let i = Math.max(first + 1, current - windowSize);
-    i <= Math.min(last - 1, current + windowSize);
-    i++
-  ) {
-    pages.push(i);
-  }
-  if (current + windowSize < last - 1) pages.push("…");
-  pages.push(last);
-  return pages;
-}
 
 export function PatientsPage() {
   const { user } = useAuth();
@@ -1202,6 +528,7 @@ export function PatientsPage() {
   const [listBusy, setListBusy] = useState(false);
   const [listError, setListError] = useState("");
   const [listVersion, setListVersion] = useState(0);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   const [createOpen, setCreateOpen] = useState(false);
 
@@ -1217,79 +544,43 @@ export function PatientsPage() {
   const [assignmentBusy, setAssignmentBusy] = useState(false);
   const [assignmentError, setAssignmentError] = useState("");
   const [selectedAssignee, setSelectedAssignee] = useState("");
-  const [page, setPage] = useState(0);
-  const [pageSize, setPageSize] = useState(10);
-  const [showStats, setShowStats] = useState(true);
-  const [goToInput, setGoToInput] = useState("");
+  const showStats = true;
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [, startFilterTransition] = useTransition();
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
 
-  type ColumnKey = "status" | "no" | "patient" | "birth" | "phone" | "email" | "insurance";
-  const DEFAULT_COLUMN_ORDER: ColumnKey[] = [
-    "no",
-    "status",
-    "patient",
-    "birth",
-    "phone",
-    "email",
-    "insurance",
-  ];
-  const [columnOrder, setColumnOrder] = useState<ColumnKey[]>(DEFAULT_COLUMN_ORDER);
-  const [draggingKey, setDraggingKey] = useState<ColumnKey | null>(null);
-  const [dropTargetKey, setDropTargetKey] = useState<ColumnKey | null>(null);
-
-  type SortDir = "asc" | "desc";
-  const [sortBy, setSortBy] = useState<{ key: ColumnKey; dir: SortDir } | null>(null);
-  const [columnFilters, setColumnFilters] = useState<Record<ColumnKey, string>>({
-    status: "",
-    no: "",
-    patient: "",
-    birth: "",
-    phone: "",
-    email: "",
-    insurance: "",
-  });
-  const [filterOpen, setFilterOpen] = useState<ColumnKey | null>(null);
-
-  function toggleSort(key: ColumnKey) {
-    setSortBy((current) => {
-      if (!current || current.key !== key) return { key, dir: "asc" };
-      if (current.dir === "asc") return { key, dir: "desc" };
-      return null;
-    });
-  }
-
-  function setColumnFilter(key: ColumnKey, value: string) {
-    setColumnFilters((current) => ({ ...current, [key]: value }));
-  }
-
-  function handleColumnDragStart(key: ColumnKey) {
-    setDraggingKey(key);
-  }
-
-  function handleColumnDragOver(event: React.DragEvent, key: ColumnKey) {
-    event.preventDefault();
-    if (draggingKey && key !== draggingKey) setDropTargetKey(key);
-  }
-
-  function handleColumnDrop(target: ColumnKey) {
-    if (!draggingKey || draggingKey === target) {
-      setDraggingKey(null);
-      setDropTargetKey(null);
-      return;
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      const isTyping =
+        target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.isContentEditable;
+      if (event.key === "/" && !isTyping) {
+        event.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      }
     }
-    setColumnOrder((current) => {
-      const next = current.filter((k) => k !== draggingKey);
-      const insertAt = next.indexOf(target);
-      next.splice(insertAt, 0, draggingKey);
-      return next;
-    });
-    setDraggingKey(null);
-    setDropTargetKey(null);
-  }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
-  function handleColumnDragEnd() {
-    setDraggingKey(null);
-    setDropTargetKey(null);
-  }
+  const [filterPredicates, setFilterPredicatesState] = useState<FilterPredicate[]>(() => {
+    if (typeof window === "undefined") return [];
+    return readDataTableState(new URLSearchParams(window.location.search)).filters ?? [];
+  });
+  const [sortStack, setSortStackState] = useState<SortStack>(() => {
+    if (typeof window === "undefined") return [{ field: "created_at", dir: "desc" }];
+    const url = readDataTableState(new URLSearchParams(window.location.search));
+    return url.sort ?? [{ field: "created_at", dir: "desc" }];
+  });
+  const [hiddenColumns, setHiddenColumns] = useVersionedLocalStorage<string[]>(
+    "patients.hiddenColumns",
+    DEFAULT_PATIENT_HIDDEN_COLUMNS,
+    1,
+  );
+  const [density, setDensity] = useLocalStorage<DensityLevel>("patients.density", "compact");
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const viewMode = useResponsiveViewMode();
 
   const effectiveFilters = useMemo(
     () => ({ ...filters, search: deferredSearch || filters.search }),
@@ -1314,67 +605,54 @@ export function PatientsPage() {
     );
   }, [patients]);
 
-  const sortedAndFilteredPatients = useMemo(() => {
-    type CompiledFilter =
-      | { kind: "status"; value: string }
-      | { kind: "insurance"; value: string }
-      | { kind: "birth"; from: string; to: string }
-      | { kind: "text"; key: ColumnKey; needle: string };
+  const columns = useMemo(() => buildPatientColumns(tr, patients), [tr, patients]);
 
-    const compiled: CompiledFilter[] = [];
-    for (const [rawKey, rawValue] of Object.entries(columnFilters) as [ColumnKey, string][]) {
-      const raw = rawValue.trim();
-      if (!raw) continue;
-      if (rawKey === "status") {
-        compiled.push({ kind: "status", value: raw });
-      } else if (rawKey === "insurance") {
-        compiled.push({ kind: "insurance", value: raw });
-      } else if (rawKey === "birth") {
-        const [from = "", to = ""] = raw.split("..");
-        compiled.push({ kind: "birth", from, to });
-      } else {
-        compiled.push({ kind: "text", key: rawKey, needle: raw.toLowerCase() });
-      }
+  const accessors = useMemo(() => {
+    const map: Record<string, (row: PatientSummary) => unknown> = {};
+    for (const col of columns) {
+      map[col.id] = col.accessor;
     }
+    return map;
+  }, [columns]);
 
-    const filtered = compiled.length === 0
-      ? patients
-      : patients.filter((p) => {
-          for (const f of compiled) {
-            if (f.kind === "status") {
-              if (f.value === "active" && !p.is_active) return false;
-              if (f.value === "inactive" && p.is_active) return false;
-            } else if (f.kind === "insurance") {
-              if ((p.insurance_type ?? "") !== f.value) return false;
-            } else if (f.kind === "birth") {
-              const bd = p.birth_date ?? "";
-              if (f.from && (bd === "" || bd < f.from)) return false;
-              if (f.to && (bd === "" || bd > f.to)) return false;
-            } else {
-              const haystack = patientColumnText(p, f.key, tr).toLowerCase();
-              if (!haystack.includes(f.needle)) return false;
-            }
-          }
-          return true;
-        });
+  const searchAccessors = useMemo(() => {
+    return columns.filter((c) => c.searchable).map((c) => c.accessor);
+  }, [columns]);
 
-    if (!sortBy) return filtered;
-    const arr = [...filtered];
-    arr.sort((a, b) => {
-      const cmp = comparePatientsByColumn(a, b, sortBy.key);
-      return sortBy.dir === "asc" ? cmp : -cmp;
-    });
-    return arr;
-  }, [patients, columnFilters, sortBy, tr]);
-
-  const totalPages = Math.max(1, Math.ceil(sortedAndFilteredPatients.length / pageSize));
-  const paginatedPatients = useMemo(
-    () => sortedAndFilteredPatients.slice(page * pageSize, (page + 1) * pageSize),
-    [sortedAndFilteredPatients, page, pageSize]
+  const searchIndex = useMemo(
+    () => buildSearchIndex(patients, { fields: searchAccessors }),
+    [patients, searchAccessors],
   );
 
-  // Reset page when data changes
-  useEffect(() => { setPage(0); }, [patients.length, pageSize]);
+  const sortedAndFilteredPatients = useMemo(() => {
+    const filtered = applyFilters(patients, filterPredicates, { accessors });
+    const searched = deferredSearch.trim()
+      ? searchWithIndex(
+          buildSearchIndex(filtered, { fields: searchAccessors }),
+          deferredSearch,
+        )
+      : filtered;
+    return applySort(searched, sortStack, { accessors });
+  }, [patients, filterPredicates, sortStack, accessors, deferredSearch, searchAccessors]);
+  // searchIndex is memoized for future use by the toolbar search input when
+  // we switch to non-deferred live-search in commit 14.
+  void searchIndex;
+
+  const setFilterPredicates = (next: FilterPredicate[]) => {
+    startFilterTransition(() => {
+      setFilterPredicatesState(next);
+    });
+    const params = writeDataTableState(new URLSearchParams(searchParams), { filters: next });
+    setSearchParams(params, { replace: true });
+  };
+
+  const setSortStack = (next: SortStack) => {
+    startFilterTransition(() => {
+      setSortStackState(next);
+    });
+    const params = writeDataTableState(new URLSearchParams(searchParams), { sort: next });
+    setSearchParams(params, { replace: true });
+  };
 
   function syncQuery(next: Record<string, string | null>) {
     const params = new URLSearchParams(searchParams);
@@ -1476,6 +754,7 @@ export function PatientsPage() {
             ? items.filter((p) => !p.is_active)
             : items;
           startTransition(() => setPatients(filtered));
+          setLastUpdated(new Date());
         }
       })
       .catch((error: unknown) => {
@@ -1582,7 +861,29 @@ export function PatientsPage() {
   }
 
   function openPatient(patientId: string) {
-    staffGo(`/patients/${patientId}`);
+    setSelectedId(patientId);
+    setDetailOpen(true);
+    syncQuery({ patient: patientId });
+  }
+
+  async function handleToggleArchive(patient: PatientSummary) {
+    const nextActive = !patient.is_active;
+    const path = patient.is_active
+      ? `/patients/${patient.id}/deactivate`
+      : `/patients/${patient.id}/activate`;
+
+    setPatients((current) =>
+      current.map((p) => (p.id === patient.id ? { ...p, is_active: nextActive } : p)),
+    );
+
+    try {
+      await apiFetch(path, { method: "POST" });
+    } catch (error) {
+      setPatients((current) =>
+        current.map((p) => (p.id === patient.id ? { ...p, is_active: !nextActive } : p)),
+      );
+      setListError(error instanceof Error ? error.message : "Failed to update patient status");
+    }
   }
 
   async function handleAssignPatient() {
@@ -1622,26 +923,37 @@ export function PatientsPage() {
     );
   }
 
-  const anyFilterActive =
-    filters.search.trim() !== "" ||
+  const anyTopFilterActive =
     filters.activeOnly !== "true" ||
     filters.providerId !== "" ||
-    filters.doctorId !== "";
+    filters.doctorId !== "" ||
+    filterPredicates.length > 0;
+
+  const tallyParts: string[] = [
+    `${metrics.total} ${t.patients_title.toLowerCase()}`,
+    `${metrics.active} ${t.common_active.toLowerCase()}`,
+  ];
 
   return (
     <>
-      <div className="space-y-4">
-        {/* Page header */}
+      <div className="flex min-h-0 flex-1 flex-col gap-3">
+        {/* Title + inline tally + primary CTA */}
         <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
+          <div className="flex items-baseline gap-2">
             <h1 className="text-[22px] font-semibold tracking-tight text-foreground leading-tight">
               {t.patients_title}
             </h1>
+            {showStats ? (
+              <span className="text-xs text-muted-foreground tabular-nums">
+                · {tallyParts.join(" · ")}
+              </span>
+            ) : null}
+          </div>
+          <div className="flex items-center gap-1.5">
             {permissions.canCreateEdit ? (
               <Button
                 type="button"
                 size="sm"
-                className="h-9 rounded-lg gap-1.5 px-3.5"
                 onClick={() => setCreateOpen(true)}
               >
                 <Plus className="size-3.5" />
@@ -1651,43 +963,51 @@ export function PatientsPage() {
           </div>
         </div>
 
-        {/* Top toolbar */}
-        <div className="flex items-center gap-1.5 flex-wrap">
+        {/* Single-row toolbar */}
+        <div className="flex flex-wrap items-center gap-1.5">
           <div className="relative">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
             <Input
+              ref={searchInputRef}
               value={filters.search}
               onChange={(event) =>
                 setFilters((current) => ({ ...current, search: event.target.value }))
               }
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  setFilters((current) => ({ ...current, search: "" }));
+                  (event.target as HTMLInputElement).blur();
+                }
+              }}
               placeholder={t.common_search}
-              className="h-8 pl-8 text-[13px] w-[220px] rounded-lg bg-card"
+              className="h-8 w-[280px] rounded-lg bg-card pl-8 text-[13px]"
             />
           </div>
 
-          <ShadSelect
-            value={filters.activeOnly}
-            onValueChange={(v) =>
-              setFilters((current) => ({ ...current, activeOnly: v ?? "" }))
-            }
-          >
-            <SelectTrigger size="sm" className="h-8 text-[13px] bg-card">
-              <Filter className="size-3.5 mr-1 text-muted-foreground" />
-              <SelectValue>
-                {filters.activeOnly === "true"
-                  ? t.common_active
-                  : filters.activeOnly === "false"
-                    ? t.common_inactive
-                    : t.providers_all}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="">{t.providers_all}</SelectItem>
-              <SelectItem value="true">{t.common_active}</SelectItem>
-              <SelectItem value="false">{t.common_inactive}</SelectItem>
-            </SelectContent>
-          </ShadSelect>
+          <FilterBuilder
+            columns={columns}
+            rows={patients}
+            filters={filterPredicates}
+            onChange={setFilterPredicates}
+          />
 
+          <SortBuilder
+            columns={columns}
+            value={sortStack}
+            onChange={setSortStack}
+          />
+
+          <ColumnVisibilityMenu
+            columns={columns}
+            hiddenColumns={hiddenColumns}
+            onChange={setHiddenColumns}
+            defaultHidden={DEFAULT_PATIENT_HIDDEN_COLUMNS}
+            groupLabels={PATIENT_COLUMN_GROUPS}
+          />
+
+          <DensityToggle value={density} onChange={setDensity} />
+
+          {/* Legacy provider/doctor (will fold into FilterBuilder in follow-up) */}
           <ShadSelect
             value={filters.providerId}
             onValueChange={(v) => {
@@ -1696,7 +1016,7 @@ export function PatientsPage() {
               syncQuery({ provider: providerId || null, doctor: null });
             }}
           >
-            <SelectTrigger size="sm" className="h-8 text-[13px] bg-card w-[260px]">
+            <SelectTrigger size="sm" className="h-8 w-[220px] bg-card text-[13px]">
               <SelectValue>
                 {filters.providerId
                   ? (providers.find((p) => p.id === filters.providerId)?.name ?? filters.providerId)
@@ -1722,7 +1042,7 @@ export function PatientsPage() {
             }}
             disabled={!filters.providerId}
           >
-            <SelectTrigger size="sm" className="h-8 text-[13px] bg-card w-[220px]">
+            <SelectTrigger size="sm" className="h-8 w-[200px] bg-card text-[13px]">
               <SelectValue>
                 {filters.doctorId
                   ? (doctors.find((d) => d.id === filters.doctorId)?.name ?? filters.doctorId)
@@ -1739,306 +1059,234 @@ export function PatientsPage() {
             </SelectContent>
           </ShadSelect>
 
-          <label className="flex items-center gap-2 h-8 px-2.5 rounded-lg cursor-pointer text-[12.5px] text-muted-foreground select-none">
-            <span>{t.common_show_stats}</span>
-            <button
-              type="button"
-              onClick={() => setShowStats((v) => !v)}
-              className={cn(
-                "relative inline-flex h-[18px] w-[30px] rounded-full transition-colors",
-                showStats ? "bg-[var(--brand)]" : "bg-neutral-300"
-              )}
-              aria-pressed={showStats}
-            >
-              <span
-                className={cn(
-                  "absolute top-0.5 size-[14px] rounded-full bg-white shadow-sm transition-transform",
-                  showStats ? "translate-x-[14px]" : "translate-x-0.5"
-                )}
-              />
-            </button>
-          </label>
+          <ShadSelect
+            value={filters.activeOnly}
+            onValueChange={(v) =>
+              setFilters((current) => ({ ...current, activeOnly: v ?? "" }))
+            }
+          >
+            <SelectTrigger size="sm" className="h-8 bg-card text-[13px]">
+              <Filter className="mr-1 size-3.5 text-muted-foreground" />
+              <SelectValue>
+                {filters.activeOnly === "true"
+                  ? t.common_active
+                  : filters.activeOnly === "false"
+                    ? t.common_inactive
+                    : t.providers_all}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">{t.providers_all}</SelectItem>
+              <SelectItem value="true">{t.common_active}</SelectItem>
+              <SelectItem value="false">{t.common_inactive}</SelectItem>
+            </SelectContent>
+          </ShadSelect>
 
-          {anyFilterActive ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-8 rounded-lg gap-1 text-[12.5px] text-muted-foreground"
-              onClick={() => {
-                setFilters(DEFAULT_FILTERS);
-                syncQuery({ provider: null, doctor: null, patient: null });
-              }}
-            >
-              <X className="size-3.5" />
-              {t.common_reset}
-            </Button>
-          ) : null}
-
-          <div className="ml-auto flex items-center gap-1.5">
+          <div className="ml-auto flex items-center gap-1">
+            {lastUpdated ? (
+              <span className="text-[11px] tabular-nums text-muted-foreground">
+                {formatRelativeTime(lastUpdated)}
+              </span>
+            ) : null}
             <Button
               type="button"
               variant="outline"
               size="icon-sm"
-              title={t.common_export}
-              aria-label={t.common_export}
-              className="rounded-lg bg-card text-emerald-700 hover:text-emerald-800"
+              title={t.common_refresh ?? "Refresh"}
+              aria-label={t.common_refresh ?? "Refresh"}
+              onClick={refreshList}
             >
-              <FileSpreadsheet className="size-4" />
+              <RefreshCw className={cn("size-3.5", listBusy && "animate-spin")} />
             </Button>
-          </div>
-        </div>
-
-        {/* KPI row */}
-        {showStats && (
-          <div className="flex flex-wrap gap-x-8 gap-y-4">
-            <KpiInlineStat
-              icon={UsersRound}
-              tone="sky"
-              label={t.patients_title}
-              value={metrics.total}
-            />
-            <KpiInlineStat
-              icon={BadgeCheck}
-              tone="emerald"
-              label={t.common_active}
-              value={metrics.active}
-            />
-            <KpiInlineStat
-              icon={Shield}
-              tone="slate"
-              label={t.insurance_private}
-              value={metrics.privateCount}
-            />
-            <KpiInlineStat
-              icon={Wallet}
-              tone="amber"
-              label={t.insurance_self_pay}
-              value={metrics.selfPay}
-            />
-          </div>
-        )}
-
-        {/* Error banner */}
-        {listError ? <Banner tone="error">{listError}</Banner> : null}
-
-        {/* Table card */}
-        <div className="rounded-xl border border-border bg-card overflow-hidden">
-          {/* Table */}
-          <div className="overflow-x-auto">
-            <table className="w-full text-[13px]">
-              <thead className="bg-muted/40">
-                <tr className="text-left text-[11px] uppercase tracking-wider text-muted-foreground">
-                  {columnOrder.map((key) => {
-                    const meta = COLUMN_META[key];
-                    const isDragging = draggingKey === key;
-                    const isDropTarget = dropTargetKey === key && draggingKey && dropTargetKey !== draggingKey;
-                    const isSorted = sortBy?.key === key;
-                    const SortIcon = isSorted ? (sortBy?.dir === "asc" ? ArrowUp : ArrowDown) : null;
-                    const filterValue = columnFilters[key];
-                    const filterActive = filterValue.trim() !== "";
-                    const isFilterOpen = filterOpen === key;
-                    return (
-                      <th
-                        key={key}
-                        draggable
-                        onDragStart={() => handleColumnDragStart(key)}
-                        onDragOver={(e) => handleColumnDragOver(e, key)}
-                        onDrop={() => handleColumnDrop(key)}
-                        onDragEnd={handleColumnDragEnd}
-                        className={cn(
-                          "px-3 py-2.5 font-medium select-none relative",
-                          meta.widthClass,
-                          isSorted && "text-foreground",
-                          isDragging && "opacity-50",
-                          isDropTarget && "before:absolute before:left-0 before:top-0 before:bottom-0 before:w-[2px] before:bg-[var(--brand)]"
-                        )}
-                      >
-                        <div className="flex items-center justify-between gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (meta.sortable && !draggingKey) toggleSort(key);
-                            }}
-                            disabled={!meta.sortable}
-                            className={cn(
-                              "flex items-center gap-1 min-w-0 text-left",
-                              meta.sortable && "cursor-pointer hover:text-foreground"
-                            )}
-                            title={meta.sortable ? (tr[meta.labelKey] ?? meta.labelKey) : ""}
-                          >
-                            <span className="truncate">{tr[meta.labelKey] ?? meta.labelKey}</span>
-                            {SortIcon ? <SortIcon className="size-3 text-[var(--brand)] shrink-0" /> : null}
-                          </button>
-                          {meta.filter !== "none" ? (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setFilterOpen(isFilterOpen ? null : key);
-                              }}
-                              title={t.common_search}
-                              className={cn(
-                                "inline-flex items-center justify-center size-5 rounded transition-colors shrink-0",
-                                filterActive
-                                  ? "text-[var(--brand)] hover:bg-[var(--brand-soft)]"
-                                  : "text-muted-foreground/60 hover:text-foreground hover:bg-muted"
-                              )}
-                            >
-                              <Filter className="size-3" />
-                            </button>
-                          ) : null}
-                        </div>
-                        {isFilterOpen && meta.filter === "text" ? (
-                          <ColumnFilterPopover
-                            value={filterValue}
-                            onChange={(v) => setColumnFilter(key, v)}
-                            onClear={() => setColumnFilter(key, "")}
-                            onClose={() => setFilterOpen(null)}
-                            placeholder={tr[meta.labelKey] ?? meta.labelKey}
-                            tr={tr}
-                          />
-                        ) : null}
-                        {isFilterOpen && meta.filter === "select" ? (
-                          <ColumnFilterSelectPopover
-                            value={filterValue}
-                            onChange={(v) => setColumnFilter(key, v)}
-                            onClear={() => setColumnFilter(key, "")}
-                            onClose={() => setFilterOpen(null)}
-                            options={
-                              key === "status"
-                                ? [
-                                    { value: "", label: t.providers_all },
-                                    { value: "active", label: t.common_active },
-                                    { value: "inactive", label: t.common_inactive },
-                                  ]
-                                : [
-                                    { value: "", label: t.providers_all },
-                                    { value: "private", label: t.insurance_private },
-                                    { value: "public", label: t.insurance_public },
-                                    { value: "self_pay", label: t.insurance_self_pay },
-                                    { value: "foreign", label: t.insurance_foreign },
-                                  ]
-                            }
-                            tr={tr}
-                          />
-                        ) : null}
-                        {isFilterOpen && meta.filter === "daterange" ? (
-                          <ColumnFilterDateRangePopover
-                            value={filterValue}
-                            onChange={(v) => setColumnFilter(key, v)}
-                            onClear={() => setColumnFilter(key, "")}
-                            onClose={() => setFilterOpen(null)}
-                            tr={tr}
-                          />
-                        ) : null}
-                      </th>
-                    );
-                  })}
-                  <th className="w-8 px-2 py-2.5"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {listBusy ? (
-                  <tr>
-                    <td colSpan={columnOrder.length + 1} className="py-16 text-center text-muted-foreground">
-                      <LoaderCircle className="inline-block mr-2 size-4 animate-spin align-text-bottom" />
-                      {t.common_loading}
-                    </td>
-                  </tr>
-                ) : paginatedPatients.length === 0 ? (
-                  <tr>
-                    <td colSpan={columnOrder.length + 1} className="py-16 text-center text-muted-foreground text-[13px]">
-                      {t.patients_no_match}
-                    </td>
-                  </tr>
-                ) : (
-                  paginatedPatients.map((patient, idx) => {
-                    const rowNumber = page * pageSize + idx + 1;
-                    return (
-                      <tr
-                        key={patient.id}
-                        className="group/row border-t border-border transition-colors hover:bg-muted/40 cursor-pointer relative"
-                        onClick={() => openPatient(patient.id)}
-                      >
-                        {columnOrder.map((key) => (
-                          <PatientCell
-                            key={key}
-                            colKey={key}
-                            patient={patient}
-                            rowNumber={rowNumber}
-                            tr={tr}
-                          />
-                        ))}
-                        <td className="w-8 px-2 py-2.5" onClick={(e) => e.stopPropagation()}>
-                          <button
-                            type="button"
-                            className="size-7 rounded-md inline-flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors opacity-0 group-hover/row:opacity-100"
-                          >
-                            <MoreHorizontal className="size-3.5" />
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Pagination */}
-          <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-t border-border text-[12.5px] flex-wrap">
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <span>{t.pagination_per_page}</span>
-              <ShadSelect
-                value={String(pageSize)}
-                onValueChange={(v) => setPageSize(Number(v))}
-              >
-                <SelectTrigger size="sm" className="h-7 w-[70px] text-[12.5px]">
-                  <SelectValue>{pageSize}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="10">10</SelectItem>
-                  <SelectItem value="20">20</SelectItem>
-                  <SelectItem value="50">50</SelectItem>
-                  <SelectItem value="100">100</SelectItem>
-                </SelectContent>
-              </ShadSelect>
-            </div>
-
-            <PaginationControls
-              page={page}
-              totalPages={totalPages}
-              onPage={setPage}
-            />
-
-            <form
-              className="flex items-center gap-2 text-muted-foreground"
-              onSubmit={(e) => {
-                e.preventDefault();
-                const n = Number(goToInput);
-                if (!Number.isFinite(n) || n < 1) return;
-                setPage(Math.min(totalPages - 1, Math.max(0, n - 1)));
-                setGoToInput("");
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-sm"
+              title={t.common_export ?? "Export"}
+              aria-label={t.common_export ?? "Export"}
+              onClick={() => {
+                const visibleCols = columns.filter(
+                  (c) => !hiddenColumns.includes(c.id) || c.required,
+                );
+                const stamp = new Date().toISOString().slice(0, 10);
+                exportCsv(sortedAndFilteredPatients, visibleCols, `patients-${stamp}.csv`);
               }}
             >
-              <span>{t.pagination_go_to_page}</span>
-              <Input
-                value={goToInput}
-                onChange={(e) => setGoToInput(e.target.value.replace(/[^0-9]/g, ""))}
-                placeholder=""
-                className="h-7 w-14 text-[12.5px] text-center"
-              />
-              <button
-                type="submit"
-                className="inline-flex items-center gap-1 h-7 px-2 rounded-md text-[12.5px] text-foreground hover:bg-muted transition-colors"
+              <Download className="size-3.5" />
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-sm"
+              title="Keyboard shortcuts"
+              aria-label="Keyboard shortcuts"
+              onClick={() => setHelpOpen((v) => !v)}
+            >
+              <Info className="size-3.5" />
+            </Button>
+            {anyTopFilterActive ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setFilters(DEFAULT_FILTERS);
+                  setFilterPredicates([]);
+                  syncQuery({ provider: null, doctor: null, patient: null });
+                }}
               >
-                {t.pagination_go}
-                <ChevronRight className="size-3" />
-              </button>
-            </form>
+                <X className="size-3.5" />
+                {t.common_reset}
+              </Button>
+            ) : null}
           </div>
         </div>
+
+        {listError ? <Banner tone="error">{listError}</Banner> : null}
+
+        <SplitView
+          active={detailOpen}
+          viewMode={viewMode}
+          onClose={() => handleDetailOpenChange(false)}
+          pane={
+            <div className="flex h-full flex-col">
+              <MemoizedPatientDetailSheet
+                open={detailOpen}
+                detail={detail}
+                detailBusy={detailBusy}
+                detailError={detailError}
+                dictionary={tr}
+                canCreateEdit={permissions.canCreateEdit}
+                canViewAssignments={permissions.canViewAssignments}
+                canManageAssignments={permissions.canManageAssignments}
+                assignments={assignments}
+                assignableStaff={assignableStaff}
+                selectedAssignee={selectedAssignee}
+                assignmentBusy={assignmentBusy}
+                assignmentError={assignmentError}
+                onAssigneeChange={setSelectedAssignee}
+                onAssign={handleAssignPatient}
+                onOpenChange={handleDetailOpenChange}
+                onRefresh={handleDetailSaved}
+                onOpenCases={() => detail ? staffGo(`/cases?patient=${detail.id}`) : undefined}
+                onOpenOrders={() => detail ? staffGo(`/orders?patient=${detail.id}`) : undefined}
+                onOpenAppointments={() => detail ? staffGo(`/appointments?patient=${detail.id}`) : undefined}
+                onOpenContracts={() => detail ? staffGo(`/contracts?patient=${detail.id}`) : undefined}
+                onOpenDocuments={() => detail ? staffGo(`/documents?patient=${detail.id}`) : undefined}
+                hideWorkspaceActions={viewMode === "split"}
+              />
+            </div>
+          }
+        >
+          {selectedIds.length > 0 ? (
+            <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-primary/5 px-3 py-1.5 text-xs">
+              <div className="flex items-center gap-2 text-foreground">
+                <span className="tabular-nums font-medium">{selectedIds.length}</span>
+                <span className="text-muted-foreground">selected</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  onClick={() => {
+                    const selectedRows = sortedAndFilteredPatients.filter((p) =>
+                      selectedIds.includes(p.id),
+                    );
+                    const visibleCols = columns.filter(
+                      (c) => !hiddenColumns.includes(c.id) || c.required,
+                    );
+                    const stamp = new Date().toISOString().slice(0, 10);
+                    exportCsv(selectedRows, visibleCols, `patients-selected-${stamp}.csv`);
+                  }}
+                >
+                  <Download className="size-3" />
+                  {t.common_export ?? "Export"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  onClick={() => setSelectedIds([])}
+                >
+                  <X className="size-3" />
+                  {t.common_reset}
+                </Button>
+              </div>
+            </div>
+          ) : null}
+          <DataTable
+            rows={sortedAndFilteredPatients}
+            columns={columns}
+            hiddenColumns={hiddenColumns}
+            sort={sortStack}
+            onSortChange={setSortStack}
+            density={density}
+            rowId={(p) => p.id}
+            activeRowId={selectedId}
+            onRowClick={(p) => openPatient(p.id)}
+            rowActions={(p) => (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void navigator.clipboard?.writeText(p.patient_id);
+                  }}
+                  title="Copy ID"
+                  aria-label="Copy ID"
+                  className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                >
+                  <Copy className="size-3" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openPatient(p.id)}
+                  title={t.patients_edit ?? "Edit"}
+                  aria-label={t.patients_edit ?? "Edit"}
+                  className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                >
+                  <Edit3 className="size-3" />
+                </button>
+                {permissions.canCreateEdit ? (
+                  <button
+                    type="button"
+                    onClick={() => handleToggleArchive(p)}
+                    title={p.is_active ? (tr.patients_archive ?? "Archive") : (tr.patients_reactivate ?? "Reactivate")}
+                    aria-label={p.is_active ? (tr.patients_archive ?? "Archive") : (tr.patients_reactivate ?? "Reactivate")}
+                    className={cn(
+                      "inline-flex size-6 items-center justify-center rounded-md transition-colors",
+                      p.is_active
+                        ? "text-muted-foreground hover:bg-muted hover:text-amber-700"
+                        : "text-muted-foreground hover:bg-muted hover:text-emerald-700",
+                    )}
+                  >
+                    {p.is_active ? <Archive className="size-3" /> : <ArchiveRestore className="size-3" />}
+                  </button>
+                ) : null}
+              </>
+            )}
+            selectedIds={selectedIds}
+            onSelectedIdsChange={setSelectedIds}
+            selectionEnabled={permissions.canCreateEdit}
+            loading={listBusy && patients.length === 0}
+            emptyState={<span className="text-sm text-muted-foreground">{t.patients_no_match}</span>}
+            className="min-h-[400px]"
+            footer={
+              <div className="flex items-center justify-between">
+                <span className="tabular-nums">
+                  {sortedAndFilteredPatients.length === patients.length
+                    ? `${patients.length}`
+                    : `${sortedAndFilteredPatients.length} / ${patients.length}`}
+                  {" "}
+                  {t.patients_title.toLowerCase()}
+                </span>
+                {selectedIds.length > 0 ? (
+                  <span className="tabular-nums">{selectedIds.length} selected</span>
+                ) : null}
+              </div>
+            }
+          />
+        </SplitView>
       </div>
 
       <MemoizedCreatePatientSheet
@@ -2048,30 +1296,31 @@ export function PatientsPage() {
         onCreated={handlePatientCreated}
       />
 
-      <MemoizedPatientDetailSheet
-        open={detailOpen}
-        detail={detail}
-        detailBusy={detailBusy}
-        detailError={detailError}
-        dictionary={tr}
-        canCreateEdit={permissions.canCreateEdit}
-        canViewAssignments={permissions.canViewAssignments}
-        canManageAssignments={permissions.canManageAssignments}
-        assignments={assignments}
-        assignableStaff={assignableStaff}
-        selectedAssignee={selectedAssignee}
-        assignmentBusy={assignmentBusy}
-        assignmentError={assignmentError}
-        onAssigneeChange={setSelectedAssignee}
-        onAssign={handleAssignPatient}
-        onOpenChange={handleDetailOpenChange}
-        onRefresh={handleDetailSaved}
-        onOpenCases={() => detail ? staffGo(`/cases?patient=${detail.id}`) : undefined}
-        onOpenOrders={() => detail ? staffGo(`/orders?patient=${detail.id}`) : undefined}
-        onOpenAppointments={() => detail ? staffGo(`/appointments?patient=${detail.id}`) : undefined}
-        onOpenContracts={() => detail ? staffGo(`/contracts?patient=${detail.id}`) : undefined}
-        onOpenDocuments={() => detail ? staffGo(`/documents?patient=${detail.id}`) : undefined}
-      />
+      {helpOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/30"
+          onClick={() => setHelpOpen(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-lg border border-border bg-card p-4 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="mb-3 text-sm font-semibold">Keyboard shortcuts</h2>
+            <ul className="space-y-1.5 text-xs">
+              <li><kbd className="rounded border border-border px-1.5 py-0.5">/</kbd> Focus search</li>
+              <li><kbd className="rounded border border-border px-1.5 py-0.5">↑</kbd> / <kbd className="rounded border border-border px-1.5 py-0.5">↓</kbd> Navigate rows</li>
+              <li><kbd className="rounded border border-border px-1.5 py-0.5">Enter</kbd> Open in split pane</li>
+              <li><kbd className="rounded border border-border px-1.5 py-0.5">Shift</kbd> + click header Multi-sort</li>
+              <li><kbd className="rounded border border-border px-1.5 py-0.5">Esc</kbd> Close pane</li>
+            </ul>
+            <div className="mt-3 flex justify-end">
+              <Button type="button" variant="outline" size="sm" onClick={() => setHelpOpen(false)}>
+                {t.common_close ?? "Close"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </>
   );
 }

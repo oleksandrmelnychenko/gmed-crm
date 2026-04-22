@@ -1,0 +1,611 @@
+import {
+  memo,
+  useEffect,
+  useMemo,
+  useState,
+  type FormEvent,
+} from "react";
+
+import { LoaderCircle } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Banner,
+  selectClass,
+  textareaClass,
+} from "@/components/ui-shell";
+import { useLang } from "@/lib/i18n";
+import { apiFetch } from "@/lib/api";
+import { cn } from "@/lib/utils";
+import { shiftLocalDateTime } from "@/pages/appointments/model/date-time";
+import { formatAppointmentSlotLabel as slotLabel } from "@/pages/appointments/model/runtime-formatters";
+import { buildConflictQuery } from "@/pages/appointments/model/query-builders";
+import { buildFollowUpVisitForm } from "@/pages/appointments/model/form-factories";
+import {
+  appointmentText,
+  carePathKindLabel,
+  doctorLabel,
+  normalizeCarePathKindForAppointmentType,
+  roleLabel,
+} from "@/pages/appointments/model/labels";
+import {
+  buildLocalScheduleWarnings,
+  buildScheduleNotice,
+} from "@/pages/appointments/model/schedule-warnings";
+import {
+  appointmentAnchorDateTime,
+  toRfc3339,
+} from "@/pages/appointments/model/workflow-helpers";
+import type {
+  AppointmentCarePathKind,
+  AppointmentDetail,
+  AppointmentListItem,
+  ConflictSummary,
+  DoctorOption,
+  FollowUpVisitFormState,
+  InterpreterOption,
+  ProviderSummary,
+  StaffOption,
+} from "@/pages/appointments/model/types";
+import {
+  CARE_PATH_KIND_OPTIONS,
+  FOLLOW_UP_PRESETS,
+} from "@/pages/appointments/model/constants";
+import { getProviderDoctors } from "@/pages/appointments/data/provider-doctors";
+import { useDebouncedValue } from "@/pages/appointments/data/use-debounced-value";
+import { Field } from "@/pages/appointments/ui/shared/workspace-primitives";
+import {
+  ConflictPanel,
+  ScheduleWarningsPanel,
+} from "@/pages/appointments/ui/shared/schedule-panels";
+
+type AppointmentFollowUpVisitSectionProps = {
+  detail: AppointmentDetail;
+  appointments: AppointmentListItem[];
+  providers: ProviderSummary[];
+  staff: StaffOption[];
+  interpreters: InterpreterOption[];
+  defaultReminderUserId: string;
+  onCreated: (result: { id?: string; notice: string }) => void;
+};
+
+const sectionCardClass =
+  "rounded-3xl border border-slate-200/80 bg-white p-5 shadow-[0_20px_50px_-35px_rgba(15,23,42,0.35)]";
+const selectClassName = cn(selectClass, "h-10 rounded-xl");
+const textareaClassName = cn(textareaClass, "min-h-[96px]");
+
+function withEllipsis(text: string) {
+  return text.trim().endsWith("...") ? text : `${text.trim()}...`;
+}
+
+function AppointmentFollowUpVisitSection({
+  detail,
+  appointments,
+  providers,
+  staff,
+  interpreters,
+  defaultReminderUserId,
+  onCreated,
+}: AppointmentFollowUpVisitSectionProps) {
+  const { t } = useLang();
+  const tr = t as unknown as Record<string, string>;
+  const interpreterFieldLabel =
+    tr.role_interpreter ??
+    appointmentText("Dolmetscher", "Переводчик", "Interpreter");
+  const scheduleWarningLabels = useMemo(
+    () => ({
+      patients_assign_owner: tr.patients_assign_owner,
+      common_doctor: tr.common_doctor,
+      common_provider: tr.common_provider,
+    }),
+    [tr.common_doctor, tr.common_provider, tr.patients_assign_owner],
+  );
+  const [form, setForm] = useState<FollowUpVisitFormState>(() =>
+    buildFollowUpVisitForm(detail, defaultReminderUserId, tr.phase_followup),
+  );
+  const [doctors, setDoctors] = useState<DoctorOption[]>([]);
+  const [conflicts, setConflicts] = useState<ConflictSummary | null>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setForm(buildFollowUpVisitForm(detail, defaultReminderUserId, tr.phase_followup));
+    setDoctors([]);
+    setConflicts(null);
+    setError("");
+    setBusy(false);
+  }, [defaultReminderUserId, detail, tr.phase_followup]);
+
+  useEffect(() => {
+    if (!form.providerId) {
+      setDoctors([]);
+      return;
+    }
+    let active = true;
+    getProviderDoctors(form.providerId)
+      .then((rows) => {
+        if (active) setDoctors(rows);
+      })
+      .catch(() => {
+        if (active) setDoctors([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [form.providerId]);
+
+  const conflictQuery = useMemo(() => {
+    if (!detail.patient_id || !form.date) return "";
+    return buildConflictQuery(
+      detail.patient_id,
+      "",
+      form.date,
+      form.timeStart,
+      form.timeEnd,
+      form.interpreterId,
+    );
+  }, [
+    detail.patient_id,
+    form.date,
+    form.interpreterId,
+    form.timeEnd,
+    form.timeStart,
+  ]);
+  const debouncedConflictQuery = useDebouncedValue(conflictQuery);
+
+  useEffect(() => {
+    if (!debouncedConflictQuery) {
+      setConflicts(null);
+      return;
+    }
+    let active = true;
+    apiFetch<ConflictSummary>(debouncedConflictQuery)
+      .then((value) => {
+        if (active) setConflicts(value);
+      })
+      .catch(() => {
+        if (active) setConflicts(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [debouncedConflictQuery]);
+
+  const localWarnings = useMemo(() => {
+    if (!detail.id || !form.date) return [];
+    return buildLocalScheduleWarnings(
+      appointments,
+      {
+        date: form.date,
+        timeStart: form.timeStart,
+        timeEnd: form.timeEnd,
+        ownerUserId: form.ownerUserId || detail.owner_user_id,
+        providerId: form.providerId || null,
+        doctorId: form.doctorId || null,
+      },
+      scheduleWarningLabels,
+    );
+  }, [
+    appointments,
+    detail.id,
+    detail.owner_user_id,
+    form.date,
+    form.doctorId,
+    form.ownerUserId,
+    form.providerId,
+    form.timeEnd,
+    form.timeStart,
+    scheduleWarningLabels,
+  ]);
+
+  function applyPreset(preset: (typeof FOLLOW_UP_PRESETS)[number]) {
+    const anchor = appointmentAnchorDateTime(detail);
+    const shifted = shiftLocalDateTime(anchor, {
+      days: "offsetDays" in preset ? preset.offsetDays : undefined,
+      months: "offsetMonths" in preset ? preset.offsetMonths : undefined,
+    });
+    if (!shifted) return;
+    const nextReminderAt = shiftLocalDateTime(shifted, { days: -3 });
+    setForm((current) => ({
+      ...current,
+      date: shifted.slice(0, 10),
+      timeStart: shifted.slice(11, 16),
+      timeEnd: current.timeEnd
+        ? shiftLocalDateTime(
+            `${detail.date}T${detail.time_end?.slice(0, 5) ?? current.timeEnd}`,
+            {
+              days: "offsetDays" in preset ? preset.offsetDays : undefined,
+              months:
+                "offsetMonths" in preset ? preset.offsetMonths : undefined,
+            },
+          ).slice(11, 16)
+        : current.timeEnd,
+      title:
+        current.title.trim() === "" || current.title.startsWith(t.phase_followup)
+          ? preset.title
+          : current.title,
+      reminderAt: nextReminderAt || current.reminderAt,
+    }));
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const result = await apiFetch<{
+        id: string;
+        conflicts?: ConflictSummary;
+      }>("/appointments", {
+        method: "POST",
+        body: JSON.stringify({
+          patient_id: detail.patient_id,
+          provider_id: form.providerId || null,
+          doctor_id: form.doctorId || null,
+          owner_user_id: form.ownerUserId || null,
+          interpreter_id: form.interpreterId || null,
+          order_id: form.linkOrder ? detail.order_id : null,
+          appointment_type: form.appointmentType,
+          care_path_kind: normalizeCarePathKindForAppointmentType(
+            form.appointmentType,
+            form.carePathKind,
+          ),
+          title: form.title.trim(),
+          date: form.date,
+          time_start: form.timeStart || null,
+          time_end: form.timeEnd || null,
+          location: form.location.trim() || null,
+          category: form.category.trim() || null,
+          notes: form.notes.trim() || null,
+        }),
+      });
+
+      if (result.id && form.createReminder && form.reminderUserId && form.reminderAt) {
+        await apiFetch<{ id: string }>(`/appointments/${result.id}/reminders`, {
+          method: "POST",
+          body: JSON.stringify({
+            user_id: form.reminderUserId,
+            remind_at: toRfc3339(form.reminderAt),
+            title: `Prepare follow-up visit: ${form.title.trim()}`,
+            description: `Planned from appointment ${detail.patient_pid} · ${detail.title} · ${slotLabel(detail)}.`,
+          }),
+        });
+      }
+
+      const notice = result.conflicts
+        ? `${buildScheduleNotice(result.conflicts, localWarnings)} Follow-up visit created.`
+        : tr.common_active;
+      setForm(buildFollowUpVisitForm(detail, form.reminderUserId, tr.phase_followup));
+      onCreated({ id: result.id, notice });
+    } catch (submitError) {
+      setError(
+        submitError instanceof Error
+          ? submitError.message
+          : tr.common_failed_create,
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className={sectionCardClass}>
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-950">
+            Follow-up visit planning
+          </h3>
+          <p className="text-xs text-slate-500">
+            Schedule the next control visit or examination directly from the
+            current appointment context.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {FOLLOW_UP_PRESETS.map((preset) => (
+            <Button
+              key={preset.id}
+              type="button"
+              variant="outline"
+              size="sm"
+              className="rounded-2xl"
+              onClick={() => applyPreset(preset)}
+            >
+              {preset.label}
+            </Button>
+          ))}
+        </div>
+      </div>
+      {error ? (
+        <div className="mt-4">
+          <Banner tone="error" withIcon>{error}</Banner>
+        </div>
+      ) : null}
+      <form onSubmit={handleSubmit} className="mt-4 space-y-4">
+        <Field label={t.appointments_title_col}>
+          <Input
+            value={form.title}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, title: event.target.value }))
+            }
+            className="h-10 rounded-xl bg-slate-50"
+            required
+          />
+        </Field>
+        <div className="grid gap-4 md:grid-cols-3">
+          <Field label={t.appointments_date}>
+            <Input
+              type="date"
+              value={form.date}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, date: event.target.value }))
+              }
+              className="h-10 rounded-xl bg-slate-50"
+              required
+            />
+          </Field>
+          <Field label={t.appointments_time}>
+            <Input
+              type="time"
+              value={form.timeStart}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  timeStart: event.target.value,
+                }))
+              }
+              className="h-10 rounded-xl bg-slate-50"
+            />
+          </Field>
+          <Field label={t.appointments_time}>
+            <Input
+              type="time"
+              value={form.timeEnd}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  timeEnd: event.target.value,
+                }))
+              }
+              className="h-10 rounded-xl bg-slate-50"
+            />
+          </Field>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field label={t.common_provider}>
+            <select
+              value={form.providerId}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  providerId: event.target.value,
+                  doctorId: "",
+                }))
+              }
+              className={selectClassName}
+              disabled={form.appointmentType === "internal"}
+            >
+              <option value="">{t.common_not_set}</option>
+              {providers.map((provider) => (
+                <option key={provider.id} value={provider.id}>
+                  {provider.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label={t.common_doctor}>
+            <select
+              value={form.doctorId}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  doctorId: event.target.value,
+                }))
+              }
+              className={selectClassName}
+              disabled={!form.providerId}
+            >
+              <option value="">{t.common_not_set}</option>
+              {doctors.map((doctor) => (
+                <option key={doctor.id} value={doctor.id}>
+                  {doctorLabel(doctor)}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field label={t.patients_assign_owner}>
+            <select
+              value={form.ownerUserId}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  ownerUserId: event.target.value,
+                }))
+              }
+              className={selectClassName}
+            >
+              <option value="">{t.common_not_set}</option>
+              {staff.map((member) => (
+                <option key={member.id} value={member.id}>
+                  {member.name} · {roleLabel(member.role)}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label={interpreterFieldLabel}>
+            <select
+              value={form.interpreterId}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  interpreterId: event.target.value,
+                }))
+              }
+              className={selectClassName}
+            >
+              <option value="">{t.common_not_set}</option>
+              {interpreters.map((member) => (
+                <option key={member.id} value={member.id}>
+                  {member.name} · {roleLabel(member.role)}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field
+            label={appointmentText(
+              "Versorgungspfad",
+              "Траектория лечения",
+              "Care path",
+            )}
+          >
+            <select
+              value={form.carePathKind}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  carePathKind: event.target.value as AppointmentCarePathKind,
+                }))
+              }
+              className={selectClassName}
+              disabled={form.appointmentType !== "medical"}
+            >
+              {CARE_PATH_KIND_OPTIONS.map((value) => (
+                <option key={value} value={value}>
+                  {carePathKindLabel(value)}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label={t.appointments_location}>
+            <Input
+              value={form.location}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  location: event.target.value,
+                }))
+              }
+              className="h-10 rounded-xl bg-slate-50"
+            />
+          </Field>
+          <Field label={tr.documents_category}>
+            <Input
+              value={form.category}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  category: event.target.value,
+                }))
+              }
+              className="h-10 rounded-xl bg-slate-50"
+            />
+          </Field>
+        </div>
+        <Field label={t.patients_notes}>
+          <textarea
+            value={form.notes}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, notes: event.target.value }))
+            }
+            className={textareaClassName}
+            rows={4}
+            placeholder={withEllipsis(tr.patients_notes)}
+          />
+        </Field>
+        {detail.order_id ? (
+          <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              checked={form.linkOrder}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  linkOrder: event.target.checked,
+                }))
+              }
+              className="mt-0.5 size-4 rounded border-slate-300 text-slate-950"
+            />
+            <span>{tr.providers_linked_patients}</span>
+          </label>
+        ) : null}
+        <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_220px]">
+          <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              checked={form.createReminder}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  createReminder: event.target.checked,
+                }))
+              }
+              className="mt-0.5 size-4 rounded border-slate-300 text-slate-950"
+            />
+            <span>Create a preparation reminder on the new follow-up visit.</span>
+          </label>
+          <Field label={tr.patients_assign_owner}>
+            <select
+              value={form.reminderUserId}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  reminderUserId: event.target.value,
+                }))
+              }
+              className={selectClassName}
+              disabled={!form.createReminder}
+            >
+              <option value="">{tr.common_not_set}</option>
+              {staff.map((member) => (
+                <option key={member.id} value={member.id}>
+                  {member.name} · {roleLabel(member.role)}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+        {form.createReminder ? (
+          <Field label={tr.appointments_date}>
+            <Input
+              type="datetime-local"
+              value={form.reminderAt}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  reminderAt: event.target.value,
+                }))
+              }
+              className="h-10 rounded-xl bg-slate-50"
+            />
+          </Field>
+        ) : null}
+        <ConflictPanel conflicts={conflicts} />
+        <ScheduleWarningsPanel warnings={localWarnings} />
+        <div className="flex justify-end">
+          <Button
+            type="submit"
+            className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+            disabled={busy || !form.title.trim()}
+          >
+            {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+            {appointmentText(
+              "Follow-up-Termin erstellen",
+              "Создать follow-up приём",
+              "Create follow-up visit",
+            )}
+          </Button>
+        </div>
+      </form>
+    </section>
+  );
+}
+
+const MemoizedAppointmentFollowUpVisitSection = memo(
+  AppointmentFollowUpVisitSection,
+);
+
+export { MemoizedAppointmentFollowUpVisitSection };

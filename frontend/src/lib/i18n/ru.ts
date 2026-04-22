@@ -222,6 +222,9 @@ export const ru: Translations = {
   insurance_foreign: "Иностранная",
 
   patients_first_name: "Имя",
+  patients_col_age: "Возраст",
+  patients_created_at: "Создан",
+  patients_functional_labels: "Метки",
   patients_birth_date: "Дата рождения",
   patients_nationality: "Гражданство",
   patients_residence_country: "Страна проживания",
