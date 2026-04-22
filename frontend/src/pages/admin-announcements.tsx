@@ -63,6 +63,11 @@ function compactDt(dt: string | null | undefined): string {
   return dt.split("T")[0] ?? dt;
 }
 
+function toDateTimeLocalInput(value: Date): string {
+  const tzOffsetMs = value.getTimezoneOffset() * 60_000;
+  return new Date(value.getTime() - tzOffsetMs).toISOString().slice(0, 16);
+}
+
 export function AdminAnnouncementsPage() {
   const { t } = useLang();
 
@@ -77,6 +82,7 @@ export function AdminAnnouncementsPage() {
   const [fMsg, setFMsg] = useState("");
   const [fVariant, setFVariant] = useState("info");
   const [fEnds, setFEnds] = useState("");
+  const [minAnnouncementEndsAt, setMinAnnouncementEndsAt] = useState(() => toDateTimeLocalInput(new Date()));
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -95,11 +101,24 @@ export function AdminAnnouncementsPage() {
     void load();
   }, [load]);
 
+  useEffect(() => {
+    if (!showCreate) {
+      return;
+    }
+    setMinAnnouncementEndsAt(toDateTimeLocalInput(new Date()));
+  }, [showCreate]);
+
   const onCreate = async (ev: FormEvent) => {
     ev.preventDefault();
     setCreating(true);
     setCreateError("");
     try {
+      const normalizedEndsAt = fEnds.trim();
+      if (normalizedEndsAt && Number.isNaN(new Date(normalizedEndsAt).getTime())) {
+        setCreateError(t.common_error);
+        return;
+      }
+
       await apiFetch("/admin/announcements", {
         method: "POST",
         body: JSON.stringify({
@@ -108,7 +127,7 @@ export function AdminAnnouncementsPage() {
           variant: fVariant,
           is_active: true,
           starts_at: null,
-          ends_at: fEnds.trim() || null,
+          ends_at: normalizedEndsAt || null,
         }),
       });
       setShowCreate(false);
@@ -306,6 +325,7 @@ export function AdminAnnouncementsPage() {
                     type="datetime-local"
                     value={fEnds}
                     onChange={(e) => setFEnds(e.target.value)}
+                    min={minAnnouncementEndsAt}
                     className="h-9 rounded-lg bg-card"
                   />
                 </Field>
