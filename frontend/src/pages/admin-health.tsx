@@ -8,10 +8,13 @@ import {
 } from "lucide-react";
 
 import {
+  AdminSheetScaffold,
   AdminInlineMetric,
   AdminTableCard,
 } from "@/components/admin-page-patterns";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { formatAdminDateTime } from "@/pages/admin-pages.helpers";
@@ -47,12 +50,15 @@ interface HealthData {
   };
 }
 
+type HealthDetailPanel = "database" | "access" | "data";
+
 export function AdminHealthPage() {
   const { t, lang } = useLang();
   const [data, setData] = useState<HealthData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [refreshedAt, setRefreshedAt] = useState<Date | null>(null);
+  const [detailPanel, setDetailPanel] = useState<HealthDetailPanel | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -88,6 +94,41 @@ export function AdminHealthPage() {
   const datasetVolume = data
     ? data.data.patients + data.data.leads + data.data.orders
     : 0;
+
+  const detailMeta = useMemo(() => {
+    if (!data || !detailPanel) {
+      return null;
+    }
+
+    if (detailPanel === "database") {
+      return {
+        title: t.health_section_database,
+        description: `${t.health_db_size}: ${data.database.size}`,
+      };
+    }
+
+    if (detailPanel === "access") {
+      return {
+        title: t.health_section_access,
+        description: `${t.health_sessions_active}: ${data.sessions.active}`,
+      };
+    }
+
+    return {
+      title: t.health_section_data,
+      description: `${t.health_data}: ${datasetVolume}`,
+    };
+  }, [
+    data,
+    datasetVolume,
+    detailPanel,
+    t.health_data,
+    t.health_db_size,
+    t.health_section_access,
+    t.health_section_data,
+    t.health_section_database,
+    t.health_sessions_active,
+  ]);
 
   return (
     <div className="space-y-4">
@@ -146,6 +187,33 @@ export function AdminHealthPage() {
               value={datasetVolume}
               description={`${data.data.audit_entries} ${t.health_audit_suffix}`}
             />
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="h-8 rounded-lg bg-card px-3 text-[12px]"
+              onClick={() => setDetailPanel("database")}
+            >
+              {t.health_section_database}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-8 rounded-lg bg-card px-3 text-[12px]"
+              onClick={() => setDetailPanel("access")}
+            >
+              {t.health_section_access}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-8 rounded-lg bg-card px-3 text-[12px]"
+              onClick={() => setDetailPanel("data")}
+            >
+              {t.health_section_data}
+            </Button>
           </div>
 
           {operationalAttention.length > 0 ? (
@@ -271,6 +339,91 @@ export function AdminHealthPage() {
           <EmptyCell>{t.health_subtitle}</EmptyCell>
         </Section>
       ) : null}
+
+      <Sheet open={Boolean(detailPanel && data)} onOpenChange={(open) => !open && setDetailPanel(null)}>
+        <SheetContent side="right" className="w-full sm:max-w-[720px]">
+          {data && detailPanel && detailMeta ? (
+            <AdminSheetScaffold title={detailMeta.title} description={detailMeta.description}>
+              {detailPanel === "database" ? (
+                <section className="space-y-4 rounded-xl border border-border/60 bg-card p-3.5">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
+                      <div className="text-xs text-muted-foreground">{t.health_db_size}</div>
+                      <div className="mt-1 text-base font-semibold">{data.database.size}</div>
+                    </div>
+                    <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
+                      <div className="text-xs text-muted-foreground">{t.health_connections}</div>
+                      <div className="mt-1 text-base font-semibold">{data.database.active_connections}</div>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    {data.database.tables.map((table) => (
+                      <div key={table.table} className="flex items-center justify-between rounded-lg border border-border/50 bg-background px-3 py-2">
+                        <span className="text-sm font-medium text-foreground">{table.table}</span>
+                        <span className="font-mono text-xs text-muted-foreground">{table.size}</span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              ) : null}
+
+              {detailPanel === "access" ? (
+                <section className="space-y-4 rounded-xl border border-border/60 bg-card p-3.5">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
+                      <div className="text-xs text-muted-foreground">{t.health_users_total}</div>
+                      <div className="mt-1 text-base font-semibold">{data.users.total}</div>
+                    </div>
+                    <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
+                      <div className="text-xs text-muted-foreground">{t.health_users_active}</div>
+                      <div className="mt-1 text-base font-semibold">{data.users.active}</div>
+                    </div>
+                    <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
+                      <div className="text-xs text-muted-foreground">{t.health_users_locked}</div>
+                      <div className="mt-1 text-base font-semibold">{data.users.locked}</div>
+                    </div>
+                    <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
+                      <div className="text-xs text-muted-foreground">{t.health_sessions_active}</div>
+                      <div className="mt-1 text-base font-semibold">{data.sessions.active}</div>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Badge className="bg-amber-500/15 text-amber-700">
+                      {t.health_mfa_pending}: {data.sessions.pending_mfa}
+                    </Badge>
+                    <Badge className="bg-rose-500/15 text-rose-700">
+                      {t.health_users_locked}: {data.users.locked}
+                    </Badge>
+                  </div>
+                </section>
+              ) : null}
+
+              {detailPanel === "data" ? (
+                <section className="space-y-4 rounded-xl border border-border/60 bg-card p-3.5">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
+                      <div className="text-xs text-muted-foreground">{t.patients_title}</div>
+                      <div className="mt-1 text-base font-semibold">{data.data.patients}</div>
+                    </div>
+                    <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
+                      <div className="text-xs text-muted-foreground">{t.nav_crm}</div>
+                      <div className="mt-1 text-base font-semibold">{data.data.leads}</div>
+                    </div>
+                    <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
+                      <div className="text-xs text-muted-foreground">{t.orders_title}</div>
+                      <div className="mt-1 text-base font-semibold">{data.data.orders}</div>
+                    </div>
+                    <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
+                      <div className="text-xs text-muted-foreground">{t.activity_title}</div>
+                      <div className="mt-1 text-base font-semibold">{data.data.audit_entries}</div>
+                    </div>
+                  </div>
+                </section>
+              ) : null}
+            </AdminSheetScaffold>
+          ) : null}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

@@ -19,6 +19,7 @@ import {
 import {
   AdminInlineMetric,
   AdminSheetScaffold,
+  SheetActionsFooter,
   AdminToolbar,
   AdminTableCard,
 } from "@/components/admin-page-patterns";
@@ -120,7 +121,7 @@ function activityInitials(name: string): string {
 }
 
 function prettyContext(context: Record<string, unknown> | null) {
-  return context ? JSON.stringify(context, null, 2) : "\u2014";
+  return context ? JSON.stringify(context, null, 2) : "-";
 }
 
 export function AdminActivityPage() {
@@ -395,7 +396,7 @@ export function AdminActivityPage() {
                 : t.activity_subtitle
             }
             footer={(
-              <div className="shrink-0 flex justify-end gap-2 bg-popover px-4 py-3">
+              <SheetActionsFooter>
                 <Button
                   type="button"
                   variant="outline"
@@ -404,35 +405,44 @@ export function AdminActivityPage() {
                 >
                   {t.common_cancel}
                 </Button>
-              </div>
+              </SheetActionsFooter>
             )}
           >
             {selectedActivity ? (
               <>
                 <section className={`space-y-3 rounded-xl p-3.5 ${tokens.surface.softCard}`}>
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <StatusBadge tone={actionTone(selectedActivity.action)}>
-                      {actionLabel(selectedActivity.action)}
-                    </StatusBadge>
-                    <StatusBadge tone="neutral">
-                      {entityDisplay(selectedActivity.entity_type, selectedActivity.entity_id)}
-                    </StatusBadge>
-                  </div>
+                  <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
+                    {t.activity_details}
+                  </h3>
 
-                  <div className="grid gap-3 md:grid-cols-2">
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                     <div className="rounded-lg border border-border/50 bg-card/60 px-3 py-2.5">
-                      <p className="text-[11.5px] text-muted-foreground">{t.activity_user}</p>
+                      <p className="text-[11.5px] text-muted-foreground">Actor</p>
                       <p className="mt-1 text-sm font-medium text-foreground">
-                        {selectedActivity.user_name}
+                        {selectedActivity.user_name || "-"}
                       </p>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        {selectedActivity.user_email}
+                        {selectedActivity.user_email || "-"}
                       </p>
                     </div>
                     <div className="rounded-lg border border-border/50 bg-card/60 px-3 py-2.5">
-                      <p className="text-[11.5px] text-muted-foreground">{t.activity_time}</p>
+                      <p className="text-[11.5px] text-muted-foreground">Action</p>
+                      <div className="mt-1">
+                        <StatusBadge tone={actionTone(selectedActivity.action)}>
+                          {actionLabel(selectedActivity.action)}
+                        </StatusBadge>
+                      </div>
+                    </div>
+                    <div className="rounded-lg border border-border/50 bg-card/60 px-3 py-2.5">
+                      <p className="text-[11.5px] text-muted-foreground">Entity</p>
                       <p className="mt-1 text-sm font-medium text-foreground">
-                        {formatAdminDateTime(selectedActivity.created_at, lang)}
+                        {entityDisplay(selectedActivity.entity_type, selectedActivity.entity_id) || "-"}
+                      </p>
+                    </div>
+                    <div className="rounded-lg border border-border/50 bg-card/60 px-3 py-2.5">
+                      <p className="text-[11.5px] text-muted-foreground">Timestamp</p>
+                      <p className="mt-1 text-sm font-medium text-foreground">
+                        {formatAdminDateTime(selectedActivity.created_at, lang) || "-"}
                       </p>
                     </div>
                   </div>
@@ -440,7 +450,7 @@ export function AdminActivityPage() {
 
                 <section className={`space-y-3 rounded-xl p-3.5 ${tokens.surface.softCard}`}>
                   <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
-                    {t.activity_details}
+                    Payload
                   </h3>
                   <pre className="overflow-x-auto rounded-lg border border-border/50 bg-card/60 p-3 text-xs leading-6 text-muted-foreground">
                     {prettyContext(selectedActivity.context)}

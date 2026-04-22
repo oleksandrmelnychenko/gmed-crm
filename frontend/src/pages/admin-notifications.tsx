@@ -22,6 +22,8 @@ import {
 import {
   AdminInlineMetric,
   AdminSheetScaffold,
+  SheetActionsFooter,
+  SheetFormFooter,
   AdminToolbar,
   AdminTableCard,
 } from "@/components/admin-page-patterns";
@@ -481,28 +483,12 @@ export function AdminNotificationsPage() {
               title={t.notif_new}
               description={t.notif_subtitle}
               footer={(
-                <div className="shrink-0 flex justify-end gap-2 bg-popover px-4 py-3">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-9 rounded-lg"
-                    onClick={() => handleCreateOpenChange(false)}
-                  >
-                    {t.common_cancel}
-                  </Button>
-                  <Button
-                    type="submit"
-                    className="h-9 rounded-lg gap-1.5 px-3.5"
-                    disabled={submitting}
-                  >
-                    {submitting ? (
-                      <LoaderCircle className="size-4 animate-spin" />
-                    ) : (
-                      <Plus className="size-4" />
-                    )}
-                    {t.common_create}
-                  </Button>
-                </div>
+                <SheetFormFooter
+                  cancelLabel={t.common_cancel}
+                  submitLabel={t.common_create}
+                  submitting={submitting}
+                  onCancel={() => handleCreateOpenChange(false)}
+                />
               )}
             >
               {formError ? <Banner tone="error">{formError}</Banner> : null}
@@ -556,7 +542,7 @@ export function AdminNotificationsPage() {
             title={selectedChannel?.name ?? t.notif_title}
             description={selectedChannel ? selectedChannel.id : t.notif_subtitle}
             footer={(
-              <div className="shrink-0 flex justify-end gap-2 bg-popover px-4 py-3">
+              <SheetActionsFooter>
                 <Button
                   type="button"
                   variant="outline"
@@ -590,7 +576,7 @@ export function AdminNotificationsPage() {
                     </Button>
                   </>
                 ) : null}
-              </div>
+              </SheetActionsFooter>
             )}
           >
             {selectedChannel ? (

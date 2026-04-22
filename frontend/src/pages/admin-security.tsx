@@ -13,6 +13,7 @@ import {
 import {
   AdminInlineMetric,
   AdminSheetScaffold,
+  SheetActionsFooter,
   AdminTableCard,
 } from "@/components/admin-page-patterns";
 import { Button } from "@/components/ui/button";
@@ -191,6 +192,10 @@ export function AdminSecurityPage() {
   }
 
   async function saveMaintenance(enabled: boolean) {
+    if (enabled && !maintEnabled && !window.confirm(t.security_maintenance_hint)) {
+      return;
+    }
+
     setMaintBusy(true);
     setMaintError("");
     setFlash(null);
@@ -658,7 +663,7 @@ export function AdminSecurityPage() {
             title={t.security_maintenance}
             description={t.security_subtitle}
             footer={(
-              <div className="shrink-0 flex justify-end gap-2 bg-popover px-4 py-3">
+              <SheetActionsFooter>
                 <Button
                   type="button"
                   variant="outline"
@@ -689,7 +694,7 @@ export function AdminSecurityPage() {
                   {maintBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
                   {maintEnabled ? t.common_save : t.security_maintenance_on}
                 </Button>
-              </div>
+              </SheetActionsFooter>
             )}
           >
             {maintError ? <Banner tone="error">{maintError}</Banner> : null}
@@ -726,7 +731,7 @@ export function AdminSecurityPage() {
               title={t.security_ip_add}
               description={t.security_ip_add_hint}
               footer={(
-                <div className="shrink-0 flex justify-end gap-2 bg-popover px-4 py-3">
+                <SheetActionsFooter>
                   <Button
                     type="button"
                     variant="outline"
@@ -743,7 +748,7 @@ export function AdminSecurityPage() {
                     {ipBusy ? <LoaderCircle className="size-4 animate-spin" /> : <Plus className="size-4" />}
                     {t.security_ip_add}
                   </Button>
-                </div>
+                </SheetActionsFooter>
               )}
             >
               {ipError ? <Banner tone="error">{ipError}</Banner> : null}

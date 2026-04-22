@@ -16,6 +16,7 @@ import {
 import { useSearchParams } from "react-router-dom";
 
 import {
+  AdminSheetScaffold,
   AdminInlineMetric,
   AdminTableCard,
 } from "@/components/admin-page-patterns";
@@ -29,6 +30,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import {
   Table,
   TableBody,
@@ -313,6 +315,10 @@ export function AdminCompliancePage() {
   const [privacyActionBusy, setPrivacyActionBusy] = useState<string | null>(
     null,
   );
+  const [consentSheetOpen, setConsentSheetOpen] = useState(false);
+  const [privacySheetOpen, setPrivacySheetOpen] = useState(false);
+  const [reviewSheetRecord, setReviewSheetRecord] =
+    useState<PrivacyRequestRecord | null>(null);
 
   const [exportResult, setExportResult] = useState<string | null>(null);
   const [actionError, setActionError] = useState("");
@@ -577,8 +583,10 @@ export function AdminCompliancePage() {
           ? loadPatientWorkspace(patientId)
           : Promise.resolve(),
       ]);
+      return true;
     } catch (error) {
       setActionError(error instanceof Error ? error.message : String(error));
+      return false;
     } finally {
       setPrivacyActionBusy(null);
     }
@@ -593,7 +601,7 @@ export function AdminCompliancePage() {
       requestType === "erasure" &&
       !window.confirm(t.compliance_anonymize_confirm)
     ) {
-      return;
+      return false;
     }
 
     const busyToken = `${requestId}:execute`;
@@ -614,12 +622,36 @@ export function AdminCompliancePage() {
           ? loadPatientWorkspace(patientId)
           : Promise.resolve(),
       ]);
+      return true;
     } catch (error) {
       setActionError(error instanceof Error ? error.message : String(error));
+      return false;
     } finally {
       setPrivacyActionBusy(null);
     }
   };
+
+  const reviewSheetImpactSummary = useMemo(() => {
+    if (!reviewSheetRecord) {
+      return [];
+    }
+    return [
+      `${t.compliance_col_due}: ${compactDt(reviewSheetRecord.due_at)}`,
+      `${t.compliance_col_retention_until}: ${compactDt(
+        reviewSheetRecord.retention_until,
+      )}`,
+      `${t.compliance_col_linked_records}: ${recordSummaryLabel(
+        reviewSheetRecord.record_summary,
+      )}`,
+      `${t.compliance_col_notes}: ${privacyNotesLabel(reviewSheetRecord)}`,
+    ];
+  }, [
+    reviewSheetRecord,
+    t.compliance_col_due,
+    t.compliance_col_linked_records,
+    t.compliance_col_notes,
+    t.compliance_col_retention_until,
+  ]);
 
   const doExport = async () => {
     const targetPatientId = (activePatientId || patientInput).trim();
@@ -757,65 +789,22 @@ export function AdminCompliancePage() {
 
             {patientError ? <Banner tone="error">{patientError}</Banner> : null}
 
-            <div className={cn("grid gap-4 rounded-xl p-3.5 xl:grid-cols-[minmax(0,220px)_minmax(0,1fr)_220px_auto]", tokens.surface.card)}>
-              <Field label={t.compliance_consent_type_label}>
-                <Select
-                  value={consentType}
-                  onValueChange={(value) => setConsentType(value ?? CONSENT_TYPE_VALUES[0])}
-                >
-                  <SelectTrigger className="h-9 w-full rounded-lg bg-card">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {CONSENT_TYPE_VALUES.map((value) => (
-                      <SelectItem key={value} value={value}>
-                        {consentTypeLabel(value, t)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Field label={t.compliance_operational_note} htmlFor="consent-note">
-                <textarea
-                  id="consent-note"
-                  value={consentNote}
-                  onChange={(event) => setConsentNote(event.target.value)}
-                  placeholder={t.compliance_consent_note_placeholder}
-                  rows={3}
-                  className={textareaClass}
-                />
-              </Field>
-              <Field label={t.compliance_expiry_date} htmlFor="consent-expires-at">
-                <Input
-                  id="consent-expires-at"
-                  type="date"
-                  value={consentExpiresAt}
-                  onChange={(event) => setConsentExpiresAt(event.target.value)}
-                  className="h-9 rounded-lg bg-card"
-                />
-                <p className="mt-2 text-xs text-muted-foreground">
-                  {t.compliance_expiry_hint}
-                </p>
-              </Field>
-              <div className="flex flex-col justify-end gap-2">
-                <Button
-                  type="button"
-                  className="h-9 rounded-lg"
-                  disabled={consentBusy !== null}
-                  onClick={() => void handleConsentAction("grant")}
-                >
-                  {consentBusy === "grant" ? t.compliance_saving : t.compliance_grant_consent}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-9 rounded-lg"
-                  disabled={consentBusy !== null}
-                  onClick={() => void handleConsentAction("revoke")}
-                >
-                  {consentBusy === "revoke" ? t.compliance_saving : t.compliance_revoke_consent}
-                </Button>
+            <div className={cn("flex flex-wrap items-center justify-between gap-3 rounded-xl p-3.5", tokens.surface.card)}>
+              <div className="space-y-1.5">
+                <div className="text-xs text-muted-foreground">{t.compliance_consent_type_label}</div>
+                <Badge className="bg-sky-500/15 text-sky-700">
+                  {consentTypeLabel(consentType, t)}
+                </Badge>
+                <p className="text-xs text-muted-foreground">{t.compliance_expiry_hint}</p>
               </div>
+              <Button
+                type="button"
+                className="h-9 rounded-lg px-3.5"
+                disabled={consentBusy !== null || (!activePatientId && !patientInput.trim())}
+                onClick={() => setConsentSheetOpen(true)}
+              >
+                {t.activity_details}
+              </Button>
             </div>
 
             <AdminTableCard
@@ -904,51 +893,22 @@ export function AdminCompliancePage() {
               </div>
             )}
           >
-            <div className={cn("grid gap-4 rounded-xl p-3.5 xl:grid-cols-[minmax(0,220px)_minmax(0,1fr)_auto]", tokens.surface.card)}>
-              <Field label={t.compliance_request_type_label}>
-                <Select
-                  value={privacyRequestType}
-                  onValueChange={(value) =>
-                    setPrivacyRequestType(
-                      (value ?? PRIVACY_REQUEST_TYPE_VALUES[0]) as PrivacyRequestType,
-                    )
-                  }
-                >
-                  <SelectTrigger className="h-9 w-full rounded-lg bg-card">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PRIVACY_REQUEST_TYPE_VALUES.map((value) => (
-                      <SelectItem key={value} value={value}>
-                        {privacyRequestTypeLabel(value, t)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Field label={t.compliance_request_reason} htmlFor="privacy-request-reason">
-                <textarea
-                  id="privacy-request-reason"
-                  value={privacyReason}
-                  onChange={(event) => setPrivacyReason(event.target.value)}
-                  placeholder={t.compliance_request_reason_placeholder}
-                  rows={3}
-                  className={textareaClass}
-                />
-              </Field>
-              <div className="flex flex-col justify-end gap-2">
-                <Button
-                  type="button"
-                  className="h-9 rounded-lg"
-                  disabled={privacyCreateBusy}
-                  onClick={() => void handleCreatePrivacyRequest()}
-                >
-                  {privacyCreateBusy ? t.compliance_saving : t.compliance_create_request}
-                </Button>
-                <p className="max-w-40 text-xs text-muted-foreground">
-                  {t.compliance_new_request_hint}
-                </p>
+            <div className={cn("flex flex-wrap items-center justify-between gap-3 rounded-xl p-3.5", tokens.surface.card)}>
+              <div className="space-y-1.5">
+                <div className="text-xs text-muted-foreground">{t.compliance_request_type_label}</div>
+                <Badge className="bg-amber-500/15 text-amber-700">
+                  {privacyRequestTypeLabel(privacyRequestType, t)}
+                </Badge>
+                <p className="text-xs text-muted-foreground">{t.compliance_new_request_hint}</p>
               </div>
+              <Button
+                type="button"
+                className="h-9 rounded-lg px-3.5"
+                disabled={privacyCreateBusy || (!activePatientId && !patientInput.trim())}
+                onClick={() => setPrivacySheetOpen(true)}
+              >
+                {t.compliance_create_request}
+              </Button>
             </div>
 
             <AdminTableCard
@@ -1204,10 +1164,11 @@ export function AdminCompliancePage() {
                   </TableHeader>
                   <TableBody>
                     {privacyQueue.map((record) => {
-                      const executeBusy = privacyActionBusy === `${record.id}:execute`;
-                      const approveBusy = privacyActionBusy === `${record.id}:approve`;
-                      const holdBusy = privacyActionBusy === `${record.id}:hold`;
-                      const rejectBusy = privacyActionBusy === `${record.id}:reject`;
+                      const isActionable =
+                        record.status === "requested" ||
+                        record.status === "retention_hold" ||
+                        (record.status === "approved" &&
+                          canExecutePrivacyRequest(user?.role, record.request_type));
 
                       return (
                         <TableRow key={record.id}>
@@ -1245,73 +1206,24 @@ export function AdminCompliancePage() {
                             {privacyNotesLabel(record)}
                           </TableCell>
                           <TableCell>
-                            <div className="flex flex-wrap gap-2">
-                              {(record.status === "requested" || record.status === "retention_hold") ? (
-                                <>
-                                  <Button
-                                    type="button"
-                                    size="sm"
-                                    variant="outline"
-                                    className="h-8 rounded-lg"
-                                    disabled={privacyActionBusy !== null}
-                                    onClick={() =>
-                                      void handleReviewPrivacyRequest(record.id, record.patient_id, "approve")
-                                    }
-                                  >
-                                    {approveBusy ? t.compliance_saving : t.compliance_approve}
-                                  </Button>
-                                  <Button
-                                    type="button"
-                                    size="sm"
-                                    variant="outline"
-                                    className="h-8 rounded-lg"
-                                    disabled={privacyActionBusy !== null}
-                                    onClick={() =>
-                                      void handleReviewPrivacyRequest(record.id, record.patient_id, "hold")
-                                    }
-                                  >
-                                    {holdBusy ? t.compliance_saving : t.compliance_hold}
-                                  </Button>
-                                  <Button
-                                    type="button"
-                                    size="sm"
-                                    variant="outline"
-                                    className="h-8 rounded-lg"
-                                    disabled={privacyActionBusy !== null}
-                                    onClick={() =>
-                                      void handleReviewPrivacyRequest(record.id, record.patient_id, "reject")
-                                    }
-                                  >
-                                    {rejectBusy ? t.compliance_saving : t.compliance_reject}
-                                  </Button>
-                                </>
-                              ) : null}
-
-                              {record.status === "approved" &&
-                              canExecutePrivacyRequest(user?.role, record.request_type) ? (
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant={record.request_type === "erasure" ? "destructive" : "outline"}
-                                  className="h-8 rounded-lg"
-                                  disabled={privacyActionBusy !== null}
-                                  onClick={() =>
-                                    void handleExecutePrivacyRequest(record.id, record.patient_id, record.request_type)
-                                  }
-                                >
-                                  {record.request_type === "erasure" ? (
-                                    <ShieldAlert className="mr-1 size-4" />
-                                  ) : null}
-                                  {executeBusy ? t.compliance_executing : t.compliance_execute}
-                                </Button>
-                              ) : null}
-
-                              {record.status === "completed" && record.executed_at ? (
-                                <span className="text-xs text-slate-500">
-                                  {t.compliance_executed_label} {compactDt(record.executed_at)}
-                                </span>
-                              ) : null}
-                            </div>
+                            {isActionable ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="h-8 rounded-lg"
+                                disabled={privacyActionBusy !== null}
+                                onClick={() => setReviewSheetRecord(record)}
+                              >
+                                {t.activity_details}
+                              </Button>
+                            ) : record.status === "completed" && record.executed_at ? (
+                              <span className="text-xs text-slate-500">
+                                {t.compliance_executed_label} {compactDt(record.executed_at)}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-slate-500">-</span>
+                            )}
                           </TableCell>
                         </TableRow>
                       );
@@ -1321,6 +1233,274 @@ export function AdminCompliancePage() {
               )}
             </AdminTableCard>
           </Section>
+
+          <Sheet open={consentSheetOpen} onOpenChange={setConsentSheetOpen}>
+            <SheetContent side="right" className="w-full sm:max-w-[720px]">
+              <AdminSheetScaffold
+                title={t.compliance_consent_type_label}
+                description={activePatientLabel}
+              >
+                <section className={cn("space-y-4 rounded-xl p-3.5", tokens.surface.softCard)}>
+                  <Field label={t.compliance_consent_type_label}>
+                    <Select
+                      value={consentType}
+                      onValueChange={(value) => setConsentType(value ?? CONSENT_TYPE_VALUES[0])}
+                    >
+                      <SelectTrigger className="h-9 w-full rounded-lg bg-card">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {CONSENT_TYPE_VALUES.map((value) => (
+                          <SelectItem key={value} value={value}>
+                            {consentTypeLabel(value, t)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field label={t.compliance_operational_note} htmlFor="consent-note">
+                    <textarea
+                      id="consent-note"
+                      value={consentNote}
+                      onChange={(event) => setConsentNote(event.target.value)}
+                      placeholder={t.compliance_consent_note_placeholder}
+                      rows={3}
+                      className={textareaClass}
+                    />
+                  </Field>
+                  <Field label={t.compliance_expiry_date} htmlFor="consent-expires-at">
+                    <Input
+                      id="consent-expires-at"
+                      type="date"
+                      value={consentExpiresAt}
+                      onChange={(event) => setConsentExpiresAt(event.target.value)}
+                      className="h-9 rounded-lg bg-card"
+                    />
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      {t.compliance_expiry_hint}
+                    </p>
+                  </Field>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      className="h-9 rounded-lg"
+                      disabled={consentBusy !== null}
+                      onClick={() => void handleConsentAction("grant")}
+                    >
+                      {consentBusy === "grant" ? t.compliance_saving : t.compliance_grant_consent}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-9 rounded-lg"
+                      disabled={consentBusy !== null}
+                      onClick={() => void handleConsentAction("revoke")}
+                    >
+                      {consentBusy === "revoke" ? t.compliance_saving : t.compliance_revoke_consent}
+                    </Button>
+                  </div>
+                </section>
+              </AdminSheetScaffold>
+            </SheetContent>
+          </Sheet>
+
+          <Sheet open={privacySheetOpen} onOpenChange={setPrivacySheetOpen}>
+            <SheetContent side="right" className="w-full sm:max-w-[720px]">
+              <AdminSheetScaffold
+                title={t.compliance_privacy_requests_title}
+                description={activePatientLabel}
+              >
+                <section className={cn("space-y-4 rounded-xl p-3.5", tokens.surface.softCard)}>
+                  <Field label={t.compliance_request_type_label}>
+                    <Select
+                      value={privacyRequestType}
+                      onValueChange={(value) =>
+                        setPrivacyRequestType(
+                          (value ?? PRIVACY_REQUEST_TYPE_VALUES[0]) as PrivacyRequestType,
+                        )
+                      }
+                    >
+                      <SelectTrigger className="h-9 w-full rounded-lg bg-card">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {PRIVACY_REQUEST_TYPE_VALUES.map((value) => (
+                          <SelectItem key={value} value={value}>
+                            {privacyRequestTypeLabel(value, t)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field label={t.compliance_request_reason} htmlFor="privacy-request-reason">
+                    <textarea
+                      id="privacy-request-reason"
+                      value={privacyReason}
+                      onChange={(event) => setPrivacyReason(event.target.value)}
+                      placeholder={t.compliance_request_reason_placeholder}
+                      rows={3}
+                      className={textareaClass}
+                    />
+                  </Field>
+                  <Button
+                    type="button"
+                    className="h-9 rounded-lg"
+                    disabled={privacyCreateBusy}
+                    onClick={() => void handleCreatePrivacyRequest()}
+                  >
+                    {privacyCreateBusy ? t.compliance_saving : t.compliance_create_request}
+                  </Button>
+                </section>
+              </AdminSheetScaffold>
+            </SheetContent>
+          </Sheet>
+
+          <Sheet
+            open={Boolean(reviewSheetRecord)}
+            onOpenChange={(open) => !open && setReviewSheetRecord(null)}
+          >
+            <SheetContent side="right" className="w-full sm:max-w-[720px]">
+              {reviewSheetRecord ? (
+                <AdminSheetScaffold
+                  title={t.compliance_privacy_review_queue}
+                  description={patientLabel(
+                    reviewSheetRecord.patient_pid,
+                    reviewSheetRecord.patient_name,
+                  )}
+                >
+                  <section className={cn("space-y-4 rounded-xl p-3.5", tokens.surface.softCard)}>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge className={privacyStatusBadgeClass(reviewSheetRecord.status)}>
+                        {privacyStatusLabel(reviewSheetRecord.status, t)}
+                      </Badge>
+                      <Badge className="bg-slate-500/15 text-slate-700">
+                        {privacyRequestTypeLabel(reviewSheetRecord.request_type, t)}
+                      </Badge>
+                      {reviewSheetRecord.is_overdue ? (
+                        <Badge className="bg-red-500/15 text-red-700">
+                          {t.compliance_stat_overdue}
+                        </Badge>
+                      ) : null}
+                    </div>
+
+                    <div className="space-y-2 rounded-lg border border-border/60 bg-card p-3">
+                      <p className="text-xs font-medium text-foreground">Impact summary</p>
+                      {reviewSheetImpactSummary.map((line) => (
+                        <p key={line} className="text-xs text-muted-foreground">
+                          {line}
+                        </p>
+                      ))}
+                    </div>
+
+                    {reviewSheetRecord.request_type === "erasure" ? (
+                      <Banner tone="warning" withIcon>
+                        {t.compliance_anonymize_confirm}
+                      </Banner>
+                    ) : null}
+
+                    {reviewSheetRecord.status === "requested" ||
+                    reviewSheetRecord.status === "retention_hold" ? (
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          className="h-9 rounded-lg"
+                          disabled={privacyActionBusy !== null}
+                          onClick={async () => {
+                            const ok = await handleReviewPrivacyRequest(
+                              reviewSheetRecord.id,
+                              reviewSheetRecord.patient_id,
+                              "approve",
+                            );
+                            if (ok) {
+                              setReviewSheetRecord(null);
+                            }
+                          }}
+                        >
+                          {privacyActionBusy === `${reviewSheetRecord.id}:approve`
+                            ? t.compliance_saving
+                            : t.compliance_approve}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-9 rounded-lg"
+                          disabled={privacyActionBusy !== null}
+                          onClick={async () => {
+                            const ok = await handleReviewPrivacyRequest(
+                              reviewSheetRecord.id,
+                              reviewSheetRecord.patient_id,
+                              "hold",
+                            );
+                            if (ok) {
+                              setReviewSheetRecord(null);
+                            }
+                          }}
+                        >
+                          {privacyActionBusy === `${reviewSheetRecord.id}:hold`
+                            ? t.compliance_saving
+                            : t.compliance_hold}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-9 rounded-lg"
+                          disabled={privacyActionBusy !== null}
+                          onClick={async () => {
+                            const ok = await handleReviewPrivacyRequest(
+                              reviewSheetRecord.id,
+                              reviewSheetRecord.patient_id,
+                              "reject",
+                            );
+                            if (ok) {
+                              setReviewSheetRecord(null);
+                            }
+                          }}
+                        >
+                          {privacyActionBusy === `${reviewSheetRecord.id}:reject`
+                            ? t.compliance_saving
+                            : t.compliance_reject}
+                        </Button>
+                      </div>
+                    ) : null}
+
+                    {reviewSheetRecord.status === "approved" &&
+                    canExecutePrivacyRequest(
+                      user?.role,
+                      reviewSheetRecord.request_type,
+                    ) ? (
+                      <Button
+                        type="button"
+                        variant={
+                          reviewSheetRecord.request_type === "erasure"
+                            ? "destructive"
+                            : "outline"
+                        }
+                        className="h-9 rounded-lg"
+                        disabled={privacyActionBusy !== null}
+                        onClick={async () => {
+                          const ok = await handleExecutePrivacyRequest(
+                            reviewSheetRecord.id,
+                            reviewSheetRecord.patient_id,
+                            reviewSheetRecord.request_type,
+                          );
+                          if (ok) {
+                            setReviewSheetRecord(null);
+                          }
+                        }}
+                      >
+                        {reviewSheetRecord.request_type === "erasure" ? (
+                          <ShieldAlert className="mr-1 size-4" />
+                        ) : null}
+                        {privacyActionBusy === `${reviewSheetRecord.id}:execute`
+                          ? t.compliance_executing
+                          : t.compliance_execute}
+                      </Button>
+                    ) : null}
+                  </section>
+                </AdminSheetScaffold>
+              ) : null}
+            </SheetContent>
+          </Sheet>
         </>
       ) : null}
     </div>

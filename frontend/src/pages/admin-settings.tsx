@@ -12,6 +12,7 @@ import {
 import {
   AdminInlineMetric,
   AdminSheetScaffold,
+  SheetActionsFooter,
   AdminTableCard,
 } from "@/components/admin-page-patterns";
 import { Button } from "@/components/ui/button";
@@ -20,6 +21,7 @@ import {
   SheetContent,
 } from "@/components/ui/sheet";
 import { apiFetch } from "@/lib/api";
+import { useSheetDirtyGuard } from "@/hooks/use-sheet-dirty-guard";
 import { useLang } from "@/lib/i18n";
 import {
   formatAdminDateTime,
@@ -193,6 +195,8 @@ export function AdminSettingsPage() {
     () => SETTINGS_GROUPS.find((group) => group.id === selectedGroupId) ?? null,
     [selectedGroupId],
   );
+  const closeUnsavedConfirmMessage =
+    tr.common_discard_unsaved_confirm ?? "Discard unsaved changes?";
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -225,19 +229,16 @@ export function AdminSettingsPage() {
 
   const accessTokenMinutes = editValues.access_token_minutes || "-";
 
-  function closeGroupSheet(open: boolean) {
-    if (!open) {
-      setSelectedGroupId(null);
-      setSheetState({ saving: false, error: "", warning: "" });
-      setEditValues(
-        settings.reduce<Record<string, string>>((acc, row) => {
-          acc[row.key] = normalizeAdminSettingValue(row.value);
-          return acc;
-        }, {}),
-      );
-      return;
-    }
-  }
+  const closeGroupSheet = useCallback(() => {
+    setSelectedGroupId(null);
+    setSheetState({ saving: false, error: "", warning: "" });
+    setEditValues(
+      settings.reduce<Record<string, string>>((acc, row) => {
+        acc[row.key] = normalizeAdminSettingValue(row.value);
+        return acc;
+      }, {}),
+    );
+  }, [settings]);
 
   function updateEditValue(key: string, value: string) {
     setEditValues((current) => ({ ...current, [key]: value }));
@@ -249,6 +250,38 @@ export function AdminSettingsPage() {
 
   const groupHasChanges =
     selectedGroup?.fields.some((field) => hasFieldChanged(field.key)) ?? false;
+
+  const handleGroupSheetOpenChange = useSheetDirtyGuard({
+    isDirty: groupHasChanges,
+    onClose: closeGroupSheet,
+    confirmMessage: closeUnsavedConfirmMessage,
+  });
+
+  const changedFieldLabels = useMemo(() => {
+    if (!selectedGroup) {
+      return [];
+    }
+    return selectedGroup.fields
+      .filter(
+        (field) =>
+          normalizeAdminSettingValue(settingsMap[field.key]?.value) !==
+          (editValues[field.key] ?? ""),
+      )
+      .map((field) => tr[field.labelKey] ?? field.key);
+  }, [selectedGroup, tr, editValues, settingsMap]);
+
+  function openGroupSheet(groupId: SettingsGroupId) {
+    if (
+      selectedGroupId &&
+      selectedGroupId !== groupId &&
+      groupHasChanges &&
+      !window.confirm(closeUnsavedConfirmMessage)
+    ) {
+      return;
+    }
+    setSelectedGroupId(groupId);
+    setSheetState({ saving: false, error: "", warning: "" });
+  }
 
   async function saveSelectedGroup() {
     if (!selectedGroup) return;
@@ -440,8 +473,7 @@ export function AdminSettingsPage() {
                     <ListItem
                       key={group.id}
                       onClick={() => {
-                        setSelectedGroupId(group.id);
-                        setSheetState({ saving: false, error: "", warning: "" });
+                        openGroupSheet(group.id);
                       }}
                     >
                       <div className="flex items-start justify-between gap-3">
@@ -677,18 +709,18 @@ export function AdminSettingsPage() {
         ) : null}
       </div>
 
-      <Sheet open={Boolean(selectedGroup)} onOpenChange={closeGroupSheet}>
+      <Sheet open={Boolean(selectedGroup)} onOpenChange={handleGroupSheetOpenChange}>
         <SheetContent side="right" className="w-full sm:max-w-[860px]">
           <AdminSheetScaffold
             title={selectedGroup ? tr[selectedGroup.titleKey] : t.settings_title}
             description={selectedGroup ? tr[selectedGroup.descriptionKey] : t.settings_subtitle}
             footer={(
-              <div className="shrink-0 flex justify-end gap-2 bg-popover px-4 py-3">
+              <SheetActionsFooter>
                 <Button
                   type="button"
                   variant="outline"
                   className="h-9 rounded-lg"
-                  onClick={() => closeGroupSheet(false)}
+                  onClick={closeGroupSheet}
                 >
                   {t.common_cancel}
                 </Button>
@@ -701,71 +733,90 @@ export function AdminSettingsPage() {
                   {sheetState.saving ? <LoaderCircle className="size-4 animate-spin" /> : null}
                   {t.common_save}
                 </Button>
-              </div>
+              </SheetActionsFooter>
             )}
           >
             {sheetState.error ? <Banner tone="error">{sheetState.error}</Banner> : null}
             {sheetState.warning ? <Banner tone="warning">{sheetState.warning}</Banner> : null}
 
             {selectedGroup ? (
-              <section className={cn("space-y-4 rounded-xl p-3.5", tokens.surface.softCard)}>
-                <div className="flex items-center gap-2">
-                  <StatusBadge tone={groupHasChanges ? "warning" : "neutral"}>
-                    {groupHasChanges ? t.common_edit : t.common_monitoring}
-                  </StatusBadge>
-                </div>
+              <>
+                <section className={cn("space-y-4 rounded-xl p-3.5", tokens.surface.softCard)}>
+                  <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
+                    Overview
+                  </h3>
+                  <div className="flex items-center gap-2">
+                    <StatusBadge tone={groupHasChanges ? "warning" : "neutral"}>
+                      {groupHasChanges ? t.common_edit : t.common_monitoring}
+                    </StatusBadge>
+                  </div>
 
-                <div className="grid gap-4 md:grid-cols-2">
-                  {selectedGroup.fields.map((field) => {
-                    const changed = hasFieldChanged(field.key);
-                    const inputClassName = cn(
-                      field.inputType === "textarea"
-                        ? textareaClass
-                        : "h-9 rounded-lg bg-card",
-                      changed && "border-[var(--brand)] ring-2 ring-[var(--brand)]/10",
-                    );
-                    return (
-                      <Field
-                        key={field.key}
-                        label={tr[field.labelKey] ?? field.key}
-                        htmlFor={`setting-${field.key}`}
-                        className={field.inputType === "textarea" ? "md:col-span-2" : undefined}
-                      >
-                        <>
-                          {settingsMap[field.key]?.description ? (
-                            <p className="mb-2 text-xs text-muted-foreground">
-                              {settingsMap[field.key]?.description}
-                            </p>
-                          ) : null}
-                          {field.inputType === "textarea" ? (
-                            <textarea
-                              id={`setting-${field.key}`}
-                              rows={field.rows ?? 4}
-                              value={editValues[field.key] ?? ""}
-                              onChange={(event) => updateEditValue(field.key, event.target.value)}
-                              className={inputClassName}
-                            />
-                          ) : (
-                            <Input
-                              id={`setting-${field.key}`}
-                              type={field.inputType}
-                              min={field.min}
-                              value={editValues[field.key] ?? ""}
-                              onChange={(event) => updateEditValue(field.key, event.target.value)}
-                              className={inputClassName}
-                            />
-                          )}
-                          {settingsMap[field.key]?.updated_at ? (
-                            <p className="mt-2 text-xs text-muted-foreground">
-                              {t.common_last_updated}: {formatAdminDateTime(settingsMap[field.key].updated_at, lang)}
-                            </p>
-                          ) : null}
-                        </>
-                      </Field>
-                    );
-                  })}
-                </div>
-              </section>
+                  {changedFieldLabels.length > 0 ? (
+                    <div className="rounded-lg border border-amber-200/70 bg-amber-50/60 px-3 py-2.5">
+                      <p className="text-xs font-medium text-amber-700">{t.common_edit}</p>
+                      <p className="mt-1 text-xs text-amber-700/90">
+                        {changedFieldLabels.join(" - ")}
+                      </p>
+                    </div>
+                  ) : null}
+                </section>
+
+                <section className={cn("space-y-4 rounded-xl p-3.5", tokens.surface.softCard)}>
+                  <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
+                    Fields
+                  </h3>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    {selectedGroup.fields.map((field) => {
+                      const changed = hasFieldChanged(field.key);
+                      const inputClassName = cn(
+                        field.inputType === "textarea"
+                          ? textareaClass
+                          : "h-9 rounded-lg bg-card",
+                        changed && "border-[var(--brand)] ring-2 ring-[var(--brand)]/10",
+                      );
+                      return (
+                        <Field
+                          key={field.key}
+                          label={tr[field.labelKey] ?? field.key}
+                          htmlFor={`setting-${field.key}`}
+                          className={field.inputType === "textarea" ? "md:col-span-2" : undefined}
+                        >
+                          <>
+                            {settingsMap[field.key]?.description ? (
+                              <p className="mb-2 text-xs text-muted-foreground">
+                                {settingsMap[field.key]?.description}
+                              </p>
+                            ) : null}
+                            {field.inputType === "textarea" ? (
+                              <textarea
+                                id={`setting-${field.key}`}
+                                rows={field.rows ?? 4}
+                                value={editValues[field.key] ?? ""}
+                                onChange={(event) => updateEditValue(field.key, event.target.value)}
+                                className={inputClassName}
+                              />
+                            ) : (
+                              <Input
+                                id={`setting-${field.key}`}
+                                type={field.inputType}
+                                min={field.min}
+                                value={editValues[field.key] ?? ""}
+                                onChange={(event) => updateEditValue(field.key, event.target.value)}
+                                className={inputClassName}
+                              />
+                            )}
+                            {settingsMap[field.key]?.updated_at ? (
+                              <p className="mt-2 text-xs text-muted-foreground">
+                                {t.common_last_updated}: {formatAdminDateTime(settingsMap[field.key].updated_at, lang)}
+                              </p>
+                            ) : null}
+                          </>
+                        </Field>
+                      );
+                    })}
+                  </div>
+                </section>
+              </>
             ) : null}
           </AdminSheetScaffold>
         </SheetContent>

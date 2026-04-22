@@ -1,7 +1,8 @@
 import { type ReactNode } from "react";
-import { type LucideIcon } from "lucide-react";
+import { LoaderCircle, type LucideIcon } from "lucide-react";
 
 import { CountBadge } from "@/components/ui-shell";
+import { Button } from "@/components/ui/button";
 import {
   SheetDescription,
   SheetHeader,
@@ -131,6 +132,48 @@ export function AdminSheetScaffold({
       </SheetHeader>
       <div className="flex-1 overflow-y-auto px-4 py-2 space-y-4">{children}</div>
       {footer}
+    </div>
+  );
+}
+
+export function SheetFormFooter({
+  cancelLabel,
+  submitLabel,
+  submittingLabel,
+  submitting = false,
+  submitDisabled = false,
+  onCancel,
+}: {
+  cancelLabel: ReactNode;
+  submitLabel: ReactNode;
+  submittingLabel?: ReactNode;
+  submitting?: boolean;
+  submitDisabled?: boolean;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="shrink-0 flex justify-end gap-2 bg-popover px-4 py-3">
+      <Button
+        type="button"
+        variant="outline"
+        className="h-9 rounded-lg"
+        onClick={onCancel}
+        disabled={submitting}
+      >
+        {cancelLabel}
+      </Button>
+      <Button type="submit" className="h-9 rounded-lg" disabled={submitting || submitDisabled}>
+        {submitting ? <LoaderCircle className="size-4 animate-spin" /> : null}
+        {submitting ? (submittingLabel ?? submitLabel) : submitLabel}
+      </Button>
+    </div>
+  );
+}
+
+export function SheetActionsFooter({ children }: { children: ReactNode }) {
+  return (
+    <div className="shrink-0 flex justify-end gap-2 bg-popover px-4 py-3">
+      {children}
     </div>
   );
 }

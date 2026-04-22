@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { LoaderCircle, Plus, RefreshCcw } from "lucide-react";
+import { Plus, RefreshCcw } from "lucide-react";
 
 import {
   AdminSheetScaffold,
+  SheetFormFooter,
   AdminTableCard,
 } from "@/components/admin-page-patterns";
 import {
@@ -267,20 +268,12 @@ export function AdminAnnouncementsPage() {
               title={t.ann_new}
               description={t.ann_subtitle}
               footer={(
-                <div className="shrink-0 flex justify-end gap-2 bg-popover px-4 py-3">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-9 rounded-lg"
-                    onClick={() => setShowCreate(false)}
-                  >
-                    {t.common_cancel}
-                  </Button>
-                  <Button type="submit" className="h-9 rounded-lg" disabled={creating}>
-                    {creating ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                    {t.common_save}
-                  </Button>
-                </div>
+                <SheetFormFooter
+                  cancelLabel={t.common_cancel}
+                  submitLabel={t.common_save}
+                  submitting={creating}
+                  onCancel={() => setShowCreate(false)}
+                />
               )}
             >
               {createError ? <Banner tone="error">{createError}</Banner> : null}

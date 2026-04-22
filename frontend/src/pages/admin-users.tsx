@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import {
-  LoaderCircle,
   Mail,
   Plus,
   RefreshCw,
@@ -11,7 +10,9 @@ import {
 } from "lucide-react";
 
 import {
+  AdminSheetScaffold,
   AdminInlineMetric,
+  SheetFormFooter,
   AdminTableCard,
   AdminToolbar,
 } from "@/components/admin-page-patterns";
@@ -22,20 +23,11 @@ import {
   TabLoader,
 } from "@/components/ui-shell";
 import { apiFetch } from "@/lib/api";
+import { useSheetDirtyGuard } from "@/hooks/use-sheet-dirty-guard";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -43,6 +35,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 interface User {
   id: string;
@@ -125,6 +120,7 @@ export function AdminUsersPage() {
   const [euSaving, setEuSaving] = useState(false);
 
   const roleLabel = useCallback((role: string) => tr[`role_${role}`] ?? role, [tr]);
+  const closeUnsavedConfirmMessage = tr.common_discard_unsaved_confirm ?? "Discard unsaved changes?";
 
   const loadUsers = useCallback(async () => {
     setLoading(true);
@@ -174,12 +170,7 @@ export function AdminUsersPage() {
         method: "POST",
         body: JSON.stringify({ email: newEmail, name: newName, password: newPassword, role: newRole }),
       });
-      setShowCreate(false);
-      setNewName("");
-      setNewEmail("");
-      setNewPassword("");
-      setNewPasswordConfirm("");
-      setNewRole("patient_manager");
+      closeCreateSheet();
       void loadUsers();
     } catch (e) {
       setCreateError(e instanceof Error ? e.message : String(e));
@@ -196,6 +187,51 @@ export function AdminUsersPage() {
     setEditUser(u);
   };
 
+  const closeCreateSheet = useCallback(() => {
+    setShowCreate(false);
+    setCreateError(null);
+    setNewName("");
+    setNewEmail("");
+    setNewPassword("");
+    setNewPasswordConfirm("");
+    setNewRole("patient_manager");
+  }, []);
+
+  const closeEditSheet = useCallback(() => {
+    setEditUser(null);
+    setEuName("");
+    setEuEmail("");
+    setEuRole("");
+    setEuPassword("");
+  }, []);
+
+  const createDirty =
+    newName.trim().length > 0 ||
+    newEmail.trim().length > 0 ||
+    newPassword.length > 0 ||
+    newPasswordConfirm.length > 0 ||
+    newRole !== "patient_manager";
+
+  const editDirty = Boolean(
+    editUser &&
+      (euName !== editUser.name ||
+        euEmail !== editUser.email ||
+        euRole !== editUser.role ||
+        euPassword.length > 0),
+  );
+
+  const handleCreateSheetOpenChange = useSheetDirtyGuard({
+    isDirty: createDirty,
+    onClose: closeCreateSheet,
+    confirmMessage: closeUnsavedConfirmMessage,
+  });
+
+  const handleEditSheetOpenChange = useSheetDirtyGuard({
+    isDirty: editDirty,
+    onClose: closeEditSheet,
+    confirmMessage: closeUnsavedConfirmMessage,
+  });
+
   const saveUser = async () => {
     if (!editUser) return;
     setEuSaving(true);
@@ -204,7 +240,7 @@ export function AdminUsersPage() {
         method: "POST",
         body: JSON.stringify({ name: euName, email: euEmail, role: euRole }),
       });
-      setEditUser(null);
+      closeEditSheet();
       void loadUsers();
     } finally {
       setEuSaving(false);
@@ -301,122 +337,140 @@ export function AdminUsersPage() {
         </AdminToolbar>
       ) : null}
 
-      <Dialog open={showCreate} onOpenChange={setShowCreate}>
-        <DialogContent className="sm:max-w-xl">
-          <DialogHeader>
-            <DialogTitle>{t.users_create_title}</DialogTitle>
-            <DialogDescription>{t.users_subtitle}</DialogDescription>
-          </DialogHeader>
-          <form onSubmit={onSubmitCreate} className="grid gap-4 py-2">
-            {createError ? <Banner tone="error">{createError}</Banner> : null}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.users_name}</Label>
-                <Input required placeholder="Max Muller" value={newName} onChange={(e) => setNewName(e.target.value)} className="h-9 rounded-lg" />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.users_email}</Label>
-                <Input type="email" required placeholder="max@gmed.de" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} className="h-9 rounded-lg" />
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.users_role}</Label>
-              <Select value={newRole} onValueChange={(v) => setNewRole(v ?? "")}>
-                <SelectTrigger className="h-9 w-full rounded-lg bg-card">
-                  <SelectValue>{roleLabel(newRole)}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {ROLE_KEYS.map((key) => (
-                    <SelectItem key={key} value={key}>{roleLabel(key)}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.users_password}</Label>
-                <Input type="password" required minLength={8} placeholder={t.users_password_hint} value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="h-9 rounded-lg" />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">
-                  {t.users_confirm_password}
-                </Label>
-                <Input
-                  type="password"
-                  required
-                  minLength={8}
-                  placeholder={t.users_password_hint}
-                  value={newPasswordConfirm}
-                  onChange={(e) => setNewPasswordConfirm(e.target.value)}
-                  className={cn("h-9 rounded-lg", newPasswordConfirm && newPassword !== newPasswordConfirm && "border-rose-400 ring-2 ring-rose-100")}
+      <Sheet open={showCreate} onOpenChange={handleCreateSheetOpenChange}>
+        <SheetContent side="right" className="w-full sm:max-w-[720px]">
+          <form onSubmit={onSubmitCreate} className="flex min-h-0 flex-1 flex-col">
+            <AdminSheetScaffold
+              title={t.users_create_title}
+              description={t.users_subtitle}
+              footer={(
+                <SheetFormFooter
+                  cancelLabel={t.users_cancel}
+                  submitLabel={t.users_create_btn}
+                  submittingLabel={t.users_creating}
+                  submitting={creating}
+                  submitDisabled={Boolean(newPasswordConfirm && newPassword !== newPasswordConfirm)}
+                  onCancel={closeCreateSheet}
                 />
-                {newPasswordConfirm && newPassword !== newPasswordConfirm ? (
-                  <p className="text-xs text-rose-600">
-                    {t.users_password_mismatch}
-                  </p>
-                ) : null}
-              </div>
-            </div>
-            <DialogFooter className="pt-2">
-              <Button type="button" variant="outline" className="h-9 rounded-lg" onClick={() => setShowCreate(false)}>{t.users_cancel}</Button>
-              <Button type="submit" className="h-9 rounded-lg" disabled={creating || (!!newPasswordConfirm && newPassword !== newPasswordConfirm)}>
-                {creating ? t.users_creating : t.users_create_btn}
-              </Button>
-            </DialogFooter>
+              )}
+            >
+              {createError ? <Banner tone="error">{createError}</Banner> : null}
+              <section className="space-y-4 rounded-xl border border-border/60 bg-card p-3.5">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.users_name}</Label>
+                    <Input required placeholder="Max Muller" value={newName} onChange={(e) => setNewName(e.target.value)} className="h-9 rounded-lg bg-card" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.users_email}</Label>
+                    <Input type="email" required placeholder="max@gmed.de" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} className="h-9 rounded-lg bg-card" />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.users_role}</Label>
+                  <Select value={newRole} onValueChange={(v) => setNewRole(v ?? "")}>
+                    <SelectTrigger className="h-9 w-full rounded-lg bg-card">
+                      <SelectValue>{roleLabel(newRole)}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {ROLE_KEYS.map((key) => (
+                        <SelectItem key={key} value={key}>{roleLabel(key)}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.users_password}</Label>
+                    <Input type="password" required minLength={8} placeholder={t.users_password_hint} value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="h-9 rounded-lg bg-card" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">
+                      {t.users_confirm_password}
+                    </Label>
+                    <Input
+                      type="password"
+                      required
+                      minLength={8}
+                      placeholder={t.users_password_hint}
+                      value={newPasswordConfirm}
+                      onChange={(e) => setNewPasswordConfirm(e.target.value)}
+                      className={cn("h-9 rounded-lg bg-card", newPasswordConfirm && newPassword !== newPasswordConfirm && "border-rose-400 ring-2 ring-rose-100")}
+                    />
+                    {newPasswordConfirm && newPassword !== newPasswordConfirm ? (
+                      <p className="text-xs text-rose-600">
+                        {t.users_password_mismatch}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+              </section>
+            </AdminSheetScaffold>
           </form>
-        </DialogContent>
-      </Dialog>
+        </SheetContent>
+      </Sheet>
 
-      <Dialog open={editUser !== null} onOpenChange={(open) => { if (!open) setEditUser(null); }}>
-        <DialogContent className="sm:max-w-xl">
-          <DialogHeader>
-            <DialogTitle>{t.patients_edit} - {editUser?.name}</DialogTitle>
-            <DialogDescription>{editUser?.email}</DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 py-2">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.users_name}</Label>
-                <Input value={euName} onChange={(e) => setEuName(e.target.value)} className="h-9 rounded-lg" />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.users_email}</Label>
-                <Input type="email" value={euEmail} onChange={(e) => setEuEmail(e.target.value)} className="h-9 rounded-lg" />
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.users_role}</Label>
-              <Select value={euRole} onValueChange={(v) => setEuRole(v ?? "")}>
-                <SelectTrigger className="h-9 w-full rounded-lg bg-card">
-                  <SelectValue>{roleLabel(euRole)}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {ROLE_KEYS.map((key) => (
-                    <SelectItem key={key} value={key}>{roleLabel(key)}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">
-                {t.users_reset_password}
-              </Label>
-              <div className="flex gap-3">
-                <Input type="password" placeholder={t.users_password_hint} value={euPassword} onChange={(e) => setEuPassword(e.target.value)} className="h-9 rounded-lg" />
-                <Button type="button" variant="outline" className="h-9 px-3.5 rounded-lg" disabled={euPassword.length < 8} onClick={resetPassword}>
-                  {t.users_reset_button}
-                </Button>
-              </div>
-            </div>
-          </div>
-          <DialogFooter className="pt-2">
-            <Button variant="outline" className="h-9 rounded-lg" onClick={() => setEditUser(null)}>{t.common_cancel}</Button>
-            <Button className="h-9 rounded-lg" disabled={euSaving} onClick={saveUser}>
-              {euSaving ? <LoaderCircle className="size-4 animate-spin" /> : t.common_save}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <Sheet open={editUser !== null} onOpenChange={handleEditSheetOpenChange}>
+        <SheetContent side="right" className="w-full sm:max-w-[720px]">
+          <form
+            className="flex min-h-0 flex-1 flex-col"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void saveUser();
+            }}
+          >
+            <AdminSheetScaffold
+              title={`${t.patients_edit} - ${editUser?.name ?? ""}`}
+              description={editUser?.email}
+              footer={(
+                <SheetFormFooter
+                  cancelLabel={t.common_cancel}
+                  submitLabel={t.common_save}
+                  submitting={euSaving}
+                  onCancel={closeEditSheet}
+                />
+              )}
+            >
+              <section className="space-y-4 rounded-xl border border-border/60 bg-card p-3.5">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.users_name}</Label>
+                    <Input value={euName} onChange={(e) => setEuName(e.target.value)} className="h-9 rounded-lg bg-card" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.users_email}</Label>
+                    <Input type="email" value={euEmail} onChange={(e) => setEuEmail(e.target.value)} className="h-9 rounded-lg bg-card" />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.users_role}</Label>
+                  <Select value={euRole} onValueChange={(v) => setEuRole(v ?? "")}>
+                    <SelectTrigger className="h-9 w-full rounded-lg bg-card">
+                      <SelectValue>{roleLabel(euRole)}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {ROLE_KEYS.map((key) => (
+                        <SelectItem key={key} value={key}>{roleLabel(key)}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">
+                    {t.users_reset_password}
+                  </Label>
+                  <div className="flex gap-3">
+                    <Input type="password" placeholder={t.users_password_hint} value={euPassword} onChange={(e) => setEuPassword(e.target.value)} className="h-9 rounded-lg bg-card" />
+                    <Button type="button" variant="outline" className="h-9 px-3.5 rounded-lg" disabled={euPassword.length < 8 || euSaving} onClick={resetPassword}>
+                      {t.users_reset_button}
+                    </Button>
+                  </div>
+                </div>
+              </section>
+            </AdminSheetScaffold>
+          </form>
+        </SheetContent>
+      </Sheet>
 
       {loading ? <TabLoader /> : null}
       {!loading && error ? <Banner tone="error">{error}</Banner> : null}

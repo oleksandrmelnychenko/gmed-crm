@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Plus, RefreshCcw } from "lucide-react";
 
 import {
+  AdminSheetScaffold,
+  SheetFormFooter,
   AdminTableCard,
   AdminToolbar,
 } from "@/components/admin-page-patterns";
@@ -16,22 +18,15 @@ import { useLang } from "@/lib/i18n";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Table,
   TableBody,
@@ -40,6 +35,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useSheetDirtyGuard } from "@/hooks/use-sheet-dirty-guard";
 
 interface CustomField {
   id: string;
@@ -65,12 +61,18 @@ export function AdminCustomFieldsPage() {
   const [msg, setMsg] = useState<string | null>(null);
 
   const [showCreate, setShowCreate] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [fEntity, setFEntity] = useState("lead");
   const [fKey, setFKey] = useState("");
   const [fLabel, setFLabel] = useState("");
   const [fType, setFType] = useState("text");
   const [fSort, setFSort] = useState("0");
   const [fOptions, setFOptions] = useState("");
+  const [createError, setCreateError] = useState<string | null>(null);
+
+  const closeUnsavedConfirmMessage =
+    (t as unknown as Record<string, string>).common_discard_unsaved_confirm ??
+    "Discard unsaved changes?";
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -93,6 +95,8 @@ export function AdminCustomFieldsPage() {
   const onCreate = async (ev: FormEvent) => {
     ev.preventDefault();
     setMsg(null);
+    setCreateError(null);
+    setCreating(true);
     let opts: unknown = undefined;
     if (fOptions.trim()) {
       try {
@@ -114,15 +118,41 @@ export function AdminCustomFieldsPage() {
           sort_order: parseInt(fSort, 10) || 0,
         }),
       });
-      setShowCreate(false);
-      setFKey("");
-      setFLabel("");
-      setFOptions("");
+      closeCreateSheet();
       void load();
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : String(e));
+      const message = e instanceof Error ? e.message : String(e);
+      setCreateError(message);
+      setMsg(message);
+    } finally {
+      setCreating(false);
     }
   };
+
+  const closeCreateSheet = useCallback(() => {
+    setShowCreate(false);
+    setCreateError(null);
+    setFEntity("lead");
+    setFType("text");
+    setFSort("0");
+    setFKey("");
+    setFLabel("");
+    setFOptions("");
+  }, []);
+
+  const createDirty =
+    fEntity !== "lead" ||
+    fType !== "text" ||
+    fSort !== "0" ||
+    fKey.trim().length > 0 ||
+    fLabel.trim().length > 0 ||
+    fOptions.trim().length > 0;
+
+  const handleCreateSheetOpenChange = useSheetDirtyGuard({
+    isDirty: createDirty,
+    onClose: closeCreateSheet,
+    confirmMessage: closeUnsavedConfirmMessage,
+  });
 
   const onDelete = async (id: string) => {
     await apiFetch(`/admin/custom-fields/${id}/delete`, { method: "POST" });
@@ -161,100 +191,101 @@ export function AdminCustomFieldsPage() {
 
       {msg ? <Banner tone="error">{msg}</Banner> : null}
 
-      <Dialog open={showCreate} onOpenChange={setShowCreate}>
-        <DialogContent className="sm:max-w-xl">
-          <DialogHeader>
-            <DialogTitle>{t.cf_new}</DialogTitle>
-            <DialogDescription>{t.cf_subtitle}</DialogDescription>
-          </DialogHeader>
-          <form onSubmit={onCreate} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_entity_type}</Label>
-                <Select value={fEntity} onValueChange={(value) => setFEntity(value ?? ENTITY_TYPES[0] ?? "patient")}>
-                  <SelectTrigger className="h-9 rounded-lg bg-card">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {ENTITY_TYPES.map((et) => (
-                      <SelectItem key={et} value={et}>
-                        {et.charAt(0).toUpperCase() + et.slice(1)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_field_key} *</Label>
-                <Input
-                  required
-                  placeholder="my_field"
-                  value={fKey}
-                  onChange={(e) => setFKey(e.target.value)}
-                  className="h-9 rounded-lg"
+      <Sheet open={showCreate} onOpenChange={handleCreateSheetOpenChange}>
+        <SheetContent side="right" className="w-full sm:max-w-[720px]">
+          <form onSubmit={onCreate} className="flex min-h-0 flex-1 flex-col">
+            <AdminSheetScaffold
+              title={t.cf_new}
+              description={t.cf_subtitle}
+              footer={(
+                <SheetFormFooter
+                  cancelLabel={t.common_cancel}
+                  submitLabel={t.common_save}
+                  submitting={creating}
+                  onCancel={closeCreateSheet}
                 />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_field_label} *</Label>
-                <Input
-                  required
-                  value={fLabel}
-                  onChange={(e) => setFLabel(e.target.value)}
-                  className="h-9 rounded-lg"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_field_type}</Label>
-                <Select value={fType} onValueChange={(value) => setFType(value ?? FIELD_TYPES[0] ?? "text")}>
-                  <SelectTrigger className="h-9 rounded-lg bg-card">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {FIELD_TYPES.map((ft) => (
-                      <SelectItem key={ft} value={ft}>
-                        {ft.charAt(0).toUpperCase() + ft.slice(1)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_sort}</Label>
-                <Input
-                  type="number"
-                  value={fSort}
-                  onChange={(e) => setFSort(e.target.value)}
-                  className="h-9 rounded-lg"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_options}</Label>
-                <Input
-                  placeholder='["opt1","opt2"]'
-                  value={fOptions}
-                  onChange={(e) => setFOptions(e.target.value)}
-                  className="h-9 rounded-lg"
-                />
-              </div>
-            </div>
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                className="h-9 rounded-lg"
-                onClick={() => setShowCreate(false)}
-              >
-                {t.common_cancel}
-              </Button>
-              <Button type="submit" className="h-9 rounded-lg">{t.common_save}</Button>
-            </DialogFooter>
+              )}
+            >
+              {createError ? <Banner tone="error">{createError}</Banner> : null}
+              <section className="space-y-4 rounded-xl border border-border/60 bg-card p-3.5">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_entity_type}</Label>
+                    <Select value={fEntity} onValueChange={(value) => setFEntity(value ?? ENTITY_TYPES[0] ?? "patient")}>
+                      <SelectTrigger className="h-9 rounded-lg bg-card">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {ENTITY_TYPES.map((et) => (
+                          <SelectItem key={et} value={et}>
+                            {et.charAt(0).toUpperCase() + et.slice(1)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_field_key} *</Label>
+                    <Input
+                      required
+                      placeholder="my_field"
+                      value={fKey}
+                      onChange={(e) => setFKey(e.target.value)}
+                      className="h-9 rounded-lg bg-card"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_field_label} *</Label>
+                    <Input
+                      required
+                      value={fLabel}
+                      onChange={(e) => setFLabel(e.target.value)}
+                      className="h-9 rounded-lg bg-card"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_field_type}</Label>
+                    <Select value={fType} onValueChange={(value) => setFType(value ?? FIELD_TYPES[0] ?? "text")}>
+                      <SelectTrigger className="h-9 rounded-lg bg-card">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {FIELD_TYPES.map((ft) => (
+                          <SelectItem key={ft} value={ft}>
+                            {ft.charAt(0).toUpperCase() + ft.slice(1)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_sort}</Label>
+                    <Input
+                      type="number"
+                      value={fSort}
+                      onChange={(e) => setFSort(e.target.value)}
+                      className="h-9 rounded-lg bg-card"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_options}</Label>
+                    <Input
+                      placeholder='["opt1","opt2"]'
+                      value={fOptions}
+                      onChange={(e) => setFOptions(e.target.value)}
+                      className="h-9 rounded-lg bg-card"
+                    />
+                  </div>
+                </div>
+              </section>
+            </AdminSheetScaffold>
           </form>
-        </DialogContent>
-      </Dialog>
+        </SheetContent>
+      </Sheet>
 
       {loading ? <TabLoader /> : null}
 

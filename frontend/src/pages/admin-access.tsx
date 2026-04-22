@@ -21,6 +21,7 @@ import {
 import {
   AdminInlineMetric,
   AdminSheetScaffold,
+  SheetActionsFooter,
   AdminToolbar,
   AdminTableCard,
 } from "@/components/admin-page-patterns";
@@ -31,6 +32,7 @@ import {
   SheetContent,
 } from "@/components/ui/sheet";
 import { apiFetch } from "@/lib/api";
+import { useSheetDirtyGuard } from "@/hooks/use-sheet-dirty-guard";
 import { useLang } from "@/lib/i18n";
 import {
   Banner,
@@ -183,6 +185,8 @@ export function AdminAccessPage() {
   const tr = t as unknown as Record<string, string>;
   const ui = ACCESS_UI_LABELS[lang];
   const fieldLabels = ACCESS_FIELD_LABELS[lang];
+  const closeUnsavedConfirmMessage =
+    tr.common_discard_unsaved_confirm ?? "Discard unsaved changes?";
 
   const [policies, setPolicies] = useState<Policy[]>([]);
   const [loading, setLoading] = useState(true);
@@ -245,6 +249,20 @@ export function AdminAccessPage() {
       };
     });
   }, [policies, selectedField]);
+
+  const selectedFieldAuditNote = useMemo(() => {
+    if (!selectedField) {
+      return "-";
+    }
+    const conditional = selectedFieldPolicies.filter(
+      ({ policy }) =>
+        policy?.access_level === "conditional" && !policy?.is_system_locked,
+    ).length;
+    const locked = selectedFieldPolicies.filter(
+      ({ policy }) => policy?.is_system_locked,
+    ).length;
+    return `${t.access_conditional}: ${conditional} - ${t.access_system_locked}: ${locked}`;
+  }, [selectedField, selectedFieldPolicies, t.access_conditional, t.access_system_locked]);
 
   const levelLabel = useCallback((level: string, locked: boolean) => {
     if (locked) return t.access_system_locked;
@@ -316,6 +334,12 @@ export function AdminAccessPage() {
       setResetBusy(false);
     }
   }, [loadPolicies, t.common_error]);
+
+  const handleDetailOpenChange = useSheetDirtyGuard({
+    isDirty: saveBusyToken !== "",
+    onClose: () => setSelectedField(null),
+    confirmMessage: closeUnsavedConfirmMessage,
+  });
 
   return (
     <>
@@ -511,13 +535,13 @@ export function AdminAccessPage() {
         ) : null}
       </div>
 
-      <Sheet open={Boolean(selectedField)} onOpenChange={(open) => !open && setSelectedField(null)}>
+      <Sheet open={Boolean(selectedField)} onOpenChange={handleDetailOpenChange}>
         <SheetContent side="right" className="w-full sm:max-w-[720px]">
           <AdminSheetScaffold
             title={selectedField ? fieldLabels[selectedField] : t.access_title}
             description={selectedField ? ui.fieldWorkspace : t.access_subtitle}
             footer={(
-              <div className="shrink-0 flex justify-end gap-2 bg-popover px-4 py-3">
+              <SheetActionsFooter>
                 <Button
                   type="button"
                   variant="outline"
@@ -526,19 +550,22 @@ export function AdminAccessPage() {
                 >
                   {t.common_cancel}
                 </Button>
-              </div>
+              </SheetActionsFooter>
             )}
           >
             {selectedField ? (
               <>
                 <section className={cn("space-y-3 rounded-xl p-3.5", tokens.surface.softCard)}>
+                  <h3 className="text-[13px] font-semibold tracking-tight text-foreground">Meta</h3>
                   <div className="flex flex-wrap items-center gap-1.5">
                     <StatusBadge tone="info">{`${t.access_entity}: ${ui.entityPatient}`}</StatusBadge>
                     <StatusBadge tone="neutral">{fieldLabels[selectedField]}</StatusBadge>
+                    <StatusBadge tone="brand">{`${t.users_role}: ${ROLE_KEYS.length}`}</StatusBadge>
                   </div>
                 </section>
 
                 <section className={cn("space-y-3 rounded-xl p-3.5", tokens.surface.softCard)}>
+                  <h3 className="text-[13px] font-semibold tracking-tight text-foreground">Permissions</h3>
                   {selectedFieldPolicies.map(({ role, policy }) => {
                     const level = policy?.access_level ?? "hidden";
                     const locked = policy?.is_system_locked ?? false;
@@ -572,6 +599,11 @@ export function AdminAccessPage() {
                       </div>
                     );
                   })}
+                </section>
+
+                <section className={cn("space-y-2 rounded-xl p-3.5", tokens.surface.softCard)}>
+                  <h3 className="text-[13px] font-semibold tracking-tight text-foreground">Audit note</h3>
+                  <p className="text-xs text-muted-foreground">{selectedFieldAuditNote}</p>
                 </section>
               </>
             ) : (
