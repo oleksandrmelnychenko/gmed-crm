@@ -45,9 +45,6 @@ import {
 
 import { Button } from "@/components/ui/button";
 import {
-  type CaseRosterItem,
-} from "@/components/cases-roster-section";
-import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -75,7 +72,6 @@ import {
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
-import { apiFetch } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import {
   buildInterpreterMobileAgendaSections,
@@ -98,26 +94,27 @@ import {
   toTimeInput,
 } from "@/pages/appointments/model/date-time";
 import {
-  APPOINTMENT_DETAIL_RESOURCE_GROUPS,
-  getRequiredAppointmentDetailResourceGroups,
-  type AppointmentDetailResourceGroup,
-} from "@/pages/appointments/model/detail-resource-needs";
-import {
   formatAppointmentDateTimeLabel as formatDateTimeLabel,
   formatAppointmentSlotLabel as slotLabel,
 } from "@/pages/appointments/model/runtime-formatters";
 import {
   blankAppointmentForm,
-  resolveFollowUpDefaultAssignee,
   statusActionKey,
 } from "@/pages/appointments/model/form-factories";
 import {
   buildAppointmentsQuery,
-  sortLinkedDocuments,
 } from "@/pages/appointments/model/query-builders";
-import { fetchAppointmentDetailResourceGroup } from "@/pages/appointments/data/detail-resource-groups";
-import { getProviderDoctors } from "@/pages/appointments/data/provider-doctors";
-import { normalizeLinkedPreviewPayload } from "@/pages/appointments/model/linked-preview";
+import { useAppointmentDetail } from "@/pages/appointments/data/use-appointment-detail";
+import {
+  updateAppointmentSchedule,
+  updateAppointmentStatus,
+} from "@/pages/appointments/data/appointment-mutations";
+import { useAppointmentLinkedPatientAssignment } from "@/pages/appointments/data/use-appointment-linked-patient-assignment";
+import { useAppointmentLinkedRecords } from "@/pages/appointments/data/use-appointment-linked-records";
+import { useAppointmentLinkedPatient } from "@/pages/appointments/data/use-appointment-linked-patient";
+import { useAppointmentsMetadata } from "@/pages/appointments/data/use-appointments-metadata";
+import { useAppointmentsSchedulerData } from "@/pages/appointments/data/use-appointments-scheduler-data";
+import { useProviderDoctorOptions } from "@/pages/appointments/data/use-provider-doctor-options";
 import {
   matchesOperationalScope,
   operationalScopeOptions,
@@ -146,9 +143,7 @@ import {
   Field,
 } from "@/pages/appointments/ui/shared/workspace-primitives";
 import type {
-  AppointmentAttentionItem,
   AppointmentCommunicationEntry,
-  AppointmentDetail,
   AppointmentFormState,
   AppointmentListItem,
   AppointmentRecurringActionScope,
@@ -158,20 +153,11 @@ import type {
   CalendarView,
   ChecklistItem,
   ConciergeServiceEntry,
-  ConflictSummary,
-  DoctorOption,
   FiltersState,
   HandoffStakeholder,
-  InterpreterOption,
-  LinkedDocumentItem,
   LinkedPreviewKind,
-  LinkedPreviewPayload,
   OperationalScope,
-  PatientAssignment,
-  PatientSummary,
-  ProviderSummary,
   ReminderEntry,
-  ReportSummary,
   SchedulerQuickScope,
   StaffOption,
   TaskEntry,
@@ -189,12 +175,8 @@ import {
   PACKAGE_END_FOLLOW_UP_PREFIX,
 } from "@/pages/appointments/model/constants";
 import {
-  type PatientAssignment as PatientSheetAssignment,
-  type PatientDetail as PatientSheetDetail,
   type PatientsDictionary,
-  type StaffOption as PatientSheetStaffOption,
 } from "@/pages/patients";
-import { type ProviderDetail as ProviderSheetDetail } from "@/pages/providers";
 
 const DEFAULT_FILTERS: FiltersState = {
   search: "",
@@ -244,25 +226,6 @@ const EMPTY_DETAIL_DERIVED_STATE = {
   billingReadinessWarnings: [] as string[],
   completionWarnings: [] as string[],
 };
-
-function createDetailResourceKeyState() {
-  return APPOINTMENT_DETAIL_RESOURCE_GROUPS.reduce<
-    Record<AppointmentDetailResourceGroup, string>
-  >(
-    (state, group) => {
-      state[group] = "";
-      return state;
-    },
-    {
-      checklist: "",
-      reminders: "",
-      report: "",
-      tasks: "",
-      services: "",
-      communications: "",
-    },
-  );
-}
 
 const loadLinkedProviderSheet = () =>
   import("@/pages/appointments/ui/sheets/linked-provider-sheet");
@@ -418,22 +381,19 @@ function StaffAppointmentsPage() {
     useState<OperationalScope>("all");
   const deferredSearch = useDeferredValue(filters.search);
 
-  const [appointments, setAppointments] = useState<AppointmentListItem[]>([]);
-  const [attentionItems, setAttentionItems] = useState<
-    AppointmentAttentionItem[]
-  >([]);
-  const [appointmentsLoading, setAppointmentsLoading] = useState(true);
-  const [appointmentsError, setAppointmentsError] = useState("");
   const [appointmentsNotice, setAppointmentsNotice] = useState("");
   const [appointmentsVersion, setAppointmentsVersion] = useState(0);
-
-  const [patients, setPatients] = useState<PatientSummary[]>([]);
-  const [providers, setProviders] = useState<ProviderSummary[]>([]);
-  const [interpreters, setInterpreters] = useState<InterpreterOption[]>([]);
-  const [staff, setStaff] = useState<StaffOption[]>([]);
-  const [filterDoctors, setFilterDoctors] = useState<DoctorOption[]>([]);
-  const [metadataLoading, setMetadataLoading] = useState(true);
-  const [metadataError, setMetadataError] = useState("");
+  const {
+    patients,
+    providers,
+    interpreters,
+    staff,
+    metadataLoading,
+    metadataError,
+  } = useAppointmentsMetadata({
+    failedLoadMessage: tr.common_failed_load,
+  });
+  const filterDoctors = useProviderDoctorOptions(filters.providerId);
   const [filtersModalOpen, setFiltersModalOpen] = useState(false);
   const [searchModalOpen, setSearchModalOpen] = useState(false);
   const [queueModalOpen, setQueueModalOpen] = useState(false);
@@ -445,96 +405,97 @@ function StaffAppointmentsPage() {
 
   const [detailOpen, setDetailOpen] = useState(false);
   const [selectedId, setSelectedId] = useState("");
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [detailError, setDetailError] = useState("");
-  const [detail, setDetail] = useState<AppointmentDetail | null>(null);
-  const [detailAssignments, setDetailAssignments] = useState<
-    PatientAssignment[]
-  >([]);
-  const [detailResourceKeys, setDetailResourceKeys] = useState(() =>
-    createDetailResourceKeyState(),
-  );
-  const detailResourceRequestKeysRef = useRef(createDetailResourceKeyState());
-  const [detailChecklist, setDetailChecklist] = useState<ChecklistItem[]>([]);
-  const [detailReminders, setDetailReminders] = useState<ReminderEntry[]>([]);
-  const [detailReport, setDetailReport] = useState<ReportSummary | null>(null);
-  const [detailTasks, setDetailTasks] = useState<TaskEntry[]>([]);
-  const [detailServices, setDetailServices] = useState<ConciergeServiceEntry[]>(
-    [],
-  );
-  const [detailCommunications, setDetailCommunications] = useState<
-    AppointmentCommunicationEntry[]
-  >([]);
   const [detailVersion, setDetailVersion] = useState(0);
-  const currentDetailResourceKey = useMemo(
-    () => (selectedId ? `${selectedId}:${detailVersion}` : ""),
-    [detailVersion, selectedId],
-  );
-  const requiredDetailResourceGroups = getRequiredAppointmentDetailResourceGroups(
+  const {
+    detailLoading,
+    detailError,
+    setDetailError,
+    detail,
+    detailAssignments,
+    detailChecklist,
+    detailReminders,
+    detailReport,
+    detailTasks,
+    detailServices,
+    detailCommunications,
+    detailExtendedLoading,
+    detailExtendedResourcesReady,
+    detailDefaultAssigneeId,
+    resetAppointmentDetailState,
+  } = useAppointmentDetail({
+    detailOpen,
+    selectedId,
+    detailVersion,
     detailTab,
     isMobile,
     permissions,
-  );
-  const missingDetailResourceGroups = useMemo(
-    () =>
-      requiredDetailResourceGroups.filter(
-        (group) => detailResourceKeys[group] !== currentDetailResourceKey,
-      ),
-    [currentDetailResourceKey, detailResourceKeys, requiredDetailResourceGroups],
-  );
+  });
   const requiresExtendedDetailResources =
-    detailOpen && Boolean(selectedId) && requiredDetailResourceGroups.length > 0;
-  const detailExtendedLoading =
-    requiresExtendedDetailResources && missingDetailResourceGroups.length > 0;
-  const detailExtendedResourcesReady =
-    !requiresExtendedDetailResources || missingDetailResourceGroups.length === 0;
+    detailOpen && isMobile && Boolean(selectedId);
   const [linkedPreviewOpen, setLinkedPreviewOpen] = useState(false);
   const [linkedPreviewKind, setLinkedPreviewKind] =
     useState<LinkedPreviewKind | null>(null);
   const [linkedPreviewLabel, setLinkedPreviewLabel] = useState("");
-  const [linkedPreviewLoading, setLinkedPreviewLoading] = useState(false);
-  const [linkedPreviewError, setLinkedPreviewError] = useState("");
-  const [linkedPreviewPayload, setLinkedPreviewPayload] =
-    useState<LinkedPreviewPayload | null>(null);
   const [linkedPatientOpen, setLinkedPatientOpen] = useState(false);
   const [linkedPatientId, setLinkedPatientId] = useState("");
-  const [linkedPatientDetailLoading, setLinkedPatientDetailLoading] =
-    useState(false);
-  const [linkedPatientDetailError, setLinkedPatientDetailError] = useState("");
-  const [linkedPatientDetail, setLinkedPatientDetail] =
-    useState<PatientSheetDetail | null>(null);
-  const [linkedPatientAssignments, setLinkedPatientAssignments] = useState<
-    PatientSheetAssignment[]
-  >([]);
-  const [linkedPatientAssignableStaff, setLinkedPatientAssignableStaff] =
-    useState<PatientSheetStaffOption[]>([]);
-  const [linkedPatientSelectedAssignee, setLinkedPatientSelectedAssignee] =
-    useState("");
-  const [linkedPatientAssignmentBusy, setLinkedPatientAssignmentBusy] =
-    useState(false);
-  const [linkedPatientAssignmentError, setLinkedPatientAssignmentError] =
-    useState("");
   const [linkedPatientVersion, setLinkedPatientVersion] = useState(0);
+  const refreshLinkedPatient = useCallback(() => {
+    setLinkedPatientVersion((current) => current + 1);
+  }, []);
+  const {
+    linkedPatientDetailLoading,
+    linkedPatientDetailError,
+    linkedPatientDetail,
+    linkedPatientAssignments,
+    linkedPatientAssignableStaff,
+    resetLinkedPatientState,
+  } = useAppointmentLinkedPatient({
+    linkedPatientOpen,
+    linkedPatientId,
+    linkedPatientVersion,
+    canViewAssignments: patientSheetPermissions.canViewAssignments,
+    canManageAssignments: patientSheetPermissions.canManageAssignments,
+    failedLoadMessage: t.common_failed_load,
+  });
+  const {
+    linkedPatientSelectedAssignee,
+    setLinkedPatientSelectedAssignee,
+    linkedPatientAssignmentBusy,
+    linkedPatientAssignmentError,
+    resetLinkedPatientAssignmentState,
+    handleAssignLinkedPatient,
+  } = useAppointmentLinkedPatientAssignment({
+    linkedPatientDetailId: linkedPatientDetail?.id ?? null,
+    failedAssignMessage: t.common_failed_assign,
+    onAssigned: refreshLinkedPatient,
+  });
   const [linkedProviderOpen, setLinkedProviderOpen] = useState(false);
   const [linkedProviderId, setLinkedProviderId] = useState("");
-  const [linkedProviderDetailLoading, setLinkedProviderDetailLoading] =
-    useState(false);
-  const [linkedProviderDetailError, setLinkedProviderDetailError] =
-    useState("");
-  const [linkedProviderDetail, setLinkedProviderDetail] =
-    useState<ProviderSheetDetail | null>(null);
   const [linkedCasesOpen, setLinkedCasesOpen] = useState(false);
-  const [linkedCasesLoading, setLinkedCasesLoading] = useState(false);
-  const [linkedCasesError, setLinkedCasesError] = useState("");
-  const [linkedCasesItems, setLinkedCasesItems] = useState<CaseRosterItem[]>(
-    [],
-  );
   const [linkedDocumentsOpen, setLinkedDocumentsOpen] = useState(false);
-  const [linkedDocumentsLoading, setLinkedDocumentsLoading] = useState(false);
-  const [linkedDocumentsError, setLinkedDocumentsError] = useState("");
-  const [linkedDocumentsItems, setLinkedDocumentsItems] = useState<
-    LinkedDocumentItem[]
-  >([]);
+  const {
+    linkedPreviewLoading,
+    linkedPreviewError,
+    linkedPreviewPayload,
+    linkedProviderDetailLoading,
+    linkedProviderDetailError,
+    linkedProviderDetail,
+    linkedCasesLoading,
+    linkedCasesError,
+    linkedCasesItems,
+    linkedDocumentsLoading,
+    linkedDocumentsError,
+    linkedDocumentsItems,
+  } = useAppointmentLinkedRecords({
+    detail,
+    linkedPreviewOpen,
+    linkedPreviewKind,
+    linkedProviderOpen,
+    linkedProviderId,
+    linkedCasesOpen,
+    linkedDocumentsOpen,
+    failedLoadMessage: t.common_failed_load,
+  });
 
   const [followUpAssigneeId, setFollowUpAssigneeId] = useState("");
   const [actionBusy, setActionBusy] = useState("");
@@ -586,6 +547,18 @@ function StaffAppointmentsPage() {
         : `${appointmentsQuery}/meta/attention`,
     [appointmentsQuery],
   );
+  const {
+    appointments,
+    attentionItems,
+    appointmentsLoading,
+    appointmentsError,
+    setAppointmentsError,
+  } = useAppointmentsSchedulerData({
+    appointmentsQuery,
+    attentionQuery,
+    appointmentsVersion,
+    failedLoadMessage: tr.common_failed_load,
+  });
   const attentionIndex = useMemo(
     () => new Map(attentionItems.map((item) => [item.id, item])),
     [attentionItems],
@@ -685,11 +658,6 @@ function StaffAppointmentsPage() {
     schedulerQuickScopeOptions.find(
       (option) => option.id === schedulerQuickScopeValue,
     )?.label ?? t.providers_all;
-  const detailDefaultAssigneeId = useMemo(
-    () =>
-      detail ? resolveFollowUpDefaultAssignee(detail, detailAssignments) : "",
-    [detail, detailAssignments],
-  );
   const shouldBuildExtendedDetailDerivedState =
     Boolean(detail) &&
     (isMobile ||
@@ -1177,50 +1145,21 @@ function StaffAppointmentsPage() {
     (clearQuery = true) => {
       setDetailOpen(false);
       setSelectedId("");
-      setDetailLoading(false);
-      detailResourceRequestKeysRef.current = createDetailResourceKeyState();
-      setDetailResourceKeys(createDetailResourceKeyState());
-      setDetailError("");
-      setDetail(null);
-      setDetailAssignments([]);
-      setDetailCommunications([]);
-      setDetailTasks([]);
-      setDetailServices([]);
-      setDetailChecklist([]);
-      setDetailReminders([]);
-      setDetailReport(null);
+      resetAppointmentDetailState();
       setFollowUpAssigneeId("");
       setActionBusy("");
       setLinkedPreviewOpen(false);
       setLinkedPreviewKind(null);
       setLinkedPreviewLabel("");
-      setLinkedPreviewLoading(false);
-      setLinkedPreviewError("");
-      setLinkedPreviewPayload(null);
       setLinkedPatientOpen(false);
       setLinkedPatientId("");
-      setLinkedPatientDetailLoading(false);
-      setLinkedPatientDetailError("");
-      setLinkedPatientDetail(null);
-      setLinkedPatientAssignments([]);
-      setLinkedPatientAssignableStaff([]);
-      setLinkedPatientSelectedAssignee("");
-      setLinkedPatientAssignmentBusy(false);
-      setLinkedPatientAssignmentError("");
+      resetLinkedPatientState();
+      resetLinkedPatientAssignmentState();
       setLinkedPatientVersion(0);
       setLinkedProviderOpen(false);
       setLinkedProviderId("");
-      setLinkedProviderDetailLoading(false);
-      setLinkedProviderDetailError("");
-      setLinkedProviderDetail(null);
       setLinkedCasesOpen(false);
-      setLinkedCasesLoading(false);
-      setLinkedCasesError("");
-      setLinkedCasesItems([]);
       setLinkedDocumentsOpen(false);
-      setLinkedDocumentsLoading(false);
-      setLinkedDocumentsError("");
-      setLinkedDocumentsItems([]);
       if (clearQuery) {
         syncQuery({
           appointment: null,
@@ -1228,8 +1167,18 @@ function StaffAppointmentsPage() {
         });
       }
     },
-    [syncQuery],
+    [
+      resetAppointmentDetailState,
+      resetLinkedPatientAssignmentState,
+      resetLinkedPatientState,
+      syncQuery,
+    ],
   );
+
+  useEffect(() => {
+    if (!detailOpen) return;
+    setFollowUpAssigneeId(detailDefaultAssigneeId);
+  }, [detailDefaultAssigneeId, detailOpen]);
 
   useEffect(() => {
     if (!calendarQuickActionMenu) return;
@@ -1340,515 +1289,12 @@ function StaffAppointmentsPage() {
   }, [filters]);
 
   useEffect(() => {
-    let active = true;
-    async function loadMetadata() {
-      setMetadataLoading(true);
-      setMetadataError("");
-      const [patientRows, providerRows, interpreterRows, staffRows] =
-        await Promise.all([
-          apiFetch<PatientSummary[]>("/patients").catch(() => []),
-          apiFetch<ProviderSummary[]>("/providers").catch(() => []),
-          apiFetch<InterpreterOption[]>(
-            "/appointments/meta/interpreters",
-          ).catch(() => []),
-          apiFetch<StaffOption[]>("/appointments/meta/staff").catch(() => []),
-        ]);
-      if (!active) return;
-      setPatients(patientRows);
-      setProviders(providerRows);
-      setInterpreters(interpreterRows);
-      setStaff(staffRows);
-      if (
-        patientRows.length === 0 &&
-        interpreterRows.length === 0 &&
-        staffRows.length === 0
-      ) {
-        setMetadataError(tr.common_failed_load);
-      }
-      setMetadataLoading(false);
-    }
-    void loadMetadata();
-    return () => {
-      active = false;
-    };
-  }, [tr.common_failed_load]);
-
-  useEffect(() => {
-    let active = true;
-    async function loadAppointments() {
-      setAppointmentsLoading(true);
-      setAppointmentsError("");
-      try {
-        const [rows, attention] = await Promise.all([
-          apiFetch<AppointmentListItem[]>(appointmentsQuery),
-          apiFetch<AppointmentAttentionItem[]>(attentionQuery),
-        ]);
-        if (!active) return;
-        setAppointments(rows);
-        setAttentionItems(attention);
-      } catch (error) {
-        if (!active) return;
-        setAppointments([]);
-        setAttentionItems([]);
-        setAppointmentsError(
-          error instanceof Error ? error.message : tr.common_failed_load,
-        );
-      } finally {
-        if (active) setAppointmentsLoading(false);
-      }
-    }
-    void loadAppointments();
-    return () => {
-      active = false;
-    };
-  }, [
-    appointmentsQuery,
-    attentionQuery,
-    appointmentsVersion,
-    tr.common_failed_load,
-  ]);
-
-  useEffect(() => {
     if (!filters.providerId) {
-      setFilterDoctors([]);
       setFilters((current) =>
         current.doctorId ? { ...current, doctorId: "" } : current,
       );
-      return;
     }
-    let active = true;
-    getProviderDoctors(filters.providerId)
-      .then((rows) => {
-        if (active) setFilterDoctors(rows);
-      })
-      .catch(() => {
-        if (active) setFilterDoctors([]);
-      });
-    return () => {
-      active = false;
-    };
   }, [filters.providerId]);
-
-  useEffect(() => {
-    if (!selectedId || !detailOpen) return;
-    let active = true;
-    async function loadDetail() {
-      setDetailLoading(true);
-      detailResourceRequestKeysRef.current = createDetailResourceKeyState();
-      setDetailResourceKeys(createDetailResourceKeyState());
-      setDetailError("");
-      try {
-        const appointmentDetail = await apiFetch<AppointmentDetail>(
-          `/appointments/${selectedId}`,
-        );
-        const assignments =
-          appointmentDetail.is_blocked || !permissions.canViewNotes
-            ? []
-            : await apiFetch<PatientAssignment[]>(
-                `/patients/${appointmentDetail.patient_id}/assignments`,
-              ).catch(() => []);
-        if (!active) return;
-        setDetail(appointmentDetail);
-        setDetailAssignments(assignments);
-        setDetailChecklist([]);
-        setDetailReminders([]);
-        setDetailReport(null);
-        setDetailTasks([]);
-        setDetailServices([]);
-        setDetailCommunications([]);
-        const followUpDefaultAssignee = resolveFollowUpDefaultAssignee(
-          appointmentDetail,
-          assignments,
-        );
-        setFollowUpAssigneeId(followUpDefaultAssignee);
-      } catch (error) {
-        if (!active) return;
-        setDetail(null);
-        setDetailAssignments([]);
-        setDetailChecklist([]);
-        setDetailReminders([]);
-        setDetailReport(null);
-        setDetailTasks([]);
-        setDetailServices([]);
-        setDetailCommunications([]);
-        setFollowUpAssigneeId("");
-        setDetailError(
-        error instanceof Error
-          ? error.message
-          : appointmentText(
-              "Termin konnte nicht geladen werden.",
-              "Не удалось загрузить приём.",
-              "Failed to load appointment",
-            ),
-        );
-      } finally {
-        if (active) setDetailLoading(false);
-      }
-    }
-    void loadDetail();
-    return () => {
-      active = false;
-    };
-  }, [
-    selectedId,
-    detailOpen,
-    detailVersion,
-    permissions.canViewNotes,
-  ]);
-
-  useEffect(() => {
-    if (
-      !selectedId ||
-      !detailOpen ||
-      detailLoading ||
-      detailError ||
-      !detail ||
-      !requiresExtendedDetailResources ||
-      missingDetailResourceGroups.length === 0
-    ) {
-      return;
-    }
-
-    const pendingGroups = missingDetailResourceGroups.filter(
-      (group) =>
-        detailResourceRequestKeysRef.current[group] !== currentDetailResourceKey,
-    );
-    if (pendingGroups.length === 0) {
-      return;
-    }
-
-    let active = true;
-
-    async function loadExtendedDetailResources() {
-      for (const group of pendingGroups) {
-        detailResourceRequestKeysRef.current[group] = currentDetailResourceKey;
-      }
-
-      const results = await Promise.allSettled(
-        pendingGroups.map((group) =>
-          fetchAppointmentDetailResourceGroup(group, selectedId),
-        ),
-      );
-
-      if (!active) {
-        return;
-      }
-
-      const loadedGroups: AppointmentDetailResourceGroup[] = [];
-      let firstErrorMessage = "";
-
-      for (const [index, result] of results.entries()) {
-        const group = pendingGroups[index];
-        if (result.status === "fulfilled") {
-          loadedGroups.push(group);
-          switch (result.value.group) {
-            case "checklist":
-              setDetailChecklist(result.value.value);
-              break;
-            case "reminders":
-              setDetailReminders(result.value.value);
-              break;
-            case "report":
-              setDetailReport(result.value.value);
-              break;
-            case "tasks":
-              setDetailTasks(result.value.value);
-              break;
-            case "services":
-              setDetailServices(result.value.value);
-              break;
-            case "communications":
-              setDetailCommunications(result.value.value);
-              break;
-          }
-          continue;
-        }
-
-        if (!firstErrorMessage) {
-          firstErrorMessage =
-            result.reason instanceof Error
-              ? result.reason.message
-              : appointmentText(
-                  "Erweiterte Termindaten konnten nicht geladen werden.",
-                  "Не удалось загрузить расширенные данные приёма.",
-                  "Failed to load extended appointment data.",
-                );
-        }
-
-        switch (group) {
-          case "checklist":
-            setDetailChecklist([]);
-            break;
-          case "reminders":
-            setDetailReminders([]);
-            break;
-          case "report":
-            setDetailReport(null);
-            break;
-          case "tasks":
-            setDetailTasks([]);
-            break;
-          case "services":
-            setDetailServices([]);
-            break;
-          case "communications":
-            setDetailCommunications([]);
-            break;
-        }
-      }
-
-      if (loadedGroups.length > 0) {
-        setDetailResourceKeys((current) => {
-          const next = { ...current };
-          for (const group of loadedGroups) {
-            next[group] = currentDetailResourceKey;
-          }
-          return next;
-        });
-      }
-      for (const group of pendingGroups) {
-        detailResourceRequestKeysRef.current[group] = "";
-      }
-      if (firstErrorMessage) {
-        setDetailError(firstErrorMessage);
-      }
-    }
-
-    void loadExtendedDetailResources();
-    return () => {
-      active = false;
-      for (const group of pendingGroups) {
-        if (detailResourceRequestKeysRef.current[group] === currentDetailResourceKey) {
-          detailResourceRequestKeysRef.current[group] = "";
-        }
-      }
-    };
-  }, [
-    currentDetailResourceKey,
-    detail,
-    detailError,
-    detailLoading,
-    detailOpen,
-    missingDetailResourceGroups,
-    requiresExtendedDetailResources,
-    selectedId,
-  ]);
-
-  useEffect(() => {
-    if (!linkedPreviewOpen || !linkedPreviewKind || !detail) return;
-    const currentDetail = detail;
-    let active = true;
-
-    async function loadLinkedPreview() {
-      setLinkedPreviewLoading(true);
-      setLinkedPreviewError("");
-      setLinkedPreviewPayload(null);
-
-      try {
-        let endpoint = "";
-        if (linkedPreviewKind === "order") {
-          if (!currentDetail.order_id) {
-            throw new Error(
-              appointmentText(
-                "Kein Auftrag mit diesem Termin verknupft.",
-                "Для этого приёма нет связанного заказа.",
-                "No linked order for this appointment.",
-              ),
-            );
-          }
-          endpoint = `/orders/${currentDetail.order_id}`;
-        } else if (linkedPreviewKind === "provider") {
-          if (!currentDetail.provider_id) {
-            throw new Error(
-              appointmentText(
-                "Keine Klinik mit diesem Termin verknupft.",
-                "Для этого приёма нет связанной клиники.",
-                "No linked provider for this appointment.",
-              ),
-            );
-          }
-          endpoint = `/providers/${currentDetail.provider_id}`;
-        } else if (linkedPreviewKind === "documents") {
-          endpoint = `/documents?appointment=${currentDetail.id}&patient=${currentDetail.patient_id}`;
-        } else {
-          endpoint = `/cases?patient=${currentDetail.patient_id}`;
-        }
-
-        const payload = await apiFetch<unknown>(endpoint);
-        if (!active) return;
-        setLinkedPreviewPayload(normalizeLinkedPreviewPayload(payload));
-      } catch (error) {
-        if (!active) return;
-        setLinkedPreviewError(
-          error instanceof Error
-            ? error.message
-            : appointmentText(
-                "Verknupfte Daten konnten nicht geladen werden.",
-                "Не удалось загрузить связанные данные.",
-                "Failed to load linked records",
-              ),
-        );
-      } finally {
-        if (active) {
-          setLinkedPreviewLoading(false);
-        }
-      }
-    }
-
-    void loadLinkedPreview();
-    return () => {
-      active = false;
-    };
-  }, [
-    detail,
-    linkedPreviewKind,
-    linkedPreviewOpen,
-  ]);
-
-  useEffect(() => {
-    if (!linkedPatientOpen || !linkedPatientId) return;
-    let active = true;
-    setLinkedPatientDetailLoading(true);
-    setLinkedPatientDetailError("");
-    setLinkedPatientAssignmentError("");
-
-    const detailRequest = apiFetch<PatientSheetDetail>(`/patients/${linkedPatientId}`);
-    const assignmentsRequest = patientSheetPermissions.canViewAssignments
-      ? apiFetch<PatientSheetAssignment[]>(`/patients/${linkedPatientId}/assignments`).catch(
-          () => [],
-        )
-      : Promise.resolve([] as PatientSheetAssignment[]);
-    const staffRequest = patientSheetPermissions.canManageAssignments
-      ? apiFetch<PatientSheetStaffOption[]>("/appointments/meta/staff").catch(
-          () => [],
-        )
-      : Promise.resolve([] as PatientSheetStaffOption[]);
-
-    void Promise.all([detailRequest, assignmentsRequest, staffRequest])
-      .then(([patientDetail, assignments, assignableStaff]) => {
-        if (!active) return;
-        setLinkedPatientDetail(patientDetail);
-        setLinkedPatientAssignments(assignments);
-        setLinkedPatientAssignableStaff(assignableStaff);
-      })
-      .catch((error) => {
-        if (!active) return;
-        setLinkedPatientDetail(null);
-        setLinkedPatientAssignments([]);
-        setLinkedPatientAssignableStaff([]);
-        setLinkedPatientDetailError(
-          error instanceof Error ? error.message : t.common_failed_load,
-        );
-      })
-      .finally(() => {
-        if (active) {
-          setLinkedPatientDetailLoading(false);
-        }
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [
-    linkedPatientId,
-    linkedPatientOpen,
-    linkedPatientVersion,
-    patientSheetPermissions.canManageAssignments,
-    patientSheetPermissions.canViewAssignments,
-    t.common_failed_load,
-  ]);
-
-  useEffect(() => {
-    if (!linkedProviderOpen || !linkedProviderId) return;
-    let active = true;
-    setLinkedProviderDetailLoading(true);
-    setLinkedProviderDetailError("");
-
-    void apiFetch<ProviderSheetDetail>(`/providers/${linkedProviderId}`)
-      .then((providerDetail) => {
-        if (!active) return;
-        setLinkedProviderDetail(providerDetail);
-      })
-      .catch((error) => {
-        if (!active) return;
-        setLinkedProviderDetail(null);
-        setLinkedProviderDetailError(
-          error instanceof Error ? error.message : t.common_failed_load,
-        );
-      })
-      .finally(() => {
-        if (active) {
-          setLinkedProviderDetailLoading(false);
-        }
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [linkedProviderId, linkedProviderOpen, t.common_failed_load]);
-
-  useEffect(() => {
-    if (!linkedCasesOpen || !detail?.patient_id) return;
-    let active = true;
-    setLinkedCasesLoading(true);
-    setLinkedCasesError("");
-
-    void apiFetch<CaseRosterItem[]>(`/cases?patient_id=${detail.patient_id}`)
-      .then((items) => {
-        if (!active) return;
-        setLinkedCasesItems(items);
-      })
-      .catch((error) => {
-        if (!active) return;
-        setLinkedCasesItems([]);
-        setLinkedCasesError(
-          error instanceof Error ? error.message : t.common_failed_load,
-        );
-      })
-      .finally(() => {
-        if (active) {
-          setLinkedCasesLoading(false);
-        }
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [detail?.patient_id, linkedCasesOpen, t.common_failed_load]);
-
-  useEffect(() => {
-    if (!linkedDocumentsOpen || !detail?.id || !detail.patient_id) return;
-    let active = true;
-    setLinkedDocumentsLoading(true);
-    setLinkedDocumentsError("");
-
-    void apiFetch<LinkedDocumentItem[]>(
-      `/documents?appointment_id=${detail.id}&patient_id=${detail.patient_id}`,
-    )
-      .then((items) => {
-        if (!active) return;
-        const patientScoped = items.filter(
-          (item) => item.patient_id === detail.patient_id,
-        );
-        setLinkedDocumentsItems(sortLinkedDocuments(patientScoped));
-      })
-      .catch((error) => {
-        if (!active) return;
-        setLinkedDocumentsItems([]);
-        setLinkedDocumentsError(
-          error instanceof Error ? error.message : t.common_failed_load,
-        );
-      })
-      .finally(() => {
-        if (active) {
-          setLinkedDocumentsLoading(false);
-        }
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [detail?.id, detail?.patient_id, linkedDocumentsOpen, t.common_failed_load]);
 
   const scopedAppointments = useMemo(
     () =>
@@ -1955,13 +1401,9 @@ function StaffAppointmentsPage() {
     });
   }, []);
 
-  const refreshLinkedPatient = useCallback(() => {
-    setLinkedPatientVersion((current) => current + 1);
-  }, []);
-
   const reportDetailError = useCallback((message: string) => {
     setDetailError(message);
-  }, []);
+  }, [setDetailError]);
 
   const reportAppointmentsNotice = useCallback((notice: string) => {
     setAppointmentsNotice(notice);
@@ -2261,9 +1703,6 @@ function StaffAppointmentsPage() {
     if (!open) {
       setLinkedPreviewKind(null);
       setLinkedPreviewLabel("");
-      setLinkedPreviewLoading(false);
-      setLinkedPreviewError("");
-      setLinkedPreviewPayload(null);
     }
   }, []);
 
@@ -2271,65 +1710,26 @@ function StaffAppointmentsPage() {
     setLinkedPatientOpen(open);
     if (!open) {
       setLinkedPatientId("");
-      setLinkedPatientDetailLoading(false);
-      setLinkedPatientDetailError("");
-      setLinkedPatientDetail(null);
-      setLinkedPatientAssignments([]);
-      setLinkedPatientAssignableStaff([]);
-      setLinkedPatientSelectedAssignee("");
-      setLinkedPatientAssignmentBusy(false);
-      setLinkedPatientAssignmentError("");
+      resetLinkedPatientState();
+      resetLinkedPatientAssignmentState();
       setLinkedPatientVersion(0);
     }
-  }, []);
+  }, [resetLinkedPatientAssignmentState, resetLinkedPatientState]);
 
   const handleLinkedProviderOpenChange = useCallback((open: boolean) => {
     setLinkedProviderOpen(open);
     if (!open) {
       setLinkedProviderId("");
-      setLinkedProviderDetailLoading(false);
-      setLinkedProviderDetailError("");
-      setLinkedProviderDetail(null);
     }
   }, []);
 
   const handleLinkedCasesOpenChange = useCallback((open: boolean) => {
     setLinkedCasesOpen(open);
-    if (!open) {
-      setLinkedCasesLoading(false);
-      setLinkedCasesError("");
-      setLinkedCasesItems([]);
-    }
   }, []);
 
   const handleLinkedDocumentsOpenChange = useCallback((open: boolean) => {
     setLinkedDocumentsOpen(open);
-    if (!open) {
-      setLinkedDocumentsLoading(false);
-      setLinkedDocumentsError("");
-      setLinkedDocumentsItems([]);
-    }
   }, []);
-
-  const handleAssignLinkedPatient = useCallback(async () => {
-    if (!linkedPatientDetail || !linkedPatientSelectedAssignee) return;
-    setLinkedPatientAssignmentBusy(true);
-    setLinkedPatientAssignmentError("");
-    try {
-      await apiFetch(`/patients/${linkedPatientDetail.id}/assign`, {
-        method: "POST",
-        body: JSON.stringify({ user_id: linkedPatientSelectedAssignee }),
-      });
-      setLinkedPatientSelectedAssignee("");
-      refreshLinkedPatient();
-    } catch (error) {
-      setLinkedPatientAssignmentError(
-        error instanceof Error ? error.message : t.common_failed_assign,
-      );
-    } finally {
-      setLinkedPatientAssignmentBusy(false);
-    }
-  }, [linkedPatientDetail, linkedPatientSelectedAssignee, refreshLinkedPatient, t.common_failed_assign]);
 
   const handleFollowUpVisitCreated = useCallback(
     ({ id, notice }: { id?: string; notice: string }) => {
@@ -2534,22 +1934,17 @@ function StaffAppointmentsPage() {
       tr,
     );
     try {
-      const result = await apiFetch<{
-        ok: boolean;
-        conflicts?: ConflictSummary;
-      }>(`/appointments/${source.id}/update`, {
-        method: "POST",
-        body: JSON.stringify({
-          provider_id: source.provider_id,
-          doctor_id: source.doctor_id,
-          owner_user_id: source.owner_user_id,
-          interpreter_id: source.interpreter_id,
-          title: source.title,
-          date: nextDate,
-          time_start: nextTimeStart || null,
-          time_end: nextTimeEnd || null,
-          location: source.location,
-        }),
+      const result = await updateAppointmentSchedule({
+        appointmentId: source.id,
+        providerId: source.provider_id,
+        doctorId: source.doctor_id,
+        ownerUserId: source.owner_user_id,
+        interpreterId: source.interpreter_id,
+        title: source.title,
+        date: nextDate,
+        timeStart: nextTimeStart || null,
+        timeEnd: nextTimeEnd || null,
+        location: source.location,
       });
       setAppointmentsNotice(
         buildScheduleNotice(result.conflicts, localWarnings),
@@ -2572,13 +1967,11 @@ function StaffAppointmentsPage() {
     setCalendarQuickActionMenu(null);
     setActionBusy(statusActionKey(appointmentId, status, recurrenceScope));
     try {
-      await apiFetch<{ ok: boolean }>(`/appointments/${appointmentId}/status`, {
-        method: "POST",
-        body: JSON.stringify({
-          status,
-          recurrence_scope: recurrenceScope,
-        }),
-      });
+      await updateAppointmentStatus(
+        appointmentId,
+        status,
+        recurrenceScope,
+      );
       if (selectedId === appointmentId) {
         refreshDetail();
       } else {
