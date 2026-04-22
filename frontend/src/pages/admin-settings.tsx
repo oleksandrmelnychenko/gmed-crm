@@ -35,6 +35,7 @@ import {
   PageHeader,
   Section,
   StatusBadge,
+  SuccessBanner,
   TabLoader,
   textareaClass,
   tokens,
@@ -222,7 +223,7 @@ export function AdminSettingsPage() {
     void load();
   }, [load]);
 
-  const accessTokenMinutes = editValues.access_token_minutes || "—";
+  const accessTokenMinutes = editValues.access_token_minutes || "-";
 
   function closeGroupSheet(open: boolean) {
     if (!open) {
@@ -394,9 +395,7 @@ export function AdminSettingsPage() {
           flash.tone === "error" ? (
             <Banner tone="error">{flash.text}</Banner>
           ) : (
-            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-              {flash.text}
-            </div>
+            <SuccessBanner>{flash.text}</SuccessBanner>
           )
         ) : null}
 
@@ -535,7 +534,7 @@ export function AdminSettingsPage() {
                                 {entry.user_email}
                               </td>
                               <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                                {entry.ip_address ?? "—"}
+                                {entry.ip_address ?? "-"}
                               </td>
                               <td
                                 className="max-w-[240px] px-4 py-3 text-xs text-muted-foreground truncate"
@@ -641,7 +640,7 @@ export function AdminSettingsPage() {
                                 <StatusBadge tone="neutral">{session.role}</StatusBadge>
                               </td>
                               <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                                {session.ip_address ?? "—"}
+                                {session.ip_address ?? "-"}
                               </td>
                               <td
                                 className="max-w-[240px] px-4 py-3 text-xs text-muted-foreground truncate"
@@ -774,3 +773,4 @@ export function AdminSettingsPage() {
     </>
   );
 }
+

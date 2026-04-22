@@ -316,7 +316,7 @@ export function AdminActivityPage() {
           >
             {filtered.length === 0 ? (
               <div className="p-4">
-                <EmptyCell>{t.common_error}</EmptyCell>
+                <EmptyCell>{t.activity_subtitle}</EmptyCell>
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -391,7 +391,7 @@ export function AdminActivityPage() {
             title={selectedActivity ? actionLabel(selectedActivity.action) : t.activity_details}
             description={
               selectedActivity
-                ? `${selectedActivity.user_name} · ${formatAdminDateTime(selectedActivity.created_at, lang)}`
+                ? `${selectedActivity.user_name} - ${formatAdminDateTime(selectedActivity.created_at, lang)}`
                 : t.activity_subtitle
             }
             footer={(

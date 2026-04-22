@@ -35,6 +35,7 @@ import {
   Section,
   StatCard,
   StatusBadge,
+  SuccessBanner,
   TabLoader,
   textareaClass,
   tokens,
@@ -302,9 +303,7 @@ export function AdminSecurityPage() {
           flash.tone === "error" ? (
             <Banner tone="error">{flash.text}</Banner>
           ) : (
-            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-              {flash.text}
-            </div>
+            <SuccessBanner>{flash.text}</SuccessBanner>
           )
         ) : null}
 
@@ -378,7 +377,7 @@ export function AdminSecurityPage() {
                     {t.security_maintenance_msg}
                   </p>
                   <p className="mt-1 text-sm text-foreground">
-                    {maintMsg || "—"}
+                    {maintMsg || "-"}
                   </p>
                 </div>
               </div>
@@ -445,14 +444,14 @@ export function AdminSecurityPage() {
                               <td className="px-4 py-3">
                                 <div className="text-sm text-foreground">{event.reason}</div>
                                 <div className="text-[11.5px] text-muted-foreground">
-                                  {event.entity_type} · {event.action}
+                                  {event.entity_type} - {event.action}
                                 </div>
                               </td>
                               <td className="max-w-[240px] px-4 py-3 text-xs text-muted-foreground truncate">
-                                {event.route ?? "—"}
+                                {event.route ?? "-"}
                               </td>
                               <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                                {event.ip_hash ?? "—"}
+                                {event.ip_hash ?? "-"}
                               </td>
                             </tr>
                           ))}
@@ -556,7 +555,7 @@ export function AdminSecurityPage() {
                                 {ip.cidr}
                               </td>
                               <td className="px-4 py-3 text-muted-foreground">
-                                {ip.description || "—"}
+                                {ip.description || "-"}
                               </td>
                               <td className="px-4 py-3">
                                 <StatusBadge tone={ip.is_active ? "success" : "neutral"}>
@@ -628,7 +627,7 @@ export function AdminSecurityPage() {
                               </div>
                             </td>
                             <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                              {entry.ip_address ?? "—"}
+                              {entry.ip_address ?? "-"}
                             </td>
                             <td
                               className="max-w-[260px] px-4 py-3 text-xs text-muted-foreground truncate"
@@ -776,3 +775,4 @@ export function AdminSecurityPage() {
     </>
   );
 }
+

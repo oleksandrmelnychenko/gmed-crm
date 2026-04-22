@@ -1,9 +1,28 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { Plus } from "lucide-react";
+import { Plus, RefreshCcw } from "lucide-react";
+
+import {
+  AdminTableCard,
+  AdminToolbar,
+} from "@/components/admin-page-patterns";
+import {
+  Banner,
+  EmptyCell,
+  PageHeader,
+  TabLoader,
+} from "@/components/ui-shell";
 import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -21,18 +40,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
 
 interface CustomField {
   id: string;
@@ -49,10 +56,6 @@ interface CustomField {
 const ENTITY_TYPES = ["lead", "patient", "order", "provider"] as const;
 const FIELD_TYPES = ["text", "number", "date", "boolean", "select"] as const;
 
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
-
 export function AdminCustomFieldsPage() {
   const { t } = useLang();
 
@@ -61,7 +64,6 @@ export function AdminCustomFieldsPage() {
   const [filterEntity, setFilterEntity] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
 
-  // create dialog
   const [showCreate, setShowCreate] = useState(false);
   const [fEntity, setFEntity] = useState("lead");
   const [fKey, setFKey] = useState("");
@@ -78,7 +80,7 @@ export function AdminCustomFieldsPage() {
         : "/admin/custom-fields";
       setFields(await apiFetch<CustomField[]>(url));
     } catch {
-      /* keep empty */
+      setFields([]);
     } finally {
       setLoading(false);
     }
@@ -96,7 +98,7 @@ export function AdminCustomFieldsPage() {
       try {
         opts = JSON.parse(fOptions);
       } catch {
-        /* ignore */
+        opts = null;
       }
     }
     try {
@@ -130,34 +132,47 @@ export function AdminCustomFieldsPage() {
   const activeFields = fields.filter((f) => f.is_active);
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">{t.cf_title}</h1>
-          <p className="text-muted-foreground text-sm">{t.cf_subtitle}</p>
-        </div>
-        <Button onClick={() => setShowCreate(true)}>
-          <Plus className="mr-1 size-4" />
-          {t.cf_new}
-        </Button>
-      </div>
+    <div className="space-y-4">
+      <PageHeader
+        title={t.cf_title}
+        description={t.cf_subtitle}
+        actions={(
+          <>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-9 rounded-lg gap-1.5 bg-card px-3.5"
+              onClick={() => void load()}
+            >
+              <RefreshCcw className="size-3.5" />
+              {t.common_refresh}
+            </Button>
+            <Button
+              type="button"
+              className="h-9 rounded-lg gap-1.5 px-3.5"
+              onClick={() => setShowCreate(true)}
+            >
+              <Plus className="size-3.5" />
+              {t.cf_new}
+            </Button>
+          </>
+        )}
+      />
 
-      {msg && <p className="text-destructive text-sm">{msg}</p>}
+      {msg ? <Banner tone="error">{msg}</Banner> : null}
 
-      {/* Create dialog */}
       <Dialog open={showCreate} onOpenChange={setShowCreate}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>{t.cf_new}</DialogTitle>
             <DialogDescription>{t.cf_subtitle}</DialogDescription>
           </DialogHeader>
           <form onSubmit={onCreate} className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <Label>{t.cf_entity_type}</Label>
+              <div className="space-y-1.5">
+                <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_entity_type}</Label>
                 <Select value={fEntity} onValueChange={(value) => setFEntity(value ?? ENTITY_TYPES[0] ?? "patient")}>
-                  <SelectTrigger>
+                  <SelectTrigger className="h-9 rounded-lg bg-card">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -169,29 +184,31 @@ export function AdminCustomFieldsPage() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-1">
-                <Label>{t.cf_field_key} *</Label>
+              <div className="space-y-1.5">
+                <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_field_key} *</Label>
                 <Input
                   required
                   placeholder="my_field"
                   value={fKey}
                   onChange={(e) => setFKey(e.target.value)}
+                  className="h-9 rounded-lg"
                 />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <Label>{t.cf_field_label} *</Label>
+              <div className="space-y-1.5">
+                <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_field_label} *</Label>
                 <Input
                   required
                   value={fLabel}
                   onChange={(e) => setFLabel(e.target.value)}
+                  className="h-9 rounded-lg"
                 />
               </div>
-              <div className="space-y-1">
-                <Label>{t.cf_field_type}</Label>
+              <div className="space-y-1.5">
+                <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_field_type}</Label>
                 <Select value={fType} onValueChange={(value) => setFType(value ?? FIELD_TYPES[0] ?? "text")}>
-                  <SelectTrigger>
+                  <SelectTrigger className="h-9 rounded-lg bg-card">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -205,20 +222,22 @@ export function AdminCustomFieldsPage() {
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <Label>{t.cf_sort}</Label>
+              <div className="space-y-1.5">
+                <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_sort}</Label>
                 <Input
                   type="number"
                   value={fSort}
                   onChange={(e) => setFSort(e.target.value)}
+                  className="h-9 rounded-lg"
                 />
               </div>
-              <div className="space-y-1">
-                <Label>{t.cf_options}</Label>
+              <div className="space-y-1.5">
+                <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_options}</Label>
                 <Input
                   placeholder='["opt1","opt2"]'
                   value={fOptions}
                   onChange={(e) => setFOptions(e.target.value)}
+                  className="h-9 rounded-lg"
                 />
               </div>
             </div>
@@ -226,45 +245,47 @@ export function AdminCustomFieldsPage() {
               <Button
                 type="button"
                 variant="outline"
+                className="h-9 rounded-lg"
                 onClick={() => setShowCreate(false)}
               >
                 {t.common_cancel}
               </Button>
-              <Button type="submit">{t.common_save}</Button>
+              <Button type="submit" className="h-9 rounded-lg">{t.common_save}</Button>
             </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
 
-      {/* Table */}
-      {loading ? (
-        <p className="text-muted-foreground py-10 text-center">
-          {t.common_loading}
-        </p>
-      ) : (
-        <div className="rounded-xl border bg-white dark:bg-neutral-900">
-          <div className="flex items-center justify-between border-b px-6 py-4">
-            <h2 className="text-lg font-semibold">
-              {t.cf_title} ({activeFields.length})
-            </h2>
-            <Select value={filterEntity} onValueChange={(value) => setFilterEntity(value ?? "")}>
-              <SelectTrigger className="w-[160px]">
-                <SelectValue placeholder={t.providers_all} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="">{t.providers_all}</SelectItem>
-                {ENTITY_TYPES.map((et) => (
-                  <SelectItem key={et} value={et}>
-                    {et.charAt(0).toUpperCase() + et.slice(1)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+      {loading ? <TabLoader /> : null}
+
+      {!loading ? (
+        <AdminTableCard
+          title={t.cf_title}
+          description={t.cf_subtitle}
+          count={activeFields.length}
+        >
+          <div className="border-b border-border px-4 py-3">
+            <AdminToolbar>
+              <Select value={filterEntity} onValueChange={(value) => setFilterEntity(value ?? "")}>
+                <SelectTrigger className="h-8 w-[180px] rounded-lg bg-card text-[13px]">
+                  <SelectValue placeholder={t.providers_all} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">{t.providers_all}</SelectItem>
+                  {ENTITY_TYPES.map((et) => (
+                    <SelectItem key={et} value={et}>
+                      {et.charAt(0).toUpperCase() + et.slice(1)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </AdminToolbar>
           </div>
+
           {activeFields.length === 0 ? (
-            <p className="text-muted-foreground px-6 py-10 text-center text-sm">
-              {t.cf_no_fields}
-            </p>
+            <div className="p-4">
+              <EmptyCell>{t.cf_no_fields}</EmptyCell>
+            </div>
           ) : (
             <Table>
               <TableHeader>
@@ -311,8 +332,8 @@ export function AdminCustomFieldsPage() {
               </TableBody>
             </Table>
           )}
-        </div>
-      )}
+        </AdminTableCard>
+      ) : null}
     </div>
   );
 }

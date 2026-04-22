@@ -95,7 +95,7 @@ export function AdminHealthPage() {
         title={t.health_title}
         description={
           refreshedAt
-            ? `${t.health_subtitle} · ${t.common_last_updated}: ${formatAdminDateTime(refreshedAt, lang)}`
+            ? `${t.health_subtitle} - ${t.common_last_updated}: ${formatAdminDateTime(refreshedAt, lang)}`
             : t.health_subtitle
         }
         actions={(
@@ -173,7 +173,7 @@ export function AdminHealthPage() {
               />
               <StatCard
                 label={t.common_last_updated}
-                value={refreshedAt ? formatAdminDateTime(refreshedAt, lang) : "—"}
+                value={refreshedAt ? formatAdminDateTime(refreshedAt, lang) : "-"}
                 description={t.health_title}
               />
             </div>
@@ -264,6 +264,12 @@ export function AdminHealthPage() {
             </div>
           </Section>
         </>
+      ) : null}
+
+      {!loading && !error && !data ? (
+        <Section title={t.health_title}>
+          <EmptyCell>{t.health_subtitle}</EmptyCell>
+        </Section>
       ) : null}
     </div>
   );

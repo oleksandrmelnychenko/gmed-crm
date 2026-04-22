@@ -50,6 +50,7 @@ import {
   Field,
   PageHeader,
   StatusBadge,
+  SuccessBanner,
   TabLoader,
   textareaClass,
   tokens,
@@ -362,9 +363,7 @@ export function AdminNotificationsPage() {
           flash.tone === "error" ? (
             <Banner tone="error">{flash.text}</Banner>
           ) : (
-            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-              {flash.text}
-            </div>
+            <SuccessBanner>{flash.text}</SuccessBanner>
           )
         ) : null}
 
@@ -428,7 +427,7 @@ export function AdminNotificationsPage() {
                           className="max-w-[360px] px-4 py-3 font-mono text-xs text-muted-foreground truncate"
                           title={prettyNotificationConfig(channel.config)}
                         >
-                          {compactNotificationConfig(channel.config) || "—"}
+                          {compactNotificationConfig(channel.config) || "-"}
                         </td>
                         <td className="px-4 py-3">
                           <StatusBadge tone={channel.is_active ? "success" : "neutral"}>
@@ -648,3 +647,5 @@ export function AdminNotificationsPage() {
     </>
   );
 }
+
+

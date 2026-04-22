@@ -1,4 +1,4 @@
-import {
+﻿import {
   startTransition,
   useCallback,
   useEffect,
@@ -84,7 +84,7 @@ const ACCESS_FIELD_LABELS = {
     birth_date: "Geburtsdatum",
     phone: "Telefon",
     email: "E-Mail",
-    nationality: "Nationalität",
+    nationality: "Nationalitaet",
     languages: "Sprachen",
     insurance: "Versicherung",
     diagnosis: "Diagnosen",
@@ -113,7 +113,7 @@ const ACCESS_FIELD_LABELS = {
 
 const ACCESS_UI_LABELS = {
   de: {
-    clickToChange: "Klicken zum Ändern",
+    clickToChange: "Klicken zum Aendern",
     entityPatient: "Patient",
     fieldWorkspace: "Feld-Workspace",
   },
@@ -463,7 +463,7 @@ export function AdminAccessPage() {
                                   title={
                                     locked
                                       ? t.access_system_locked
-                                      : `${levelLabel(level, false)} · ${ui.clickToChange}`
+                                      : `${levelLabel(level, false)} - ${ui.clickToChange}`
                                   }
                                   disabled={locked || busy}
                                   onClick={() => void updatePolicy(role, field)}
@@ -583,3 +583,5 @@ export function AdminAccessPage() {
     </>
   );
 }
+
+

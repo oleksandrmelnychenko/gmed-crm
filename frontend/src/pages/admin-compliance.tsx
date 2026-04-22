@@ -46,6 +46,7 @@ import {
   Field,
   PageHeader,
   Section,
+  SuccessBanner,
   TabLoader,
   textareaClass,
   tokens,
@@ -235,7 +236,7 @@ function patientLabel(patientPid?: string | null, patientName?: string | null) {
   const normalizedName = patientName?.trim();
   const normalizedPid = patientPid?.trim();
   if (normalizedPid && normalizedName) {
-    return `${normalizedPid} · ${normalizedName}`;
+    return `${normalizedPid} - ${normalizedName}`;
   }
   return normalizedPid || normalizedName || "\u2014";
 }
@@ -251,7 +252,7 @@ function recordSummaryLabel(summary?: RecordSummary | null) {
     `O ${summary.orders ?? 0}`,
     `D ${summary.documents ?? 0}`,
     `I ${summary.invoices ?? 0}`,
-  ].join(" · ");
+  ].join(" - ");
 }
 
 function privacyNotesLabel(record: PrivacyRequestRecord) {
@@ -658,6 +659,11 @@ export function AdminCompliancePage() {
       value: privacyCounters.overdue,
     },
   ];
+  const exportResultIsError = exportResult?.startsWith("Error:") ?? false;
+  const exportResultIsJson = Boolean(
+    exportResult &&
+      (exportResult.trim().startsWith("{") || exportResult.trim().startsWith("[")),
+  );
 
   return (
     <div className="space-y-4">
@@ -813,7 +819,7 @@ export function AdminCompliancePage() {
             </div>
 
             <AdminTableCard
-              title={`${t.compliance_consent_history}${activePatientId ? ` — ${activePatientId}` : ""}`}
+              title={`${t.compliance_consent_history}${activePatientId ? ` - ${activePatientId}` : ""}`}
               description={t.compliance_patient_register_hint}
               count={patientConsents.length}
             >
@@ -946,7 +952,7 @@ export function AdminCompliancePage() {
             </div>
 
             <AdminTableCard
-              title={`${t.compliance_privacy_history}${activePatientId ? ` — ${activePatientId}` : ""}`}
+              title={`${t.compliance_privacy_history}${activePatientId ? ` - ${activePatientId}` : ""}`}
               description={t.compliance_privacy_requests_hint}
               count={patientPrivacyRequests.length}
             >
@@ -1033,9 +1039,15 @@ export function AdminCompliancePage() {
               </div>
             </div>
             {exportResult ? (
-              <pre className="max-h-72 overflow-auto rounded-lg border border-border/50 bg-card/60 p-3 text-xs text-muted-foreground">
-                {exportResult}
-              </pre>
+              exportResultIsError ? (
+                <Banner tone="error">{exportResult}</Banner>
+              ) : exportResultIsJson ? (
+                <pre className="max-h-72 overflow-auto rounded-lg border border-border/50 bg-card/60 p-3 text-xs text-muted-foreground">
+                  {exportResult}
+                </pre>
+              ) : (
+                <SuccessBanner>{exportResult}</SuccessBanner>
+              )
             ) : null}
           </Section>
 
@@ -1168,7 +1180,7 @@ export function AdminCompliancePage() {
           <Section title={t.compliance_privacy_review_queue}>
             <AdminTableCard
               title={t.compliance_privacy_review_queue}
-              description={`${t.compliance_stat_requested} ${privacyCounters.requested} · ${t.compliance_stat_hold} ${privacyCounters.retentionHold} · ${t.compliance_stat_approved} ${privacyCounters.approved} · ${t.compliance_stat_overdue} ${privacyCounters.overdue}`}
+              description={`${t.compliance_stat_requested} ${privacyCounters.requested} - ${t.compliance_stat_hold} ${privacyCounters.retentionHold} - ${t.compliance_stat_approved} ${privacyCounters.approved} - ${t.compliance_stat_overdue} ${privacyCounters.overdue}`}
               count={privacyQueue.length}
             >
               {privacyQueueLoading ? (
@@ -1314,3 +1326,4 @@ export function AdminCompliancePage() {
     </div>
   );
 }
+
