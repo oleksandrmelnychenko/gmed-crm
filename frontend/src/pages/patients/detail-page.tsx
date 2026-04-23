@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   useDeferredValue,
   useCallback,
   useEffect,
@@ -73,13 +75,23 @@ import type {
 } from "./model/detail-tab-types";
 import { usePatientDetailTabData } from "./data/use-patient-detail-tab-data";
 import { usePatientInvoiceDunningEvents } from "./data/use-patient-invoice-dunning-events";
-import { PatientDetailOverlayLayers } from "./ui/workspace/patient-detail-overlay-layers";
 import { PatientDetailWorkspaceContent } from "./ui/workspace/patient-detail-workspace-content";
 import {
   getPatientLegalStatusChecklist,
   getPatientLegalStatusCompletion,
   normalizePatientLegalStatus,
 } from "./model/legal-status";
+
+const loadPatientDetailOverlayLayers = () => import("./ui/workspace/patient-detail-overlay-layers");
+
+const LazyPatientDetailOverlayLayers = lazy(async () => {
+  const mod = await loadPatientDetailOverlayLayers();
+  return { default: mod.PatientDetailOverlayLayers };
+});
+
+function preloadPatientDetailOverlayLayers() {
+  void loadPatientDetailOverlayLayers();
+}
 
 type PatientVitalFormState = {
   measuredAt: string;
@@ -1092,29 +1104,41 @@ export function PatientDetailPage() {
       ),
     [assignments]
   );
+  const isDocumentsTabActive = activeTab === "documents";
+  const isContractsTabActive = activeTab === "contracts";
+  const isInvoicesTabActive = activeTab === "invoices";
+  const isWorkflowTabActive = activeTab === "workflow";
+  const isTimelineTabActive = activeTab === "timeline";
   const timelineCategoryOptions = useMemo(
     () =>
-      [...new Set(timeline.map((item) => item.category).filter((value) => Boolean(value?.trim())))]
-        .toSorted((left, right) => left.localeCompare(right)),
-    [timeline]
+      isTimelineTabActive
+        ? [...new Set(timeline.map((item) => item.category).filter((value) => Boolean(value?.trim())))]
+            .toSorted((left, right) => left.localeCompare(right))
+        : [],
+    [isTimelineTabActive, timeline]
   );
   const timelineSourceOptions = useMemo(
     () =>
-      [...new Set(timeline.map((item) => item.source_label ?? "").filter((value) => Boolean(value.trim())))]
-        .toSorted((left, right) => left.localeCompare(right)),
-    [timeline]
+      isTimelineTabActive
+        ? [...new Set(timeline.map((item) => item.source_label ?? "").filter((value) => Boolean(value.trim())))]
+            .toSorted((left, right) => left.localeCompare(right))
+        : [],
+    [isTimelineTabActive, timeline]
   );
 
   const filteredTimeline = useMemo(
     () =>
-      filterPatientTimelineItems(timeline, {
-        entityFilter: timelineEntityFilter,
-        categoryFilter: timelineCategoryFilter,
-        sourceFilter: timelineSourceFilter === "all" ? "" : timelineSourceFilter,
-        search: deferredTimelineSearch,
-        rangeFilter: timelineRangeFilter,
-      }),
+      isTimelineTabActive
+        ? filterPatientTimelineItems(timeline, {
+            entityFilter: timelineEntityFilter,
+            categoryFilter: timelineCategoryFilter,
+            sourceFilter: timelineSourceFilter === "all" ? "" : timelineSourceFilter,
+            search: deferredTimelineSearch,
+            rangeFilter: timelineRangeFilter,
+          })
+        : [],
     [
+      isTimelineTabActive,
       deferredTimelineSearch,
       timeline,
       timelineCategoryFilter,
@@ -1137,6 +1161,8 @@ export function PatientDetailPage() {
         }
       | null = null;
 
+    if (!isTimelineTabActive) return groups;
+
     for (const item of filteredTimeline) {
       const key = timelineDateGroupKey(item.happened_at);
       const label = timelineDateGroupLabel(item.happened_at, lang);
@@ -1150,12 +1176,26 @@ export function PatientDetailPage() {
     }
 
     return groups;
-  }, [filteredTimeline, lang]);
+  }, [filteredTimeline, isTimelineTabActive, lang]);
 
-  const timelineSummary = useMemo(() => buildPatientTimelineSummary(timeline), [timeline]);
-  const localizedTimelineRangeOptions = useMemo(() => timelineRangeOptions(lang), [lang]);
-  const timelineHasNextPage = timelineOffset + timeline.length < timelineTotal;
+  const timelineSummary = useMemo(
+    () => (isTimelineTabActive ? buildPatientTimelineSummary(timeline) : buildPatientTimelineSummary([])),
+    [isTimelineTabActive, timeline]
+  );
+  const localizedTimelineRangeOptions = useMemo(
+    () => (isTimelineTabActive ? timelineRangeOptions(lang) : []),
+    [isTimelineTabActive, lang]
+  );
+  const timelineHasNextPage = isTimelineTabActive && timelineOffset + timeline.length < timelineTotal;
+  const hasActiveOverlayLayer =
+    profileEditorOpen ||
+    relationEditorOpen ||
+    documentUploadOpen ||
+    contractCreateOpen ||
+    Boolean(contractStatusId) ||
+    Boolean(invoiceManageId);
   const workflowChecklistGroups = useMemo(() => {
+    if (!isWorkflowTabActive) return [];
     const items = workflowChecklist?.items ?? [];
     const grouped = new Map<string, WorkflowChecklistItem[]>();
     for (const item of items) {
@@ -1169,7 +1209,7 @@ export function PatientDetailPage() {
       items: groupItems,
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workflowChecklist, lang]);
+  }, [isWorkflowTabActive, workflowChecklist, lang]);
   const legalStatus = useMemo(
     () => normalizePatientLegalStatus(detail?.legal_status),
     [detail?.legal_status]
@@ -1183,55 +1223,66 @@ export function PatientDetailPage() {
     [legalStatus]
   );
   const documentStatusOptions = useMemo(
-    () =>
-      [...new Set(documents.map((item) => item.status ?? "").filter((value) => Boolean(value.trim())))]
-        .toSorted((left, right) => left.localeCompare(right)),
-    [documents]
+    () => {
+      if (!isDocumentsTabActive) return [];
+      return [...new Set(documents.map((item) => item.status ?? "").filter((value) => Boolean(value.trim())))]
+        .toSorted((left, right) => left.localeCompare(right));
+    },
+    [documents, isDocumentsTabActive]
   );
   const documentCategoryOptions = useMemo(
-    () =>
-      [...new Set(documents.map((item) => item.category ?? "").filter((value) => Boolean(value.trim())))]
-        .toSorted((left, right) => left.localeCompare(right)),
-    [documents]
+    () => {
+      if (!isDocumentsTabActive) return [];
+      return [...new Set(documents.map((item) => item.category ?? "").filter((value) => Boolean(value.trim())))]
+        .toSorted((left, right) => left.localeCompare(right));
+    },
+    [documents, isDocumentsTabActive]
   );
   const filteredDocuments = useMemo(
-    () =>
-      documents.filter((item) => {
+    () => {
+      if (!isDocumentsTabActive) return [];
+      return documents.filter((item) => {
         if (documentStatusFilter !== "all" && (item.status ?? "") !== documentStatusFilter) return false;
         if (documentCategoryFilter !== "all" && (item.category ?? "") !== documentCategoryFilter) return false;
         return true;
-      }),
-    [documentCategoryFilter, documentStatusFilter, documents]
+      });
+    },
+    [documentCategoryFilter, documentStatusFilter, documents, isDocumentsTabActive]
   );
   const hasDocumentFilters =
-    documentStatusFilter !== "all" || documentCategoryFilter !== "all";
+    isDocumentsTabActive &&
+    (documentStatusFilter !== "all" || documentCategoryFilter !== "all");
   const requiredDocumentFulfilledCount =
-    documentAlerts?.required_documents.filter((item) => item.fulfilled).length ?? 0;
+    isDocumentsTabActive
+      ? documentAlerts?.required_documents.filter((item) => item.fulfilled).length ?? 0
+      : 0;
   const contractSignedCount = useMemo(
-    () => contracts.filter((item) => item.status === "signed" || item.status === "active").length,
-    [contracts]
+    () => (isContractsTabActive ? contracts.filter((item) => item.status === "signed" || item.status === "active").length : 0),
+    [contracts, isContractsTabActive]
   );
   const contractPendingCount = useMemo(
-    () => contracts.filter((item) => item.status === "draft" || item.status === "sent").length,
-    [contracts]
+    () => (isContractsTabActive ? contracts.filter((item) => item.status === "draft" || item.status === "sent").length : 0),
+    [contracts, isContractsTabActive]
   );
   const contractExpiringSoonCount = useMemo(() => {
+    if (!isContractsTabActive) return 0;
     const now = new Date();
     return contracts.filter((item) => isContractExpiringSoon(item, now)).length;
-  }, [contracts]);
+  }, [contracts, isContractsTabActive]);
   const invoiceOutstandingAmount = useMemo(
-    () => invoices.reduce((sum, item) => sum + moneyValueNumber(item.balance_due), 0),
-    [invoices]
+    () => (isInvoicesTabActive ? invoices.reduce((sum, item) => sum + moneyValueNumber(item.balance_due), 0) : 0),
+    [invoices, isInvoicesTabActive]
   );
   const invoicePaidAmountTotal = useMemo(
-    () => invoices.reduce((sum, item) => sum + moneyValueNumber(item.paid_amount), 0),
-    [invoices]
+    () => (isInvoicesTabActive ? invoices.reduce((sum, item) => sum + moneyValueNumber(item.paid_amount), 0) : 0),
+    [invoices, isInvoicesTabActive]
   );
   const invoiceOpenCount = useMemo(
-    () => invoices.filter((item) => moneyValueNumber(item.balance_due) > 0).length,
-    [invoices]
+    () => (isInvoicesTabActive ? invoices.filter((item) => moneyValueNumber(item.balance_due) > 0).length : 0),
+    [invoices, isInvoicesTabActive]
   );
   const invoiceOverdueCount = useMemo(() => {
+    if (!isInvoicesTabActive) return 0;
     const now = new Date();
     return invoices.filter((item) => {
       if (item.status === "overdue") return true;
@@ -1239,13 +1290,14 @@ export function PatientDetailPage() {
       const dueDate = new Date(item.due_date);
       return !Number.isNaN(dueDate.getTime()) && dueDate < now;
     }).length;
-  }, [invoices]);
+  }, [invoices, isInvoicesTabActive]);
   const hasTimelineFilters =
-    timelineEntityFilter !== "all" ||
-    timelineCategoryFilter !== "all" ||
-    timelineSourceFilter !== "all" ||
-    timelineRangeFilter !== "all" ||
-    deferredTimelineSearch.trim().length > 0;
+    isTimelineTabActive &&
+    (timelineEntityFilter !== "all" ||
+      timelineCategoryFilter !== "all" ||
+      timelineSourceFilter !== "all" ||
+      timelineRangeFilter !== "all" ||
+      deferredTimelineSearch.trim().length > 0);
 
   const reload = useCallback(() => {
     setActionErrorState((current) =>
@@ -1277,6 +1329,7 @@ export function PatientDetailPage() {
   );
 
   useEffect(() => {
+    if (!isTimelineTabActive) return;
     const nextEntityFilter = normalizeTimelineQueryValue(searchParams.get("entity_type"));
     const nextCategoryFilter = normalizeTimelineQueryValue(searchParams.get("category"));
     const nextSourceFilter = normalizeTimelineQueryValue(searchParams.get("source"));
@@ -1291,6 +1344,7 @@ export function PatientDetailPage() {
     if (timelineSearch !== nextSearch) setTimelineSearch(nextSearch);
     if (timelineOffset !== nextOffset) setTimelineOffset(nextOffset);
   }, [
+    isTimelineTabActive,
     searchParams,
     timelineCategoryFilter,
     timelineEntityFilter,
@@ -1301,6 +1355,7 @@ export function PatientDetailPage() {
   ]);
 
   useEffect(() => {
+    if (!isTimelineTabActive) return;
     const nextParams = new URLSearchParams(searchParams);
 
     if (timelineEntityFilter === "all") nextParams.delete("entity_type");
@@ -1325,6 +1380,7 @@ export function PatientDetailPage() {
       setSearchParams(nextParams, { replace: true });
     }
   }, [
+    isTimelineTabActive,
     searchParams,
     setSearchParams,
     timelineCategoryFilter,
@@ -1336,6 +1392,7 @@ export function PatientDetailPage() {
   ]);
 
   useEffect(() => {
+    if (!isWorkflowTabActive) return;
     if (workflowForm.ownerUserId) return;
     const preferredAssignee =
       activeWorkflowAssignees.find((item) => item.user_id === user?.id)?.user_id ??
@@ -1346,7 +1403,7 @@ export function PatientDetailPage() {
       ...current,
       ownerUserId: preferredAssignee,
     }));
-  }, [activeWorkflowAssignees, user?.id, workflowForm.ownerUserId]);
+  }, [activeWorkflowAssignees, isWorkflowTabActive, user?.id, workflowForm.ownerUserId]);
 
   useEffect(() => {
     const requestedTab = searchParams.get("tab");
@@ -1447,10 +1504,12 @@ export function PatientDetailPage() {
   }
 
   const handleProfileEditorOpenChange = useCallback((open: boolean) => {
+    if (open) preloadPatientDetailOverlayLayers();
     setProfileEditorOpen(open);
   }, []);
 
   const handleRelationEditorOpenChange = useCallback((open: boolean) => {
+    if (open) preloadPatientDetailOverlayLayers();
     setRelationEditorOpen(open);
     if (!open) {
       setEditingRelation(null);
@@ -1458,20 +1517,24 @@ export function PatientDetailPage() {
   }, []);
 
   const handleDocumentUploadOpenChange = useCallback((open: boolean) => {
+    if (open) preloadPatientDetailOverlayLayers();
     setDocumentUploadOpen(open);
   }, []);
 
   const openProfileEditor = useCallback(() => {
     if (!detail) return;
+    preloadPatientDetailOverlayLayers();
     setProfileEditorOpen(true);
   }, [detail]);
 
   function openCreateRelation() {
+    preloadPatientDetailOverlayLayers();
     setEditingRelation(null);
     setRelationEditorOpen(true);
   }
 
   function openEditRelation(relation: RelationItem) {
+    preloadPatientDetailOverlayLayers();
     setEditingRelation(relation);
     setRelationEditorOpen(true);
   }
@@ -1515,8 +1578,14 @@ export function PatientDetailPage() {
   }
 
   function openContractStatusEditor(contract: ContractItem) {
+    preloadPatientDetailOverlayLayers();
     setContractStatusId(contract.id);
     setContractStatusForm(contractToForm(contract));
+  }
+
+  function openCreateContract() {
+    preloadPatientDetailOverlayLayers();
+    setContractCreateOpen(true);
   }
 
   async function handleSaveContractStatus(event: FormEvent<HTMLFormElement>) {
@@ -1545,9 +1614,15 @@ export function PatientDetailPage() {
   }
 
   function openInvoiceManager(invoice: InvoiceItem) {
+    preloadPatientDetailOverlayLayers();
     setInvoiceManageId(invoice.id);
     setInvoiceStatusForm(invoiceToStatusForm(invoice));
     setDunningNote("");
+  }
+
+  function openDocumentUpload() {
+    preloadPatientDetailOverlayLayers();
+    setDocumentUploadOpen(true);
   }
 
   async function handleSaveInvoiceStatus(event: FormEvent<HTMLFormElement>) {
@@ -1839,7 +1914,7 @@ export function PatientDetailPage() {
         onCardEntrySheetOpenChange={setCardEntrySheetOpen}
         onCaveSheetOpenChange={setCaveSheetOpen}
         onContractsPreviewOpenChange={setContractsPreviewOpen}
-        onCreateContract={() => setContractCreateOpen(true)}
+        onCreateContract={openCreateContract}
         onCreateRelation={openCreateRelation}
         onDeleteRelation={(relationId) => { void handleDeleteRelation(relationId); }}
         onDocsPreviewOpenChange={setDocsPreviewOpen}
@@ -1857,7 +1932,7 @@ export function PatientDetailPage() {
         onOpenOrder={(orderId) => { staffGo(`/orders?order=${orderId}`); }}
         onOpenPatient={(patientId) => { staffGo(`/patients/${patientId}`); }}
         onOpenProfileEditor={openProfileEditor}
-        onOpenUpload={() => setDocumentUploadOpen(true)}
+        onOpenUpload={openDocumentUpload}
         onPrintPatientLabel={handlePatientLabelSelect}
         onResetDocumentFilters={() => {
           setDocumentStatusFilter("all");
@@ -1963,66 +2038,70 @@ export function PatientDetailPage() {
         workspaceTabs={workspaceTabs}
       />
 
-      <PatientDetailOverlayLayers
-        appointments={appointments}
-        canManageInvoices={canManageInvoices}
-        canManageRelations={canManageRelations}
-        contractBusy={contractBusy}
-        contractCreateForm={contractCreateForm}
-        contractCreateOpen={contractCreateOpen}
-        contractStatusForm={contractStatusForm}
-        contractStatusId={contractStatusId}
-        contractStatusOptions={CONTRACT_STATUS_OPTIONS}
-        detail={detail}
-        dictionary={tr}
-        documentUploadOpen={documentUploadOpen}
-        dunningBusy={dunningBusy}
-        dunningEvents={dunningEvents}
-        dunningNote={dunningNote}
-        editingRelation={editingRelation}
-        formatDate={fmtDate}
-        formatDateTime={fmtDateTime}
-        formatMoney={fmtMoney}
-        invoiceBusy={invoiceBusy}
-        invoiceManageId={invoiceManageId}
-        invoiceStatusForm={invoiceStatusForm}
-        invoiceStatusOptions={INVOICE_STATUS_OPTIONS}
-        lang={lang}
-        l={l}
-        nextDunningLevel={nextDunningLevel}
-        onCloseContractStatus={() => setContractStatusId("")}
-        onCloseInvoiceManager={() => setInvoiceManageId("")}
-        onContractCreateOpenChange={setContractCreateOpen}
-        onContractCreateSignedAtChange={(value) => setContractCreateForm((current) => ({ ...current, signedAt: value }))}
-        onContractCreateStatusChange={(value) => setContractCreateForm((current) => ({ ...current, status: value as ContractStatus }))}
-        onContractCreateSubmit={handleCreateContract}
-        onContractCreateValidFromChange={(value) => setContractCreateForm((current) => ({ ...current, validFrom: value }))}
-        onContractCreateValidToChange={(value) => setContractCreateForm((current) => ({ ...current, validTo: value }))}
-        onContractStatusSignedAtChange={(value) => setContractStatusForm((current) => ({ ...current, signedAt: value }))}
-        onContractStatusSubmit={handleSaveContractStatus}
-        onContractStatusValueChange={(value) => setContractStatusForm((current) => ({ ...current, status: value as ContractStatus }))}
-        onContractStatusValidFromChange={(value) => setContractStatusForm((current) => ({ ...current, validFrom: value }))}
-        onContractStatusValidToChange={(value) => setContractStatusForm((current) => ({ ...current, validTo: value }))}
-        onCreateDunning={handleCreateDunning}
-        onDocumentUploadOpenChange={handleDocumentUploadOpenChange}
-        onDunningNoteChange={setDunningNote}
-        onError={setTabActionError}
-        onInvoiceDueDateChange={(value) => setInvoiceStatusForm((current) => ({ ...current, dueDate: value }))}
-        onInvoiceManageOpenChange={(open) => { if (!open) setInvoiceManageId(""); }}
-        onInvoiceNotesChange={(value) => setInvoiceStatusForm((current) => ({ ...current, notes: value }))}
-        onInvoicePaidAmountChange={(value) => setInvoiceStatusForm((current) => ({ ...current, paidAmount: value }))}
-        onInvoiceStatusSubmit={handleSaveInvoiceStatus}
-        onInvoiceStatusValueChange={(value) => setInvoiceStatusForm((current) => ({ ...current, status: value as InvoiceStatus }))}
-        onProfileEditorOpenChange={handleProfileEditorOpenChange}
-        onRelationEditorOpenChange={handleRelationEditorOpenChange}
-        onSaved={reload}
-        orders={orders}
-        patientId={id}
-        patientDetailStatusLabel={patientDetailStatusLabel}
-        profileEditorOpen={profileEditorOpen}
-        relationEditorOpen={relationEditorOpen}
-        textareaClassName={spaciousTextareaClassName}
-      />
+      {hasActiveOverlayLayer ? (
+        <Suspense fallback={null}>
+          <LazyPatientDetailOverlayLayers
+            appointments={appointments}
+            canManageInvoices={canManageInvoices}
+            canManageRelations={canManageRelations}
+            contractBusy={contractBusy}
+            contractCreateForm={contractCreateForm}
+            contractCreateOpen={contractCreateOpen}
+            contractStatusForm={contractStatusForm}
+            contractStatusId={contractStatusId}
+            contractStatusOptions={CONTRACT_STATUS_OPTIONS}
+            detail={detail}
+            dictionary={tr}
+            documentUploadOpen={documentUploadOpen}
+            dunningBusy={dunningBusy}
+            dunningEvents={dunningEvents}
+            dunningNote={dunningNote}
+            editingRelation={editingRelation}
+            formatDate={fmtDate}
+            formatDateTime={fmtDateTime}
+            formatMoney={fmtMoney}
+            invoiceBusy={invoiceBusy}
+            invoiceManageId={invoiceManageId}
+            invoiceStatusForm={invoiceStatusForm}
+            invoiceStatusOptions={INVOICE_STATUS_OPTIONS}
+            lang={lang}
+            l={l}
+            nextDunningLevel={nextDunningLevel}
+            onCloseContractStatus={() => setContractStatusId("")}
+            onCloseInvoiceManager={() => setInvoiceManageId("")}
+            onContractCreateOpenChange={setContractCreateOpen}
+            onContractCreateSignedAtChange={(value) => setContractCreateForm((current) => ({ ...current, signedAt: value }))}
+            onContractCreateStatusChange={(value) => setContractCreateForm((current) => ({ ...current, status: value as ContractStatus }))}
+            onContractCreateSubmit={handleCreateContract}
+            onContractCreateValidFromChange={(value) => setContractCreateForm((current) => ({ ...current, validFrom: value }))}
+            onContractCreateValidToChange={(value) => setContractCreateForm((current) => ({ ...current, validTo: value }))}
+            onContractStatusSignedAtChange={(value) => setContractStatusForm((current) => ({ ...current, signedAt: value }))}
+            onContractStatusSubmit={handleSaveContractStatus}
+            onContractStatusValueChange={(value) => setContractStatusForm((current) => ({ ...current, status: value as ContractStatus }))}
+            onContractStatusValidFromChange={(value) => setContractStatusForm((current) => ({ ...current, validFrom: value }))}
+            onContractStatusValidToChange={(value) => setContractStatusForm((current) => ({ ...current, validTo: value }))}
+            onCreateDunning={handleCreateDunning}
+            onDocumentUploadOpenChange={handleDocumentUploadOpenChange}
+            onDunningNoteChange={setDunningNote}
+            onError={setTabActionError}
+            onInvoiceDueDateChange={(value) => setInvoiceStatusForm((current) => ({ ...current, dueDate: value }))}
+            onInvoiceManageOpenChange={(open) => { if (!open) setInvoiceManageId(""); }}
+            onInvoiceNotesChange={(value) => setInvoiceStatusForm((current) => ({ ...current, notes: value }))}
+            onInvoicePaidAmountChange={(value) => setInvoiceStatusForm((current) => ({ ...current, paidAmount: value }))}
+            onInvoiceStatusSubmit={handleSaveInvoiceStatus}
+            onInvoiceStatusValueChange={(value) => setInvoiceStatusForm((current) => ({ ...current, status: value as InvoiceStatus }))}
+            onProfileEditorOpenChange={handleProfileEditorOpenChange}
+            onRelationEditorOpenChange={handleRelationEditorOpenChange}
+            onSaved={reload}
+            orders={orders}
+            patientId={id}
+            patientDetailStatusLabel={patientDetailStatusLabel}
+            profileEditorOpen={profileEditorOpen}
+            relationEditorOpen={relationEditorOpen}
+            textareaClassName={spaciousTextareaClassName}
+          />
+        </Suspense>
+      ) : null}
     </>
   );
 }

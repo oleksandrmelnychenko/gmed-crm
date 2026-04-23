@@ -1,12 +1,33 @@
-import type { FormEvent } from "react";
+import { lazy, Suspense, type FormEvent } from "react";
 
 import type { AppointmentItem, OrderItem, RelationItem } from "../../model/detail-tab-types";
 import type { PatientsDictionary, PatientDetail } from "../../model/list-model";
-import { MemoizedPatientDocumentUploadDialog } from "../sheets/patient-document-upload-dialog";
-import { PatientFinancialDialogs } from "../sheets/patient-financial-dialogs";
-import { MemoizedPatientProfileEditorSheet } from "../sheets/patient-profile-editor-sheet";
-import { MemoizedPatientRelationEditorSheet } from "../sheets/patient-relation-editor-sheet";
 import type { DunningEvent } from "../../model/detail-tab-types";
+
+const loadPatientProfileEditorSheet = () => import("../sheets/patient-profile-editor-sheet");
+const loadPatientRelationEditorSheet = () => import("../sheets/patient-relation-editor-sheet");
+const loadPatientDocumentUploadDialog = () => import("../sheets/patient-document-upload-dialog");
+const loadPatientFinancialDialogs = () => import("../sheets/patient-financial-dialogs");
+
+const LazyPatientProfileEditorSheet = lazy(async () => {
+  const mod = await loadPatientProfileEditorSheet();
+  return { default: mod.MemoizedPatientProfileEditorSheet };
+});
+
+const LazyPatientRelationEditorSheet = lazy(async () => {
+  const mod = await loadPatientRelationEditorSheet();
+  return { default: mod.MemoizedPatientRelationEditorSheet };
+});
+
+const LazyPatientDocumentUploadDialog = lazy(async () => {
+  const mod = await loadPatientDocumentUploadDialog();
+  return { default: mod.MemoizedPatientDocumentUploadDialog };
+});
+
+const LazyPatientFinancialDialogs = lazy(async () => {
+  const mod = await loadPatientFinancialDialogs();
+  return { default: mod.PatientFinancialDialogs };
+});
 
 type LocalizeFn = (de: string, ru: string, en: string) => string;
 type StatusLabelFn = (status: string) => string;
@@ -149,93 +170,112 @@ export function PatientDetailOverlayLayers({
   relationEditorOpen,
   textareaClassName,
 }: PatientDetailOverlayLayersProps) {
+  const hasFinancialDialogsOpen =
+    contractCreateOpen || Boolean(contractStatusId) || Boolean(invoiceManageId);
+
   return (
     <>
-      <MemoizedPatientProfileEditorSheet
-        open={profileEditorOpen}
-        patientId={patientId}
-        detail={detail}
-        dictionary={dictionary}
-        lang={lang}
-        statusLabel={patientDetailStatusLabel}
-        onOpenChange={onProfileEditorOpenChange}
-        onSaved={onSaved}
-        onError={onError}
-      />
+      {profileEditorOpen ? (
+        <Suspense fallback={null}>
+          <LazyPatientProfileEditorSheet
+            open={profileEditorOpen}
+            patientId={patientId}
+            detail={detail}
+            dictionary={dictionary}
+            lang={lang}
+            statusLabel={patientDetailStatusLabel}
+            onOpenChange={onProfileEditorOpenChange}
+            onSaved={onSaved}
+            onError={onError}
+          />
+        </Suspense>
+      ) : null}
 
-      <MemoizedPatientRelationEditorSheet
-        open={relationEditorOpen}
-        patientId={patientId}
-        selfPatientId={detail.id}
-        canManageRelations={canManageRelations}
-        editingRelation={editingRelation}
-        dictionary={dictionary}
-        lang={lang}
-        textareaClassName={textareaClassName}
-        onOpenChange={onRelationEditorOpenChange}
-        onSaved={onSaved}
-        onError={onError}
-      />
+      {relationEditorOpen ? (
+        <Suspense fallback={null}>
+          <LazyPatientRelationEditorSheet
+            open={relationEditorOpen}
+            patientId={patientId}
+            selfPatientId={detail.id}
+            canManageRelations={canManageRelations}
+            editingRelation={editingRelation}
+            dictionary={dictionary}
+            lang={lang}
+            textareaClassName={textareaClassName}
+            onOpenChange={onRelationEditorOpenChange}
+            onSaved={onSaved}
+            onError={onError}
+          />
+        </Suspense>
+      ) : null}
 
-      <MemoizedPatientDocumentUploadDialog
-        open={documentUploadOpen}
-        patientId={patientId}
-        orders={orders}
-        appointments={appointments}
-        dictionary={dictionary}
-        lang={lang}
-        textareaClassName={textareaClassName}
-        statusLabel={patientDetailStatusLabel}
-        formatDate={formatDate}
-        onOpenChange={onDocumentUploadOpenChange}
-        onSaved={onSaved}
-        onError={onError}
-      />
+      {documentUploadOpen ? (
+        <Suspense fallback={null}>
+          <LazyPatientDocumentUploadDialog
+            open={documentUploadOpen}
+            patientId={patientId}
+            orders={orders}
+            appointments={appointments}
+            dictionary={dictionary}
+            lang={lang}
+            textareaClassName={textareaClassName}
+            statusLabel={patientDetailStatusLabel}
+            formatDate={formatDate}
+            onOpenChange={onDocumentUploadOpenChange}
+            onSaved={onSaved}
+            onError={onError}
+          />
+        </Suspense>
+      ) : null}
 
-      <PatientFinancialDialogs
-        canManageInvoices={canManageInvoices}
-        cancelLabel={dictionary.common_cancel}
-        contractBusy={contractBusy}
-        contractCreateForm={contractCreateForm}
-        contractCreateOpen={contractCreateOpen}
-        contractStatusForm={contractStatusForm}
-        contractStatusId={contractStatusId}
-        contractStatusOptions={contractStatusOptions}
-        dunningBusy={dunningBusy}
-        dunningEvents={dunningEvents}
-        dunningNote={dunningNote}
-        formatDateTime={formatDateTime}
-        formatMoney={formatMoney}
-        invoiceBusy={invoiceBusy}
-        invoiceManageId={invoiceManageId}
-        invoiceStatusForm={invoiceStatusForm}
-        invoiceStatusOptions={invoiceStatusOptions}
-        l={l}
-        nextDunningLevel={nextDunningLevel}
-        onCloseContractStatus={onCloseContractStatus}
-        onCloseInvoiceManager={onCloseInvoiceManager}
-        onContractCreateOpenChange={onContractCreateOpenChange}
-        onContractCreateSignedAtChange={onContractCreateSignedAtChange}
-        onContractCreateStatusChange={onContractCreateStatusChange}
-        onContractCreateSubmit={onContractCreateSubmit}
-        onContractCreateValidFromChange={onContractCreateValidFromChange}
-        onContractCreateValidToChange={onContractCreateValidToChange}
-        onContractStatusSignedAtChange={onContractStatusSignedAtChange}
-        onContractStatusSubmit={onContractStatusSubmit}
-        onContractStatusValueChange={onContractStatusValueChange}
-        onContractStatusValidFromChange={onContractStatusValidFromChange}
-        onContractStatusValidToChange={onContractStatusValidToChange}
-        onCreateDunning={onCreateDunning}
-        onDunningNoteChange={onDunningNoteChange}
-        onInvoiceDueDateChange={onInvoiceDueDateChange}
-        onInvoiceManageOpenChange={onInvoiceManageOpenChange}
-        onInvoiceNotesChange={onInvoiceNotesChange}
-        onInvoicePaidAmountChange={onInvoicePaidAmountChange}
-        onInvoiceStatusSubmit={onInvoiceStatusSubmit}
-        onInvoiceStatusValueChange={onInvoiceStatusValueChange}
-        patientDetailStatusLabel={patientDetailStatusLabel}
-        textareaClassName={textareaClassName}
-      />
+      {hasFinancialDialogsOpen ? (
+        <Suspense fallback={null}>
+          <LazyPatientFinancialDialogs
+            canManageInvoices={canManageInvoices}
+            cancelLabel={dictionary.common_cancel}
+            contractBusy={contractBusy}
+            contractCreateForm={contractCreateForm}
+            contractCreateOpen={contractCreateOpen}
+            contractStatusForm={contractStatusForm}
+            contractStatusId={contractStatusId}
+            contractStatusOptions={contractStatusOptions}
+            dunningBusy={dunningBusy}
+            dunningEvents={dunningEvents}
+            dunningNote={dunningNote}
+            formatDateTime={formatDateTime}
+            formatMoney={formatMoney}
+            invoiceBusy={invoiceBusy}
+            invoiceManageId={invoiceManageId}
+            invoiceStatusForm={invoiceStatusForm}
+            invoiceStatusOptions={invoiceStatusOptions}
+            l={l}
+            nextDunningLevel={nextDunningLevel}
+            onCloseContractStatus={onCloseContractStatus}
+            onCloseInvoiceManager={onCloseInvoiceManager}
+            onContractCreateOpenChange={onContractCreateOpenChange}
+            onContractCreateSignedAtChange={onContractCreateSignedAtChange}
+            onContractCreateStatusChange={onContractCreateStatusChange}
+            onContractCreateSubmit={onContractCreateSubmit}
+            onContractCreateValidFromChange={onContractCreateValidFromChange}
+            onContractCreateValidToChange={onContractCreateValidToChange}
+            onContractStatusSignedAtChange={onContractStatusSignedAtChange}
+            onContractStatusSubmit={onContractStatusSubmit}
+            onContractStatusValueChange={onContractStatusValueChange}
+            onContractStatusValidFromChange={onContractStatusValidFromChange}
+            onContractStatusValidToChange={onContractStatusValidToChange}
+            onCreateDunning={onCreateDunning}
+            onDunningNoteChange={onDunningNoteChange}
+            onInvoiceDueDateChange={onInvoiceDueDateChange}
+            onInvoiceManageOpenChange={onInvoiceManageOpenChange}
+            onInvoiceNotesChange={onInvoiceNotesChange}
+            onInvoicePaidAmountChange={onInvoicePaidAmountChange}
+            onInvoiceStatusSubmit={onInvoiceStatusSubmit}
+            onInvoiceStatusValueChange={onInvoiceStatusValueChange}
+            patientDetailStatusLabel={patientDetailStatusLabel}
+            textareaClassName={textareaClassName}
+          />
+        </Suspense>
+      ) : null}
     </>
   );
 }

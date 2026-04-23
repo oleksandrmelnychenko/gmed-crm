@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { LoaderCircle, Pencil, Plus } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -19,20 +20,67 @@ import type {
   PatientRiskScore,
   PatientVitalMeasurement,
 } from "../../model/detail-resource-types";
-import { PatientCardEntrySheet } from "../sheets/patient-card-entry-sheet";
-import { PatientCaveNotesSheet } from "../sheets/patient-cave-notes-sheet";
-import {
-  PatientContractsPreviewSheet,
-  PatientDocumentsPreviewSheet,
-  PatientInvoicesPreviewSheet,
-} from "../sheets/patient-legal-preview-sheets";
-import { PatientLegalStatusSheet } from "../sheets/patient-legal-status-sheet";
-import { PatientMedicalOrderSheet } from "../sheets/patient-medical-order-sheet";
-import { PatientNotesSheet } from "../sheets/patient-notes-sheet";
-import { PatientRiskScoreSheet } from "../sheets/patient-risk-score-sheet";
-import { PatientVitalsSheet } from "../sheets/patient-vitals-sheet";
 import { LegalStatusPill } from "../shared/legal-status-pill";
 import { WorkspaceSectionIntro } from "../shared/workspace-primitives";
+
+const loadPatientLegalPreviewSheets = () => import("../sheets/patient-legal-preview-sheets");
+const loadPatientLegalStatusSheet = () => import("../sheets/patient-legal-status-sheet");
+const loadPatientVitalsSheet = () => import("../sheets/patient-vitals-sheet");
+const loadPatientCaveNotesSheet = () => import("../sheets/patient-cave-notes-sheet");
+const loadPatientCardEntrySheet = () => import("../sheets/patient-card-entry-sheet");
+const loadPatientMedicalOrderSheet = () => import("../sheets/patient-medical-order-sheet");
+const loadPatientRiskScoreSheet = () => import("../sheets/patient-risk-score-sheet");
+const loadPatientNotesSheet = () => import("../sheets/patient-notes-sheet");
+
+const LazyPatientDocumentsPreviewSheet = lazy(async () => {
+  const mod = await loadPatientLegalPreviewSheets();
+  return { default: mod.PatientDocumentsPreviewSheet };
+});
+
+const LazyPatientContractsPreviewSheet = lazy(async () => {
+  const mod = await loadPatientLegalPreviewSheets();
+  return { default: mod.PatientContractsPreviewSheet };
+});
+
+const LazyPatientInvoicesPreviewSheet = lazy(async () => {
+  const mod = await loadPatientLegalPreviewSheets();
+  return { default: mod.PatientInvoicesPreviewSheet };
+});
+
+const LazyPatientLegalStatusSheet = lazy(async () => {
+  const mod = await loadPatientLegalStatusSheet();
+  return { default: mod.PatientLegalStatusSheet };
+});
+
+const LazyPatientVitalsSheet = lazy(async () => {
+  const mod = await loadPatientVitalsSheet();
+  return { default: mod.PatientVitalsSheet };
+});
+
+const LazyPatientCaveNotesSheet = lazy(async () => {
+  const mod = await loadPatientCaveNotesSheet();
+  return { default: mod.PatientCaveNotesSheet };
+});
+
+const LazyPatientCardEntrySheet = lazy(async () => {
+  const mod = await loadPatientCardEntrySheet();
+  return { default: mod.PatientCardEntrySheet };
+});
+
+const LazyPatientMedicalOrderSheet = lazy(async () => {
+  const mod = await loadPatientMedicalOrderSheet();
+  return { default: mod.PatientMedicalOrderSheet };
+});
+
+const LazyPatientRiskScoreSheet = lazy(async () => {
+  const mod = await loadPatientRiskScoreSheet();
+  return { default: mod.PatientRiskScoreSheet };
+});
+
+const LazyPatientNotesSheet = lazy(async () => {
+  const mod = await loadPatientNotesSheet();
+  return { default: mod.PatientNotesSheet };
+});
 
 type LocalizeFn = (de: string, ru: string, en: string) => string;
 type DateFormatter = (value?: string | null, fallback?: string) => string;
@@ -190,6 +238,56 @@ export function PatientProfileTab({
 }: PatientProfileTabProps) {
   const editAction = canEditPatientProfile ? openProfileEditor : undefined;
 
+  function handleDocumentsPreviewOpenChange(open: boolean) {
+    if (open) void loadPatientLegalPreviewSheets();
+    onDocsPreviewOpenChange(open);
+  }
+
+  function handleContractsPreviewOpenChange(open: boolean) {
+    if (open) void loadPatientLegalPreviewSheets();
+    onContractsPreviewOpenChange(open);
+  }
+
+  function handleInvoicesPreviewOpenChange(open: boolean) {
+    if (open) void loadPatientLegalPreviewSheets();
+    onInvoicesPreviewOpenChange(open);
+  }
+
+  function handleLegalStatusSheetOpenChange(open: boolean) {
+    if (open) void loadPatientLegalStatusSheet();
+    onLegalStatusSheetOpenChange(open);
+  }
+
+  function handleVitalsSheetOpenChange(open: boolean) {
+    if (open) void loadPatientVitalsSheet();
+    onVitalsSheetOpenChange(open);
+  }
+
+  function handleCaveSheetOpenChange(open: boolean) {
+    if (open) void loadPatientCaveNotesSheet();
+    onCaveSheetOpenChange(open);
+  }
+
+  function handleCardEntrySheetOpenChange(open: boolean) {
+    if (open) void loadPatientCardEntrySheet();
+    onCardEntrySheetOpenChange(open);
+  }
+
+  function handleMedicalOrderSheetOpenChange(open: boolean) {
+    if (open) void loadPatientMedicalOrderSheet();
+    onMedicalOrderSheetOpenChange(open);
+  }
+
+  function handleRiskScoreSheetOpenChange(open: boolean) {
+    if (open) void loadPatientRiskScoreSheet();
+    onRiskScoreSheetOpenChange(open);
+  }
+
+  function handleNotesSheetOpenChange(open: boolean) {
+    if (open) void loadPatientNotesSheet();
+    onNotesSheetOpenChange(open);
+  }
+
   return (
     <div className="space-y-6 mt-4 min-h-[400px]">
       <WorkspaceSectionIntro
@@ -283,7 +381,7 @@ export function PatientProfileTab({
         }
         accessory={
           canEditPatientProfile ? (
-            <Button type="button" size="sm" className="h-8 rounded-lg gap-1.5" onClick={() => onLegalStatusSheetOpenChange(true)}>
+            <Button type="button" size="sm" className="h-8 rounded-lg gap-1.5" onClick={() => handleLegalStatusSheetOpenChange(true)}>
               <Pencil className="size-3.5" />
               {l("Status aktualisieren", "Обновить статус", "Update status")}
             </Button>
@@ -362,7 +460,7 @@ export function PatientProfileTab({
               variant="outline"
               size="sm"
               className="h-8 rounded-lg"
-              onClick={() => onDocsPreviewOpenChange(true)}
+              onClick={() => handleDocumentsPreviewOpenChange(true)}
             >
               {l("Dokumente öffnen", "Открыть документы", "Open documents")}
             </Button>
@@ -373,7 +471,7 @@ export function PatientProfileTab({
               variant="outline"
               size="sm"
               className="h-8 rounded-lg"
-              onClick={() => onContractsPreviewOpenChange(true)}
+              onClick={() => handleContractsPreviewOpenChange(true)}
             >
               {l("Verträge öffnen", "Открыть договоры", "Open contracts")}
             </Button>
@@ -384,7 +482,7 @@ export function PatientProfileTab({
               variant="outline"
               size="sm"
               className="h-8 rounded-lg"
-              onClick={() => onInvoicesPreviewOpenChange(true)}
+              onClick={() => handleInvoicesPreviewOpenChange(true)}
             >
               {l("Rechnungen öffnen", "Открыть счета", "Open invoices")}
             </Button>
@@ -392,55 +490,67 @@ export function PatientProfileTab({
         </div>
       </FormSection>
 
-      {id && canViewDocuments ? (
-        <PatientDocumentsPreviewSheet
-          key={`documents:${id}:${docsPreviewOpen ? "open" : "closed"}`}
-          patientId={id}
-          open={docsPreviewOpen}
-          onOpenChange={onDocsPreviewOpenChange}
-        />
+      {id && canViewDocuments && docsPreviewOpen ? (
+        <Suspense fallback={null}>
+          <LazyPatientDocumentsPreviewSheet
+            key={`documents:${id}:${docsPreviewOpen ? "open" : "closed"}`}
+            patientId={id}
+            open={docsPreviewOpen}
+            onOpenChange={handleDocumentsPreviewOpenChange}
+          />
+        </Suspense>
       ) : null}
-      {id && canViewContracts ? (
-        <PatientContractsPreviewSheet
-          key={`contracts:${id}:${contractsPreviewOpen ? "open" : "closed"}`}
-          patientId={id}
-          open={contractsPreviewOpen}
-          onOpenChange={onContractsPreviewOpenChange}
-        />
+      {id && canViewContracts && contractsPreviewOpen ? (
+        <Suspense fallback={null}>
+          <LazyPatientContractsPreviewSheet
+            key={`contracts:${id}:${contractsPreviewOpen ? "open" : "closed"}`}
+            patientId={id}
+            open={contractsPreviewOpen}
+            onOpenChange={handleContractsPreviewOpenChange}
+          />
+        </Suspense>
       ) : null}
-      {id && canViewInvoices ? (
-        <PatientInvoicesPreviewSheet
-          key={`invoices:${id}:${invoicesPreviewOpen ? "open" : "closed"}`}
-          patientId={id}
-          open={invoicesPreviewOpen}
-          onOpenChange={onInvoicesPreviewOpenChange}
-        />
+      {id && canViewInvoices && invoicesPreviewOpen ? (
+        <Suspense fallback={null}>
+          <LazyPatientInvoicesPreviewSheet
+            key={`invoices:${id}:${invoicesPreviewOpen ? "open" : "closed"}`}
+            patientId={id}
+            open={invoicesPreviewOpen}
+            onOpenChange={handleInvoicesPreviewOpenChange}
+          />
+        </Suspense>
       ) : null}
-      {id && canEditPatientProfile ? (
-        <PatientLegalStatusSheet
-          patientId={id}
-          initial={legalStatus}
-          open={legalStatusSheetOpen}
-          onOpenChange={onLegalStatusSheetOpenChange}
-          onSaved={reload}
-        />
+      {id && canEditPatientProfile && legalStatusSheetOpen ? (
+        <Suspense fallback={null}>
+          <LazyPatientLegalStatusSheet
+            patientId={id}
+            initial={legalStatus}
+            open={legalStatusSheetOpen}
+            onOpenChange={handleLegalStatusSheetOpenChange}
+            onSaved={reload}
+          />
+        </Suspense>
       ) : null}
-      {id && canManagePatientVitals ? (
-        <PatientVitalsSheet
-          patientId={id}
-          open={vitalsSheetOpen}
-          onOpenChange={onVitalsSheetOpenChange}
-          onSaved={reload}
-        />
+      {id && canManagePatientVitals && vitalsSheetOpen ? (
+        <Suspense fallback={null}>
+          <LazyPatientVitalsSheet
+            patientId={id}
+            open={vitalsSheetOpen}
+            onOpenChange={handleVitalsSheetOpenChange}
+            onSaved={reload}
+          />
+        </Suspense>
       ) : null}
-      {id && canEditPatientProfile ? (
-        <PatientCaveNotesSheet
-          patientId={id}
-          initial={detail.clinical_warnings ?? ""}
-          open={caveSheetOpen}
-          onOpenChange={onCaveSheetOpenChange}
-          onSaved={reload}
-        />
+      {id && canEditPatientProfile && caveSheetOpen ? (
+        <Suspense fallback={null}>
+          <LazyPatientCaveNotesSheet
+            patientId={id}
+            initial={detail.clinical_warnings ?? ""}
+            open={caveSheetOpen}
+            onOpenChange={handleCaveSheetOpenChange}
+            onSaved={reload}
+          />
+        </Suspense>
       ) : null}
 
       {hasClinicalSurface ? (
@@ -465,7 +575,7 @@ export function PatientProfileTab({
                   type="button"
                   size="sm"
                   className="h-8 rounded-lg gap-1.5"
-                  onClick={() => onCaveSheetOpenChange(true)}
+                  onClick={() => handleCaveSheetOpenChange(true)}
                 >
                   <Pencil className="size-3.5" />
                   {l("Aktualisieren", "Обновить", "Update")}
@@ -492,7 +602,7 @@ export function PatientProfileTab({
                   {l(`${vitalsHistory.length} Einträge`, `${vitalsHistory.length} записей`, `${vitalsHistory.length} entries`)}
                 </Badge>
                 {canManagePatientVitals ? (
-                  <Button size="sm" className="h-8 rounded-lg gap-1.5" onClick={() => onVitalsSheetOpenChange(true)}>
+                  <Button size="sm" className="h-8 rounded-lg gap-1.5" onClick={() => handleVitalsSheetOpenChange(true)}>
                     <Plus className="size-3.5" />
                     {l("Hinzufügen", "Добавить", "Add")}
                   </Button>
@@ -554,7 +664,7 @@ export function PatientProfileTab({
                 {l(`${cardEntries.length} Einträge`, `${cardEntries.length} записей`, `${cardEntries.length} entries`)}
               </CountBadge>
               {canManagePatientCardEntries ? (
-                <Button size="sm" className="h-8 rounded-lg gap-1.5" onClick={() => onCardEntrySheetOpenChange(true)}>
+                <Button size="sm" className="h-8 rounded-lg gap-1.5" onClick={() => handleCardEntrySheetOpenChange(true)}>
                   <Plus className="size-3.5" />
                   {l("Hinzufügen", "Добавить", "Add")}
                 </Button>
@@ -598,13 +708,15 @@ export function PatientProfileTab({
         </FormSection>
       ) : null}
 
-      {canManagePatientCardEntries && id ? (
-        <PatientCardEntrySheet
-          patientId={id}
-          open={cardEntrySheetOpen}
-          onOpenChange={onCardEntrySheetOpenChange}
-          onSaved={reload}
-        />
+      {canManagePatientCardEntries && id && cardEntrySheetOpen ? (
+        <Suspense fallback={null}>
+          <LazyPatientCardEntrySheet
+            patientId={id}
+            open={cardEntrySheetOpen}
+            onOpenChange={handleCardEntrySheetOpenChange}
+            onSaved={reload}
+          />
+        </Suspense>
       ) : null}
 
       {canManagePatientMedicalOrders || medicalOrders.length > 0 ? (
@@ -616,7 +728,7 @@ export function PatientProfileTab({
                 {l(`${medicalOrders.length} назначений`, `${medicalOrders.length} назначений`, `${medicalOrders.length} orders`)}
               </CountBadge>
               {canManagePatientMedicalOrders ? (
-                <Button size="sm" className="h-8 rounded-lg gap-1.5" onClick={() => onMedicalOrderSheetOpenChange(true)}>
+                <Button size="sm" className="h-8 rounded-lg gap-1.5" onClick={() => handleMedicalOrderSheetOpenChange(true)}>
                   <Plus className="size-3.5" />
                   {l("Hinzufügen", "Добавить", "Add")}
                 </Button>
@@ -707,13 +819,15 @@ export function PatientProfileTab({
         </FormSection>
       ) : null}
 
-      {canManagePatientMedicalOrders && id ? (
-        <PatientMedicalOrderSheet
-          patientId={id}
-          open={medicalOrderSheetOpen}
-          onOpenChange={onMedicalOrderSheetOpenChange}
-          onSaved={reload}
-        />
+      {canManagePatientMedicalOrders && id && medicalOrderSheetOpen ? (
+        <Suspense fallback={null}>
+          <LazyPatientMedicalOrderSheet
+            patientId={id}
+            open={medicalOrderSheetOpen}
+            onOpenChange={handleMedicalOrderSheetOpenChange}
+            onSaved={reload}
+          />
+        </Suspense>
       ) : null}
 
       {canManagePatientRiskScores || riskScores.length > 0 ? (
@@ -725,7 +839,7 @@ export function PatientProfileTab({
                 {l(`${riskScores.length} Scores`, `${riskScores.length} скоров`, `${riskScores.length} scores`)}
               </CountBadge>
               {canManagePatientRiskScores ? (
-                <Button size="sm" className="h-8 rounded-lg gap-1.5" onClick={() => onRiskScoreSheetOpenChange(true)}>
+                <Button size="sm" className="h-8 rounded-lg gap-1.5" onClick={() => handleRiskScoreSheetOpenChange(true)}>
                   <Plus className="size-3.5" />
                   {l("Hinzufügen", "Добавить", "Add")}
                 </Button>
@@ -788,13 +902,15 @@ export function PatientProfileTab({
         </FormSection>
       ) : null}
 
-      {canManagePatientRiskScores && id ? (
-        <PatientRiskScoreSheet
-          patientId={id}
-          open={riskScoreSheetOpen}
-          onOpenChange={onRiskScoreSheetOpenChange}
-          onSaved={reload}
-        />
+      {canManagePatientRiskScores && id && riskScoreSheetOpen ? (
+        <Suspense fallback={null}>
+          <LazyPatientRiskScoreSheet
+            patientId={id}
+            open={riskScoreSheetOpen}
+            onOpenChange={handleRiskScoreSheetOpenChange}
+            onSaved={reload}
+          />
+        </Suspense>
       ) : null}
 
       <WorkspaceSectionIntro
@@ -814,7 +930,7 @@ export function PatientProfileTab({
               type="button"
               size="sm"
               className="h-8 rounded-lg gap-1.5"
-              onClick={() => onNotesSheetOpenChange(true)}
+              onClick={() => handleNotesSheetOpenChange(true)}
             >
               {detail.notes ? <Pencil className="size-3.5" /> : <Plus className="size-3.5" />}
               {detail.notes ? l("Bearbeiten", "Редактировать", "Edit") : l("Hinzufügen", "Добавить", "Add")}
@@ -832,14 +948,16 @@ export function PatientProfileTab({
           )}
         </div>
       </FormSection>
-      {id && canEditPatientProfile ? (
-        <PatientNotesSheet
-          patientId={id}
-          initial={detail.notes ?? ""}
-          open={notesSheetOpen}
-          onOpenChange={onNotesSheetOpenChange}
-          onSaved={reload}
-        />
+      {id && canEditPatientProfile && notesSheetOpen ? (
+        <Suspense fallback={null}>
+          <LazyPatientNotesSheet
+            patientId={id}
+            initial={detail.notes ?? ""}
+            open={notesSheetOpen}
+            onOpenChange={handleNotesSheetOpenChange}
+            onSaved={reload}
+          />
+        </Suspense>
       ) : null}
     </div>
   );

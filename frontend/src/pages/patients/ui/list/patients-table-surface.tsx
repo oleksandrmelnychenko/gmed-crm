@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Archive, ArchiveRestore, Copy, Download, Edit3, X } from "lucide-react";
 
 import { DataTable } from "@/components/data-table/data-table";
@@ -13,8 +14,18 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 import type { PatientSummary } from "../../model/list-model";
-import { MemoizedPatientDetailSheet } from "../sheets/patient-list-detail-sheet";
 import type { PatientDetailSheetProps } from "../sheets/patient-list-detail-sheet";
+
+const loadPatientListDetailSheet = () => import("../sheets/patient-list-detail-sheet");
+
+const LazyPatientDetailSheet = lazy(async () => {
+  const mod = await loadPatientListDetailSheet();
+  return { default: mod.MemoizedPatientDetailSheet };
+});
+
+export function preloadPatientListDetailSheet() {
+  void loadPatientListDetailSheet();
+}
 
 type PatientsTableSurfaceProps = {
   columns: ColumnDef<PatientSummary>[];
@@ -74,7 +85,15 @@ export function PatientsTableSurface({
       onClose={onCloseDetail}
       pane={
         <div className="flex h-full flex-col">
-          <MemoizedPatientDetailSheet {...detailPaneProps} />
+          <Suspense
+            fallback={
+              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                {detailPaneProps.dictionary.common_loading}
+              </div>
+            }
+          >
+            <LazyPatientDetailSheet {...detailPaneProps} />
+          </Suspense>
         </div>
       }
     >

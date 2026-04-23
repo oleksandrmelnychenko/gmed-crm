@@ -41,7 +41,8 @@
       "Bash(npx -y skills@latest add mattpocock/skills/git-guardrails-claude-code -y -g)",
       "WebFetch(domain:github.com)",
       "Bash(npm run *)",
-      "Bash(grep -n \"path === \\\\\"/patients\\\\\"\\\\|/patients\\\\\"\\\\s*&&\\\\s*route\\\\|/patients$\" tests/e2e/staff-smoke.spec.ts)"
+      "Bash(grep -n \"path === \\\\\"/patients\\\\\"\\\\|/patients\\\\\"\\\\s*&&\\\\s*route\\\\|/patients$\" tests/e2e/staff-smoke.spec.ts)",
+      "Read(//c/Users/123/.claude/skills/grill-me/**)"
     ],
     "additionalDirectories": [
       "C:\\Users\\123\\Downloads\\dev\\frontend",
