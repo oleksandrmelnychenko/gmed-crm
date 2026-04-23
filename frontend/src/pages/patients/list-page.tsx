@@ -32,7 +32,7 @@ import { usePatientDetailSheetSession } from "./ui/hooks/use-patient-detail-shee
 import { usePatientsListTableModel } from "./ui/hooks/use-patients-list-table-model";
 import { usePatientsListViewState } from "./ui/hooks/use-patients-list-view-state";
 import { PatientsListToolbar } from "./ui/list/patients-list-toolbar";
-import { PatientsTableSurface, preloadPatientListDetailSheet } from "./ui/list/patients-table-surface";
+import { PatientsTableSurface } from "./ui/list/patients-table-surface";
 
 const loadCreatePatientSheet = () => import("./ui/sheets/create-patient-sheet");
 const loadPatientsShortcutsDialog = () => import("./ui/list/patients-shortcuts-dialog");
@@ -69,7 +69,6 @@ export function PatientsPage() {
     helpOpen,
     hiddenColumns,
     listVersion,
-    openPatient,
     refreshDetail,
     refreshList,
     searchInputRef,
@@ -190,8 +189,7 @@ export function PatientsPage() {
   }
 
   function handleOpenPatient(patientId: string) {
-    preloadPatientListDetailSheet();
-    openPatient(patientId);
+    staffGo(`/patients/${patientId}`);
   }
 
   function openShortcutsDialog() {
