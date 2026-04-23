@@ -175,6 +175,7 @@ export function DataTable<T>({
           {visibleCols.map((col, index) => {
             const sortState = sortLookup.get(col.id);
             const pinStyle = pinnedStyle(col, index, visibleCols, selectionEnabled);
+            const isPinned = Boolean(col.pinned);
             return (
               <button
                 key={col.id}
@@ -192,6 +193,7 @@ export function DataTable<T>({
                   "flex h-full items-center gap-1 border-r border-border px-2 text-left",
                   col.sortable && "cursor-pointer hover:bg-muted/80",
                   pinStyle.className,
+                  isPinned && "bg-muted/40",
                 )}
                 style={pinStyle.style}
                 disabled={!col.sortable}
@@ -240,7 +242,22 @@ export function DataTable<T>({
               const id = rowId(row);
               const isActive = activeRowId === id;
               const isSelected = selectedSet.has(id);
+              const isOdd = vRow.index % 2 === 1;
               const accent = rowAccent?.(row);
+
+              const baseBg = isSelected
+                ? "bg-primary/5"
+                : isActive
+                  ? "bg-muted/50"
+                  : isOdd
+                    ? "bg-muted/30"
+                    : "bg-background";
+              const hoverBg = isSelected
+                ? "group-hover/row:bg-primary/10"
+                : isActive
+                  ? "group-hover/row:bg-muted/60"
+                  : "group-hover/row:bg-muted/40";
+
               return (
                 <div
                   key={id}
@@ -251,9 +268,9 @@ export function DataTable<T>({
                   onClick={() => onRowClick?.(row)}
                   onDoubleClick={() => onRowDoubleClick?.(row)}
                   className={cn(
-                    "group/row absolute inset-x-0 grid cursor-pointer items-center border-b border-border/60 bg-background transition-colors hover:bg-muted/30",
-                    isActive && "bg-muted/50 hover:bg-muted/60",
-                    isSelected && "bg-primary/5 hover:bg-primary/10",
+                    "group/row absolute inset-x-0 grid cursor-pointer items-center border-b border-border/60 transition-colors",
+                    baseBg,
+                    hoverBg.replace(/group-hover\/row:/g, "hover:"),
                   )}
                   style={{
                     top: vRow.start,
@@ -268,7 +285,13 @@ export function DataTable<T>({
                     />
                   ) : null}
                   {selectionEnabled ? (
-                    <div className="sticky left-0 z-10 flex h-full items-center justify-center border-r border-border bg-[inherit] px-2">
+                    <div
+                      className={cn(
+                        "sticky left-0 z-10 flex h-full items-center justify-center border-r border-border px-2 transition-colors",
+                        baseBg,
+                        hoverBg,
+                      )}
+                    >
                       <SelectCheckbox
                         checked={isSelected}
                         onChange={(e) => {
@@ -280,13 +303,15 @@ export function DataTable<T>({
                   ) : null}
                   {visibleCols.map((col, index) => {
                     const pinStyle = pinnedStyle(col, index, visibleCols, selectionEnabled);
+                    const isPinned = Boolean(col.pinned);
                     return (
                       <div
                         key={col.id}
                         role="cell"
                         className={cn(
-                          "flex h-full items-center overflow-hidden border-r border-border/40 px-2 text-xs text-foreground",
+                          "flex h-full items-center overflow-hidden border-r border-border/40 px-2 text-xs text-foreground transition-colors",
                           pinStyle.className,
+                          isPinned && cn(baseBg, hoverBg),
                         )}
                         style={pinStyle.style}
                       >
@@ -298,7 +323,11 @@ export function DataTable<T>({
                   })}
                   {rowActions ? (
                     <div
-                      className="sticky right-0 z-10 flex h-full items-center justify-end gap-1 border-l border-border bg-[inherit] px-1 opacity-0 transition-opacity group-hover/row:opacity-100"
+                      className={cn(
+                        "sticky right-0 z-10 flex h-full items-center justify-end gap-1 border-l border-border px-1 opacity-0 transition-[opacity,background-color] group-hover/row:opacity-100",
+                        baseBg,
+                        hoverBg,
+                      )}
                       style={{ gridColumn: `${visibleCols.length + (selectionEnabled ? 2 : 1)}` }}
                       onClick={(e) => e.stopPropagation()}
                     >
@@ -351,7 +380,7 @@ function pinnedStyle<T>(
       if (cols[i].pinned === "left") offset += cols[i].width ?? 120;
     }
     return {
-      className: "sticky z-10 bg-[inherit]",
+      className: "sticky z-10",
       style: { left: offset },
     };
   }
@@ -361,7 +390,7 @@ function pinnedStyle<T>(
       if (cols[i].pinned === "right") offset += cols[i].width ?? 120;
     }
     return {
-      className: "sticky z-10 bg-[inherit]",
+      className: "sticky z-10",
       style: { right: offset },
     };
   }
