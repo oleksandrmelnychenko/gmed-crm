@@ -385,7 +385,7 @@ pub fn hash_client_ip(ip: IpAddr, salt: &str) -> String {
     hasher.update(ip.to_string().as_bytes());
     hasher.update(b"::");
     hasher.update(salt.as_bytes());
-    format!("sha256:{:x}", hasher.finalize())
+    format!("sha256:{}", hex::encode(hasher.finalize()))
 }
 
 /// axum middleware that records one `audit_log` row per authenticated

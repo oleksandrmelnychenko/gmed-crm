@@ -85,12 +85,7 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
   const res = await fetch(buildApiUrl(path), { ...init, headers });
 
   if (!res.ok) {
-    let body: ApiErrorBody | null = null;
-    try {
-      body = (await res.json()) as ApiErrorBody;
-    } catch {
-      body = null;
-    }
+    const body = await res.json().catch(() => null) as ApiErrorBody | null;
 
     throw new Error(body?.message ?? body?.error ?? `${res.status} ${res.statusText}`);
   }
@@ -117,12 +112,7 @@ export async function apiFetchFile(path: string, init: RequestInit = {}) {
   const res = await fetch(buildApiUrl(path), { ...init, headers });
 
   if (!res.ok) {
-    let body: ApiErrorBody | null = null;
-    try {
-      body = (await res.json()) as ApiErrorBody;
-    } catch {
-      body = null;
-    }
+    const body = await res.json().catch(() => null) as ApiErrorBody | null;
 
     throw new Error(body?.message ?? body?.error ?? `${res.status} ${res.statusText}`);
   }

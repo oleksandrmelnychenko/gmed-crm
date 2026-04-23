@@ -697,10 +697,12 @@ function EmptyChart({ label }: { label: string }) {
 
 function greetingFor(name: string, tr: Record<string, string>) {
   const hour = new Date().getHours();
-  let prefix = tr.dash_greeting ?? "Hello";
-  if (hour < 12) prefix = tr.dash_greeting_morning ?? tr.dash_greeting ?? "Good morning";
-  else if (hour < 18) prefix = tr.dash_greeting_afternoon ?? tr.dash_greeting ?? "Good afternoon";
-  else prefix = tr.dash_greeting_evening ?? tr.dash_greeting ?? "Good evening";
+  const prefix =
+    hour < 12
+      ? tr.dash_greeting_morning ?? tr.dash_greeting ?? "Good morning"
+      : hour < 18
+        ? tr.dash_greeting_afternoon ?? tr.dash_greeting ?? "Good afternoon"
+        : tr.dash_greeting_evening ?? tr.dash_greeting ?? "Good evening";
   return name ? `${prefix}, ${name.split(/\s+/)[0]}` : prefix;
 }
 

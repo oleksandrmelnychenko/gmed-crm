@@ -83,13 +83,7 @@ function isPendingLoginResponse(
 }
 
 async function parseError(response: Response) {
-  let body: ApiErrorBody | null = null;
-
-  try {
-    body = (await response.json()) as ApiErrorBody;
-  } catch {
-    body = null;
-  }
+  const body = await response.json().catch(() => null) as ApiErrorBody | null;
 
   const message =
     body?.message ??

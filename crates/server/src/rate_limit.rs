@@ -36,7 +36,6 @@
 //! the behaviour ISO 27001 A.8.6 and BSI C5 OPS-13 expect from an effective
 //! "capacity management" control.
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
@@ -79,9 +78,7 @@ where
         .key_extractor(PeerIpKeyExtractor)
         .finish()
         .expect("rate-limit quota constants are static and non-zero");
-    router.layer(GovernorLayer {
-        config: Arc::new(config),
-    })
+    router.layer(GovernorLayer::new(config))
 }
 
 /// Wrap a router in the tight auth-endpoint limiter.

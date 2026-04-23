@@ -39,12 +39,9 @@ export async function uploadFile<T>(path: string, formData: FormData): Promise<T
   });
 
   if (!res.ok) {
-    let body: { message?: string; error?: string } | null = null;
-    try {
-      body = await res.json();
-    } catch {
-      body = null;
-    }
+    const body = await res.json().catch(() => null) as
+      | { message?: string; error?: string }
+      | null;
     throw new Error(body?.message ?? body?.error ?? `${res.status} ${res.statusText}`);
   }
 

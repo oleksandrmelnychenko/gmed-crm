@@ -426,12 +426,14 @@ export function ChatPage() {
     const connect = () => {
       socket = new WebSocket(url);
       socket.onmessage = (event) => {
-        let payload: ChatStreamEvent | null = null;
-        try {
-          payload = JSON.parse(event.data) as ChatStreamEvent;
-        } catch {
-          return;
-        }
+        const payload = (() => {
+          try {
+            return JSON.parse(event.data) as ChatStreamEvent;
+          } catch {
+            return null;
+          }
+        })();
+        if (!payload) return;
 
         void loadConversations();
         const currentPeer = activePeerRef.current;

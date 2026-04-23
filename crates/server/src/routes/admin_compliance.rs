@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 use sqlx::Row;
 use sqlx::postgres::PgRow;
 use uuid::Uuid;
-use zip::write::FileOptions;
+use zip::write::SimpleFileOptions;
 
 use crate::access;
 use crate::audit;
@@ -565,9 +565,9 @@ fn build_patient_export_zip(payload: &Value) -> Result<Vec<u8>, axum::response::
     })?;
     let mut archive = zip::ZipWriter::new(Cursor::new(Vec::new()));
     let json_file_options =
-        FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
     let readme_file_options =
-        FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
     archive
         .start_file("patient-export.json", json_file_options)
