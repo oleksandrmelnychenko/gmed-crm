@@ -21,14 +21,21 @@ import { useSearchParams } from "react-router-dom";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { CasesRosterSection, type CaseRosterItem } from "@/components/cases-roster-section";
+import type { CaseRosterItem } from "@/components/cases-roster-section";
+import { DataTable } from "@/components/data-table/data-table";
+import type { ColumnDef } from "@/components/data-table/types";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  AdminInlineMetric,
+  AdminSheetScaffold,
+  AdminTableCard,
+  AdminToolbar,
+  SheetFormFooter,
+} from "@/components/admin-page-patterns";
+import {
+  PageHeader,
+  inputClass as shellInputClassName,
+  textareaClass as shellTextareaClass,
+} from "@/components/ui-shell";
 import { Input } from "@/components/ui/input";
 import {
   Select as ShadSelect,
@@ -40,9 +47,6 @@ import {
 import {
   Sheet,
   SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
 } from "@/components/ui/sheet";
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -444,10 +448,8 @@ const DEFAULT_CASE_TEXT_SNIPPET_FORM: CaseTextSnippetFormState = {
   is_active: true,
 };
 
-const textareaClassName =
-  "min-h-[104px] w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
-const nativeSelectClassName =
-  "h-10 w-full rounded-xl border border-input bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
+const inputClassName = shellInputClassName;
+const textareaClassName = shellTextareaClass;
 
 function casePermissions(role?: string): CasePermissions {
   return {
@@ -459,7 +461,7 @@ function casePermissions(role?: string): CasePermissions {
 
 function cardClass(className?: string) {
   return cn(
-    "rounded-[1.75rem] border border-slate-200/80 bg-white shadow-[0_18px_48px_rgba(15,23,42,0.05)]",
+    "rounded-xl border border-border bg-card",
     className,
   );
 }
@@ -489,7 +491,7 @@ function statusBadgeClass(status: string) {
     case "closed":
       return "border-emerald-200 bg-emerald-100 text-emerald-700";
     default:
-      return "border-slate-200 bg-slate-100 text-slate-700";
+      return "border-border bg-muted text-foreground";
   }
 }
 
@@ -1078,6 +1080,22 @@ export function CasesPage({
     () => patients.find((patient) => patient.id === (detail?.patient_id ?? selectedSummary?.patient_id)),
     [detail?.patient_id, patients, selectedSummary?.patient_id],
   );
+  const selectedFilterPatient = useMemo(
+    () => patients.find((patient) => patient.id === filters.patientId) ?? null,
+    [patients, filters.patientId],
+  );
+  const selectedCreatePatient = useMemo(
+    () => patients.find((patient) => patient.id === createForm.patientId) ?? null,
+    [patients, createForm.patientId],
+  );
+  const selectedCreateReferrerDoctor = useMemo(
+    () => doctors.find((doctor) => doctor.id === createForm.zuweiserDoctorId) ?? null,
+    [doctors, createForm.zuweiserDoctorId],
+  );
+  const selectedOverviewReferrerDoctor = useMemo(
+    () => doctors.find((doctor) => doctor.id === overviewForm.zuweiser_doctor_id) ?? null,
+    [doctors, overviewForm.zuweiser_doctor_id],
+  );
   const snippetContext = useMemo(
     () => ({
       patientName:
@@ -1111,6 +1129,66 @@ export function CasesPage({
       { total: 0, open: 0, inProgress: 0, closed: 0 },
     );
   }, [cases]);
+  const caseTableColumns = useMemo<ColumnDef<CaseRosterItem>[]>(
+    () => [
+      {
+        id: "case_id",
+        label: caseText("Fall-ID", "ID кейса", "Case ID"),
+        accessor: (row) => row.case_id,
+        sortable: true,
+        required: true,
+        width: 170,
+        render: (row) => <span className="font-mono text-xs">{row.case_id}</span>,
+      },
+      {
+        id: "patient_name",
+        label: t.orders_patient,
+        accessor: (row) => row.patient_name,
+        sortable: true,
+        required: true,
+        width: 260,
+      },
+      {
+        id: "patient_pid",
+        label: caseText("Patient-ID", "ID пациента", "Patient ID"),
+        accessor: (row) => row.patient_pid,
+        sortable: true,
+        width: 180,
+      },
+      {
+        id: "status",
+        label: t.users_status,
+        accessor: (row) => row.status,
+        sortable: true,
+        width: 160,
+        render: (row) => (
+          <Badge variant="outline" className={cn("rounded-full", statusBadgeClass(row.status))}>
+            {caseStatusLabel(row.status, t)}
+          </Badge>
+        ),
+      },
+      {
+        id: "reason",
+        label: t.cases_reason,
+        accessor: (row) => row.hauptanfragegrund ?? "",
+        width: 280,
+        render: (row) => (
+          <span className="block max-w-[280px] truncate text-sm text-foreground">
+            {row.hauptanfragegrund?.trim() || t.common_not_set}
+          </span>
+        ),
+      },
+      {
+        id: "created",
+        label: t.users_created,
+        accessor: (row) => row.created_at,
+        sortable: true,
+        width: 180,
+        render: (row) => <span className="text-xs text-muted-foreground">{formatDateTime(row.created_at)}</span>,
+      },
+    ],
+    [t],
+  );
   const cardiologyTriggered = useMemo(
     () =>
       cardiology.is_relevant ||
@@ -1908,10 +1986,10 @@ export function CasesPage({
     return (
       <div className="space-y-6">
         <section className={cardClass("p-8")}>
-          <h1 className="text-3xl font-semibold tracking-tight text-slate-950">
+          <h1 className="text-3xl font-semibold tracking-tight text-foreground">
             {caseText("Fallbereich", "Рабочее пространство кейсов", "Case workspace")}
           </h1>
-          <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600">
+          <p className="mt-3 max-w-2xl text-sm leading-7 text-muted-foreground">
             {caseText(
               "Die Fallverwaltung ist im Backend derzeit auf die Rollen CEO und Patient Manager beschränkt.",
               "Управление кейсами в backend сейчас ограничено ролями CEO и Patient Manager.",
@@ -1926,298 +2004,326 @@ export function CasesPage({
   return (
     <>
       {embedded ? null : (
-        <div className="space-y-6">
-        <section className="rounded-[2rem] border border-white/70 bg-[radial-gradient(circle_at_top_left,_rgba(125,211,252,0.28),_transparent_38%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(241,245,249,0.92))] p-6 shadow-[0_32px_80px_rgba(15,23,42,0.08)]">
-          <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
-            <div className="max-w-3xl">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge
-                  variant="outline"
-                  className="rounded-full border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-sky-700"
-                >
-                  {caseText("Fälle", "Кейсы", "Cases")}
-                </Badge>
-                <Badge
-                  variant="outline"
-                  className="rounded-full border-slate-200 bg-white/80 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-600"
-                >
-                  {t.cases_subtitle}
-                </Badge>
-              </div>
-              <h1 className="mt-4 text-3xl font-semibold tracking-tight text-slate-950 md:text-4xl">
-                {t.cases_subtitle}
-              </h1>
-              <p className="mt-3 text-sm leading-7 text-slate-600 md:text-[15px]">
-                {t.cases_subtitle}
-                
-              </p>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-3">
-              <Button type="button" variant="outline" className="rounded-2xl" onClick={refreshList}>
-                <RefreshCw className="size-4" />
-                {caseText("Aktualisieren", "Обновить", "Refresh")}
-              </Button>
-              {permissions.canCreate ? (
+        <div className="space-y-4">
+          <PageHeader
+            title={t.cases_title}
+            description={t.cases_subtitle}
+            actions={(
+              <>
                 <Button
                   type="button"
-                  className="h-9 rounded-lg px-3.5"
-                  onClick={() => {
-                    setCreateError("");
-                    setCreateForm(DEFAULT_CREATE_FORM);
-                    setCreateOpen(true);
-                  }}
+                  variant="outline"
+                  className="h-9 rounded-lg gap-1.5 bg-card px-3.5"
+                  onClick={refreshList}
                 >
-                  <Plus className="size-4" />
-                  {t.cases_title}
+                  <RefreshCw className="size-3.5" />
+                  {t.common_refresh}
                 </Button>
-              ) : null}
-            </div>
-          </div>
+                {permissions.canCreate ? (
+                  <Button
+                    type="button"
+                    className="h-9 rounded-lg gap-1.5 px-3.5"
+                    onClick={() => {
+                      setCreateError("");
+                      setCreateForm(DEFAULT_CREATE_FORM);
+                      setCreateOpen(true);
+                    }}
+                  >
+                    <Plus className="size-3.5" />
+                    {t.cases_new}
+                  </Button>
+                ) : null}
+              </>
+            )}
+          />
 
-          <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <MetricCard
+          <div className="flex flex-wrap gap-x-8 gap-y-4">
+            <AdminInlineMetric
+              icon={ClipboardList}
+              tone="sky"
               label={t.cases_title}
-              value={metrics.total.toString()}
-              description={t.cases_subtitle}
-              icon={<ClipboardList className="size-4" />}
+              value={metrics.total}
+              description={t.common_registry}
             />
-            <MetricCard
+            <AdminInlineMetric
+              icon={Plus}
+              tone="slate"
               label={t.cases_open}
-              value={metrics.open.toString()}
-              description={t.cases_subtitle}
-              icon={<Plus className="size-4" />}
+              value={metrics.open}
+              description={t.users_status}
             />
-            <MetricCard
+            <AdminInlineMetric
+              icon={Stethoscope}
+              tone="amber"
               label={t.cases_in_progress}
-              value={metrics.inProgress.toString()}
-              description={t.cases_subtitle}
-              icon={<Stethoscope className="size-4" />}
+              value={metrics.inProgress}
+              description={t.users_status}
             />
-            <MetricCard
+            <AdminInlineMetric
+              icon={CalendarClock}
+              tone="emerald"
               label={t.cases_closed}
-              value={metrics.closed.toString()}
-              description={t.cases_subtitle}
-              icon={<CalendarClock className="size-4" />}
+              value={metrics.closed}
+              description={t.users_status}
             />
           </div>
-        </section>
 
-        <div className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
-          <section className={cardClass("p-5")}>
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-sm font-semibold text-slate-950">{t.common_search}</h2>
-                <p className="mt-1 text-sm text-slate-600">
-                  {t.cases_subtitle}
-                </p>
-              </div>
+          <AdminToolbar>
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+              <Input
+                value={filters.search}
+                onChange={(event) =>
+                  setFilters((current) => ({ ...current, search: event.target.value }))}
+                placeholder={t.search_placeholder}
+                className="h-8 w-[260px] rounded-lg bg-card pl-8 text-[13px]"
+              />
+            </div>
+
+            <ShadSelect
+              value={filters.status || "__all__"}
+              onValueChange={(value) =>
+                setFilters((current) => ({
+                  ...current,
+                  status: value && value !== "__all__" ? value : "",
+                }))}
+            >
+              <SelectTrigger className="h-8 w-[220px] rounded-lg bg-card text-[13px]">
+                <SelectValue>
+                  {filters.status ? caseStatusLabel(filters.status, t) : t.providers_all}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">{t.providers_all}</SelectItem>
+                {CASE_STATUSES.map((status) => (
+                  <SelectItem key={status} value={status}>
+                    {caseStatusLabel(status, t)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </ShadSelect>
+
+            <ShadSelect
+              value={filters.patientId || "__all__"}
+              onValueChange={(value) => {
+                const patientId = value && value !== "__all__" ? value : "";
+                setFilters((current) => ({ ...current, patientId }));
+                updateQuery({ patient: patientId || null });
+              }}
+            >
+              <SelectTrigger className="h-8 w-[260px] rounded-lg bg-card text-[13px]">
+                <SelectValue>
+                  {selectedFilterPatient
+                    ? patientLabel(selectedFilterPatient)
+                    : filters.patientId
+                      ? filters.patientId
+                      : t.providers_all}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">{t.providers_all}</SelectItem>
+                {patients.map((patient) => (
+                  <SelectItem key={patient.id} value={patient.id}>
+                    {patientLabel(patient)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </ShadSelect>
+
+            {filters.search.trim() || filters.status || filters.patientId ? (
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="rounded-xl"
+                className="h-8 rounded-lg gap-1 text-[12.5px] text-muted-foreground"
                 onClick={() => {
                   setFilters(DEFAULT_FILTERS);
                   updateQuery({ patient: null, case: null });
                 }}
               >
-                {caseText("Zurücksetzen", "Сбросить", "Reset")}
+                {t.common_reset}
               </Button>
-            </div>
+            ) : null}
+          </AdminToolbar>
 
-            <div className="mt-5 space-y-4">
-              <Field label={t.common_search}>
-                <div className="relative">
-                  <Search className="pointer-events-none absolute top-3 left-3 size-4 text-slate-400" />
-                  <Input
-                    value={filters.search}
-                    onChange={(event) =>
-                      setFilters((current) => ({ ...current, search: event.target.value }))
-                    }
-                    placeholder={t.search_placeholder}
-                    className="h-10 rounded-xl bg-slate-50 pl-9"
-                  />
-                </div>
-              </Field>
-
-              <Field label={t.users_status}>
-                <ShadSelect value={filters.status} onValueChange={(v) => setFilters((current) => ({ ...current, status: v ?? "" }))}>
-                  <SelectTrigger className="w-full h-10 rounded-xl bg-slate-50">
-                    <SelectValue placeholder={t.providers_all} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="">{t.providers_all}</SelectItem>
-                    {CASE_STATUSES.map((status) => (
-                      <SelectItem key={status} value={status}>{caseStatusLabel(status, t)}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </ShadSelect>
-              </Field>
-
-              <Field label={t.orders_patient}>
-                <ShadSelect value={filters.patientId} onValueChange={(v) => {
-                  const patientId = v ?? "";
-                  setFilters((current) => ({ ...current, patientId }));
-                  updateQuery({ patient: patientId || null });
-                }}>
-                  <SelectTrigger className="w-full h-10 rounded-xl bg-slate-50">
-                    <SelectValue>
-                      {filters.patientId
-                        ? patientLabel(patients.find((p) => p.id === filters.patientId) ?? { id: "", patient_id: "", first_name: "", last_name: "" })
-                        : t.providers_all}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="">{t.providers_all}</SelectItem>
-                    {patients.map((patient) => (
-                      <SelectItem key={patient.id} value={patient.id}>{patientLabel(patient)}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </ShadSelect>
-              </Field>
-            </div>
-          </section>
-
-          <CasesRosterSection
-            className={cardClass("p-5")}
+          <AdminTableCard
             title={t.cases_roster}
-            subtitle={t.cases_subtitle}
-            counterLabel={listBusy ? t.patients_syncing : `${cases.length} ${t.patients_records}`}
-            loading={listBusy}
-            loadingLabel={t.common_loading}
-            error={listError}
-            renderError={(message) => (
-              <div className="mt-5">
-                <Banner tone="error">{message}</Banner>
+            description={t.cases_subtitle}
+            count={listBusy ? t.patients_syncing : `${cases.length}`}
+            className="min-h-[440px]"
+          >
+            {listError ? (
+              <div className="px-4 py-4">
+                <Banner tone="error">{listError}</Banner>
               </div>
-            )}
-            items={cases}
-            emptyState={
-              <EmptyPanel
-                title={t.cases_no_match}
-                text={t.cases_no_match}
-                action={
-                  permissions.canCreate ? (
-                    <Button
-                      type="button"
-                      className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
-                      onClick={() => setCreateOpen(true)}
-                    >
-                      <Plus className="size-4" />
-                      {t.cases_title}
-                    </Button>
-                  ) : undefined
-                }
+            ) : (
+              <DataTable
+                rows={cases}
+                columns={caseTableColumns}
+                rowId={(item) => item.id}
+                activeRowId={selectedId || undefined}
+                onRowClick={(item) => openCase(item.id)}
+                loading={listBusy}
+                loadingState={(
+                  <div className="flex min-h-[320px] items-center justify-center text-sm text-muted-foreground">
+                    <LoaderCircle className="mr-2 size-4 animate-spin" />
+                    {t.common_loading}
+                  </div>
+                )}
+                emptyState={(
+                  <EmptyPanel
+                    title={t.cases_no_match}
+                    text={t.cases_no_match}
+                    action={
+                      permissions.canCreate ? (
+                        <Button
+                          type="button"
+                          className="h-9 rounded-lg px-3.5"
+                          onClick={() => {
+                            setCreateError("");
+                            setCreateForm(DEFAULT_CREATE_FORM);
+                            setCreateOpen(true);
+                          }}
+                        >
+                          <Plus className="size-4" />
+                          {t.cases_new}
+                        </Button>
+                      ) : undefined
+                    }
+                  />
+                )}
+                className="min-h-[360px] rounded-none border-0"
+                footer={(
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span className="tabular-nums">{cases.length}</span>
+                    <span>{t.patients_records}</span>
+                  </div>
+                )}
               />
-            }
-            onCaseClick={(item) => openCase(item.id)}
-            caseStatusLabel={(status) => caseStatusLabel(status, t)}
-            caseStatusBadgeClassName={statusBadgeClass}
-            reasonLabel={t.cases_reason}
-            createdLabel={t.users_created}
-            notSetLabel={t.common_not_set}
-            formatDateTimeLabel={(value) => formatDate(value)}
-          />
-        </div>
+            )}
+          </AdminTableCard>
         </div>
       )}
 
       {embedded ? null : (
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>{t.cases_new}</DialogTitle>
-            <DialogDescription>
-              {t.cases_subtitle}
-            </DialogDescription>
-          </DialogHeader>
-          <form onSubmit={handleCreateCase} className="space-y-4">
-            {createError ? <Banner tone="error">{createError}</Banner> : null}
-            <Field label={t.cases_patient} required>
-              <ShadSelect value={createForm.patientId} onValueChange={(v) => setCreateForm((current) => ({ ...current, patientId: v ?? "" }))}>
-                <SelectTrigger className="w-full h-10 rounded-xl bg-slate-50">
-                  <SelectValue placeholder={t.cases_patient} />
-                </SelectTrigger>
-                <SelectContent>
-                  {patients.map((patient) => (
-                    <SelectItem key={patient.id} value={patient.id}>{patientLabel(patient)}</SelectItem>
-                  ))}
-                </SelectContent>
-              </ShadSelect>
-            </Field>
-            <Field label={t.cases_reason} required>
-              <Input
-                value={createForm.hauptanfragegrund}
-                onChange={(event) =>
-                  setCreateForm((current) => ({
-                    ...current,
-                    hauptanfragegrund: event.target.value,
-                  }))
-                }
-                className="h-10 rounded-xl bg-slate-50"
-              />
-            </Field>
-            <Field label={t.cases_anamnesis} required>
-              <textarea
-                value={createForm.aktuelleAnamnese}
-                onChange={(event) =>
-                  setCreateForm((current) => ({
-                    ...current,
-                    aktuelleAnamnese: event.target.value,
-                  }))
-                }
-                className={textareaClassName}
-                rows={4}
-              />
-            </Field>
-            <Field label={t.cases_referrer}>
-              <select
-                value={createForm.zuweiserDoctorId}
-                onChange={(event) => {
-                  const doctorId = event.target.value;
-                  const selectedDoctor = doctors.find((doctor) => doctor.id === doctorId);
-                  setCreateForm((current) => ({
-                    ...current,
-                    zuweiserDoctorId: doctorId,
-                    zuweiser: selectedDoctor ? selectedDoctor.name : current.zuweiser,
-                  }));
-                }}
-                className={nativeSelectClassName}
+        <Sheet open={createOpen} onOpenChange={setCreateOpen}>
+          <SheetContent side="right" className="w-full overflow-y-auto border-l border-border p-0 sm:max-w-[640px]">
+            <form onSubmit={handleCreateCase} className="flex min-h-0 flex-1 flex-col">
+              <AdminSheetScaffold
+                title={t.cases_new}
+                description={t.cases_subtitle}
+                footer={(
+                  <SheetFormFooter
+                    cancelLabel={t.common_cancel}
+                    submitLabel={t.cases_new}
+                    submittingLabel={t.patients_creating}
+                    submitting={createBusy}
+                    submitDisabled={!createForm.patientId}
+                    onCancel={() => setCreateOpen(false)}
+                  />
+                )}
               >
-                <option value="">{t.common_not_set}</option>
-                {doctors.map((doctor) => (
-                  <option key={doctor.id} value={doctor.id}>
-                    {doctorOptionLabel(doctor)}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label={caseText("Bezeichnung des Zuweisers", "Наименование направившего врача", "Referrer label")}>
-              <Input
-                value={createForm.zuweiser}
-                onChange={(event) =>
-                  setCreateForm((current) => ({ ...current, zuweiser: event.target.value }))
-                }
-                className="h-10 rounded-xl bg-slate-50"
-              />
-            </Field>
-            <div className="flex justify-end gap-3 pt-2">
-              <Button type="button" variant="outline" className="rounded-2xl" onClick={() => setCreateOpen(false)}>
-                {t.common_cancel}
-              </Button>
-              <Button
-                type="submit"
-                className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
-                disabled={createBusy || !createForm.patientId}
-              >
-                {createBusy ? <LoaderCircle className="size-4 animate-spin" /> : <Plus className="size-4" />}
-                {createBusy ? t.patients_creating : t.cases_new}
-              </Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
+                {createError ? <Banner tone="error">{createError}</Banner> : null}
+                <Field label={t.cases_patient} required>
+                  <ShadSelect
+                    value={createForm.patientId || "__none__"}
+                    onValueChange={(value) => {
+                      const patientId = value && value !== "__none__" ? value : "";
+                      setCreateForm((current) => ({ ...current, patientId }));
+                    }}
+                  >
+                    <SelectTrigger className={cn("w-full", inputClassName)}>
+                      <SelectValue>
+                        {selectedCreatePatient ? patientLabel(selectedCreatePatient) : t.cases_patient}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">{t.cases_patient}</SelectItem>
+                      {patients.map((patient) => (
+                        <SelectItem key={patient.id} value={patient.id}>
+                          {patientLabel(patient)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </ShadSelect>
+                </Field>
+
+                <Field label={t.cases_reason} required>
+                  <Input
+                    value={createForm.hauptanfragegrund}
+                    onChange={(event) =>
+                      setCreateForm((current) => ({
+                        ...current,
+                        hauptanfragegrund: event.target.value,
+                      }))}
+                    required
+                    className={inputClassName}
+                  />
+                </Field>
+
+                <Field label={t.cases_anamnesis} required>
+                  <textarea
+                    value={createForm.aktuelleAnamnese}
+                    onChange={(event) =>
+                      setCreateForm((current) => ({
+                        ...current,
+                        aktuelleAnamnese: event.target.value,
+                      }))}
+                    required
+                    className={textareaClassName}
+                    rows={4}
+                  />
+                </Field>
+
+                <Field label={t.cases_referrer}>
+                  <ShadSelect
+                    value={createForm.zuweiserDoctorId || "__none__"}
+                    onValueChange={(value) => {
+                      const doctorId = value && value !== "__none__" ? value : "";
+                      const selectedDoctor = doctors.find((doctor) => doctor.id === doctorId);
+                      setCreateForm((current) => ({
+                        ...current,
+                        zuweiserDoctorId: doctorId,
+                        zuweiser: selectedDoctor ? selectedDoctor.name : current.zuweiser,
+                      }));
+                    }}
+                  >
+                    <SelectTrigger className={cn("w-full", inputClassName)}>
+                      <SelectValue>
+                        {selectedCreateReferrerDoctor
+                          ? doctorOptionLabel(selectedCreateReferrerDoctor)
+                          : t.common_not_set}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">{t.common_not_set}</SelectItem>
+                      {doctors.map((doctor) => (
+                        <SelectItem key={doctor.id} value={doctor.id}>
+                          {doctorOptionLabel(doctor)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </ShadSelect>
+                </Field>
+
+                <Field
+                  label={caseText(
+                    "Bezeichnung des Zuweisers",
+                    "Наименование направившего врача",
+                    "Referrer label",
+                  )}
+                >
+                  <Input
+                    value={createForm.zuweiser}
+                    onChange={(event) =>
+                      setCreateForm((current) => ({ ...current, zuweiser: event.target.value }))}
+                    className={inputClassName}
+                  />
+                </Field>
+              </AdminSheetScaffold>
+            </form>
+          </SheetContent>
+        </Sheet>
       )}
 
       <Sheet
@@ -2239,28 +2345,18 @@ export function CasesPage({
           }
         }}
       >
-        <SheetContent side="right" className="w-full overflow-y-auto border-l border-slate-200 p-0 sm:max-w-[980px]">
-          <SheetHeader className="border-b border-slate-200 bg-gradient-to-b from-orange-50/40 to-transparent px-6 py-5">
-            <div className="flex items-center gap-2.5">
-              <span
-                aria-hidden
-                className="size-2.5 shrink-0 rounded-full bg-orange-500 shadow-[0_0_0_4px_rgba(249,115,22,0.15)]"
-              />
-              <SheetTitle className="text-lg font-semibold tracking-tight text-slate-950">
-                {detail?.case_id ?? selectedSummary?.case_id ?? t.cases_title}
-              </SheetTitle>
-            </div>
-            <SheetDescription className="text-[13px] leading-relaxed text-slate-500">
-              {caseText(
-                "Vollständiger Verlauf und strukturierter Anamnese-Editor für den ausgewählten Patientenfall.",
-                "Полный нарратив и структурированный редактор анамнеза для выбранного кейса пациента.",
-                "Full narrative and structured anamnesis editor for the selected patient case.",
-              )}
-            </SheetDescription>
-          </SheetHeader>
-          <div className="space-y-6 px-6 py-6">
+        <SheetContent side="right" className="w-full overflow-y-auto border-l border-border p-0 sm:max-w-[980px]">
+          <AdminSheetScaffold
+            title={detail?.case_id ?? selectedSummary?.case_id ?? t.cases_title}
+            description={caseText(
+              "Vollständiger Verlauf und strukturierter Anamnese-Editor für den ausgewählten Patientenfall.",
+              "Полный нарратив и структурированный редактор анамнеза для выбранного кейса пациента.",
+              "Full narrative and structured anamnesis editor for the selected patient case.",
+            )}
+            className="h-full"
+          >
             {detailBusy ? (
-              <div className="flex min-h-[320px] items-center justify-center text-sm text-slate-500">
+              <div className="flex min-h-[320px] items-center justify-center text-sm text-muted-foreground">
                 <LoaderCircle className="mr-2 size-4 animate-spin" />
                 Loading case
               </div>
@@ -2274,11 +2370,11 @@ export function CasesPage({
                       variant="outline"
                       className={cn("rounded-full", statusBadgeClass(detail.status))}
                     >
-                      {detail.status}
+                      {caseStatusLabel(detail.status, t)}
                     </Badge>
                     <Badge
                       variant="outline"
-                      className="rounded-full border-slate-200 bg-white text-slate-700"
+                      className="rounded-full border-border bg-background text-foreground"
                     >
                       {selectedPatient ? patientLabel(selectedPatient) : detail.patient_id}
                     </Badge>
@@ -2286,8 +2382,8 @@ export function CasesPage({
 
                   <div className="mt-4 flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                     <div>
-                      <h2 className="text-2xl font-semibold text-slate-950">{detail.case_id}</h2>
-                      <p className="mt-2 text-sm text-slate-600">
+                      <h2 className="text-xl font-semibold text-foreground md:text-2xl">{detail.case_id}</h2>
+                      <p className="mt-2 text-sm text-muted-foreground">
                         {selectedSummary?.patient_name
                           ? `${selectedSummary.patient_name} (${selectedSummary.patient_pid})`
                           : selectedPatient
@@ -2295,55 +2391,55 @@ export function CasesPage({
                             : detail.patient_id}
                       </p>
                       <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                        <div className="rounded-xl border border-border bg-muted/20 px-4 py-3">
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                             {caseText("Referenzcode", "Код ссылки", "Reference code")}
                           </div>
-                          <div className="mt-2 font-mono text-sm text-slate-900">{detail.case_id}</div>
+                          <div className="mt-2 font-mono text-sm text-foreground">{detail.case_id}</div>
                         </div>
-                        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                        <div className="rounded-xl border border-border bg-muted/20 px-4 py-3">
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                             {caseText("System-UUID des Falls", "Системный UUID кейса", "System case UUID")}
                           </div>
-                          <div className="mt-2 break-all font-mono text-xs text-slate-900">
+                          <div className="mt-2 break-all font-mono text-xs text-foreground">
                             {detail.case_uuid ?? detail.id}
                           </div>
                         </div>
-                        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                        <div className="rounded-xl border border-border bg-muted/20 px-4 py-3">
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                             {caseText("Aufbewahrung bis", "Хранить до", "Retention until")}
                           </div>
-                          <div className="mt-2 text-sm text-slate-900">
+                          <div className="mt-2 text-sm text-foreground">
                             {formatDate(detail.retention_until)}
                           </div>
                         </div>
-                        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                        <div className="rounded-xl border border-border bg-muted/20 px-4 py-3">
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                             {caseText("Letzte klinische Aktualisierung", "Последнее клиническое обновление", "Last clinical update")}
                           </div>
-                          <div className="mt-2 text-sm text-slate-900">
+                          <div className="mt-2 text-sm text-foreground">
                             {formatDateTime(detail.last_clinical_update_at ?? detail.updated_at)}
                           </div>
                         </div>
                       </div>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      <Button type="button" variant="outline" className="rounded-2xl" onClick={openPatientWorkspace}>
+                      <Button type="button" variant="outline" className="h-9 rounded-lg px-3.5" onClick={openPatientWorkspace}>
                         <UserRound className="size-4" />
                         {caseText("Patient", "Пациент", "Patient")}
                       </Button>
-                      <Button type="button" variant="outline" className="rounded-2xl" onClick={openOrdersWorkspace}>
+                      <Button type="button" variant="outline" className="h-9 rounded-lg px-3.5" onClick={openOrdersWorkspace}>
                         <ClipboardList className="size-4" />
                         {caseText("Aufträge", "Заказы", "Orders")}
                       </Button>
-                      <Button type="button" variant="outline" className="rounded-2xl" onClick={openAppointmentsWorkspace}>
+                      <Button type="button" variant="outline" className="h-9 rounded-lg px-3.5" onClick={openAppointmentsWorkspace}>
                         <CalendarClock className="size-4" />
                         {caseText("Termine", "Приёмы", "Appointments")}
                       </Button>
                     </div>
                   </div>
 
-                  <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
                     <MetricCard label={t.cases_preconditions} value={detail.vorerkrankungen.length.toString()} description={t.cases_subtitle} icon={<Stethoscope className="size-4" />} />
                     <MetricCard label={t.cases_allergies} value={detail.allergien.length.toString()} description={t.cases_subtitle} icon={<Plus className="size-4" />} />
                     <MetricCard label={t.cases_medication} value={detail.medikamente.length.toString()} description={t.cases_subtitle} icon={<ClipboardList className="size-4" />} />
@@ -2369,7 +2465,7 @@ export function CasesPage({
                       <Button
                         type="button"
                         variant="outline"
-                        className="rounded-2xl"
+                        className="h-9 rounded-lg px-3.5"
                         onClick={openNewSnippetDialog}
                       >
                         {t.cases_snippets_manage}
@@ -2389,14 +2485,14 @@ export function CasesPage({
                               hauptanfragegrund: event.target.value,
                             }))
                           }
-                          className="h-10 rounded-xl bg-slate-50"
+                          className="h-10 rounded-xl bg-muted/20"
                         />
                       </Field>
                       <Field label={t.cases_referrer}>
-                        <select
-                          value={overviewForm.zuweiser_doctor_id}
-                          onChange={(event) => {
-                            const doctorId = event.target.value;
+                        <ShadSelect
+                          value={overviewForm.zuweiser_doctor_id || "__none__"}
+                          onValueChange={(value) => {
+                            const doctorId = value && value !== "__none__" ? value : "";
                             const selectedDoctor = doctors.find((doctor) => doctor.id === doctorId);
                             setOverviewForm((current) => ({
                               ...current,
@@ -2404,15 +2500,25 @@ export function CasesPage({
                               zuweiser: selectedDoctor ? selectedDoctor.name : current.zuweiser,
                             }));
                           }}
-                          className={nativeSelectClassName}
                         >
-                          <option value="">{t.common_not_set}</option>
-                          {doctors.map((doctor) => (
-                            <option key={doctor.id} value={doctor.id}>
-                              {doctorOptionLabel(doctor)}
-                            </option>
-                          ))}
-                        </select>
+                          <SelectTrigger className="h-10 w-full rounded-xl bg-muted/20">
+                            <SelectValue>
+                              {selectedOverviewReferrerDoctor
+                                ? doctorOptionLabel(selectedOverviewReferrerDoctor)
+                                : overviewForm.zuweiser_doctor_id
+                                  ? (overviewForm.zuweiser || overviewForm.zuweiser_doctor_id)
+                                  : t.common_not_set}
+                            </SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">{t.common_not_set}</SelectItem>
+                            {doctors.map((doctor) => (
+                              <SelectItem key={doctor.id} value={doctor.id}>
+                                {doctorOptionLabel(doctor)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </ShadSelect>
                       </Field>
                       <Field label={caseText("Bezeichnung des Zuweisers", "Наименование направившего врача", "Referrer label")}>
                         <Input
@@ -2423,7 +2529,7 @@ export function CasesPage({
                               zuweiser: event.target.value,
                             }))
                           }
-                          className="h-10 rounded-xl bg-slate-50"
+                          className="h-10 rounded-xl bg-muted/20"
                         />
                       </Field>
                     </div>
@@ -2440,17 +2546,17 @@ export function CasesPage({
                         rows={5}
                       />
                     </Field>
-                    <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
+                    <div className="rounded-xl border border-border bg-muted/20 p-4">
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div>
-                          <p className="text-sm font-semibold text-slate-900">
+                          <p className="text-sm font-semibold text-foreground">
                             {t.cases_snippets_title}
                           </p>
-                          <p className="mt-1 text-xs text-slate-500">
+                          <p className="mt-1 text-xs text-muted-foreground">
                             {t.cases_snippets_description}
                           </p>
                         </div>
-                        <code className="rounded-xl bg-white px-3 py-1 text-[11px] text-slate-500">
+                        <code className="rounded-xl bg-white px-3 py-1 text-[11px] text-muted-foreground">
                           {CASE_TEXT_SNIPPET_PLACEHOLDERS.join(" · ")}
                         </code>
                       </div>
@@ -2458,12 +2564,12 @@ export function CasesPage({
                         <Banner tone="error">{snippetsError}</Banner>
                       ) : null}
                       {snippetsBusy ? (
-                        <div className="mt-3 flex items-center gap-2 text-sm text-slate-500">
+                        <div className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
                           <LoaderCircle className="size-4 animate-spin" />
                           {t.common_loading}
                         </div>
                       ) : activeSnippets.length === 0 ? (
-                        <p className="mt-3 text-sm text-slate-500">
+                        <p className="mt-3 text-sm text-muted-foreground">
                           {t.cases_snippets_empty}
                         </p>
                       ) : (
@@ -2476,14 +2582,14 @@ export function CasesPage({
                             return (
                               <div
                                 key={snippet.id}
-                                className="rounded-2xl border border-slate-200 bg-white p-4"
+                                className="rounded-xl border border-border bg-card p-4"
                               >
                                 <div className="flex items-start justify-between gap-3">
                                   <div>
-                                    <p className="text-sm font-semibold text-slate-900">
+                                    <p className="text-sm font-semibold text-foreground">
                                       {snippet.label}
                                     </p>
-                                    <p className="text-xs text-slate-500">
+                                    <p className="text-xs text-muted-foreground">
                                       {snippet.category}
                                     </p>
                                   </div>
@@ -2492,14 +2598,14 @@ export function CasesPage({
                                       type="button"
                                       variant="ghost"
                                       size="sm"
-                                      className="rounded-2xl"
+                                      className="rounded-lg"
                                       onClick={() => openEditSnippetDialog(snippet)}
                                     >
                                       {t.common_edit}
                                     </Button>
                                   ) : null}
                                 </div>
-                                <p className="mt-3 whitespace-pre-wrap text-sm text-slate-700">
+                                <p className="mt-3 whitespace-pre-wrap text-sm text-foreground">
                                   {rendered}
                                 </p>
                                 <div className="mt-3 flex justify-end">
@@ -2507,7 +2613,7 @@ export function CasesPage({
                                     type="button"
                                     variant="outline"
                                     size="sm"
-                                    className="rounded-2xl"
+                                    className="rounded-lg"
                                     onClick={() => insertSnippetIntoNarrative(snippet)}
                                   >
                                     {t.cases_snippets_insert}
@@ -2520,171 +2626,166 @@ export function CasesPage({
                       )}
                     </div>
                     <div className="flex justify-end border-t border-border/70 pt-4">
-                      <Button type="submit" className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800" disabled={sectionBusy === "overview" || !permissions.canEdit}>
+                      <Button type="submit" className="h-9 rounded-lg px-3.5" disabled={sectionBusy === "overview" || !permissions.canEdit}>
                         {sectionBusy === "overview" ? <LoaderCircle className="size-4 animate-spin" /> : null}
                         {caseText("Übersicht speichern", "Сохранить обзор", "Save overview")}
                       </Button>
                     </div>
                   </form>
                 </Panel>
-
-                <Dialog open={snippetDialogOpen} onOpenChange={setSnippetDialogOpen}>
-                  <DialogContent className="max-w-4xl">
-                    <DialogHeader>
-                      <DialogTitle>{t.cases_snippets_title}</DialogTitle>
-                      <DialogDescription>
-                        {t.cases_snippets_description}
-                      </DialogDescription>
-                    </DialogHeader>
-                    <div className="grid gap-6 lg:grid-cols-[1.15fr,0.85fr]">
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between gap-3">
-                          <p className="text-sm font-semibold text-slate-900">
-                            {t.cases_snippets_title}
-                          </p>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="rounded-2xl"
-                            onClick={openNewSnippetDialog}
-                          >
-                            {t.cases_snippets_new}
-                          </Button>
-                        </div>
-                        <div className="max-h-[26rem] space-y-3 overflow-y-auto pr-1">
-                          {snippets.map((snippet) => (
-                            <button
-                              key={snippet.id}
+                <Sheet open={snippetDialogOpen} onOpenChange={setSnippetDialogOpen}>
+                  <SheetContent side="right" className="w-full overflow-y-auto border-l border-border p-0 sm:max-w-[960px]">
+                    <AdminSheetScaffold
+                      title={t.cases_snippets_title}
+                      description={t.cases_snippets_description}
+                      className="h-full"
+                    >
+                      <div className="grid gap-6 lg:grid-cols-[1.15fr,0.85fr]">
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="text-sm font-semibold text-foreground">
+                              {t.cases_snippets_title}
+                            </p>
+                            <Button
                               type="button"
-                              className={cn(
-                                "w-full rounded-2xl border p-4 text-left transition",
-                                snippetForm.id === snippet.id
-                                  ? "border-sky-300 bg-sky-50"
-                                  : "border-slate-200 bg-white hover:border-slate-300",
-                              )}
-                              onClick={() => openEditSnippetDialog(snippet)}
+                              variant="outline"
+                              size="sm"
+                              className="rounded-lg"
+                              onClick={openNewSnippetDialog}
                             >
-                              <div className="flex items-start justify-between gap-3">
-                                <div>
-                                  <p className="text-sm font-semibold text-slate-900">
-                                    {snippet.label}
-                                  </p>
-                                  <p className="text-xs text-slate-500">
-                                    {snippet.category}
-                                  </p>
+                              {t.cases_snippets_new}
+                            </Button>
+                          </div>
+                          <div className="max-h-[26rem] space-y-3 overflow-y-auto pr-1">
+                            {snippets.map((snippet) => (
+                              <button
+                                key={snippet.id}
+                                type="button"
+                                className={cn(
+                                  "w-full rounded-xl border p-4 text-left transition",
+                                  snippetForm.id === snippet.id
+                                    ? "border-sky-300 bg-sky-50"
+                                    : "border-border bg-white hover:border-border",
+                                )}
+                                onClick={() => openEditSnippetDialog(snippet)}
+                              >
+                                <div className="flex items-start justify-between gap-3">
+                                  <div>
+                                    <p className="text-sm font-semibold text-foreground">
+                                      {snippet.label}
+                                    </p>
+                                    <p className="text-xs text-muted-foreground">
+                                      {snippet.category}
+                                    </p>
+                                  </div>
+                                  <Badge
+                                    variant="secondary"
+                                    className={snippet.is_active ? "bg-emerald-100 text-emerald-700" : "bg-muted text-muted-foreground"}
+                                  >
+                                    {snippet.is_active ? t.common_active : t.common_inactive}
+                                  </Badge>
                                 </div>
-                                <Badge
-                                  variant="secondary"
-                                  className={snippet.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"}
-                                >
-                                  {snippet.is_active ? t.common_active : t.common_inactive}
-                                </Badge>
-                              </div>
-                              <p className="mt-2 line-clamp-3 whitespace-pre-wrap text-xs text-slate-600">
-                                {snippet.body}
-                              </p>
-                            </button>
-                          ))}
+                                <p className="mt-2 line-clamp-3 whitespace-pre-wrap text-xs text-muted-foreground">
+                                  {snippet.body}
+                                </p>
+                              </button>
+                            ))}
+                          </div>
                         </div>
+                        <form onSubmit={handleSaveSnippet} className="space-y-4 rounded-xl border border-border bg-muted/20 p-4">
+                          {snippetSaveError ? (
+                            <Banner tone="error">{snippetSaveError}</Banner>
+                          ) : null}
+                          <Field label={t.cases_snippets_label} required>
+                            <Input
+                              value={snippetForm.label}
+                              onChange={(event) =>
+                                setSnippetForm((current) => ({
+                                  ...current,
+                                  label: event.target.value,
+                                }))}
+                              className="h-10 rounded-xl bg-white"
+                            />
+                          </Field>
+                          <Field label={t.cases_snippets_category}>
+                            <Input
+                              value={snippetForm.category}
+                              onChange={(event) =>
+                                setSnippetForm((current) => ({
+                                  ...current,
+                                  category: event.target.value,
+                                }))}
+                              className="h-10 rounded-xl bg-white"
+                            />
+                          </Field>
+                          <Field label={t.cases_snippets_body} required>
+                            <textarea
+                              value={snippetForm.body}
+                              onChange={(event) =>
+                                setSnippetForm((current) => ({
+                                  ...current,
+                                  body: event.target.value,
+                                }))}
+                              className={textareaClassName}
+                              rows={8}
+                            />
+                          </Field>
+                          <label className="flex items-center gap-3 rounded-xl border border-border bg-white px-3 py-2 text-sm text-foreground">
+                            <input
+                              type="checkbox"
+                              checked={snippetForm.is_active}
+                              onChange={(event) =>
+                                setSnippetForm((current) => ({
+                                  ...current,
+                                  is_active: event.target.checked,
+                                }))}
+                            />
+                            {t.cases_snippets_active}
+                          </label>
+                          <div className="rounded-xl border border-dashed border-border bg-white px-3 py-3">
+                            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                              {t.cases_snippets_preview}
+                            </p>
+                            <p className="mt-2 whitespace-pre-wrap text-sm text-foreground">
+                              {renderCaseTextSnippet(snippetForm.body, snippetContext) || t.cases_snippets_empty}
+                            </p>
+                          </div>
+                          <code className="block rounded-xl bg-white px-3 py-2 text-[11px] text-muted-foreground">
+                            {CASE_TEXT_SNIPPET_PLACEHOLDERS.join(" · ")}
+                          </code>
+                          <div className="flex justify-end gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="rounded-lg"
+                              onClick={() => {
+                                setSnippetDialogOpen(false);
+                                setSnippetForm(DEFAULT_CASE_TEXT_SNIPPET_FORM);
+                                setSnippetSaveError("");
+                              }}
+                            >
+                              {t.common_cancel}
+                            </Button>
+                            <Button
+                              type="submit"
+                              className="h-9 rounded-lg px-3.5"
+                              disabled={snippetSaveBusy}
+                            >
+                              {snippetSaveBusy ? (
+                                <LoaderCircle className="size-4 animate-spin" />
+                              ) : null}
+                              {t.cases_snippets_save}
+                            </Button>
+                          </div>
+                        </form>
                       </div>
-                      <form onSubmit={handleSaveSnippet} className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                        {snippetSaveError ? (
-                          <Banner tone="error">{snippetSaveError}</Banner>
-                        ) : null}
-                        <Field label={t.cases_snippets_label} required>
-                          <Input
-                            value={snippetForm.label}
-                            onChange={(event) =>
-                              setSnippetForm((current) => ({
-                                ...current,
-                                label: event.target.value,
-                              }))
-                            }
-                            className="h-10 rounded-xl bg-white"
-                          />
-                        </Field>
-                        <Field label={t.cases_snippets_category}>
-                          <Input
-                            value={snippetForm.category}
-                            onChange={(event) =>
-                              setSnippetForm((current) => ({
-                                ...current,
-                                category: event.target.value,
-                              }))
-                            }
-                            className="h-10 rounded-xl bg-white"
-                          />
-                        </Field>
-                        <Field label={t.cases_snippets_body} required>
-                          <textarea
-                            value={snippetForm.body}
-                            onChange={(event) =>
-                              setSnippetForm((current) => ({
-                                ...current,
-                                body: event.target.value,
-                              }))
-                            }
-                            className={textareaClassName}
-                            rows={8}
-                          />
-                        </Field>
-                        <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
-                          <input
-                            type="checkbox"
-                            checked={snippetForm.is_active}
-                            onChange={(event) =>
-                              setSnippetForm((current) => ({
-                                ...current,
-                                is_active: event.target.checked,
-                              }))
-                            }
-                          />
-                          {t.cases_snippets_active}
-                        </label>
-                        <div className="rounded-xl border border-dashed border-slate-300 bg-white px-3 py-3">
-                          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                            {t.cases_snippets_preview}
-                          </p>
-                          <p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">
-                            {renderCaseTextSnippet(snippetForm.body, snippetContext) || t.cases_snippets_empty}
-                          </p>
-                        </div>
-                        <code className="block rounded-xl bg-white px-3 py-2 text-[11px] text-slate-500">
-                          {CASE_TEXT_SNIPPET_PLACEHOLDERS.join(" · ")}
-                        </code>
-                        <div className="flex justify-end gap-2">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            className="rounded-2xl"
-                            onClick={() => {
-                              setSnippetDialogOpen(false);
-                              setSnippetForm(DEFAULT_CASE_TEXT_SNIPPET_FORM);
-                              setSnippetSaveError("");
-                            }}
-                          >
-                            {t.common_cancel}
-                          </Button>
-                          <Button
-                            type="submit"
-                            className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
-                            disabled={snippetSaveBusy}
-                          >
-                            {snippetSaveBusy ? (
-                              <LoaderCircle className="size-4 animate-spin" />
-                            ) : null}
-                            {t.cases_snippets_save}
-                          </Button>
-                        </div>
-                      </form>
-                    </div>
-                  </DialogContent>
-                </Dialog>
+                    </AdminSheetScaffold>
+                  </SheetContent>
+                </Sheet>
 
                 <ItemEditorSection title={t.cases_preconditions} description={t.cases_subtitle} count={countFilled(vorerkrankungen, "erkrankung")} addLabel={t.providers_add_service} emptyTitle={t.common_not_set} emptyText={t.cases_subtitle} busy={sectionBusy === "vorerkrankungen"} error={sectionErrors.vorerkrankungen ?? ""} canEdit={permissions.canEdit} onAdd={() => setVorerkrankungen((current) => [...current, blankVorerkrankung()])} onSave={handleSaveVorerkrankungen}>
                   {vorerkrankungen.map((item, index) => (
-                    <div key={`vor-${index}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div key={`vor-${index}`} className="rounded-xl border border-border bg-muted/20 p-4">
                       <div className="grid gap-4 md:grid-cols-2">
                         <Field label={t.cases_preconditions} required><Input value={item.erkrankung} onChange={(event) => setVorerkrankungen((current) => updateItemAtIndex(current, index, { erkrankung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_preconditions}><Input value={item.erstdiagnose ?? ""} onChange={(event) => setVorerkrankungen((current) => updateItemAtIndex(current, index, { erstdiagnose: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
@@ -2692,34 +2793,34 @@ export function CasesPage({
                       <Field label={t.cases_note}>
                         <textarea value={item.notiz ?? ""} onChange={(event) => setVorerkrankungen((current) => updateItemAtIndex(current, index, { notiz: event.target.value }))} className="mt-2 min-h-[90px] w-full rounded-xl border border-input bg-white px-3 py-2 text-sm outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30" />
                       </Field>
-                      <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-2xl" onClick={() => setVorerkrankungen((current) => removeItemAtIndex(current, index))}>{caseText("Entfernen", "Удалить", "Remove")}</Button></div>
+                      <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-lg" onClick={() => setVorerkrankungen((current) => removeItemAtIndex(current, index))}>{caseText("Entfernen", "Удалить", "Remove")}</Button></div>
                     </div>
                   ))}
                 </ItemEditorSection>
 
                 <ItemEditorSection title={t.cases_allergies} description={t.cases_subtitle} count={countFilled(allergien, "allergie")} addLabel={t.providers_add_service} emptyTitle={t.common_not_set} emptyText={t.cases_subtitle} busy={sectionBusy === "allergien"} error={sectionErrors.allergien ?? ""} canEdit={permissions.canEdit} onAdd={() => setAllergien((current) => [...current, blankAllergie()])} onSave={handleSaveAllergien}>
                   {allergien.map((item, index) => (
-                    <div key={`alg-${index}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div key={`alg-${index}`} className="rounded-xl border border-border bg-muted/20 p-4">
                       <div className="grid gap-4 md:grid-cols-2">
                         <Field label={t.cases_allergies} required><Input value={item.allergie} onChange={(event) => setAllergien((current) => updateItemAtIndex(current, index, { allergie: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_subtitle}><Input value={item.reaktion ?? ""} onChange={(event) => setAllergien((current) => updateItemAtIndex(current, index, { reaktion: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                       </div>
-                      <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-2xl" onClick={() => setAllergien((current) => removeItemAtIndex(current, index))}>{caseText("Entfernen", "Удалить", "Remove")}</Button></div>
+                      <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-lg" onClick={() => setAllergien((current) => removeItemAtIndex(current, index))}>{caseText("Entfernen", "Удалить", "Remove")}</Button></div>
                     </div>
                   ))}
                 </ItemEditorSection>
 
                 <ItemEditorSection title={t.cases_operations} description={t.cases_subtitle} count={countFilled(operationen, "grund")} addLabel={t.providers_add_service} emptyTitle={t.common_not_set} emptyText={t.cases_subtitle} busy={sectionBusy === "operationen"} error={sectionErrors.operationen ?? ""} canEdit={permissions.canEdit} onAdd={() => setOperationen((current) => [...current, blankOperation()])} onSave={handleSaveOperationen}>
                   {operationen.map((item, index) => (
-                    <div key={`op-${index}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div key={`op-${index}`} className="rounded-xl border border-border bg-muted/20 p-4">
                       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
                         <Field label={t.appointments_date}><Input type="date" value={item.datum ?? ""} onChange={(event) => setOperationen((current) => updateItemAtIndex(current, index, { datum: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_reason} required><Input value={item.grund} onChange={(event) => setOperationen((current) => updateItemAtIndex(current, index, { grund: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={caseText("Arzt aus Register", "Врач из реестра", "Doctor registry")}>
-                          <select
-                            value={item.arzt_id ?? ""}
-                            onChange={(event) => {
-                              const doctorId = event.target.value;
+                          <ShadSelect
+                            value={item.arzt_id || "__none__"}
+                            onValueChange={(value) => {
+                              const doctorId = value && value !== "__none__" ? value : "";
                               const selectedDoctor = doctors.find((doctor) => doctor.id === doctorId);
                               setOperationen((current) =>
                                 updateItemAtIndex(current, index, {
@@ -2730,27 +2831,38 @@ export function CasesPage({
                                 }),
                               );
                             }}
-                            className={nativeSelectClassName}
                           >
-                            <option value="">{t.common_not_set}</option>
-                            {doctors.map((doctor) => (
-                              <option key={doctor.id} value={doctor.id}>
-                                {doctorOptionLabel(doctor)}
-                              </option>
-                            ))}
-                          </select>
+                            <SelectTrigger className="h-10 w-full rounded-xl bg-white">
+                              <SelectValue>
+                                {(() => {
+                                  if (!item.arzt_id) return t.common_not_set;
+                                  const selectedDoctor = doctors.find((doctor) => doctor.id === item.arzt_id);
+                                  if (selectedDoctor) return doctorOptionLabel(selectedDoctor);
+                                  return item.arzt_registry_name ?? item.arzt ?? item.arzt_id;
+                                })()}
+                              </SelectValue>
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__none__">{t.common_not_set}</SelectItem>
+                              {doctors.map((doctor) => (
+                                <SelectItem key={doctor.id} value={doctor.id}>
+                                  {doctorOptionLabel(doctor)}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </ShadSelect>
                         </Field>
                         <Field label={caseText("Freitext Arzt", "Наименование врача", "Doctor label")}><Input value={item.arzt ?? ""} onChange={(event) => setOperationen((current) => updateItemAtIndex(current, index, { arzt: event.target.value }))} className="h-10 rounded-xl bg-white" placeholder={caseText("Altbestand / manuelle Angabe", "Устаревшее / ручной ввод", "Legacy / manual fallback")} /></Field>
                         <Field label={t.cases_note}><Input value={item.notiz ?? ""} onChange={(event) => setOperationen((current) => updateItemAtIndex(current, index, { notiz: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                       </div>
-                      <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-2xl" onClick={() => setOperationen((current) => removeItemAtIndex(current, index))}>{caseText("Entfernen", "Удалить", "Remove")}</Button></div>
+                      <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-lg" onClick={() => setOperationen((current) => removeItemAtIndex(current, index))}>{caseText("Entfernen", "Удалить", "Remove")}</Button></div>
                     </div>
                   ))}
                 </ItemEditorSection>
 
                 <ItemEditorSection title={t.cases_medication} description={t.cases_subtitle} count={countFilled(medikamente, "handelsname")} addLabel={t.providers_add_service} emptyTitle={t.common_not_set} emptyText={t.cases_subtitle} busy={sectionBusy === "medikamente"} error={sectionErrors.medikamente ?? ""} canEdit={permissions.canEdit} onAdd={() => setMedikamente((current) => [...current, blankMedikament()])} onSave={handleSaveMedikamente}>
                   {medikamente.map((item, index) => (
-                    <div key={`med-${index}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div key={`med-${index}`} className="rounded-xl border border-border bg-muted/20 p-4">
                       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                         <Field label={t.cases_medications} required><Input value={item.handelsname} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { handelsname: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_medications}><Input value={item.wirkstoff ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { wirkstoff: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
@@ -2777,10 +2889,10 @@ export function CasesPage({
                         <Field label={t.providers_service_valid_from}><Input value={item.seit ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { seit: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_reason}><Input value={item.grund ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { grund: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={caseText("Arzt aus Register", "Врач из реестра", "Doctor registry")}>
-                          <select
-                            value={item.verordnender_arzt_id ?? ""}
-                            onChange={(event) => {
-                              const doctorId = event.target.value;
+                          <ShadSelect
+                            value={item.verordnender_arzt_id || "__none__"}
+                            onValueChange={(value) => {
+                              const doctorId = value && value !== "__none__" ? value : "";
                               const selectedDoctor = doctors.find((doctor) => doctor.id === doctorId);
                               setMedikamente((current) =>
                                 updateItemAtIndex(current, index, {
@@ -2791,15 +2903,32 @@ export function CasesPage({
                                 }),
                               );
                             }}
-                            className={nativeSelectClassName}
                           >
-                            <option value="">{t.common_not_set}</option>
-                            {doctors.map((doctor) => (
-                              <option key={doctor.id} value={doctor.id}>
-                                {doctorOptionLabel(doctor)}
-                              </option>
-                            ))}
-                          </select>
+                            <SelectTrigger className="h-10 w-full rounded-xl bg-white">
+                              <SelectValue>
+                                {(() => {
+                                  if (!item.verordnender_arzt_id) return t.common_not_set;
+                                  const selectedDoctor = doctors.find(
+                                    (doctor) => doctor.id === item.verordnender_arzt_id,
+                                  );
+                                  if (selectedDoctor) return doctorOptionLabel(selectedDoctor);
+                                  return (
+                                    item.verordnender_arzt_registry_name ??
+                                    item.verordnender_arzt ??
+                                    item.verordnender_arzt_id
+                                  );
+                                })()}
+                              </SelectValue>
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__none__">{t.common_not_set}</SelectItem>
+                              {doctors.map((doctor) => (
+                                <SelectItem key={doctor.id} value={doctor.id}>
+                                  {doctorOptionLabel(doctor)}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </ShadSelect>
                         </Field>
                         <Field label={caseText("Freitext Arzt", "Наименование врача", "Doctor label")}><Input value={item.verordnender_arzt ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { verordnender_arzt: event.target.value }))} className="h-10 rounded-xl bg-white" placeholder={caseText("Altbestand / manuelle Angabe", "Устаревшее / ручной ввод", "Legacy / manual fallback")} /></Field>
                         <Field label={t.patients_notes}><Input value={item.anmerkung ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { anmerkung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
@@ -2840,7 +2969,7 @@ export function CasesPage({
                             type="button"
                             variant="outline"
                             size="sm"
-                            className="rounded-2xl"
+                            className="rounded-lg"
                             onClick={() => {
                               if (item.id) {
                                 void handleConfirmMedicationExpiry(item.id);
@@ -2851,7 +2980,7 @@ export function CasesPage({
                             Confirm expiry review
                           </Button>
                         ) : null}
-                        <Button type="button" variant="outline" size="sm" className="rounded-2xl" onClick={() => setMedikamente((current) => removeItemAtIndex(current, index))}>{caseText("Entfernen", "Удалить", "Remove")}</Button>
+                        <Button type="button" variant="outline" size="sm" className="rounded-lg" onClick={() => setMedikamente((current) => removeItemAtIndex(current, index))}>{caseText("Entfernen", "Удалить", "Remove")}</Button>
                       </div>
                     </div>
                   ))}
@@ -2859,7 +2988,7 @@ export function CasesPage({
 
                 <ItemEditorSection title={t.cases_pain} description={t.cases_subtitle} count={countFilled(painRecords, "lokalisierung")} addLabel={t.providers_add_service} emptyTitle={t.common_not_set} emptyText={t.cases_subtitle} busy={sectionBusy === "pain"} error={sectionErrors.pain ?? ""} canEdit={permissions.canEdit} onAdd={() => setPainRecords((current) => [...current, blankPainItem()])} onSave={handleSavePain}>
                   {painRecords.map((item, index) => (
-                    <div key={`pain-${index}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div key={`pain-${index}`} className="rounded-xl border border-border bg-muted/20 p-4">
                       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                         <Field label={t.appointments_location} required><Input value={item.lokalisierung} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { lokalisierung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.providers_service_valid_from}><Input value={item.seit_wann ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { seit_wann: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
@@ -2874,19 +3003,19 @@ export function CasesPage({
                         <Field label={t.cases_pain}><Input value={item.ausstrahlung ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { ausstrahlung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_pain}><Input value={item.auftreten ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { auftreten: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                       </div>
-                      <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-2xl" onClick={() => setPainRecords((current) => removeItemAtIndex(current, index))}>{caseText("Entfernen", "Удалить", "Remove")}</Button></div>
+                      <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-lg" onClick={() => setPainRecords((current) => removeItemAtIndex(current, index))}>{caseText("Entfernen", "Удалить", "Remove")}</Button></div>
                     </div>
                   ))}
                 </ItemEditorSection>
 
                 <ItemEditorSection title={t.cases_symptoms} description={t.cases_subtitle} count={countFilled(symptome, "beschreibung")} addLabel={t.providers_add_service} emptyTitle={t.common_not_set} emptyText={t.cases_subtitle} busy={sectionBusy === "symptome"} error={sectionErrors.symptome ?? ""} canEdit={permissions.canEdit} onAdd={() => setSymptome((current) => [...current, blankSymptom()])} onSave={handleSaveSymptome}>
                   {symptome.map((item, index) => (
-                    <div key={`sym-${index}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div key={`sym-${index}`} className="rounded-xl border border-border bg-muted/20 p-4">
                       <div className="grid gap-4 md:grid-cols-2">
                         <Field label={t.patients_notes} required><Input value={item.beschreibung} onChange={(event) => setSymptome((current) => updateItemAtIndex(current, index, { beschreibung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_title}><Input value={item.fachrichtung ?? ""} onChange={(event) => setSymptome((current) => updateItemAtIndex(current, index, { fachrichtung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                       </div>
-                      <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-2xl" onClick={() => setSymptome((current) => removeItemAtIndex(current, index))}>{caseText("Entfernen", "Удалить", "Remove")}</Button></div>
+                      <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-lg" onClick={() => setSymptome((current) => removeItemAtIndex(current, index))}>{caseText("Entfernen", "Удалить", "Remove")}</Button></div>
                     </div>
                   ))}
                 </ItemEditorSection>
@@ -2910,7 +3039,7 @@ export function CasesPage({
                   <form onSubmit={handleSaveCardiology} className="space-y-4">
                     {sectionErrors.cardiology ? <Banner tone="error">{sectionErrors.cardiology}</Banner> : null}
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                      <label className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 text-sm text-foreground">
                         <input
                           type="checkbox"
                           checked={cardiology.is_relevant}
@@ -2932,7 +3061,7 @@ export function CasesPage({
                       ].map(([key, label]) => (
                         <label
                           key={key}
-                          className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700"
+                          className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 text-sm text-foreground"
                         >
                           <input
                             type="checkbox"
@@ -2950,22 +3079,22 @@ export function CasesPage({
                     </div>
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                       <Field label={caseText("Bekannte Diagnose", "Известный диагноз", "Known diagnosis")}>
-                        <Input value={cardiology.known_diagnosis} onChange={(event) => setCardiology((current) => ({ ...current, known_diagnosis: event.target.value }))} className="h-10 rounded-xl bg-slate-50" />
+                        <Input value={cardiology.known_diagnosis} onChange={(event) => setCardiology((current) => ({ ...current, known_diagnosis: event.target.value }))} className="h-10 rounded-xl bg-muted/20" />
                       </Field>
                       <Field label={caseText("Vorbefunde (EKG / Echo / Diagnostik)", "Предыдущие ЭКГ / Эхо / обследования", "Prior ECG / echo / workup")}>
-                        <Input value={cardiology.prior_cardiac_workup} onChange={(event) => setCardiology((current) => ({ ...current, prior_cardiac_workup: event.target.value }))} className="h-10 rounded-xl bg-slate-50" />
+                        <Input value={cardiology.prior_cardiac_workup} onChange={(event) => setCardiology((current) => ({ ...current, prior_cardiac_workup: event.target.value }))} className="h-10 rounded-xl bg-muted/20" />
                       </Field>
                       <Field label={caseText("Antikoagulation", "Антикоагуляция", "Anticoagulation")}>
-                        <Input value={cardiology.anticoagulation} onChange={(event) => setCardiology((current) => ({ ...current, anticoagulation: event.target.value }))} className="h-10 rounded-xl bg-slate-50" />
+                        <Input value={cardiology.anticoagulation} onChange={(event) => setCardiology((current) => ({ ...current, anticoagulation: event.target.value }))} className="h-10 rounded-xl bg-muted/20" />
                       </Field>
                       <Field label={caseText("Kardiovaskuläre Risikofaktoren", "Сердечно-сосудистые факторы риска", "CV risk factors")}>
-                        <Input value={cardiology.cardiovascular_risk_factors} onChange={(event) => setCardiology((current) => ({ ...current, cardiovascular_risk_factors: event.target.value }))} className="h-10 rounded-xl bg-slate-50" />
+                        <Input value={cardiology.cardiovascular_risk_factors} onChange={(event) => setCardiology((current) => ({ ...current, cardiovascular_risk_factors: event.target.value }))} className="h-10 rounded-xl bg-muted/20" />
                       </Field>
                       <Field label={caseText("Familienanamnese", "Семейный анамнез", "Family history")}>
-                        <Input value={cardiology.family_history} onChange={(event) => setCardiology((current) => ({ ...current, family_history: event.target.value }))} className="h-10 rounded-xl bg-slate-50" />
+                        <Input value={cardiology.family_history} onChange={(event) => setCardiology((current) => ({ ...current, family_history: event.target.value }))} className="h-10 rounded-xl bg-muted/20" />
                       </Field>
                       <Field label={caseText("Warnzeichen", "Красные флаги", "Red flags")}>
-                        <Input value={cardiology.red_flags} onChange={(event) => setCardiology((current) => ({ ...current, red_flags: event.target.value }))} className="h-10 rounded-xl bg-slate-50" />
+                        <Input value={cardiology.red_flags} onChange={(event) => setCardiology((current) => ({ ...current, red_flags: event.target.value }))} className="h-10 rounded-xl bg-muted/20" />
                       </Field>
                     </div>
                     <Field label={caseText("Kardiologische Notizen", "Кардиологические заметки", "Cardiology notes")}>
@@ -2979,7 +3108,7 @@ export function CasesPage({
                       />
                     </Field>
                     <div className="flex justify-end border-t border-border/70 pt-4">
-                      <Button type="submit" className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800" disabled={sectionBusy === "cardiology" || !permissions.canEdit}>
+                      <Button type="submit" className="h-9 rounded-lg px-3.5" disabled={sectionBusy === "cardiology" || !permissions.canEdit}>
                         {sectionBusy === "cardiology" ? <LoaderCircle className="size-4 animate-spin" /> : null}
                         {caseText("Kardiologie speichern", "Сохранить кардиологию", "Save cardiology")}
                       </Button>
@@ -3008,7 +3137,7 @@ export function CasesPage({
                       <Banner tone="error">{sectionErrors.gastroenterology}</Banner>
                     ) : null}
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                      <label className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 text-sm text-foreground">
                         <input
                           type="checkbox"
                           checked={gastroenterology.is_relevant}
@@ -3031,7 +3160,7 @@ export function CasesPage({
                       ].map(([key, label]) => (
                         <label
                           key={key}
-                          className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700"
+                          className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 text-sm text-foreground"
                         >
                           <input
                             type="checkbox"
@@ -3059,7 +3188,7 @@ export function CasesPage({
                               prior_endoscopy: event.target.value,
                             }))
                           }
-                          className="h-10 rounded-xl bg-slate-50"
+                          className="h-10 rounded-xl bg-muted/20"
                         />
                       </Field>
                       <Field label={caseText("Veränderungen der Stuhlgewohnheiten", "Изменения стула", "Bowel habit changes")}>
@@ -3071,7 +3200,7 @@ export function CasesPage({
                               bowel_habits: event.target.value,
                             }))
                           }
-                          className="h-10 rounded-xl bg-slate-50"
+                          className="h-10 rounded-xl bg-muted/20"
                         />
                       </Field>
                       <Field label={caseText("Leber- / hepatobiliäre Vorgeschichte", "Печёночно-билиарный анамнез", "Liver / hepatobiliary history")}>
@@ -3083,7 +3212,7 @@ export function CasesPage({
                               liver_history: event.target.value,
                             }))
                           }
-                          className="h-10 rounded-xl bg-slate-50"
+                          className="h-10 rounded-xl bg-muted/20"
                         />
                       </Field>
                       <Field label={caseText("Nahrungsmittelunverträglichkeiten / Auslöser", "Пищевая непереносимость / триггеры", "Food intolerance / triggers")}>
@@ -3095,7 +3224,7 @@ export function CasesPage({
                               food_intolerance: event.target.value,
                             }))
                           }
-                          className="h-10 rounded-xl bg-slate-50"
+                          className="h-10 rounded-xl bg-muted/20"
                         />
                       </Field>
                       <Field label={caseText("Warnzeichen", "Красные флаги", "Red flags")}>
@@ -3107,7 +3236,7 @@ export function CasesPage({
                               red_flags: event.target.value,
                             }))
                           }
-                          className="h-10 rounded-xl bg-slate-50"
+                          className="h-10 rounded-xl bg-muted/20"
                         />
                       </Field>
                     </div>
@@ -3127,7 +3256,7 @@ export function CasesPage({
                     <div className="flex justify-end border-t border-border/70 pt-4">
                       <Button
                         type="submit"
-                        className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+                        className="h-9 rounded-lg px-3.5"
                         disabled={
                           sectionBusy === "gastroenterology" || !permissions.canEdit
                         }
@@ -3162,7 +3291,7 @@ export function CasesPage({
                       <Banner tone="error">{sectionErrors.orthopedics}</Banner>
                     ) : null}
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                      <label className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 text-sm text-foreground">
                         <input
                           type="checkbox"
                           checked={orthopedics.is_relevant}
@@ -3183,7 +3312,7 @@ export function CasesPage({
                       ].map(([key, label]) => (
                         <label
                           key={key}
-                          className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700"
+                          className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 text-sm text-foreground"
                         >
                           <input
                             type="checkbox"
@@ -3209,7 +3338,7 @@ export function CasesPage({
                               prior_imaging: event.target.value,
                             }))
                           }
-                          className="h-10 rounded-xl bg-slate-50"
+                          className="h-10 rounded-xl bg-muted/20"
                         />
                       </Field>
                       <Field label={caseText("Hilfsmittel / Implantate", "Средства поддержки / импланты", "Assistive devices / implants")}>
@@ -3221,7 +3350,7 @@ export function CasesPage({
                               assistive_devices: event.target.value,
                             }))
                           }
-                          className="h-10 rounded-xl bg-slate-50"
+                          className="h-10 rounded-xl bg-muted/20"
                         />
                       </Field>
                       <Field label={caseText("Physiotherapie- / Reha-Vorgeschichte", "Физиотерапия / реабилитация в анамнезе", "Physiotherapy / rehab history")}>
@@ -3233,7 +3362,7 @@ export function CasesPage({
                               physiotherapy_history: event.target.value,
                             }))
                           }
-                          className="h-10 rounded-xl bg-slate-50"
+                          className="h-10 rounded-xl bg-muted/20"
                         />
                       </Field>
                       <Field label={caseText("Schmerzauslöser / Belastungsmuster", "Триггеры боли / характер нагрузки", "Pain triggers / load pattern")}>
@@ -3245,7 +3374,7 @@ export function CasesPage({
                               pain_triggers: event.target.value,
                             }))
                           }
-                          className="h-10 rounded-xl bg-slate-50"
+                          className="h-10 rounded-xl bg-muted/20"
                         />
                       </Field>
                       <Field label={caseText("Warnzeichen", "Красные флаги", "Red flags")}>
@@ -3257,7 +3386,7 @@ export function CasesPage({
                               red_flags: event.target.value,
                             }))
                           }
-                          className="h-10 rounded-xl bg-slate-50"
+                          className="h-10 rounded-xl bg-muted/20"
                         />
                       </Field>
                     </div>
@@ -3277,7 +3406,7 @@ export function CasesPage({
                     <div className="flex justify-end border-t border-border/70 pt-4">
                       <Button
                         type="submit"
-                        className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+                        className="h-9 rounded-lg px-3.5"
                         disabled={sectionBusy === "orthopedics" || !permissions.canEdit}
                       >
                         {sectionBusy === "orthopedics" ? (
@@ -3310,7 +3439,7 @@ export function CasesPage({
                       <Banner tone="error">{sectionErrors.neurology}</Banner>
                     ) : null}
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                      <label className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 text-sm text-foreground">
                         <input
                           type="checkbox"
                           checked={neurology.is_relevant}
@@ -3333,7 +3462,7 @@ export function CasesPage({
                       ].map(([key, label]) => (
                         <label
                           key={key}
-                          className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700"
+                          className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 text-sm text-foreground"
                         >
                           <input
                             type="checkbox"
@@ -3359,7 +3488,7 @@ export function CasesPage({
                               prior_neuro_imaging: event.target.value,
                             }))
                           }
-                          className="h-10 rounded-xl bg-slate-50"
+                          className="h-10 rounded-xl bg-muted/20"
                         />
                       </Field>
                       <Field label={caseText("Frühere neurologische Diagnostik", "Предыдущее неврологическое обследование", "Prior neurology workup")}>
@@ -3371,7 +3500,7 @@ export function CasesPage({
                               prior_neurology_workup: event.target.value,
                             }))
                           }
-                          className="h-10 rounded-xl bg-slate-50"
+                          className="h-10 rounded-xl bg-muted/20"
                         />
                       </Field>
                       <Field label={caseText("Kognitive / sprachliche Veränderungen", "Когнитивные / речевые изменения", "Cognitive / speech changes")}>
@@ -3383,7 +3512,7 @@ export function CasesPage({
                               cognitive_changes: event.target.value,
                             }))
                           }
-                          className="h-10 rounded-xl bg-slate-50"
+                          className="h-10 rounded-xl bg-muted/20"
                         />
                       </Field>
                       <Field label={caseText("Warnzeichen", "Красные флаги", "Red flags")}>
@@ -3395,7 +3524,7 @@ export function CasesPage({
                               red_flags: event.target.value,
                             }))
                           }
-                          className="h-10 rounded-xl bg-slate-50"
+                          className="h-10 rounded-xl bg-muted/20"
                         />
                       </Field>
                     </div>
@@ -3415,7 +3544,7 @@ export function CasesPage({
                     <div className="flex justify-end border-t border-border/70 pt-4">
                       <Button
                         type="submit"
-                        className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+                        className="h-9 rounded-lg px-3.5"
                         disabled={sectionBusy === "neurology" || !permissions.canEdit}
                       >
                         {sectionBusy === "neurology" ? (
@@ -3448,7 +3577,7 @@ export function CasesPage({
                       <Banner tone="error">{sectionErrors.pulmonology}</Banner>
                     ) : null}
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                      <label className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 text-sm text-foreground">
                         <input
                           type="checkbox"
                           checked={pulmonology.is_relevant}
@@ -3470,7 +3599,7 @@ export function CasesPage({
                       ].map(([key, label]) => (
                         <label
                           key={key}
-                          className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700"
+                          className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 text-sm text-foreground"
                         >
                           <input
                             type="checkbox"
@@ -3496,7 +3625,7 @@ export function CasesPage({
                               smoking_history: event.target.value,
                             }))
                           }
-                          className="h-10 rounded-xl bg-slate-50"
+                          className="h-10 rounded-xl bg-muted/20"
                         />
                       </Field>
                       <Field label={caseText("Vorherige Thoraxbildgebung", "Предыдущая визуализация грудной клетки", "Prior chest imaging")}>
@@ -3508,7 +3637,7 @@ export function CasesPage({
                               prior_chest_imaging: event.target.value,
                             }))
                           }
-                          className="h-10 rounded-xl bg-slate-50"
+                          className="h-10 rounded-xl bg-muted/20"
                         />
                       </Field>
                       <Field label={caseText("Inhalation / Atemtherapie", "Ингаляторы / респираторная терапия", "Inhaler / respiratory therapy")}>
@@ -3520,7 +3649,7 @@ export function CasesPage({
                               inhaler_therapy: event.target.value,
                             }))
                           }
-                          className="h-10 rounded-xl bg-slate-50"
+                          className="h-10 rounded-xl bg-muted/20"
                         />
                       </Field>
                       <Field label={caseText("Schlafapnoe- / CPAP-Anamnese", "Анамнез апноэ сна / CPAP", "Sleep apnea / CPAP history")}>
@@ -3532,7 +3661,7 @@ export function CasesPage({
                               sleep_apnea_history: event.target.value,
                             }))
                           }
-                          className="h-10 rounded-xl bg-slate-50"
+                          className="h-10 rounded-xl bg-muted/20"
                         />
                       </Field>
                       <Field label={caseText("Warnzeichen", "Красные флаги", "Red flags")}>
@@ -3544,7 +3673,7 @@ export function CasesPage({
                               red_flags: event.target.value,
                             }))
                           }
-                          className="h-10 rounded-xl bg-slate-50"
+                          className="h-10 rounded-xl bg-muted/20"
                         />
                       </Field>
                     </div>
@@ -3564,7 +3693,7 @@ export function CasesPage({
                     <div className="flex justify-end border-t border-border/70 pt-4">
                       <Button
                         type="submit"
-                        className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+                        className="h-9 rounded-lg px-3.5"
                         disabled={sectionBusy === "pulmonology" || !permissions.canEdit}
                       >
                         {sectionBusy === "pulmonology" ? (
@@ -3597,7 +3726,7 @@ export function CasesPage({
                       <Banner tone="error">{sectionErrors.urology}</Banner>
                     ) : null}
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                      <label className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 text-sm text-foreground">
                         <input
                           type="checkbox"
                           checked={urology.is_relevant}
@@ -3620,7 +3749,7 @@ export function CasesPage({
                       ].map(([key, label]) => (
                         <label
                           key={key}
-                          className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700"
+                          className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 text-sm text-foreground"
                         >
                           <input
                             type="checkbox"
@@ -3646,7 +3775,7 @@ export function CasesPage({
                               prior_urology_workup: event.target.value,
                             }))
                           }
-                          className="h-10 rounded-xl bg-slate-50"
+                          className="h-10 rounded-xl bg-muted/20"
                         />
                       </Field>
                       <Field label={caseText("Katheter- / Instrumentationsanamnese", "Катетеризация / инструментальные вмешательства в анамнезе", "Catheter / instrumentation history")}>
@@ -3658,7 +3787,7 @@ export function CasesPage({
                               catheter_history: event.target.value,
                             }))
                           }
-                          className="h-10 rounded-xl bg-slate-50"
+                          className="h-10 rounded-xl bg-muted/20"
                         />
                       </Field>
                       <Field label={caseText("Stein- / Nierenkolikanamnese", "Анамнез камней / почечной колики", "Stone / renal colic history")}>
@@ -3670,7 +3799,7 @@ export function CasesPage({
                               stone_history: event.target.value,
                             }))
                           }
-                          className="h-10 rounded-xl bg-slate-50"
+                          className="h-10 rounded-xl bg-muted/20"
                         />
                       </Field>
                       <Field label={caseText("Warnzeichen", "Красные флаги", "Red flags")}>
@@ -3682,7 +3811,7 @@ export function CasesPage({
                               red_flags: event.target.value,
                             }))
                           }
-                          className="h-10 rounded-xl bg-slate-50"
+                          className="h-10 rounded-xl bg-muted/20"
                         />
                       </Field>
                     </div>
@@ -3702,7 +3831,7 @@ export function CasesPage({
                     <div className="flex justify-end border-t border-border/70 pt-4">
                       <Button
                         type="submit"
-                        className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+                        className="h-9 rounded-lg px-3.5"
                         disabled={sectionBusy === "urology" || !permissions.canEdit}
                       >
                         {sectionBusy === "urology" ? (
@@ -3718,14 +3847,14 @@ export function CasesPage({
                   <form onSubmit={handleSaveVegetative} className="space-y-4">
                     {sectionErrors.vegetative ? <Banner tone="error">{sectionErrors.vegetative}</Banner> : null}
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      <Field label={t.cases_symptoms}><Input value={vegetative.appetit_durst} onChange={(event) => setVegetative((current) => ({ ...current, appetit_durst: event.target.value }))} className="h-10 rounded-xl bg-slate-50" /></Field>
-                      <Field label={t.cases_symptoms}><Input value={vegetative.koerpergroesse} onChange={(event) => setVegetative((current) => ({ ...current, koerpergroesse: event.target.value }))} className="h-10 rounded-xl bg-slate-50" /></Field>
-                      <Field label={t.cases_symptoms}><Input value={vegetative.gewicht} onChange={(event) => setVegetative((current) => ({ ...current, gewicht: event.target.value }))} className="h-10 rounded-xl bg-slate-50" /></Field>
-                      <Field label={t.cases_symptoms}><Input value={vegetative.gewichtsveraenderung} onChange={(event) => setVegetative((current) => ({ ...current, gewichtsveraenderung: event.target.value }))} className="h-10 rounded-xl bg-slate-50" /></Field>
-                      <Field label={t.cases_reason}><Input value={vegetative.grund} onChange={(event) => setVegetative((current) => ({ ...current, grund: event.target.value }))} className="h-10 rounded-xl bg-slate-50" /></Field>
+                      <Field label={t.cases_symptoms}><Input value={vegetative.appetit_durst} onChange={(event) => setVegetative((current) => ({ ...current, appetit_durst: event.target.value }))} className="h-10 rounded-xl bg-muted/20" /></Field>
+                      <Field label={t.cases_symptoms}><Input value={vegetative.koerpergroesse} onChange={(event) => setVegetative((current) => ({ ...current, koerpergroesse: event.target.value }))} className="h-10 rounded-xl bg-muted/20" /></Field>
+                      <Field label={t.cases_symptoms}><Input value={vegetative.gewicht} onChange={(event) => setVegetative((current) => ({ ...current, gewicht: event.target.value }))} className="h-10 rounded-xl bg-muted/20" /></Field>
+                      <Field label={t.cases_symptoms}><Input value={vegetative.gewichtsveraenderung} onChange={(event) => setVegetative((current) => ({ ...current, gewichtsveraenderung: event.target.value }))} className="h-10 rounded-xl bg-muted/20" /></Field>
+                      <Field label={t.cases_reason}><Input value={vegetative.grund} onChange={(event) => setVegetative((current) => ({ ...current, grund: event.target.value }))} className="h-10 rounded-xl bg-muted/20" /></Field>
                     </div>
                     <div className="flex justify-end border-t border-border/70 pt-4">
-                      <Button type="submit" className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800" disabled={sectionBusy === "vegetative" || !permissions.canEdit}>
+                      <Button type="submit" className="h-9 rounded-lg px-3.5" disabled={sectionBusy === "vegetative" || !permissions.canEdit}>
                         {sectionBusy === "vegetative" ? <LoaderCircle className="size-4 animate-spin" /> : null}
                         {caseText("Vegetative Anamnese speichern", "Сохранить вегетативный анамнез", "Save vegetative")}
                       </Button>
@@ -3740,7 +3869,7 @@ export function CasesPage({
                       <textarea value={impfstatus} onChange={(event) => setImpfstatus(event.target.value)} className={textareaClassName} rows={3} />
                     </Field>
                     <div className="flex justify-end border-t border-border/70 pt-4">
-                      <Button type="submit" className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800" disabled={sectionBusy === "impfstatus" || !permissions.canEdit}>
+                      <Button type="submit" className="h-9 rounded-lg px-3.5" disabled={sectionBusy === "impfstatus" || !permissions.canEdit}>
                         {sectionBusy === "impfstatus" ? <LoaderCircle className="size-4 animate-spin" /> : null}
                         {caseText("Impfstatus speichern", "Сохранить вакцинацию", "Save vaccination")}
                       </Button>
@@ -3761,39 +3890,39 @@ export function CasesPage({
                       {detail.history.map((entry) => (
                         <article
                           key={entry.id}
-                          className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                          className="rounded-xl border border-border bg-muted/20 p-4"
                         >
                           <div className="flex flex-wrap items-center justify-between gap-3">
                             <div>
-                              <h4 className="text-sm font-semibold text-slate-950">
+                              <h4 className="text-sm font-semibold text-foreground">
                                 {historySectionLabel(entry.section)}
                               </h4>
-                              <p className="mt-1 text-xs text-slate-600">
+                              <p className="mt-1 text-xs text-muted-foreground">
                                 {entry.changed_by_name} · {entry.changed_by_role} ·{" "}
                                 {formatDateTime(entry.created_at)}
                               </p>
                             </div>
                             <Badge
                               variant="outline"
-                              className="rounded-full border-slate-200 bg-white text-slate-700"
+                              className="rounded-full border-border bg-background text-foreground"
                             >
                               #{entry.id}
                             </Badge>
                           </div>
                           <div className="mt-3 grid gap-3 md:grid-cols-2">
-                            <div className="rounded-xl border border-slate-200 bg-white p-3">
-                              <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                            <div className="rounded-xl border border-border bg-white p-3">
+                              <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                                 {caseText("Vorher", "Было", "Previous")}
                               </div>
-                              <p className="mt-2 break-words font-mono text-xs text-slate-700">
+                              <p className="mt-2 break-words font-mono text-xs text-foreground">
                                 {historyValuePreview(entry.old_value)}
                               </p>
                             </div>
-                            <div className="rounded-xl border border-slate-200 bg-white p-3">
-                              <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                            <div className="rounded-xl border border-border bg-white p-3">
+                              <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                                 {caseText("Neu", "Стало", "New")}
                               </div>
-                              <p className="mt-2 break-words font-mono text-xs text-slate-700">
+                              <p className="mt-2 break-words font-mono text-xs text-foreground">
                                 {historyValuePreview(entry.new_value)}
                               </p>
                             </div>
@@ -3814,11 +3943,11 @@ export function CasesPage({
                 </Panel>
               </>
             ) : (
-              <div className="flex min-h-[320px] items-center justify-center text-sm text-slate-500">
+              <div className="flex min-h-[320px] items-center justify-center text-sm text-muted-foreground">
                 {caseText("Wählen Sie einen Fall aus der Liste aus.", "Выберите кейс из списка.", "Select a case from the roster.")}
               </div>
             )}
-          </div>
+          </AdminSheetScaffold>
         </SheetContent>
       </Sheet>
     </>
@@ -3827,16 +3956,16 @@ export function CasesPage({
 
 function MetricCard({ label, value, description, icon }: MetricCardProps) {
   return (
-    <div className="rounded-[1.5rem] border border-white/90 bg-white/88 p-4 shadow-sm backdrop-blur">
+    <div className="rounded-xl border border-border bg-card p-4">
       <div className="flex items-center justify-between gap-3">
-        <span className="inline-flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-          <span aria-hidden className="size-1.5 rounded-full bg-orange-500" />
+        <span className="inline-flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+          <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
           {label}
         </span>
-        <span className="rounded-2xl bg-slate-100 p-2 text-slate-700">{icon}</span>
+        <span className="rounded-lg bg-muted p-2 text-muted-foreground">{icon}</span>
       </div>
-      <p className="mt-4 text-3xl font-semibold tracking-tight text-slate-950">{value}</p>
-      <p className="mt-2 text-sm leading-relaxed text-slate-600">{description}</p>
+      <p className="mt-4 text-3xl font-semibold tracking-tight text-foreground">{value}</p>
+      <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{description}</p>
     </div>
   );
 }
@@ -3844,9 +3973,9 @@ function MetricCard({ label, value, description, icon }: MetricCardProps) {
 function Panel({ title, description, action, children, className, accent = true, tone = "default" }: PanelProps) {
   const toneClass =
     tone === "clinical"
-      ? "border-orange-200/70 bg-orange-50/30"
+      ? "border-amber-200/70 bg-amber-50/40"
       : tone === "subtle"
-        ? "border-slate-200/70 bg-slate-50/60"
+        ? "bg-muted/20"
         : "";
   return (
     <section className={cardClass(cn("p-6", toneClass, className))}>
@@ -3856,44 +3985,37 @@ function Panel({ title, description, action, children, className, accent = true,
             {accent ? (
               <span
                 aria-hidden
-                className="size-2 shrink-0 rounded-full bg-orange-500 shadow-[0_0_0_3px_rgba(249,115,22,0.15)]"
+                className="size-2 shrink-0 rounded-full bg-primary/70"
               />
             ) : null}
-            <h3 className="text-[15px] font-semibold tracking-tight text-slate-950">
+            <h3 className="text-[15px] font-semibold tracking-tight text-foreground">
               {title}
             </h3>
           </div>
           {description ? (
-            <p className="mt-1.5 text-[13px] leading-relaxed text-slate-500">
+            <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
               {description}
             </p>
           ) : null}
         </div>
         {action ? <div className="flex shrink-0 items-center gap-2">{action}</div> : null}
       </header>
-      <div className="mt-5 border-t border-slate-100 pt-5">{children}</div>
+      <div className="mt-5 border-t border-border pt-5">{children}</div>
     </section>
   );
 }
 
-function Field({ label, children, required, hint }: FieldProps) {
+function Field({ label, children, required: _required, hint }: FieldProps) {
   return (
-    <label className="flex flex-col gap-1.5">
-      <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] leading-tight text-slate-600">
-        {required ? (
-          <span
-            aria-hidden
-            title="Required"
-            className="size-1.5 shrink-0 rounded-full bg-orange-500"
-          />
-        ) : null}
+    <div className="space-y-1.5">
+      <label className="block text-[11.5px] font-medium leading-tight text-muted-foreground">
         {label}
-      </span>
+      </label>
       {children}
       {hint ? (
-        <span className="text-[11.5px] leading-snug text-slate-500">{hint}</span>
+        <span className="text-xs leading-snug text-muted-foreground">{hint}</span>
       ) : null}
-    </label>
+    </div>
   );
 }
 
@@ -3914,10 +4036,10 @@ function Banner({ tone, children }: BannerProps) {
 
 function EmptyPanel({ title, text, action }: EmptyPanelProps) {
   return (
-    <div className="rounded-[1.5rem] border border-dashed border-slate-300 bg-slate-50/70 px-5 py-8 text-center">
+    <div className="rounded-xl border border-dashed border-border bg-muted/20 px-5 py-8 text-center">
       <div className="mx-auto max-w-md">
-        <h3 className="text-base font-semibold text-slate-950">{title}</h3>
-        <p className="mt-2 text-sm leading-6 text-slate-600">{text}</p>
+        <h3 className="text-base font-semibold text-foreground">{title}</h3>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">{text}</p>
         {action ? <div className="mt-4 flex justify-center">{action}</div> : null}
       </div>
     </div>
@@ -3951,12 +4073,12 @@ function ItemEditorSection({
             className={cn(
               "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.08em]",
               populated
-                ? "border-orange-200 bg-orange-50 text-orange-700"
-                : "border-slate-200 bg-slate-50 text-slate-500",
+                ? "border-primary/30 bg-primary/10 text-primary"
+                : "border-border bg-muted/30 text-muted-foreground",
             )}
           >
             {populated ? (
-              <span aria-hidden className="size-1.5 rounded-full bg-orange-500" />
+              <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
             ) : null}
             {count} {itemsLabel}
           </span>
@@ -3965,7 +4087,7 @@ function ItemEditorSection({
               type="button"
               variant="outline"
               size="sm"
-              className="rounded-2xl"
+              className="rounded-lg"
               onClick={onAdd}
             >
               <Plus className="size-4" />
@@ -3978,10 +4100,10 @@ function ItemEditorSection({
       <form onSubmit={onSave} className="space-y-4">
         {error ? <Banner tone="error">{error}</Banner> : null}
         {!hasContent ? <EmptyPanel title={emptyTitle} text={emptyText} /> : children}
-        <div className="flex justify-end border-t border-slate-100 pt-4">
+        <div className="flex justify-end border-t border-border pt-4">
           <Button
             type="submit"
-            className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+            className="h-9 rounded-lg px-3.5"
             disabled={busy || !canEdit}
           >
             {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
