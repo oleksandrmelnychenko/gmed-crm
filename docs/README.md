@@ -41,6 +41,7 @@
 
 - `architecture/01_target-architecture_ua.md`
 - `architecture/03_frontend-workspace-refactor-plan_ua.md` - канонічний tracker frontend-рефактора `app-shell -> record-workspace -> appointments split`
+- `architecture/05_frontend-dashboard-refactor-plan_ua.md` - канонічний tracker dashboard route/staff dashboard refactor і route-level perf split
 
 ### Testing
 
