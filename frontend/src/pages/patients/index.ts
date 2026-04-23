@@ -1,13 +1,13 @@
 export {
-  MemoizedCreatePatientSheet,
-  MemoizedPatientDetailSheet,
   PatientsPage,
 } from "./list-page";
+export { MemoizedCreatePatientSheet } from "./ui/sheets/create-patient-sheet";
+export { MemoizedPatientDetailSheet } from "./ui/sheets/patient-list-detail-sheet";
 
 export type {
   PatientAssignment,
   PatientDetail,
-  PatientDetailSheetProps,
   PatientsDictionary,
   StaffOption,
-} from "./list-page";
+} from "./model/list-model";
+export type { PatientDetailSheetProps } from "./ui/sheets/patient-list-detail-sheet";

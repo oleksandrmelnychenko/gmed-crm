@@ -7,9 +7,9 @@
 ## 1. Статус
 
 - Поточний статус: `In progress`
-- Активна фаза: `P6`
+- Активна фаза: `P5`
 - Scope: staff frontend patients workspace
-- Review context: `2026-04-22`
+- Review context: `2026-04-23`
 
 ## 2. Поточний зріз
 
@@ -17,7 +17,7 @@
 
 Актуальні больові точки:
 
-- [index.ts](/c:/Users/123/Downloads/dev/frontend/src/pages/patients/index.ts) уже thin route adapter; головний list monolith перенесений у [list-page.tsx](/c:/Users/123/Downloads/dev/frontend/src/pages/patients/list-page.tsx), зараз близько `1669` рядків.
+- [index.ts](/c:/Users/123/Downloads/dev/frontend/src/pages/patients/index.ts) уже thin route adapter; головний list monolith перенесений у [list-page.tsx](/c:/Users/123/Downloads/dev/frontend/src/pages/patients/list-page.tsx), зараз близько `523` рядків після винесення list sheets, toolbar і table surface.
 - [detail-entry.ts](/c:/Users/123/Downloads/dev/frontend/src/pages/patients/detail-entry.ts) уже thin route adapter; головний detail monolith перенесений у [detail-page.tsx](/c:/Users/123/Downloads/dev/frontend/src/pages/patients/detail-page.tsx), зараз близько `2028` рядків після винесення workspace composition.
 - [form-primitives.tsx](/c:/Users/123/Downloads/dev/frontend/src/components/patients/compat/form-primitives.tsx) уже зведений до compatibility adapter, а канонічний модуль живе в [patient-form-primitives.tsx](/c:/Users/123/Downloads/dev/frontend/src/pages/patients/ui/shared/patient-form-primitives.tsx).
 - [workspace-nav.tsx](/c:/Users/123/Downloads/dev/frontend/src/components/patients/compat/workspace-nav.tsx) уже є thin re-export wrapper; канонічний rail живе в [patient-workspace-nav.tsx](/c:/Users/123/Downloads/dev/frontend/src/pages/patients/ui/patient-workspace-nav.tsx).
@@ -95,8 +95,8 @@ Dependency law:
 | `P2` | `Done` | `model` extraction | patient types/selectors/mappers/helpers винесені й не тягнуть React |
 | `P3` | `Done` | `data` extraction | list/detail fetch flows, assignments, preview resources і mutations винесені з route modules |
 | `P4` | `Planned` | `appearance` extraction | patient-local visual bindings і control/surface recipes сидять у `patients/appearance/*` |
-| `P5` | `Planned` | list UI split | table/list/create/detail-sheet surfaces розбиті на feature-local UI modules |
-| `P6` | `In progress` | detail UI split | patient detail workspace, tabs, sheets, dialogs і section blocks винесені з `patient-detail.tsx` |
+| `P5` | `In progress` | list UI split | table/list/create/detail-sheet surfaces розбиті на feature-local UI modules |
+| `P6` | `Done` | detail UI split | patient detail workspace, tabs, sheets, dialogs і section blocks винесені з `patient-detail.tsx` |
 | `P7` | `Planned` | Performance hardening | hidden tabs і heavy preview/dialog flows lazy-load, detail state локалізований |
 | `P8` | `Planned` | Final validation | lint/build/test green, targeted e2e sanity green, residual tails documented |
 
@@ -203,3 +203,5 @@ final validation + tracker normalization
 | `2026-04-22` | `P6` | Contract/invoice management overlays винесені з `detail-page.tsx` у `ui/sheets/patient-financial-dialogs.tsx`. `detail-page.tsx` більше не тримає inline contract create sheet, contract status dialog і invoice+dunning dialog cluster. | `frontend npm run lint`; `frontend npm run build` |
 | `2026-04-22` | `P6` | Після нового проходу `detail-page.tsx` зменшився до ~`2133` рядків. Поточний build baseline: `patients` `98.52 kB / 26.08 kB gzip`, `detail-entry` `208.56 kB / 50.14 kB gzip`; неблокуючий Vite warning лишається тільки по великому `index` chunk. | `frontend npm run lint`; `frontend npm run build` |
 | `2026-04-22` | `P6` | Detail workspace composition винесений з route module в `ui/workspace/patient-detail-workspace-content.tsx` і `ui/workspace/patient-detail-overlay-layers.tsx`. `detail-page.tsx` тепер монтує feature-local workspace shell замість inline tab/overlay composition і зменшився до ~`2028` рядків. Актуальний build baseline: `patients` `98.52 kB / 26.08 kB gzip`, `detail-entry` `219.35 kB / 51.44 kB gzip`. | `frontend npm run lint`; `frontend npm run build` |
+| `2026-04-23` | `P5` | Стартував list UI split: create flow винесений у `ui/sheets/create-patient-sheet.tsx`, split-pane detail sheet у `ui/sheets/patient-list-detail-sheet.tsx`, shared patient form fields у `ui/shared/patient-form-fields.tsx`, а pure presentation formatters у `model/list-formatters.ts`. Після цього `list-page.tsx` зменшився до ~`780` рядків і став значно тоншим orchestration shell. | `frontend npm run lint`; `frontend npm run build` |
+| `2026-04-23` | `P5` | Продовжено list UI split: toolbar винесений у `ui/list/patients-list-toolbar.tsx`, shortcuts modal у `ui/list/patients-shortcuts-dialog.tsx`, а split/data-table surface у `ui/list/patients-table-surface.tsx`. Після цього `list-page.tsx` зменшився до ~`523` рядків. Актуальний build baseline: `patients` `100.93 kB / 26.99 kB gzip`, `detail-entry` `219.34 kB / 51.44 kB gzip`. | `frontend npm run lint`; `frontend npm run build` |
