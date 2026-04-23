@@ -861,9 +861,7 @@ export function PatientsPage() {
   }
 
   function openPatient(patientId: string) {
-    setSelectedId(patientId);
-    setDetailOpen(true);
-    syncQuery({ patient: patientId });
+    staffGo(`/patients/${patientId}`);
   }
 
   async function handleToggleArchive(patient: PatientSummary) {
