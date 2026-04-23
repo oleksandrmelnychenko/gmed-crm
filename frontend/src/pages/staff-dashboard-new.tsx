@@ -263,13 +263,13 @@ export function StaffDashboardPageNew() {
             <ArrowRight className="size-3" />
           </button>
         </div>
-        <div style={{ width: "100%", height: 240 }}>
+        <div className="min-w-0" style={{ width: "100%", height: 240 }}>
           {loading ? (
             <ChartSkeleton />
           ) : monthly.length === 0 ? (
             <EmptyChart label={tr.dash_no_data ?? "No data"} />
           ) : (
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={240}>
               <AreaChart data={monthly} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
                 <defs>
                   <linearGradient id="dashLeadsGrad" x1="0" y1="0" x2="0" y2="1">
@@ -407,7 +407,9 @@ export function StaffDashboardPageNew() {
           <div className="relative">
             <span className="text-[12px] text-muted-foreground">{tr.dash_avg_duration ?? "Avg case duration"}</span>
             <p className="mt-2 text-[30px] font-semibold tracking-tight text-foreground leading-none">
-              {clinical ? Math.round(clinical.avg_case_duration_days) : "—"}
+              {clinical && Number.isFinite(clinical.avg_case_duration_days)
+                ? Math.round(clinical.avg_case_duration_days)
+                : "—"}
             </p>
             <p className="mt-1.5 text-[12px] text-muted-foreground">{tr.dash_days ?? "days"}</p>
             <p className="mt-3 text-[11px] text-muted-foreground">
@@ -760,12 +762,12 @@ function ChartCard({
   compact?: boolean;
 }) {
   return (
-    <div className={cn("rounded-xl border border-border bg-card", compact ? "p-3" : "p-4")}>
+    <div className={cn("min-w-0 rounded-xl border border-border bg-card", compact ? "p-3" : "p-4")}>
       <div>
         <h3 className="text-[14px] font-semibold text-foreground">{title}</h3>
         {hint && <p className="text-[11.5px] text-muted-foreground mt-0.5">{hint}</p>}
       </div>
-      <div className="mt-3">{children}</div>
+      <div className="mt-3 min-w-0">{children}</div>
     </div>
   );
 }
@@ -827,8 +829,8 @@ function HorizontalBars({
     ? data.map((d) => ({ ...d, label: d.label.length > truncate ? d.label.slice(0, truncate - 1) + "…" : d.label }))
     : data;
   return (
-    <div style={{ width: "100%", height }}>
-      <ResponsiveContainer width="100%" height="100%">
+    <div className="min-w-0" style={{ width: "100%", height }}>
+      <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={height}>
         <BarChart
           data={displayData}
           layout="vertical"
@@ -870,9 +872,9 @@ function MiniDonut({
   const visible = data.filter((d) => d.value > 0);
   if (visible.length === 0) return <div style={{ height }}><EmptyChart label={emptyLabel} /></div>;
   return (
-    <div className="grid grid-cols-[1fr_auto] items-center gap-3">
-      <div style={{ width: "100%", height }}>
-        <ResponsiveContainer width="100%" height="100%">
+    <div className="grid min-w-0 grid-cols-[1fr_auto] items-center gap-3">
+      <div className="min-w-0" style={{ width: "100%", height }}>
+        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={height}>
           <PieChart>
             <Pie
               data={visible}
