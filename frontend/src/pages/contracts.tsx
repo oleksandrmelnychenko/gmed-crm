@@ -10,7 +10,6 @@ import {
 import { useSearchParams } from "react-router-dom";
 import {
   CalendarClock,
-  ChevronRight,
   FileBadge2,
   FileSpreadsheet,
   LoaderCircle,
@@ -24,20 +23,30 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  AdminInlineMetric,
+  AdminSheetScaffold,
+  AdminTableCard,
+  AdminToolbar,
+  SheetFormFooter,
+} from "@/components/admin-page-patterns";
+import { DataTable } from "@/components/data-table/data-table";
+import type { ColumnDef } from "@/components/data-table/types";
+import {
+  PageHeader,
+  inputClass as shellInputClassName,
+  textareaClass as shellTextareaClass,
+} from "@/components/ui-shell";
 import { Input } from "@/components/ui/input";
+import {
+  Select as ShadSelect,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Sheet,
   SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
 } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { apiFetch } from "@/lib/api";
@@ -257,10 +266,8 @@ const DEFAULT_AGENCY_SERVICE_FILTERS: AgencyServiceFilters = {
   search: "",
   activeOnly: "true",
 };
-const selectClassName =
-  "h-10 w-full rounded-xl border border-input bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
-const textareaClassName =
-  "min-h-[104px] w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
+const selectTriggerClassName = cn(shellInputClassName, "justify-between");
+const textareaClassName = shellTextareaClass;
 
 function contractsPermissions(role?: string): ContractsPermissions {
   const canView =
@@ -471,6 +478,10 @@ function quoteStatusClassName(status: string) {
 
 function patientOptionLabel(patient: PatientOption) {
   return `${patient.patient_id} · ${[patient.first_name, patient.last_name].filter(Boolean).join(" ")}`;
+}
+
+function orderOptionLabel(order: OrderOption) {
+  return `${order.order_number} · ${order.patient_pid} · ${order.patient_name}`;
 }
 
 function buildSearchParams(
@@ -767,6 +778,7 @@ export function ContractsPage() {
   const [contractsReloadToken, setContractsReloadToken] = useState(0);
   const [quotesReloadToken, setQuotesReloadToken] = useState(0);
   const [agencyServicesReloadToken, setAgencyServicesReloadToken] = useState(0);
+  const [agencyServiceSheetOpen, setAgencyServiceSheetOpen] = useState(false);
   const [createContractOpen, setCreateContractOpen] = useState(false);
   const [createQuoteOpen, setCreateQuoteOpen] = useState(false);
   const [createContractForm, setCreateContractForm] = useState<ContractFormState>(
@@ -861,6 +873,277 @@ export function ContractsPage() {
   const selectedCreateOrder = useMemo(
     () => orders.find((order) => order.id === createQuoteForm.orderId) ?? null,
     [orders, createQuoteForm.orderId],
+  );
+  const selectedContractFilterPatient = useMemo(
+    () => patients.find((patient) => patient.id === contractFilters.patientId) ?? null,
+    [patients, contractFilters.patientId],
+  );
+  const selectedQuoteFilterPatient = useMemo(
+    () => patients.find((patient) => patient.id === quoteFilters.patientId) ?? null,
+    [patients, quoteFilters.patientId],
+  );
+  const selectedQuoteFilterOrder = useMemo(
+    () => orders.find((order) => order.id === quoteFilters.orderId) ?? null,
+    [orders, quoteFilters.orderId],
+  );
+  const selectedCreateContractPatient = useMemo(
+    () => patients.find((patient) => patient.id === createContractForm.patientId) ?? null,
+    [patients, createContractForm.patientId],
+  );
+
+  const agencyServiceColumns = useMemo<ColumnDef<AgencyServiceItem>[]>(
+    () => [
+      {
+        id: "service_key",
+        label: text.serviceKey,
+        accessor: (row) => row.service_key,
+        sortable: true,
+        required: true,
+        width: 180,
+        render: (row) => <span className="font-mono text-xs">{row.service_key}</span>,
+      },
+      {
+        id: "service_name",
+        label: text.serviceName,
+        accessor: (row) => row.service_name,
+        sortable: true,
+        required: true,
+        width: 260,
+      },
+      {
+        id: "description",
+        label: text.description,
+        accessor: (row) => row.description ?? "",
+        width: 320,
+        render: (row) => (
+          <span className="block max-w-[320px] truncate text-sm text-foreground">
+            {row.description?.trim() || t.common_not_set}
+          </span>
+        ),
+      },
+      {
+        id: "unit_price",
+        label: text.unitPrice,
+        accessor: (row) => Number(row.unit_price ?? 0),
+        sortable: true,
+        width: 140,
+        render: (row) => formatCurrency(row.unit_price),
+      },
+      {
+        id: "unit_label",
+        label: text.unit,
+        accessor: (row) => row.unit_label,
+        width: 120,
+      },
+      {
+        id: "vat_rate",
+        label: text.vatPercent,
+        accessor: (row) => valueToInput(row.vat_rate),
+        width: 120,
+        render: (row) => `${valueToInput(row.vat_rate) || "0"}%`,
+      },
+      {
+        id: "is_active",
+        label: t.users_status,
+        accessor: (row) => (row.is_active ? "active" : "inactive"),
+        width: 140,
+        render: (row) => (
+          <Badge
+            variant="outline"
+            className={cn(
+              "rounded-full",
+              row.is_active
+                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                : "border-slate-200 bg-slate-100 text-slate-600",
+            )}
+          >
+            {row.is_active ? text.activeState : text.inactiveState}
+          </Badge>
+        ),
+      },
+      {
+        id: "updated_at",
+        label: text.updated,
+        accessor: (row) => row.updated_at ?? "",
+        sortable: true,
+        width: 180,
+        render: (row) => (
+          <span className="text-xs text-muted-foreground">
+            {formatDateTime(row.updated_at, locale, t.common_not_set)}
+          </span>
+        ),
+      },
+    ],
+    [locale, t.common_not_set, t.users_status, text],
+  );
+
+  const contractTableColumns = useMemo<ColumnDef<ContractItem>[]>(
+    () => [
+      {
+        id: "contract_number",
+        label: t.contracts_framework,
+        accessor: (row) => row.contract_number,
+        sortable: true,
+        required: true,
+        width: 180,
+        render: (row) => <span className="font-mono text-xs">{row.contract_number}</span>,
+      },
+      {
+        id: "patient_name",
+        label: t.contracts_patient,
+        accessor: (row) => row.patient_name,
+        sortable: true,
+        required: true,
+        width: 240,
+      },
+      {
+        id: "patient_pid",
+        label: "PID",
+        accessor: (row) => row.patient_pid,
+        sortable: true,
+        width: 140,
+      },
+      {
+        id: "status",
+        label: t.users_status,
+        accessor: (row) => row.status,
+        sortable: true,
+        width: 150,
+        render: (row) => (
+          <Badge variant="outline" className={cn("rounded-full", contractStatusClassName(row.status))}>
+            {contractStatusLabel(row.status)}
+          </Badge>
+        ),
+      },
+      {
+        id: "valid_from",
+        label: t.providers_service_valid_from,
+        accessor: (row) => row.valid_from ?? "",
+        sortable: true,
+        width: 150,
+        render: (row) => formatDate(row.valid_from, locale, t.common_not_set),
+      },
+      {
+        id: "valid_to",
+        label: t.providers_service_valid_to,
+        accessor: (row) => row.valid_to ?? "",
+        sortable: true,
+        width: 150,
+        render: (row) => formatDate(row.valid_to, locale, t.common_not_set),
+      },
+      {
+        id: "signed_at",
+        label: t.contracts_signed_at,
+        accessor: (row) => row.signed_at ?? "",
+        sortable: true,
+        width: 180,
+        render: (row) => formatDateTime(row.signed_at, locale, t.common_not_set),
+      },
+      {
+        id: "updated_at",
+        label: text.updatedAt,
+        accessor: (row) => row.updated_at,
+        sortable: true,
+        width: 180,
+        render: (row) => formatDateTime(row.updated_at, locale, t.common_not_set),
+      },
+    ],
+    [
+      locale,
+      t.common_not_set,
+      t.contracts_framework,
+      t.contracts_patient,
+      t.contracts_signed_at,
+      t.providers_service_valid_from,
+      t.providers_service_valid_to,
+      t.users_status,
+      text.updatedAt,
+    ],
+  );
+
+  const quoteTableColumns = useMemo<ColumnDef<QuoteItem>[]>(
+    () => [
+      {
+        id: "quote_number",
+        label: text.quotesTab,
+        accessor: (row) => row.quote_number,
+        sortable: true,
+        required: true,
+        width: 180,
+        render: (row) => <span className="font-mono text-xs">{row.quote_number}</span>,
+      },
+      {
+        id: "patient_name",
+        label: t.contracts_patient,
+        accessor: (row) => row.patient_name,
+        sortable: true,
+        required: true,
+        width: 220,
+      },
+      {
+        id: "order_number",
+        label: t.orders_title,
+        accessor: (row) => row.order_number,
+        sortable: true,
+        width: 160,
+      },
+      {
+        id: "status",
+        label: t.users_status,
+        accessor: (row) => row.status,
+        sortable: true,
+        width: 150,
+        render: (row) => (
+          <Badge variant="outline" className={cn("rounded-full", quoteStatusClassName(row.status))}>
+            {quoteStatusLabel(row.status)}
+          </Badge>
+        ),
+      },
+      {
+        id: "total_gross",
+        label: text.grossTotal,
+        accessor: (row) => Number(row.total_gross ?? 0),
+        sortable: true,
+        width: 150,
+        render: (row) => formatCurrency(row.total_gross),
+      },
+      {
+        id: "valid_until",
+        label: t.providers_service_valid_to,
+        accessor: (row) => row.valid_until ?? "",
+        sortable: true,
+        width: 150,
+        render: (row) => formatDate(row.valid_until, locale, t.common_not_set),
+      },
+      {
+        id: "paid_amount",
+        label: t.invoices_paid,
+        accessor: (row) => Number(row.paid_amount ?? 0),
+        sortable: true,
+        width: 150,
+        render: (row) => formatCurrency(row.paid_amount),
+      },
+      {
+        id: "updated_at",
+        label: text.updatedAt,
+        accessor: (row) => row.updated_at,
+        sortable: true,
+        width: 180,
+        render: (row) => formatDateTime(row.updated_at, locale, t.common_not_set),
+      },
+    ],
+    [
+      locale,
+      t.common_not_set,
+      t.contracts_patient,
+      t.invoices_paid,
+      t.orders_title,
+      t.providers_service_valid_to,
+      t.users_status,
+      text.grossTotal,
+      text.quotesTab,
+      text.updatedAt,
+    ],
   );
 
   useEffect(() => {
@@ -1118,6 +1401,7 @@ export function ContractsPage() {
         method: "POST",
         body: JSON.stringify(payload),
       });
+      setAgencyServiceSheetOpen(false);
       setAgencyServiceForm(blankAgencyServiceForm(lang));
       setAgencyServicesReloadToken((current) => current + 1);
     } catch (error) {
@@ -1132,11 +1416,22 @@ export function ContractsPage() {
   function handleEditAgencyService(service: AgencyServiceItem) {
     setAgencyServiceFormError(null);
     setAgencyServiceForm(agencyServiceToForm(service));
+    setAgencyServiceSheetOpen(true);
   }
 
   function resetAgencyServiceForm() {
     setAgencyServiceFormError(null);
     setAgencyServiceForm(blankAgencyServiceForm(lang));
+  }
+
+  function openNewAgencyServiceSheet() {
+    resetAgencyServiceForm();
+    setAgencyServiceSheetOpen(true);
+  }
+
+  function closeAgencyServiceSheet() {
+    resetAgencyServiceForm();
+    setAgencyServiceSheetOpen(false);
   }
 
   async function handleSaveContractStatus() {
@@ -1216,45 +1511,43 @@ export function ContractsPage() {
 
   return (
     <>
-      <div className="space-y-8">
-        <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-            <div>
-              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
-                {text.workspaceKicker}
-              </div>
-              <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">
-                {text.workspaceTitle}
-              </h1>
-              <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">
-                {text.workspaceDescription}
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-2">
+      <div className="space-y-6">
+        <PageHeader
+          title={text.workspaceTitle}
+          description={text.workspaceDescription}
+          actions={
+            <>
               <Button
                 type="button"
                 variant="outline"
-                className="rounded-2xl"
+                className="h-9 rounded-lg"
                 onClick={() => {
                   setContractsReloadToken((current) => current + 1);
                   setQuotesReloadToken((current) => current + 1);
+                  setAgencyServicesReloadToken((current) => current + 1);
                 }}
               >
-                <RefreshCw className="mr-2 size-4" />
+                <RefreshCw className="size-4" />
                 {text.refresh}
               </Button>
+              {permissions.canManageCatalog ? (
+                <Button type="button" variant="outline" className="h-9 rounded-lg" onClick={openNewAgencyServiceSheet}>
+                  <Plus className="size-4" />
+                  {text.newCatalogItem}
+                </Button>
+              ) : null}
               {permissions.canCreateContract ? (
                 <Button
                   type="button"
                   variant="outline"
-                  className="rounded-2xl"
+                  className="h-9 rounded-lg"
                   onClick={() => {
                     setCreateContractError(null);
                     setCreateContractForm(blankContractForm(contractFilters.patientId));
                     setCreateContractOpen(true);
                   }}
                 >
-                  <FileBadge2 className="mr-2 size-4" />
+                  <FileBadge2 className="size-4" />
                   {text.newContract}
                 </Button>
               ) : null}
@@ -1268,401 +1561,187 @@ export function ContractsPage() {
                     setCreateQuoteOpen(true);
                   }}
                 >
-                  <Plus className="mr-2 size-4" />
+                  <Plus className="size-4" />
                   {text.newQuote}
                 </Button>
               ) : null}
-            </div>
-          </div>
-        </section>
+            </>
+          }
+        />
 
-        <section className="grid gap-4 xl:grid-cols-4">
-          <StatCard
+        <div className="flex flex-wrap gap-6 rounded-xl border border-border bg-card px-4 py-3">
+          <AdminInlineMetric
+            icon={ShieldCheck}
             label={t.contracts_title}
             value={String(contractStats.total)}
-            description={lang === "de"
-              ? `${contractStats.signed} unterzeichnet / ${contractStats.sent} versendet`
-              : `${contractStats.signed} подписано / ${contractStats.sent} отправлено`}
-            icon={<ShieldCheck className="size-5" />}
+            description={`${contractStats.signed} / ${contractStats.sent} ${text.contractStatsDescription}`}
+            tone="sky"
           />
-          <StatCard
+          <AdminInlineMetric
+            icon={FileSpreadsheet}
             label={text.quotesTab}
             value={String(quoteStats.total)}
-            description={lang === "de"
-              ? `${quoteStats.accepted} angenommen`
-              : `${quoteStats.accepted} принято`}
-            icon={<FileSpreadsheet className="size-5" />}
+            description={`${quoteStats.accepted} ${text.quoteStatsDescription}`}
+            tone="emerald"
           />
-          <StatCard
+          <AdminInlineMetric
+            icon={Wallet}
             label={t.contracts_total}
             value={formatCurrency(quoteStats.gross)}
             description={t.contracts_subtitle}
-            icon={<Wallet className="size-5" />}
+            tone="amber"
           />
-          <StatCard
+          <AdminInlineMetric
+            icon={CalendarClock}
             label={t.invoices_paid_at}
             value={formatCurrency(quoteStats.paid)}
             description={t.invoices_subtitle}
-            icon={<CalendarClock className="size-5" />}
+            tone="slate"
           />
-        </section>
+        </div>
 
-        {optionsError ? (
-          <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-            {optionsError}
-          </div>
-        ) : null}
+        {optionsError ? <Banner tone="error">{optionsError}</Banner> : null}
 
-        <SectionCard
+        <AdminTableCard
           title={text.agencyServiceTitle}
           description={text.agencyServiceDescription}
-          action={
-            <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
-              {lang === "de"
-                ? `${agencyServiceStats.active} aktiv / ${agencyServiceStats.total} gesamt`
-                : `${agencyServiceStats.active} активных / ${agencyServiceStats.total} всего`}
+          count={agencyServices.length}
+          accessory={
+            <Badge variant="outline" className="rounded-full">
+              {agencyServiceStats.active} / {agencyServiceStats.total}
             </Badge>
           }
         >
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,0.9fr)]">
-            <div className="space-y-4">
-              <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px_auto]">
-                <div className="relative">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
-                  <Input
-                    value={agencyServiceFilters.search}
-                    onChange={(event) =>
-                      startTransition(() =>
-                        setAgencyServiceFilters((current) => ({
-                          ...current,
-                          search: event.target.value,
-                        })),
-                      )
-                    }
-                    className="h-11 rounded-2xl border-slate-200 bg-slate-50 pl-9"
-                    placeholder={text.agencyServiceSearchPlaceholder}
-                  />
-                </div>
-                <select
-                  value={agencyServiceFilters.activeOnly}
+          <div className="space-y-4 border-b border-border px-4 py-4">
+            <AdminToolbar>
+              <div className="relative min-w-[260px] flex-1">
+                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={agencyServiceFilters.search}
                   onChange={(event) =>
-                    setAgencyServiceFilters((current) => ({
-                      ...current,
-                      activeOnly: event.target.value,
-                    }))
+                    startTransition(() =>
+                      setAgencyServiceFilters((current) => ({
+                        ...current,
+                        search: event.target.value,
+                      })),
+                    )
                   }
-                  className={selectClassName}
-                >
-                  <option value="true">{text.activeOnly}</option>
-                  <option value="">{text.allStatuses}</option>
-                  <option value="false">{text.inactiveOnly}</option>
-                </select>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-11 rounded-2xl"
-                  onClick={() => setAgencyServiceFilters(DEFAULT_AGENCY_SERVICE_FILTERS)}
-                >
-                  Reset
-                </Button>
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-3">
-                <MiniMetric label={text.catalogItems} value={String(agencyServiceStats.total)} />
-                <MiniMetric label={text.activeLabel} value={String(agencyServiceStats.active)} />
-                <MiniMetric label={text.priced} value={String(agencyServiceStats.priced)} />
-              </div>
-
-              {agencyServicesLoading ? (
-                <LoadingState label={t.common_loading} />
-              ) : agencyServicesError ? (
-                <Banner tone="error">{agencyServicesError}</Banner>
-              ) : agencyServices.length === 0 ? (
-                <EmptyState
-                  title={text.noCatalogItems}
-                  description={text.noCatalogItemsDescription}
+                  className={cn(shellInputClassName, "pl-9")}
+                  placeholder={text.agencyServiceSearchPlaceholder}
                 />
-              ) : (
-                <div className="grid gap-3 xl:grid-cols-2">
-                  {agencyServices.map((item) => (
-                    <div
-                      key={item.id}
-                      className="rounded-[1.6rem] border border-slate-200 bg-slate-50 p-4"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <div className="font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                            {item.service_key}
-                          </div>
-                          <h3 className="mt-2 text-base font-semibold text-slate-950">
-                            {item.service_name}
-                          </h3>
-                          <p className="mt-1 text-sm text-slate-600">
-                            {item.description || t.common_not_set}
-                          </p>
-                        </div>
-                        <div className="flex flex-col items-end gap-2">
-                          <Badge
-                            variant="outline"
-                            className={cn(
-                              "rounded-full",
-                              item.is_active
-                                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                : "border-slate-200 bg-slate-100 text-slate-600",
-                            )}
-                          >
-                            {item.is_active ? text.activeState : text.inactiveState}
-                          </Badge>
-                          {permissions.canManageCatalog ? (
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              className="rounded-xl"
-                              onClick={() => handleEditAgencyService(item)}
-                            >
-                              {t.common_edit}
-                            </Button>
-                          ) : null}
-                        </div>
-                      </div>
+              </div>
+              <ShadSelect
+                value={agencyServiceFilters.activeOnly || "__all__"}
+                onValueChange={(value) =>
+                  setAgencyServiceFilters((current) => ({
+                    ...current,
+                    activeOnly: value && value !== "__all__" ? value : "",
+                  }))
+                }
+              >
+                <SelectTrigger className={cn(selectTriggerClassName, "w-[180px] min-w-[180px]")}>
+                  <SelectValue>
+                    {agencyServiceFilters.activeOnly === "true"
+                      ? text.activeOnly
+                      : agencyServiceFilters.activeOnly === "false"
+                        ? text.inactiveOnly
+                        : text.allStatuses}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="true">{text.activeOnly}</SelectItem>
+                  <SelectItem value="__all__">{text.allStatuses}</SelectItem>
+                  <SelectItem value="false">{text.inactiveOnly}</SelectItem>
+                </SelectContent>
+              </ShadSelect>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-9 rounded-lg"
+                onClick={() => setAgencyServiceFilters(DEFAULT_AGENCY_SERVICE_FILTERS)}
+              >
+                {t.access_reset}
+              </Button>
+            </AdminToolbar>
 
-                      <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                        <MiniMetric
-                          label={text.unitPrice}
-                          value={formatCurrency(item.unit_price)}
-                        />
-                        <MiniMetric label={text.unit} value={item.unit_label} />
-                        <MiniMetric
-                          label={t.invoices_vat}
-                          value={`${valueToInput(item.vat_rate) || "0"}%`}
-                        />
-                        <MiniMetric
-                          label={t.providers_service_valid_from}
-                          value={formatDate(item.valid_from, locale, t.common_not_set)}
-                        />
-                        <MiniMetric
-                          label={t.providers_service_valid_to}
-                          value={formatDate(item.valid_to, locale, t.common_not_set)}
-                        />
-                        <MiniMetric
-                          label={text.updated}
-                          value={formatDateTime(item.updated_at, locale, t.common_not_set)}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+            <div className="grid gap-3 sm:grid-cols-3">
+              <MiniMetric label={text.catalogItems} value={String(agencyServiceStats.total)} />
+              <MiniMetric label={text.activeLabel} value={String(agencyServiceStats.active)} />
+              <MiniMetric label={text.priced} value={String(agencyServiceStats.priced)} />
             </div>
 
-            {permissions.canManageCatalog ? (
-              <form
-                onSubmit={handleSaveAgencyService}
-                className="rounded-[1.6rem] border border-slate-200 bg-slate-50 p-5"
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <h3 className="text-sm font-semibold text-slate-950">
-                      {agencyServiceForm.id ? text.editCatalogItem : text.newCatalogItem}
-                    </h3>
-                    <p className="mt-1 text-sm text-slate-600">
-                      {text.catalogHelp}
-                    </p>
-                  </div>
-                  {agencyServiceForm.id ? (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="rounded-xl"
-                      onClick={resetAgencyServiceForm}
-                    >
-                      {text.cancelEdit}
-                    </Button>
-                  ) : null}
-                </div>
-
-                {agencyServiceFormError ? (
-                  <div className="mt-4">
-                    <Banner tone="error">{agencyServiceFormError}</Banner>
-                  </div>
-                ) : null}
-
-                <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                  <Field label={text.serviceKey}>
-                    <Input
-                      required
-                      value={agencyServiceForm.serviceKey}
-                      onChange={(event) =>
-                        setAgencyServiceForm((current) => ({
-                          ...current,
-                          serviceKey: event.target.value,
-                        }))
-                      }
-                    />
-                  </Field>
-                  <Field label={text.serviceName}>
-                    <Input
-                      required
-                      value={agencyServiceForm.serviceName}
-                      onChange={(event) =>
-                        setAgencyServiceForm((current) => ({
-                          ...current,
-                          serviceName: event.target.value,
-                        }))
-                      }
-                    />
-                  </Field>
-                  <Field label={text.unitLabel}>
-                    <Input
-                      value={agencyServiceForm.unitLabel}
-                      onChange={(event) =>
-                        setAgencyServiceForm((current) => ({
-                          ...current,
-                          unitLabel: event.target.value,
-                        }))
-                      }
-                    />
-                  </Field>
-                  <Field label={text.currency}>
-                    <Input
-                      value={agencyServiceForm.currency}
-                      onChange={(event) =>
-                        setAgencyServiceForm((current) => ({
-                          ...current,
-                          currency: event.target.value,
-                        }))
-                      }
-                    />
-                  </Field>
-                  <Field label={text.unitPrice}>
-                    <Input
-                      required
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={agencyServiceForm.unitPrice}
-                      onChange={(event) =>
-                        setAgencyServiceForm((current) => ({
-                          ...current,
-                          unitPrice: event.target.value,
-                        }))
-                      }
-                    />
-                  </Field>
-                  <Field label={text.vatPercent}>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      max="100"
-                      value={agencyServiceForm.vatRate}
-                      onChange={(event) =>
-                        setAgencyServiceForm((current) => ({
-                          ...current,
-                          vatRate: event.target.value,
-                        }))
-                      }
-                    />
-                  </Field>
-                  <Field label={t.providers_service_valid_from}>
-                    <Input
-                      required
-                      type="date"
-                      value={agencyServiceForm.validFrom}
-                      onChange={(event) =>
-                        setAgencyServiceForm((current) => ({
-                          ...current,
-                          validFrom: event.target.value,
-                        }))
-                      }
-                    />
-                  </Field>
-                  <Field label={t.providers_service_valid_to}>
-                    <Input
-                      type="date"
-                      value={agencyServiceForm.validTo}
-                      onChange={(event) =>
-                        setAgencyServiceForm((current) => ({
-                          ...current,
-                          validTo: event.target.value,
-                        }))
-                      }
-                    />
-                  </Field>
-                  <Field label={text.description} className="sm:col-span-2">
-                    <textarea
-                      className={textareaClassName}
-                      value={agencyServiceForm.description}
-                      onChange={(event) =>
-                        setAgencyServiceForm((current) => ({
-                          ...current,
-                          description: event.target.value,
-                        }))
-                      }
-                    />
-                  </Field>
-                  <label className="sm:col-span-2 flex items-center gap-2 text-sm text-slate-700">
-                    <input
-                      type="checkbox"
-                      checked={agencyServiceForm.isActive}
-                      onChange={(event) =>
-                        setAgencyServiceForm((current) => ({
-                          ...current,
-                          isActive: event.target.checked,
-                        }))
-                      }
-                      className="size-4 rounded border-slate-300"
-                    />
-                    {text.itemIsActive}
-                  </label>
-                </div>
-
-                <div className="mt-4 flex justify-end">
-                  <Button
-                    type="submit"
-                    className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
-                    disabled={agencyServiceBusy}
-                  >
-                    {agencyServiceBusy ? (
-                      <LoaderCircle className="mr-2 size-4 animate-spin" />
-                    ) : null}
-                    {agencyServiceForm.id ? text.saveCatalogItem : text.createCatalogItem}
-                  </Button>
-                </div>
-              </form>
-            ) : null}
+            {agencyServicesError ? <Banner tone="error">{agencyServicesError}</Banner> : null}
           </div>
-        </SectionCard>
+
+          <DataTable
+            rows={agencyServices}
+            columns={agencyServiceColumns}
+            rowId={(row) => row.id}
+            density="compact"
+            loading={agencyServicesLoading}
+            activeRowId={agencyServiceForm.id || null}
+            onRowClick={permissions.canManageCatalog ? handleEditAgencyService : undefined}
+            rowAccent={(row) => {
+              if (row.id === agencyServiceForm.id) return "bg-sky-500";
+              return row.is_active ? "bg-emerald-500" : "bg-slate-300";
+            }}
+            emptyState={
+              <EmptyState
+                title={text.noCatalogItems}
+                description={text.noCatalogItemsDescription}
+                action={
+                  permissions.canManageCatalog ? (
+                    <Button type="button" className="h-9 rounded-lg" onClick={openNewAgencyServiceSheet}>
+                      <Plus className="size-4" />
+                      {text.createCatalogItem}
+                    </Button>
+                  ) : null
+                }
+              />
+            }
+          />
+        </AdminTableCard>
 
         <Tabs
           value={activeTab}
           onValueChange={(value) => {
             const next = value as ContractsTab;
             setActiveTab(next);
-            syncQuery({ tab: next, contract: next === "contracts" ? selectedContractId : null, quote: next === "quotes" ? selectedQuoteId : null });
+            syncQuery({
+              tab: next,
+              contract: next === "contracts" ? selectedContractId : null,
+              quote: next === "quotes" ? selectedQuoteId : null,
+            });
           }}
-          className="gap-6"
+          className="gap-4"
         >
-          <TabsList variant="line" className="rounded-2xl border border-slate-200 bg-white p-1 shadow-sm">
-            <TabsTrigger value="contracts" className="rounded-xl px-4 data-active:bg-slate-950 data-active:text-white">
-              {text.contractsTab}
+          <TabsList className="h-auto rounded-xl border border-border bg-card p-1">
+            <TabsTrigger
+              value="contracts"
+              className="rounded-lg px-3 py-1.5 data-[state=active]:bg-background data-[state=active]:shadow-sm"
+            >
+              <span>{text.contractsTab}</span>
+              <Badge variant="outline" className="ml-2 rounded-full text-[11px]">
+                {contracts.length}
+              </Badge>
             </TabsTrigger>
-            <TabsTrigger value="quotes" className="rounded-xl px-4 data-active:bg-slate-950 data-active:text-white">
-              {text.quotesTab}
+            <TabsTrigger
+              value="quotes"
+              className="rounded-lg px-3 py-1.5 data-[state=active]:bg-background data-[state=active]:shadow-sm"
+            >
+              <span>{text.quotesTab}</span>
+              <Badge variant="outline" className="ml-2 rounded-full text-[11px]">
+                {quotes.length}
+              </Badge>
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="contracts">
-            <div className="space-y-5">
-              <SectionCard
-                title={text.quotesTab}
-                description={t.contracts_subtitle}
-              >
-                <div className="grid gap-3 lg:grid-cols-[minmax(0,1.4fr)_minmax(220px,1fr)_minmax(180px,0.8fr)_auto]">
-                  <div className="relative">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+          <TabsContent value="contracts" className="space-y-4">
+            <AdminTableCard title={text.contractsTab} description={t.contracts_subtitle} count={contracts.length}>
+              <div className="space-y-4 border-b border-border px-4 py-4">
+                <AdminToolbar>
+                  <div className="relative min-w-[260px] flex-1">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                     <Input
                       value={contractFilters.search}
                       onChange={(event) =>
@@ -1670,44 +1749,67 @@ export function ContractsPage() {
                           setContractFilters((current) => ({ ...current, search: event.target.value })),
                         )
                       }
-                      className="h-11 rounded-2xl border-slate-200 bg-slate-50 pl-9"
+                      className={cn(shellInputClassName, "pl-9")}
                       placeholder={t.common_search}
                     />
                   </div>
-                  <select
-                    value={contractFilters.patientId}
-                    onChange={(event) => {
-                      const patientId = event.target.value;
+                  <ShadSelect
+                    value={contractFilters.patientId || "__all__"}
+                    onValueChange={(value) => {
+                      const patientId = value && value !== "__all__" ? value : "";
                       setContractFilters((current) => ({ ...current, patientId }));
                       syncQuery({ patient: patientId || null });
                     }}
-                    className={selectClassName}
                   >
-                    <option value="">{lang === "de" ? "Alle Patienten" : "Все пациенты"}</option>
-                    {patients.map((patient) => (
-                      <option key={patient.id} value={patient.id}>
-                        {patientOptionLabel(patient)}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    value={contractFilters.status}
-                    onChange={(event) =>
-                      setContractFilters((current) => ({ ...current, status: event.target.value }))
+                    <SelectTrigger className={cn(selectTriggerClassName, "w-[260px] min-w-[260px]")}>
+                      <SelectValue>
+                        {selectedContractFilterPatient
+                          ? patientOptionLabel(selectedContractFilterPatient)
+                          : lang === "de"
+                            ? "Alle Patienten"
+                            : "Все пациенты"}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__all__">
+                        {lang === "de" ? "Alle Patienten" : "Все пациенты"}
+                      </SelectItem>
+                      {patients.map((patient) => (
+                        <SelectItem key={patient.id} value={patient.id}>
+                          {patientOptionLabel(patient)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </ShadSelect>
+                  <ShadSelect
+                    value={contractFilters.status || "__all__"}
+                    onValueChange={(value) =>
+                      setContractFilters((current) => ({
+                        ...current,
+                        status: value && value !== "__all__" ? value : "",
+                      }))
                     }
-                    className={selectClassName}
                   >
-                    <option value="">{t.providers_all}</option>
-                    {CONTRACT_STATUSES.map((status) => (
-                      <option key={status} value={status}>
-                        {contractStatusLabel(status)}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger className={cn(selectTriggerClassName, "w-[180px] min-w-[180px]")}>
+                      <SelectValue>
+                        {contractFilters.status
+                          ? contractStatusLabel(contractFilters.status)
+                          : t.providers_all}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__all__">{t.providers_all}</SelectItem>
+                      {CONTRACT_STATUSES.map((status) => (
+                        <SelectItem key={status} value={status}>
+                          {contractStatusLabel(status)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </ShadSelect>
                   <Button
                     type="button"
                     variant="outline"
-                    className="h-11 rounded-2xl"
+                    className="h-9 rounded-lg"
                     onClick={() => {
                       setContractFilters({
                         ...DEFAULT_CONTRACT_FILTERS,
@@ -1717,84 +1819,51 @@ export function ContractsPage() {
                   >
                     {t.access_reset}
                   </Button>
-                </div>
-              </SectionCard>
+                </AdminToolbar>
+                {contractsError ? <Banner tone="error">{contractsError}</Banner> : null}
+              </div>
 
-              {contractsLoading ? (
-                <LoadingState label={t.common_loading} />
-              ) : contractsError ? (
-                <Banner tone="error">{contractsError}</Banner>
-              ) : contracts.length === 0 ? (
-                <EmptyState
-                  title={t.common_not_set}
-                  description={t.contracts_subtitle}
-                  action={
-                    permissions.canCreateContract ? (
-                      <Button type="button" onClick={() => setCreateContractOpen(true)}>
-                        <Plus className="mr-2 size-4" />
-                        {text.createContract}
-                      </Button>
-                    ) : null
-                  }
-                />
-              ) : (
-                <div className="grid gap-4 xl:grid-cols-2">
-                  {contracts.map((contract) => {
-                    const isSelected = selectedContractId === contract.id;
-                    return (
-                      <button
-                        key={contract.id}
-                        type="button"
-                        onClick={() => openContract(contract.id)}
-                        className={cn(
-                          "rounded-[1.6rem] border bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md",
-                          isSelected ? "border-sky-300 ring-4 ring-sky-100" : "border-slate-200",
-                        )}
-                      >
-                        <div className="flex items-start justify-between gap-4">
-                          <div>
-                            <div className="font-mono text-xs font-semibold tracking-[0.16em] text-slate-500">
-                              {contract.contract_number}
-                            </div>
-                            <h2 className="mt-2 text-lg font-semibold text-slate-950">
-                              {contract.patient_name}
-                            </h2>
-                            <p className="mt-1 text-sm text-slate-500">{contract.patient_pid}</p>
-                          </div>
-                          <ChevronRight className="mt-1 size-4 text-slate-400" />
-                        </div>
-
-                        <div className="mt-4 flex flex-wrap gap-2">
-                          <Badge variant="outline" className={cn("rounded-full", contractStatusClassName(contract.status))}>
-                            {contractStatusLabel(contract.status)}
-                          </Badge>
-                          <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
-                            {contract.signed_at ? t.contracts_signed : t.contracts_draft}
-                          </Badge>
-                        </div>
-
-                        <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                          <MiniMetric label={t.providers_service_valid_from} value={formatDate(contract.valid_from, locale, t.common_not_set)} />
-                          <MiniMetric label={t.providers_service_valid_to} value={formatDate(contract.valid_to, locale, t.common_not_set)} />
-                          <MiniMetric label={t.contracts_signed_at} value={formatDateTime(contract.signed_at, locale, t.common_not_set)} />
-                          <MiniMetric label={text.updatedAt} value={formatDateTime(contract.updated_at, locale, t.common_not_set)} />
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
+              <DataTable
+                rows={contracts}
+                columns={contractTableColumns}
+                rowId={(row) => row.id}
+                density="compact"
+                loading={contractsLoading}
+                activeRowId={selectedContractId || null}
+                onRowClick={(row) => openContract(row.id)}
+                rowAccent={(row) => (row.id === selectedContractId ? "bg-sky-500" : null)}
+                emptyState={
+                  <EmptyState
+                    title={t.common_not_set}
+                    description={t.contracts_subtitle}
+                    action={
+                      permissions.canCreateContract ? (
+                        <Button
+                          type="button"
+                          className="h-9 rounded-lg"
+                          onClick={() => {
+                            setCreateContractError(null);
+                            setCreateContractForm(blankContractForm(contractFilters.patientId));
+                            setCreateContractOpen(true);
+                          }}
+                        >
+                          <Plus className="size-4" />
+                          {text.createContract}
+                        </Button>
+                      ) : null
+                    }
+                  />
+                }
+              />
+            </AdminTableCard>
           </TabsContent>
-          <TabsContent value="quotes">
-            <div className="space-y-5">
-              <SectionCard
-                title={t.contracts_title}
-                description={t.contracts_subtitle}
-              >
-                <div className="grid gap-3 lg:grid-cols-[minmax(0,1.2fr)_minmax(220px,1fr)_minmax(220px,1fr)_minmax(180px,0.8fr)_auto]">
-                  <div className="relative">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+
+          <TabsContent value="quotes" className="space-y-4">
+            <AdminTableCard title={text.quotesTab} description={t.contracts_subtitle} count={quotes.length}>
+              <div className="space-y-4 border-b border-border px-4 py-4">
+                <AdminToolbar>
+                  <div className="relative min-w-[240px] flex-1">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                     <Input
                       value={quoteFilters.search}
                       onChange={(event) =>
@@ -1802,68 +1871,104 @@ export function ContractsPage() {
                           setQuoteFilters((current) => ({ ...current, search: event.target.value })),
                         )
                       }
-                      className="h-11 rounded-2xl border-slate-200 bg-slate-50 pl-9"
+                      className={cn(shellInputClassName, "pl-9")}
                       placeholder={t.common_search}
                     />
                   </div>
-                  <select
-                    value={quoteFilters.patientId}
-                    onChange={(event) => {
-                      const patientId = event.target.value;
+                  <ShadSelect
+                    value={quoteFilters.patientId || "__all__"}
+                    onValueChange={(value) => {
+                      const patientId = value && value !== "__all__" ? value : "";
                       setQuoteFilters((current) => ({
                         ...current,
                         patientId,
                         orderId:
+                          patientId &&
                           current.orderId &&
                           orders.some((order) => order.id === current.orderId && order.patient_id === patientId)
                             ? current.orderId
-                            : "",
+                            : patientId
+                              ? ""
+                              : current.orderId,
                       }));
                       syncQuery({ patient: patientId || null, order: null });
                     }}
-                    className={selectClassName}
                   >
-                    <option value="">{lang === "de" ? "Alle Patienten" : "Все пациенты"}</option>
-                    {patients.map((patient) => (
-                      <option key={patient.id} value={patient.id}>
-                        {patientOptionLabel(patient)}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    value={quoteFilters.orderId}
-                    onChange={(event) => {
-                      const orderId = event.target.value;
+                    <SelectTrigger className={cn(selectTriggerClassName, "w-[260px] min-w-[260px]")}>
+                      <SelectValue>
+                        {selectedQuoteFilterPatient
+                          ? patientOptionLabel(selectedQuoteFilterPatient)
+                          : lang === "de"
+                            ? "Alle Patienten"
+                            : "Все пациенты"}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__all__">
+                        {lang === "de" ? "Alle Patienten" : "Все пациенты"}
+                      </SelectItem>
+                      {patients.map((patient) => (
+                        <SelectItem key={patient.id} value={patient.id}>
+                          {patientOptionLabel(patient)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </ShadSelect>
+                  <ShadSelect
+                    value={quoteFilters.orderId || "__all__"}
+                    onValueChange={(value) => {
+                      const orderId = value && value !== "__all__" ? value : "";
                       setQuoteFilters((current) => ({ ...current, orderId }));
                       syncQuery({ order: orderId || null });
                     }}
-                    className={selectClassName}
                   >
-                    <option value="">{lang === "de" ? "Alle Aufträge" : "Все заказы"}</option>
-                    {filteredOrderOptions.map((order) => (
-                      <option key={order.id} value={order.id}>
-                        {`${order.order_number} · ${order.patient_pid}`}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    value={quoteFilters.status}
-                    onChange={(event) =>
-                      setQuoteFilters((current) => ({ ...current, status: event.target.value }))
+                    <SelectTrigger className={cn(selectTriggerClassName, "w-[260px] min-w-[260px]")}>
+                      <SelectValue>
+                        {selectedQuoteFilterOrder
+                          ? orderOptionLabel(selectedQuoteFilterOrder)
+                          : lang === "de"
+                            ? "Alle Aufträge"
+                            : "Все заказы"}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__all__">
+                        {lang === "de" ? "Alle Aufträge" : "Все заказы"}
+                      </SelectItem>
+                      {filteredOrderOptions.map((order) => (
+                        <SelectItem key={order.id} value={order.id}>
+                          {orderOptionLabel(order)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </ShadSelect>
+                  <ShadSelect
+                    value={quoteFilters.status || "__all__"}
+                    onValueChange={(value) =>
+                      setQuoteFilters((current) => ({
+                        ...current,
+                        status: value && value !== "__all__" ? value : "",
+                      }))
                     }
-                    className={selectClassName}
                   >
-                    <option value="">{t.providers_all}</option>
-                    {QUOTE_STATUSES.map((status) => (
-                      <option key={status} value={status}>
-                        {quoteStatusLabel(status)}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger className={cn(selectTriggerClassName, "w-[180px] min-w-[180px]")}>
+                      <SelectValue>
+                        {quoteFilters.status ? quoteStatusLabel(quoteFilters.status) : t.providers_all}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__all__">{t.providers_all}</SelectItem>
+                      {QUOTE_STATUSES.map((status) => (
+                        <SelectItem key={status} value={status}>
+                          {quoteStatusLabel(status)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </ShadSelect>
                   <Button
                     type="button"
                     variant="outline"
-                    className="h-11 rounded-2xl"
+                    className="h-9 rounded-lg"
                     onClick={() => {
                       setQuoteFilters({
                         ...DEFAULT_QUOTE_FILTERS,
@@ -1874,243 +1979,376 @@ export function ContractsPage() {
                   >
                     {t.access_reset}
                   </Button>
-                </div>
-              </SectionCard>
+                </AdminToolbar>
+                {quotesError ? <Banner tone="error">{quotesError}</Banner> : null}
+              </div>
 
-              {quotesLoading ? (
-                <LoadingState label={t.common_loading} />
-              ) : quotesError ? (
-                <Banner tone="error">{quotesError}</Banner>
-              ) : quotes.length === 0 ? (
-                <EmptyState
-                  title={t.common_not_set}
-                  description={t.contracts_subtitle}
-                  action={
-                    permissions.canCreateQuote ? (
-                      <Button type="button" onClick={() => setCreateQuoteOpen(true)}>
-                        <Plus className="mr-2 size-4" />
-                        {text.createQuote}
-                      </Button>
-                    ) : null
-                  }
-                />
-              ) : (
-                <div className="grid gap-4 xl:grid-cols-2">
-                  {quotes.map((quote) => {
-                    const isSelected = selectedQuoteId === quote.id;
-                    return (
-                      <button
-                        key={quote.id}
-                        type="button"
-                        onClick={() => openQuote(quote.id)}
-                        className={cn(
-                          "rounded-[1.6rem] border bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md",
-                          isSelected ? "border-sky-300 ring-4 ring-sky-100" : "border-slate-200",
-                        )}
-                      >
-                        <div className="flex items-start justify-between gap-4">
-                          <div>
-                            <div className="font-mono text-xs font-semibold tracking-[0.16em] text-slate-500">
-                              {quote.quote_number}
-                            </div>
-                            <h2 className="mt-2 text-lg font-semibold text-slate-950">
-                              {quote.patient_name}
-                            </h2>
-                            <p className="mt-1 text-sm text-slate-500">{`${quote.order_number} · ${quote.patient_pid}`}</p>
-                          </div>
-                          <ChevronRight className="mt-1 size-4 text-slate-400" />
-                        </div>
-
-                        <div className="mt-4 flex flex-wrap gap-2">
-                          <Badge variant="outline" className={cn("rounded-full", quoteStatusClassName(quote.status))}>
-                            {quoteStatusLabel(quote.status)}
-                          </Badge>
-                          <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
-                            {formatCurrency(quote.total_gross)}
-                          </Badge>
-                        </div>
-
-                        <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                          <MiniMetric label={t.providers_service_valid_to} value={formatDate(quote.valid_until, locale, t.common_not_set)} />
-                          <MiniMetric label={t.invoices_paid} value={formatCurrency(quote.paid_amount)} />
-                          <MiniMetric label={t.patients_created} value={formatDateTime(quote.created_at, locale, t.common_not_set)} />
-                          <MiniMetric label={t.invoices_paid_at} value={formatDateTime(quote.paid_at, locale, t.common_not_set)} />
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
+              <DataTable
+                rows={quotes}
+                columns={quoteTableColumns}
+                rowId={(row) => row.id}
+                density="compact"
+                loading={quotesLoading}
+                activeRowId={selectedQuoteId || null}
+                onRowClick={(row) => openQuote(row.id)}
+                rowAccent={(row) => (row.id === selectedQuoteId ? "bg-sky-500" : null)}
+                emptyState={
+                  <EmptyState
+                    title={t.common_not_set}
+                    description={t.contracts_subtitle}
+                    action={
+                      permissions.canCreateQuote ? (
+                        <Button
+                          type="button"
+                          className="h-9 rounded-lg"
+                          onClick={() => {
+                            setCreateQuoteError(null);
+                            setCreateQuoteForm(blankQuoteForm(quoteFilters.orderId));
+                            setCreateQuoteOpen(true);
+                          }}
+                        >
+                          <Plus className="size-4" />
+                          {text.createQuote}
+                        </Button>
+                      ) : null
+                    }
+                  />
+                }
+              />
+            </AdminTableCard>
           </TabsContent>
         </Tabs>
       </div>
 
-      <Dialog open={createContractOpen} onOpenChange={setCreateContractOpen}>
-        <DialogContent className="sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>{text.newContract}</DialogTitle>
-            <DialogDescription>
-              {text.createContractDescription}
-            </DialogDescription>
-          </DialogHeader>
-          <form className="space-y-5" onSubmit={handleCreateContract}>
-            {createContractError ? <Banner tone="error">{createContractError}</Banner> : null}
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label={t.contracts_patient}>
-                <select
-                  required
-                  value={createContractForm.patientId}
-                  onChange={(event) =>
-                    setCreateContractForm((current) => ({ ...current, patientId: event.target.value }))
-                  }
-                  className={selectClassName}
-                >
-                  <option value="">{text.selectPatient}</option>
-                  {patients.map((patient) => (
-                    <option key={patient.id} value={patient.id}>
-                      {patientOptionLabel(patient)}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label={t.users_status}>
-                <select
-                  value={createContractForm.status}
-                  onChange={(event) =>
-                    setCreateContractForm((current) => ({
-                      ...current,
-                      status: event.target.value as ContractStatus,
-                    }))
-                  }
-                  className={selectClassName}
-                >
-                  {CONTRACT_STATUSES.map((status) => (
-                    <option key={status} value={status}>
-                      {contractStatusLabel(status)}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label={t.providers_service_valid_from}>
-                <Input
-                  type="date"
-                  value={createContractForm.validFrom}
-                  onChange={(event) =>
-                    setCreateContractForm((current) => ({ ...current, validFrom: event.target.value }))
-                  }
+      <Sheet open={agencyServiceSheetOpen} onOpenChange={(open) => (!open ? closeAgencyServiceSheet() : setAgencyServiceSheetOpen(true))}>
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
+          <form className="flex h-full flex-col" onSubmit={handleSaveAgencyService}>
+            <AdminSheetScaffold
+              title={agencyServiceForm.id ? text.editCatalogItem : text.newCatalogItem}
+              description={text.catalogHelp}
+              footer={
+                <SheetFormFooter
+                  cancelLabel={t.common_cancel}
+                  submitLabel={agencyServiceForm.id ? text.saveCatalogItem : text.createCatalogItem}
+                  submitting={agencyServiceBusy}
+                  onCancel={closeAgencyServiceSheet}
                 />
-              </Field>
-              <Field label={t.providers_service_valid_to}>
-                <Input
-                  type="date"
-                  value={createContractForm.validTo}
-                  onChange={(event) =>
-                    setCreateContractForm((current) => ({ ...current, validTo: event.target.value }))
-                  }
-                />
-              </Field>
-              <Field label={t.contracts_signed_at} className="sm:col-span-2">
-                <Input
-                  type="datetime-local"
-                  value={createContractForm.signedAt}
-                  onChange={(event) =>
-                    setCreateContractForm((current) => ({ ...current, signedAt: event.target.value }))
-                  }
-                />
-              </Field>
-              <Field label={t.contracts_notes} className="sm:col-span-2">
-                <textarea
-                  className={textareaClassName}
-                  value={createContractForm.conditionsText}
-                  onChange={(event) =>
-                    setCreateContractForm((current) => ({ ...current, conditionsText: event.target.value }))
-                  }
-                  placeholder='{"language":"de","jurisdiction":"DE"}'
-                />
-              </Field>
-            </div>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setCreateContractOpen(false)}>
-                {t.common_cancel}
-              </Button>
-              <Button type="submit" disabled={createContractBusy}>
-                {createContractBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : <Plus className="mr-2 size-4" />}
-                {text.createContract}
-              </Button>
-            </DialogFooter>
+              }
+            >
+              {agencyServiceFormError ? <Banner tone="error">{agencyServiceFormError}</Banner> : null}
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label={text.serviceKey}>
+                  <Input
+                    required
+                    className={shellInputClassName}
+                    value={agencyServiceForm.serviceKey}
+                    onChange={(event) =>
+                      setAgencyServiceForm((current) => ({ ...current, serviceKey: event.target.value }))
+                    }
+                  />
+                </Field>
+                <Field label={text.serviceName}>
+                  <Input
+                    required
+                    className={shellInputClassName}
+                    value={agencyServiceForm.serviceName}
+                    onChange={(event) =>
+                      setAgencyServiceForm((current) => ({ ...current, serviceName: event.target.value }))
+                    }
+                  />
+                </Field>
+                <Field label={text.unitLabel}>
+                  <Input
+                    className={shellInputClassName}
+                    value={agencyServiceForm.unitLabel}
+                    onChange={(event) =>
+                      setAgencyServiceForm((current) => ({ ...current, unitLabel: event.target.value }))
+                    }
+                  />
+                </Field>
+                <Field label={text.currency}>
+                  <Input
+                    className={shellInputClassName}
+                    value={agencyServiceForm.currency}
+                    onChange={(event) =>
+                      setAgencyServiceForm((current) => ({ ...current, currency: event.target.value }))
+                    }
+                  />
+                </Field>
+                <Field label={text.unitPrice}>
+                  <Input
+                    required
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    className={shellInputClassName}
+                    value={agencyServiceForm.unitPrice}
+                    onChange={(event) =>
+                      setAgencyServiceForm((current) => ({ ...current, unitPrice: event.target.value }))
+                    }
+                  />
+                </Field>
+                <Field label={text.vatPercent}>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    max="100"
+                    className={shellInputClassName}
+                    value={agencyServiceForm.vatRate}
+                    onChange={(event) =>
+                      setAgencyServiceForm((current) => ({ ...current, vatRate: event.target.value }))
+                    }
+                  />
+                </Field>
+                <Field label={t.providers_service_valid_from}>
+                  <Input
+                    required
+                    type="date"
+                    className={shellInputClassName}
+                    value={agencyServiceForm.validFrom}
+                    onChange={(event) =>
+                      setAgencyServiceForm((current) => ({ ...current, validFrom: event.target.value }))
+                    }
+                  />
+                </Field>
+                <Field label={t.providers_service_valid_to}>
+                  <Input
+                    type="date"
+                    className={shellInputClassName}
+                    value={agencyServiceForm.validTo}
+                    onChange={(event) =>
+                      setAgencyServiceForm((current) => ({ ...current, validTo: event.target.value }))
+                    }
+                  />
+                </Field>
+                <Field label={text.description} className="sm:col-span-2">
+                  <textarea
+                    className={textareaClassName}
+                    value={agencyServiceForm.description}
+                    onChange={(event) =>
+                      setAgencyServiceForm((current) => ({ ...current, description: event.target.value }))
+                    }
+                  />
+                </Field>
+                <label className="sm:col-span-2 flex items-center gap-2 text-sm text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={agencyServiceForm.isActive}
+                    onChange={(event) =>
+                      setAgencyServiceForm((current) => ({ ...current, isActive: event.target.checked }))
+                    }
+                    className="size-4 rounded border-border"
+                  />
+                  {text.itemIsActive}
+                </label>
+              </div>
+            </AdminSheetScaffold>
           </form>
-        </DialogContent>
-      </Dialog>
+        </SheetContent>
+      </Sheet>
 
-      <Dialog open={createQuoteOpen} onOpenChange={setCreateQuoteOpen}>
-        <DialogContent className="sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>{text.newQuote}</DialogTitle>
-            <DialogDescription>
-              {text.createQuoteDescription}
-            </DialogDescription>
-          </DialogHeader>
-          <form className="space-y-5" onSubmit={handleCreateQuote}>
-            {createQuoteError ? <Banner tone="error">{createQuoteError}</Banner> : null}
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label={t.orders_title} className="sm:col-span-2">
-                <select
-                  required
-                  value={createQuoteForm.orderId}
-                  onChange={(event) =>
-                    setCreateQuoteForm((current) => ({ ...current, orderId: event.target.value }))
-                  }
-                  className={selectClassName}
-                  disabled={optionsLoading}
-                >
-                  <option value="">{optionsLoading ? text.loadingOrders : text.selectOrder}</option>
-                  {filteredOrderOptions.map((order) => (
-                    <option key={order.id} value={order.id}>
-                      {`${order.order_number} · ${order.patient_pid} · ${order.patient_name}`}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label={t.providers_service_valid_to}>
-                <Input
-                  type="date"
-                  value={createQuoteForm.validUntil}
-                  onChange={(event) =>
-                    setCreateQuoteForm((current) => ({ ...current, validUntil: event.target.value }))
-                  }
+      <Sheet open={createContractOpen} onOpenChange={setCreateContractOpen}>
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
+          <form className="flex h-full flex-col" onSubmit={handleCreateContract}>
+            <AdminSheetScaffold
+              title={text.newContract}
+              description={text.createContractDescription}
+              footer={
+                <SheetFormFooter
+                  cancelLabel={t.common_cancel}
+                  submitLabel={text.createContract}
+                  submitting={createContractBusy}
+                  onCancel={() => setCreateContractOpen(false)}
                 />
-              </Field>
-              <Field label={t.orders_title}>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-                  {selectedCreateOrder
-                    ? `${selectedCreateOrder.order_number} · ${selectedCreateOrder.patient_pid} · ${formatCurrency(selectedCreateOrder.total_estimated)}`
-                    : text.chooseOrder}
-                </div>
-              </Field>
-              <Field label={t.contracts_notes} className="sm:col-span-2">
-                <textarea
-                  className={textareaClassName}
-                  value={createQuoteForm.notes}
-                  onChange={(event) =>
-                    setCreateQuoteForm((current) => ({ ...current, notes: event.target.value }))
-                  }
-                  placeholder={t.patients_notes}
-                />
-              </Field>
-            </div>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setCreateQuoteOpen(false)}>
-                {t.common_cancel}
-              </Button>
-              <Button type="submit" disabled={createQuoteBusy || !createQuoteForm.orderId}>
-                {createQuoteBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : <Plus className="mr-2 size-4" />}
-                {text.createQuote}
-              </Button>
-            </DialogFooter>
+              }
+            >
+              {createContractError ? <Banner tone="error">{createContractError}</Banner> : null}
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label={t.contracts_patient}>
+                  <ShadSelect
+                    value={createContractForm.patientId || "__empty__"}
+                    onValueChange={(value) =>
+                      setCreateContractForm((current) => ({
+                        ...current,
+                        patientId: value && value !== "__empty__" ? value : "",
+                      }))
+                    }
+                  >
+                    <SelectTrigger className={selectTriggerClassName}>
+                      <SelectValue>
+                        {selectedCreateContractPatient
+                          ? patientOptionLabel(selectedCreateContractPatient)
+                          : text.selectPatient}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__empty__">{text.selectPatient}</SelectItem>
+                      {patients.map((patient) => (
+                        <SelectItem key={patient.id} value={patient.id}>
+                          {patientOptionLabel(patient)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </ShadSelect>
+                </Field>
+                <Field label={t.users_status}>
+                  <ShadSelect
+                    value={createContractForm.status}
+                    onValueChange={(value) =>
+                      setCreateContractForm((current) => ({
+                        ...current,
+                        status: value as ContractStatus,
+                      }))
+                    }
+                  >
+                    <SelectTrigger className={selectTriggerClassName}>
+                      <SelectValue>{contractStatusLabel(createContractForm.status)}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {CONTRACT_STATUSES.map((status) => (
+                        <SelectItem key={status} value={status}>
+                          {contractStatusLabel(status)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </ShadSelect>
+                </Field>
+                <Field label={t.providers_service_valid_from}>
+                  <Input
+                    type="date"
+                    className={shellInputClassName}
+                    value={createContractForm.validFrom}
+                    onChange={(event) =>
+                      setCreateContractForm((current) => ({ ...current, validFrom: event.target.value }))
+                    }
+                  />
+                </Field>
+                <Field label={t.providers_service_valid_to}>
+                  <Input
+                    type="date"
+                    className={shellInputClassName}
+                    value={createContractForm.validTo}
+                    onChange={(event) =>
+                      setCreateContractForm((current) => ({ ...current, validTo: event.target.value }))
+                    }
+                  />
+                </Field>
+                <Field label={t.contracts_signed_at} className="sm:col-span-2">
+                  <Input
+                    type="datetime-local"
+                    className={shellInputClassName}
+                    value={createContractForm.signedAt}
+                    onChange={(event) =>
+                      setCreateContractForm((current) => ({ ...current, signedAt: event.target.value }))
+                    }
+                  />
+                </Field>
+                <Field label={t.contracts_notes} className="sm:col-span-2">
+                  <textarea
+                    className={textareaClassName}
+                    value={createContractForm.conditionsText}
+                    onChange={(event) =>
+                      setCreateContractForm((current) => ({
+                        ...current,
+                        conditionsText: event.target.value,
+                      }))
+                    }
+                    placeholder='{"language":"de","jurisdiction":"DE"}'
+                  />
+                </Field>
+              </div>
+            </AdminSheetScaffold>
           </form>
-        </DialogContent>
-      </Dialog>
+        </SheetContent>
+      </Sheet>
+
+      <Sheet open={createQuoteOpen} onOpenChange={setCreateQuoteOpen}>
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
+          <form className="flex h-full flex-col" onSubmit={handleCreateQuote}>
+            <AdminSheetScaffold
+              title={text.newQuote}
+              description={text.createQuoteDescription}
+              footer={
+                <SheetFormFooter
+                  cancelLabel={t.common_cancel}
+                  submitLabel={text.createQuote}
+                  submitting={createQuoteBusy}
+                  submitDisabled={!createQuoteForm.orderId}
+                  onCancel={() => setCreateQuoteOpen(false)}
+                />
+              }
+            >
+              {createQuoteError ? <Banner tone="error">{createQuoteError}</Banner> : null}
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label={t.orders_title} className="sm:col-span-2">
+                  <ShadSelect
+                    value={createQuoteForm.orderId || "__empty__"}
+                    onValueChange={(value) =>
+                      setCreateQuoteForm((current) => ({
+                        ...current,
+                        orderId: value && value !== "__empty__" ? value : "",
+                      }))
+                    }
+                    disabled={optionsLoading}
+                  >
+                    <SelectTrigger className={selectTriggerClassName}>
+                      <SelectValue>
+                        {selectedCreateOrder
+                          ? orderOptionLabel(selectedCreateOrder)
+                          : optionsLoading
+                            ? text.loadingOrders
+                            : text.selectOrder}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__empty__">
+                        {optionsLoading ? text.loadingOrders : text.selectOrder}
+                      </SelectItem>
+                      {filteredOrderOptions.map((order) => (
+                        <SelectItem key={order.id} value={order.id}>
+                          {orderOptionLabel(order)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </ShadSelect>
+                </Field>
+                <Field label={t.providers_service_valid_to}>
+                  <Input
+                    type="date"
+                    className={shellInputClassName}
+                    value={createQuoteForm.validUntil}
+                    onChange={(event) =>
+                      setCreateQuoteForm((current) => ({ ...current, validUntil: event.target.value }))
+                    }
+                  />
+                </Field>
+                <Field label={t.orders_title}>
+                  <Input
+                    readOnly
+                    className={cn(shellInputClassName, !selectedCreateOrder && "text-muted-foreground")}
+                    value={
+                      selectedCreateOrder
+                        ? `${selectedCreateOrder.order_number} · ${selectedCreateOrder.patient_pid} · ${formatCurrency(selectedCreateOrder.total_estimated)}`
+                        : text.chooseOrder
+                    }
+                  />
+                </Field>
+                <Field label={t.contracts_notes} className="sm:col-span-2">
+                  <textarea
+                    className={textareaClassName}
+                    value={createQuoteForm.notes}
+                    onChange={(event) =>
+                      setCreateQuoteForm((current) => ({ ...current, notes: event.target.value }))
+                    }
+                    placeholder={t.patients_notes}
+                  />
+                </Field>
+              </div>
+            </AdminSheetScaffold>
+          </form>
+        </SheetContent>
+      </Sheet>
 
       <Sheet
         open={Boolean(selectedContractId)}
@@ -2123,12 +2361,11 @@ export function ContractsPage() {
           }
         }}
       >
-        <SheetContent side="right" className="w-full overflow-y-auto border-l border-slate-200 p-0 sm:max-w-3xl">
-            <SheetHeader className="border-b border-slate-200 px-6 py-5">
-              <SheetTitle>{contractDetail ? `${contractDetail.contract_number} / ${contractDetail.patient_name}` : t.contracts_framework}</SheetTitle>
-            <SheetDescription>{text.contractSheetDescription}</SheetDescription>
-            </SheetHeader>
-          <div className="space-y-6 px-6 py-6">
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-3xl">
+          <AdminSheetScaffold
+            title={contractDetail ? `${contractDetail.contract_number} / ${contractDetail.patient_name}` : t.contracts_framework}
+            description={text.contractSheetDescription}
+          >
             {contractDetailLoading ? (
               <LoadingState label={t.common_loading} />
             ) : contractDetailError ? (
@@ -2137,12 +2374,16 @@ export function ContractsPage() {
               <EmptyState title={t.common_not_set} description={t.contracts_subtitle} />
             ) : (
               <>
-                <SectionCard
+                <AdminTableCard
                   title={t.contracts_title}
                   description={text.contractOverviewDescription}
-                  action={<Badge variant="outline" className={cn("rounded-full", contractStatusClassName(contractDetail.status))}>{contractStatusLabel(contractDetail.status)}</Badge>}
+                  accessory={
+                    <Badge variant="outline" className={cn("rounded-full", contractStatusClassName(contractDetail.status))}>
+                      {contractStatusLabel(contractDetail.status)}
+                    </Badge>
+                  }
                 >
-                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-4">
                     <DetailField label={t.contracts_patient} value={`${contractDetail.patient_name} (${contractDetail.patient_pid})`} />
                     <DetailField label={t.patients_created} value={formatDateTime(contractDetail.created_at, locale, t.common_not_set)} />
                     <DetailField label={text.updatedAt} value={formatDateTime(contractDetail.updated_at, locale, t.common_not_set)} />
@@ -2151,58 +2392,111 @@ export function ContractsPage() {
                     <DetailField label={t.providers_service_valid_to} value={formatDate(contractDetail.valid_to, locale, t.common_not_set)} />
                     <DetailField
                       label={t.contracts_notes}
-                      value={contractDetail.conditions && Object.keys(contractDetail.conditions).length > 0 ? JSON.stringify(contractDetail.conditions, null, 2) : t.common_not_set}
+                      value={
+                        contractDetail.conditions && Object.keys(contractDetail.conditions).length > 0
+                          ? JSON.stringify(contractDetail.conditions, null, 2)
+                          : t.common_not_set
+                      }
                     />
                   </div>
-                </SectionCard>
+                </AdminTableCard>
 
-                <SectionCard title={t.providers_linked_patients} description={text.linkedContractDescription}>
-                  <div className="flex flex-wrap gap-2">
-                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => staffGo(`/patients?patient=${contractDetail.patient_id}`)}>{t.contracts_patient}</Button>
-                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => staffGo(`/orders?patient=${contractDetail.patient_id}`)}>{text.orders}</Button>
-                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => staffGo(`/documents?patient=${contractDetail.patient_id}`)}>{text.documents}</Button>
-                  </div>
-                </SectionCard>
-
-                <SectionCard title={t.contracts_status} description={t.contracts_subtitle}>
-                  {contractStatusError ? <Banner tone="error">{contractStatusError}</Banner> : null}
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <Field label={t.users_status}>
-                      <select
-                        value={contractStatusForm.status}
-                        onChange={(event) =>
-                          setContractStatusForm((current) => ({ ...current, status: event.target.value as ContractStatus }))
-                        }
-                        className={selectClassName}
-                      >
-                        {CONTRACT_STATUSES.map((status) => (
-                          <option key={status} value={status}>{contractStatusLabel(status)}</option>
-                        ))}
-                      </select>
-                    </Field>
-                    <Field label={t.contracts_signed_at}>
-                      <Input type="datetime-local" value={contractStatusForm.signedAt} onChange={(event) => setContractStatusForm((current) => ({ ...current, signedAt: event.target.value }))} />
-                    </Field>
-                    <Field label={t.providers_service_valid_from}>
-                      <Input type="date" value={contractStatusForm.validFrom} onChange={(event) => setContractStatusForm((current) => ({ ...current, validFrom: event.target.value }))} />
-                    </Field>
-                    <Field label={t.providers_service_valid_to}>
-                      <Input type="date" value={contractStatusForm.validTo} onChange={(event) => setContractStatusForm((current) => ({ ...current, validTo: event.target.value }))} />
-                    </Field>
-                    <Field label={t.contracts_notes} className="sm:col-span-2">
-                      <textarea className={textareaClassName} value={contractStatusForm.conditionsText} onChange={(event) => setContractStatusForm((current) => ({ ...current, conditionsText: event.target.value }))} />
-                    </Field>
-                  </div>
-                  <div className="mt-4 flex justify-end">
-                    <Button type="button" onClick={() => void handleSaveContractStatus()} disabled={contractStatusBusy || !permissions.canManageContract}>
-                      {contractStatusBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
-                      {text.saveContract}
+                <AdminTableCard title={t.providers_linked_patients} description={text.linkedContractDescription}>
+                  <div className="flex flex-wrap gap-2 p-4">
+                    <Button type="button" variant="outline" className="h-9 rounded-lg" onClick={() => staffGo(`/patients?patient=${contractDetail.patient_id}`)}>
+                      {t.contracts_patient}
+                    </Button>
+                    <Button type="button" variant="outline" className="h-9 rounded-lg" onClick={() => staffGo(`/orders?patient=${contractDetail.patient_id}`)}>
+                      {text.orders}
+                    </Button>
+                    <Button type="button" variant="outline" className="h-9 rounded-lg" onClick={() => staffGo(`/documents?patient=${contractDetail.patient_id}`)}>
+                      {text.documents}
                     </Button>
                   </div>
-                </SectionCard>
+                </AdminTableCard>
+
+                <AdminTableCard title={t.contracts_status} description={t.contracts_subtitle}>
+                  <div className="space-y-4 p-4">
+                    {contractStatusError ? <Banner tone="error">{contractStatusError}</Banner> : null}
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <Field label={t.users_status}>
+                        <ShadSelect
+                          value={contractStatusForm.status}
+                          onValueChange={(value) =>
+                            setContractStatusForm((current) => ({ ...current, status: value as ContractStatus }))
+                          }
+                        >
+                          <SelectTrigger className={selectTriggerClassName}>
+                            <SelectValue>{contractStatusLabel(contractStatusForm.status)}</SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            {CONTRACT_STATUSES.map((status) => (
+                              <SelectItem key={status} value={status}>
+                                {contractStatusLabel(status)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </ShadSelect>
+                      </Field>
+                      <Field label={t.contracts_signed_at}>
+                        <Input
+                          type="datetime-local"
+                          className={shellInputClassName}
+                          value={contractStatusForm.signedAt}
+                          onChange={(event) =>
+                            setContractStatusForm((current) => ({ ...current, signedAt: event.target.value }))
+                          }
+                        />
+                      </Field>
+                      <Field label={t.providers_service_valid_from}>
+                        <Input
+                          type="date"
+                          className={shellInputClassName}
+                          value={contractStatusForm.validFrom}
+                          onChange={(event) =>
+                            setContractStatusForm((current) => ({ ...current, validFrom: event.target.value }))
+                          }
+                        />
+                      </Field>
+                      <Field label={t.providers_service_valid_to}>
+                        <Input
+                          type="date"
+                          className={shellInputClassName}
+                          value={contractStatusForm.validTo}
+                          onChange={(event) =>
+                            setContractStatusForm((current) => ({ ...current, validTo: event.target.value }))
+                          }
+                        />
+                      </Field>
+                      <Field label={t.contracts_notes} className="sm:col-span-2">
+                        <textarea
+                          className={textareaClassName}
+                          value={contractStatusForm.conditionsText}
+                          onChange={(event) =>
+                            setContractStatusForm((current) => ({
+                              ...current,
+                              conditionsText: event.target.value,
+                            }))
+                          }
+                        />
+                      </Field>
+                    </div>
+                    <div className="flex justify-end">
+                      <Button
+                        type="button"
+                        className="h-9 rounded-lg"
+                        onClick={() => void handleSaveContractStatus()}
+                        disabled={contractStatusBusy || !permissions.canManageContract}
+                      >
+                        {contractStatusBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                        {text.saveContract}
+                      </Button>
+                    </div>
+                  </div>
+                </AdminTableCard>
               </>
             )}
-          </div>
+          </AdminSheetScaffold>
         </SheetContent>
       </Sheet>
 
@@ -2217,12 +2511,11 @@ export function ContractsPage() {
           }
         }}
       >
-        <SheetContent side="right" className="w-full overflow-y-auto border-l border-slate-200 p-0 sm:max-w-3xl">
-          <SheetHeader className="border-b border-slate-200 px-6 py-5">
-            <SheetTitle>{quoteDetail ? `${quoteDetail.quote_number} / ${quoteDetail.patient_name}` : text.quotesTab}</SheetTitle>
-            <SheetDescription>{text.quoteSheetDescription}</SheetDescription>
-          </SheetHeader>
-          <div className="space-y-6 px-6 py-6">
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-3xl">
+          <AdminSheetScaffold
+            title={quoteDetail ? `${quoteDetail.quote_number} / ${quoteDetail.patient_name}` : text.quotesTab}
+            description={text.quoteSheetDescription}
+          >
             {quoteDetailLoading ? (
               <LoadingState label={t.common_loading} />
             ) : quoteDetailError ? (
@@ -2231,12 +2524,16 @@ export function ContractsPage() {
               <EmptyState title={t.common_not_set} description={t.contracts_subtitle} />
             ) : (
               <>
-                <SectionCard
+                <AdminTableCard
                   title={text.quotesTab}
                   description={text.quoteOverviewDescription}
-                  action={<Badge variant="outline" className={cn("rounded-full", quoteStatusClassName(quoteDetail.status))}>{quoteStatusLabel(quoteDetail.status)}</Badge>}
+                  accessory={
+                    <Badge variant="outline" className={cn("rounded-full", quoteStatusClassName(quoteDetail.status))}>
+                      {quoteStatusLabel(quoteDetail.status)}
+                    </Badge>
+                  }
                 >
-                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-4">
                     <DetailField label={t.contracts_patient} value={`${quoteDetail.patient_name} (${quoteDetail.patient_pid})`} />
                     <DetailField label={t.orders_title} value={quoteDetail.order_number} />
                     <DetailField label={t.providers_service_valid_to} value={formatDate(quoteDetail.valid_until, locale, t.common_not_set)} />
@@ -2255,188 +2552,172 @@ export function ContractsPage() {
                     />
                     <DetailField label={t.contracts_notes} value={quoteDetail.notes || t.common_not_set} />
                   </div>
-                </SectionCard>
+                </AdminTableCard>
 
-                <SectionCard title={t.providers_linked_patients} description={text.linkedQuoteDescription}>
-                  <div className="flex flex-wrap gap-2">
-                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => staffGo(`/patients?patient=${quoteDetail.patient_id}`)}>{t.contracts_patient}</Button>
-                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => staffGo(`/orders?order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`)}>{text.order}</Button>
-                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => staffGo(`/invoices?quote=${quoteDetail.id}&order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`)}>{text.invoices}</Button>
-                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => staffGo(`/documents?order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`)}>{text.documents}</Button>
-                  </div>
-                </SectionCard>
-
-                <SectionCard title={text.quoteLifecycle} description={text.quoteLifecycleDescription}>
-                  {quoteStatusError ? <Banner tone="error">{quoteStatusError}</Banner> : null}
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <Field label={t.users_status}>
-                      <select
-                        value={quoteStatusForm.status}
-                        onChange={(event) =>
-                          setQuoteStatusForm((current) => ({ ...current, status: event.target.value as QuoteStatus }))
-                        }
-                        className={selectClassName}
-                      >
-                        {QUOTE_STATUSES.map((status) => (
-                          <option key={status} value={status}>{quoteStatusLabel(status)}</option>
-                        ))}
-                      </select>
-                    </Field>
-                    <Field label={t.invoices_paid_at}>
-                      <Input type="number" step="0.01" min="0" value={quoteStatusForm.paidAmount} onChange={(event) => setQuoteStatusForm((current) => ({ ...current, paidAmount: event.target.value }))} />
-                    </Field>
-                    <Field label={t.contracts_notes} className="sm:col-span-2">
-                      <textarea className={textareaClassName} value={quoteStatusForm.notes} onChange={(event) => setQuoteStatusForm((current) => ({ ...current, notes: event.target.value }))} />
-                    </Field>
-                  </div>
-                  <div className="mt-4 flex justify-end">
-                    <Button type="button" onClick={() => void handleSaveQuoteStatus()} disabled={quoteStatusBusy || !permissions.canManageQuote}>
-                      {quoteStatusBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
-                      {text.saveQuote}
+                <AdminTableCard title={t.providers_linked_patients} description={text.linkedQuoteDescription}>
+                  <div className="flex flex-wrap gap-2 p-4">
+                    <Button type="button" variant="outline" className="h-9 rounded-lg" onClick={() => staffGo(`/patients?patient=${quoteDetail.patient_id}`)}>
+                      {t.contracts_patient}
+                    </Button>
+                    <Button type="button" variant="outline" className="h-9 rounded-lg" onClick={() => staffGo(`/orders?order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`)}>
+                      {text.order}
+                    </Button>
+                    <Button type="button" variant="outline" className="h-9 rounded-lg" onClick={() => staffGo(`/invoices?quote=${quoteDetail.id}&order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`)}>
+                      {text.invoices}
+                    </Button>
+                    <Button type="button" variant="outline" className="h-9 rounded-lg" onClick={() => staffGo(`/documents?order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`)}>
+                      {text.documents}
                     </Button>
                   </div>
-                </SectionCard>
+                </AdminTableCard>
 
-                <SectionCard title={text.lineItems} description={text.lineItemsDescription}>
-                  {!quoteDetail.line_items || quoteDetail.line_items.length === 0 ? (
-                    <EmptyState title={text.noLineItems} description={text.noLineItemsDescription} />
-                  ) : (
-                    <div className="space-y-3">
-                      {quoteDetail.line_items.map((line, index) => (
-                        <div key={`${line.description}-${index}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div>
-                              <h3 className="text-sm font-semibold text-slate-900">{line.description}</h3>
-                              <p className="mt-1 text-xs text-slate-500">
-                                {text.quantity} {line.quantity} · {text.unit} {formatCurrency(line.unit_price)}
-                              </p>
-                            </div>
-                            <div className="flex flex-wrap gap-2">
-                              <Badge variant="outline" className="rounded-full border-slate-200 bg-white text-slate-700">
-                                {t.invoices_vat} {line.vat_rate}%
-                              </Badge>
-                              {line.is_cost_passthrough ? (
-                                <Badge variant="outline" className="rounded-full border-orange-200 bg-orange-50 text-orange-700">
-                                  {t.orders_cost_pass_through_badge}
-                                </Badge>
-                              ) : null}
-                            </div>
-                          </div>
-                          <div className="mt-4 grid gap-3 md:grid-cols-3">
-                            <MiniMetric label={text.net} value={formatCurrency(line.line_net)} />
-                            <MiniMetric label={t.invoices_vat} value={formatCurrency(line.line_vat)} />
-                            <MiniMetric label={text.gross} value={formatCurrency(line.line_gross)} />
-                          </div>
-                          {line.notes ? (
-                            <div className="mt-3 text-sm text-slate-600">{line.notes}</div>
-                          ) : null}
-                        </div>
-                      ))}
+                <AdminTableCard title={text.quoteLifecycle} description={text.quoteLifecycleDescription}>
+                  <div className="space-y-4 p-4">
+                    {quoteStatusError ? <Banner tone="error">{quoteStatusError}</Banner> : null}
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <Field label={t.users_status}>
+                        <ShadSelect
+                          value={quoteStatusForm.status}
+                          onValueChange={(value) =>
+                            setQuoteStatusForm((current) => ({ ...current, status: value as QuoteStatus }))
+                          }
+                        >
+                          <SelectTrigger className={selectTriggerClassName}>
+                            <SelectValue>{quoteStatusLabel(quoteStatusForm.status)}</SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            {QUOTE_STATUSES.map((status) => (
+                              <SelectItem key={status} value={status}>
+                                {quoteStatusLabel(status)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </ShadSelect>
+                      </Field>
+                      <Field label={t.invoices_paid_at}>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          className={shellInputClassName}
+                          value={quoteStatusForm.paidAmount}
+                          onChange={(event) =>
+                            setQuoteStatusForm((current) => ({ ...current, paidAmount: event.target.value }))
+                          }
+                        />
+                      </Field>
+                      <Field label={t.contracts_notes} className="sm:col-span-2">
+                        <textarea
+                          className={textareaClassName}
+                          value={quoteStatusForm.notes}
+                          onChange={(event) =>
+                            setQuoteStatusForm((current) => ({ ...current, notes: event.target.value }))
+                          }
+                        />
+                      </Field>
                     </div>
-                  )}
-                </SectionCard>
+                    <div className="flex justify-end">
+                      <Button
+                        type="button"
+                        className="h-9 rounded-lg"
+                        onClick={() => void handleSaveQuoteStatus()}
+                        disabled={quoteStatusBusy || !permissions.canManageQuote}
+                      >
+                        {quoteStatusBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                        {text.saveQuote}
+                      </Button>
+                    </div>
+                  </div>
+                </AdminTableCard>
 
-                <SectionCard title={text.versionHistory} description={text.versionHistoryDescription}>
-                  {quoteVersionsLoading ? (
-                    <LoadingState label={t.common_loading} />
-                  ) : quoteVersionsError ? (
-                    <Banner tone="error">{quoteVersionsError}</Banner>
-                  ) : quoteVersions.length === 0 ? (
-                    <EmptyState title={text.noVersions} description={text.noVersionsDescription} />
-                  ) : (
-                    <div className="space-y-3">
-                      {quoteVersions.map((version) => (
-                        <div key={version.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div>
-                              <div className="flex flex-wrap items-center gap-2">
-                                <h3 className="text-sm font-semibold text-slate-900">
-                                  {text.version} {version.version_number}
-                                </h3>
-                                <Badge variant="outline" className={cn("rounded-full", quoteStatusClassName(version.status))}>
-                                  {quoteStatusLabel(version.status)}
-                                </Badge>
+                <AdminTableCard title={text.lineItems} description={text.lineItemsDescription}>
+                  <div className="p-4">
+                    {!quoteDetail.line_items || quoteDetail.line_items.length === 0 ? (
+                      <EmptyState title={text.noLineItems} description={text.noLineItemsDescription} />
+                    ) : (
+                      <div className="space-y-3">
+                        {quoteDetail.line_items.map((line, index) => (
+                          <div key={`${line.description}-${index}`} className="rounded-xl border border-border bg-muted/20 p-4">
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div>
+                                <h3 className="text-sm font-semibold text-foreground">{line.description}</h3>
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                  {text.quantity} {line.quantity} · {text.unit} {formatCurrency(line.unit_price)}
+                                </p>
                               </div>
-                              <p className="mt-1 text-xs text-slate-500">
-                                {formatDateTime(version.created_at, locale, t.common_not_set)} · {version.created_by_name} ({roleLabel(version.created_by_role)})
-                              </p>
-                              <p className="mt-2 text-sm text-slate-600">
-                                {(version.change_reason || text.snapshotFallback).replaceAll("_", " ")} · {version.line_item_count} {text.lineItemsCount}
-                              </p>
+                              <div className="flex flex-wrap gap-2">
+                                <Badge variant="outline" className="rounded-full">
+                                  {t.invoices_vat} {line.vat_rate}%
+                                </Badge>
+                                {line.is_cost_passthrough ? (
+                                  <Badge variant="outline" className="rounded-full border-orange-200 bg-orange-50 text-orange-700">
+                                    {t.orders_cost_pass_through_badge}
+                                  </Badge>
+                                ) : null}
+                              </div>
                             </div>
-                            <div className="grid min-w-[220px] gap-3 md:grid-cols-2">
-                              <MiniMetric label={text.gross} value={formatCurrency(version.total_gross)} />
-                              <MiniMetric label={t.invoices_paid} value={formatCurrency(version.paid_amount)} />
-                              <MiniMetric label={t.providers_service_valid_to} value={formatDate(version.valid_until, locale, t.common_not_set)} />
-                              <MiniMetric label={t.invoices_paid_at} value={formatDateTime(version.paid_at, locale, t.common_not_set)} />
+                            <div className="mt-4 grid gap-3 md:grid-cols-3">
+                              <MiniMetric label={text.net} value={formatCurrency(line.line_net)} />
+                              <MiniMetric label={t.invoices_vat} value={formatCurrency(line.line_vat)} />
+                              <MiniMetric label={text.gross} value={formatCurrency(line.line_gross)} />
                             </div>
+                            {line.notes ? <div className="mt-3 text-sm text-muted-foreground">{line.notes}</div> : null}
                           </div>
-                          {version.notes ? (
-                            <div className="mt-3 text-sm text-slate-600">{version.notes}</div>
-                          ) : null}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </SectionCard>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </AdminTableCard>
+
+                <AdminTableCard title={text.versionHistory} description={text.versionHistoryDescription}>
+                  <div className="p-4">
+                    {quoteVersionsLoading ? (
+                      <LoadingState label={t.common_loading} />
+                    ) : quoteVersionsError ? (
+                      <Banner tone="error">{quoteVersionsError}</Banner>
+                    ) : quoteVersions.length === 0 ? (
+                      <EmptyState title={text.noVersions} description={text.noVersionsDescription} />
+                    ) : (
+                      <div className="space-y-3">
+                        {quoteVersions.map((version) => (
+                          <div key={version.id} className="rounded-xl border border-border bg-muted/20 p-4">
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <h3 className="text-sm font-semibold text-foreground">
+                                    {text.version} {version.version_number}
+                                  </h3>
+                                  <Badge variant="outline" className={cn("rounded-full", quoteStatusClassName(version.status))}>
+                                    {quoteStatusLabel(version.status)}
+                                  </Badge>
+                                </div>
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                  {formatDateTime(version.created_at, locale, t.common_not_set)} · {version.created_by_name} ({roleLabel(version.created_by_role)})
+                                </p>
+                                <p className="mt-2 text-sm text-muted-foreground">
+                                  {(version.change_reason || text.snapshotFallback).replaceAll("_", " ")} · {version.line_item_count} {text.lineItemsCount}
+                                </p>
+                              </div>
+                              <div className="grid min-w-[220px] gap-3 md:grid-cols-2">
+                                <MiniMetric label={text.gross} value={formatCurrency(version.total_gross)} />
+                                <MiniMetric label={t.invoices_paid} value={formatCurrency(version.paid_amount)} />
+                                <MiniMetric label={t.providers_service_valid_to} value={formatDate(version.valid_until, locale, t.common_not_set)} />
+                                <MiniMetric label={t.invoices_paid_at} value={formatDateTime(version.paid_at, locale, t.common_not_set)} />
+                              </div>
+                            </div>
+                            {version.notes ? <div className="mt-3 text-sm text-muted-foreground">{version.notes}</div> : null}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </AdminTableCard>
               </>
             )}
-          </div>
+          </AdminSheetScaffold>
         </SheetContent>
       </Sheet>
     </>
-  );
-}
-
-function StatCard({
-  label,
-  value,
-  description,
-  icon,
-}: {
-  label: string;
-  value: string;
-  description: string;
-  icon: ReactNode;
-}) {
-  return (
-    <div className="rounded-[1.8rem] border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="flex items-center justify-between">
-        <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-          {label}
-        </span>
-        <span className="rounded-full border border-slate-200 bg-slate-50 p-2 text-slate-600">
-          {icon}
-        </span>
-      </div>
-      <div className="mt-5 text-2xl font-semibold tracking-tight text-slate-950">{value}</div>
-      <p className="mt-2 text-sm text-slate-600">{description}</p>
-    </div>
-  );
-}
-
-function SectionCard({
-  title,
-  description,
-  action,
-  children,
-}: {
-  title: string;
-  description?: string;
-  action?: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <section className="rounded-[1.8rem] border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="flex flex-col gap-3 border-b border-slate-200 pb-4 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <h2 className="text-lg font-semibold text-slate-950">{title}</h2>
-          {description ? <p className="mt-1 text-sm text-slate-600">{description}</p> : null}
-        </div>
-        {action ? <div>{action}</div> : null}
-      </div>
-      <div className="pt-5">{children}</div>
-    </section>
   );
 }
 
@@ -2444,17 +2725,17 @@ function DetailField({ label, value }: { label: string; value: ReactNode }) {
   const rendered =
     typeof value === "string" && value.includes("{") && value.includes("}")
       ? (
-          <pre className="whitespace-pre-wrap break-words rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+          <pre className="whitespace-pre-wrap break-words rounded-lg border border-border bg-muted/20 p-3 text-xs text-foreground">
             {value}
           </pre>
         )
       : (
-          <div className="text-sm text-slate-900">{value}</div>
+          <div className="text-sm text-foreground">{value}</div>
         );
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+    <div className="rounded-xl border border-border bg-muted/20 p-4">
+      <div className="text-[11.5px] font-medium leading-tight text-muted-foreground">
         {label}
       </div>
       <div className="mt-2">{rendered}</div>
@@ -2464,11 +2745,11 @@ function DetailField({ label, value }: { label: string; value: ReactNode }) {
 
 function MiniMetric({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+    <div className="rounded-lg border border-border bg-muted/20 p-3">
+      <div className="text-[11.5px] font-medium leading-tight text-muted-foreground">
         {label}
       </div>
-      <div className="mt-2 text-sm text-slate-900">{value}</div>
+      <div className="mt-2 text-sm text-foreground">{value}</div>
     </div>
   );
 }
@@ -2502,7 +2783,7 @@ function Banner({
   return (
     <div
       className={cn(
-        "rounded-2xl border px-4 py-3 text-sm",
+        "rounded-xl border px-4 py-3 text-sm",
         tone === "error"
           ? "border-rose-200 bg-rose-50 text-rose-700"
           : "border-sky-200 bg-sky-50 text-sky-700",
@@ -2515,7 +2796,7 @@ function Banner({
 
 function LoadingState({ label }: { label: string }) {
   return (
-    <div className="rounded-[1.8rem] border border-slate-200 bg-white px-6 py-12 text-center text-sm text-slate-500 shadow-sm">
+    <div className="rounded-xl border border-border bg-card px-6 py-12 text-center text-sm text-muted-foreground">
       <LoaderCircle className="mx-auto mb-3 size-5 animate-spin" />
       {label}
     </div>
@@ -2532,10 +2813,11 @@ function EmptyState({
   action?: ReactNode;
 }) {
   return (
-    <div className="rounded-[1.8rem] border border-dashed border-slate-300 bg-white px-6 py-12 text-center shadow-sm">
-      <h3 className="text-lg font-semibold text-slate-950">{title}</h3>
-      <p className="mx-auto mt-3 max-w-2xl text-sm leading-6 text-slate-600">{description}</p>
+    <div className="rounded-xl border border-dashed border-border bg-muted/20 px-6 py-12 text-center">
+      <h3 className="text-lg font-semibold text-foreground">{title}</h3>
+      <p className="mx-auto mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">{description}</p>
       {action ? <div className="mt-5 flex justify-center">{action}</div> : null}
     </div>
   );
 }
+
