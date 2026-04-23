@@ -25,6 +25,7 @@ import { Button } from "@/components/ui/button";
 import {
   AdminInlineMetric,
   AdminSheetScaffold,
+  SheetActionsFooter,
   AdminTableCard,
   AdminToolbar,
   SheetFormFooter,
@@ -37,6 +38,7 @@ import {
   textareaClass as shellTextareaClass,
 } from "@/components/ui-shell";
 import { Input } from "@/components/ui/input";
+import { Banner as ShellBanner } from "@/components/record-workspace/recipes";
 import {
   Select as ShadSelect,
   SelectContent,
@@ -131,6 +133,10 @@ type QuoteVersionItem = {
   created_at: string;
   created_by_name: string;
   created_by_role: string;
+};
+
+type QuoteLineItemRow = QuoteLineItem & {
+  id: string;
 };
 
 type PatientOption = {
@@ -266,7 +272,7 @@ const DEFAULT_AGENCY_SERVICE_FILTERS: AgencyServiceFilters = {
   search: "",
   activeOnly: "true",
 };
-const selectTriggerClassName = cn(shellInputClassName, "justify-between");
+const selectTriggerClassName = cn("w-full", shellInputClassName, "justify-between");
 const textareaClassName = shellTextareaClass;
 
 function contractsPermissions(role?: string): ContractsPermissions {
@@ -1146,6 +1152,222 @@ export function ContractsPage() {
     ],
   );
 
+  const quoteLineItemRows = useMemo<QuoteLineItemRow[]>(
+    () =>
+      (quoteDetail?.line_items ?? []).map((line, index) => ({
+        ...line,
+        id: `${index}-${line.description}-${line.quantity}-${line.unit_price}`,
+      })),
+    [quoteDetail?.line_items],
+  );
+
+  const quoteLineItemColumns = useMemo<ColumnDef<QuoteLineItemRow>[]>(
+    () => [
+      {
+        id: "description",
+        label: text.description,
+        accessor: (row) => row.description,
+        sortable: true,
+        required: true,
+        width: 320,
+      },
+      {
+        id: "quantity",
+        label: text.quantity,
+        accessor: (row) => Number(row.quantity ?? 0),
+        sortable: true,
+        width: 90,
+      },
+      {
+        id: "unit_price",
+        label: text.unitPrice,
+        accessor: (row) => Number(row.unit_price ?? 0),
+        sortable: true,
+        width: 140,
+        render: (row) => formatCurrency(row.unit_price),
+      },
+      {
+        id: "vat_rate",
+        label: t.invoices_vat,
+        accessor: (row) => Number(row.vat_rate ?? 0),
+        sortable: true,
+        width: 110,
+        render: (row) => `${row.vat_rate}%`,
+      },
+      {
+        id: "line_net",
+        label: text.net,
+        accessor: (row) => Number(row.line_net ?? 0),
+        sortable: true,
+        width: 140,
+        render: (row) => formatCurrency(row.line_net),
+      },
+      {
+        id: "line_vat",
+        label: text.vatTotal,
+        accessor: (row) => Number(row.line_vat ?? 0),
+        sortable: true,
+        width: 140,
+        render: (row) => formatCurrency(row.line_vat),
+      },
+      {
+        id: "line_gross",
+        label: text.gross,
+        accessor: (row) => Number(row.line_gross ?? 0),
+        sortable: true,
+        width: 140,
+        render: (row) => formatCurrency(row.line_gross),
+      },
+      {
+        id: "passthrough",
+        label: t.orders_cost_pass_through_badge,
+        accessor: (row) => (row.is_cost_passthrough ? "yes" : "no"),
+        width: 180,
+        render: (row) =>
+          row.is_cost_passthrough ? (
+            <Badge variant="outline" className="rounded-full border-orange-200 bg-orange-50 text-orange-700">
+              {t.orders_cost_pass_through_badge}
+            </Badge>
+          ) : (
+            <span className="text-muted-foreground">-</span>
+          ),
+      },
+      {
+        id: "notes",
+        label: t.contracts_notes,
+        accessor: (row) => row.notes ?? "",
+        width: 280,
+        render: (row) => (
+          <span className="block max-w-[280px] truncate text-sm text-foreground">
+            {row.notes?.trim() || t.common_not_set}
+          </span>
+        ),
+      },
+    ],
+    [
+      t.common_not_set,
+      t.contracts_notes,
+      t.invoices_vat,
+      t.orders_cost_pass_through_badge,
+      text.description,
+      text.gross,
+      text.net,
+      text.quantity,
+      text.unitPrice,
+      text.vatTotal,
+    ],
+  );
+
+  const quoteVersionColumns = useMemo<ColumnDef<QuoteVersionItem>[]>(
+    () => [
+      {
+        id: "version_number",
+        label: text.version,
+        accessor: (row) => row.version_number,
+        sortable: true,
+        required: true,
+        width: 120,
+        render: (row) => <span className="font-mono text-xs">v{row.version_number}</span>,
+      },
+      {
+        id: "status",
+        label: t.users_status,
+        accessor: (row) => row.status,
+        sortable: true,
+        width: 150,
+        render: (row) => (
+          <Badge variant="outline" className={cn("rounded-full", quoteStatusClassName(row.status))}>
+            {quoteStatusLabel(row.status)}
+          </Badge>
+        ),
+      },
+      {
+        id: "total_gross",
+        label: text.gross,
+        accessor: (row) => Number(row.total_gross ?? 0),
+        sortable: true,
+        width: 140,
+        render: (row) => formatCurrency(row.total_gross),
+      },
+      {
+        id: "paid_amount",
+        label: t.invoices_paid,
+        accessor: (row) => Number(row.paid_amount ?? 0),
+        sortable: true,
+        width: 140,
+        render: (row) => formatCurrency(row.paid_amount),
+      },
+      {
+        id: "valid_until",
+        label: t.providers_service_valid_to,
+        accessor: (row) => row.valid_until ?? "",
+        sortable: true,
+        width: 150,
+        render: (row) => formatDate(row.valid_until, locale, t.common_not_set),
+      },
+      {
+        id: "paid_at",
+        label: t.invoices_paid_at,
+        accessor: (row) => row.paid_at ?? "",
+        sortable: true,
+        width: 170,
+        render: (row) => formatDateTime(row.paid_at, locale, t.common_not_set),
+      },
+      {
+        id: "line_item_count",
+        label: text.lineItemsCount,
+        accessor: (row) => row.line_item_count,
+        sortable: true,
+        width: 120,
+      },
+      {
+        id: "change_reason",
+        label: t.contracts_notes,
+        accessor: (row) => row.change_reason ?? "",
+        width: 280,
+        render: (row) => (
+          <span className="block max-w-[280px] truncate text-sm text-foreground">
+            {(row.change_reason || text.snapshotFallback).replaceAll("_", " ")}
+          </span>
+        ),
+      },
+      {
+        id: "created_by_name",
+        label: t.users_created,
+        accessor: (row) => `${row.created_by_name} ${row.created_by_role}`,
+        width: 200,
+        render: (row) => (
+          <span className="text-sm text-foreground">
+            {row.created_by_name} ({roleLabel(row.created_by_role)})
+          </span>
+        ),
+      },
+      {
+        id: "created_at",
+        label: text.updatedAt,
+        accessor: (row) => row.created_at,
+        sortable: true,
+        width: 180,
+        render: (row) => formatDateTime(row.created_at, locale, t.common_not_set),
+      },
+    ],
+    [
+      locale,
+      t.common_not_set,
+      t.contracts_notes,
+      t.invoices_paid,
+      t.invoices_paid_at,
+      t.providers_service_valid_to,
+      t.users_created,
+      t.users_status,
+      text.gross,
+      text.lineItemsCount,
+      text.snapshotFallback,
+      text.updatedAt,
+      text.version,
+    ],
+  );
+
   useEffect(() => {
     let ignore = false;
     async function loadOptions() {
@@ -1520,7 +1742,7 @@ export function ContractsPage() {
               <Button
                 type="button"
                 variant="outline"
-                className="h-9 rounded-lg"
+                className="h-9 rounded-lg px-3.5"
                 onClick={() => {
                   setContractsReloadToken((current) => current + 1);
                   setQuotesReloadToken((current) => current + 1);
@@ -1531,7 +1753,7 @@ export function ContractsPage() {
                 {text.refresh}
               </Button>
               {permissions.canManageCatalog ? (
-                <Button type="button" variant="outline" className="h-9 rounded-lg" onClick={openNewAgencyServiceSheet}>
+                <Button type="button" variant="outline" className="h-9 rounded-lg px-3.5" onClick={openNewAgencyServiceSheet}>
                   <Plus className="size-4" />
                   {text.newCatalogItem}
                 </Button>
@@ -1540,7 +1762,7 @@ export function ContractsPage() {
                 <Button
                   type="button"
                   variant="outline"
-                  className="h-9 rounded-lg"
+                  className="h-9 rounded-lg px-3.5"
                   onClick={() => {
                     setCreateContractError(null);
                     setCreateContractForm(blankContractForm(contractFilters.patientId));
@@ -1600,7 +1822,7 @@ export function ContractsPage() {
           />
         </div>
 
-        {optionsError ? <Banner tone="error">{optionsError}</Banner> : null}
+        {optionsError ? <ShellBanner tone="error">{optionsError}</ShellBanner> : null}
 
         <AdminTableCard
           title={text.agencyServiceTitle}
@@ -1657,7 +1879,7 @@ export function ContractsPage() {
               <Button
                 type="button"
                 variant="outline"
-                className="h-9 rounded-lg"
+                className="h-9 rounded-lg px-3.5"
                 onClick={() => setAgencyServiceFilters(DEFAULT_AGENCY_SERVICE_FILTERS)}
               >
                 {t.access_reset}
@@ -1670,7 +1892,7 @@ export function ContractsPage() {
               <MiniMetric label={text.priced} value={String(agencyServiceStats.priced)} />
             </div>
 
-            {agencyServicesError ? <Banner tone="error">{agencyServicesError}</Banner> : null}
+            {agencyServicesError ? <ShellBanner tone="error">{agencyServicesError}</ShellBanner> : null}
           </div>
 
           <DataTable
@@ -1691,7 +1913,7 @@ export function ContractsPage() {
                 description={text.noCatalogItemsDescription}
                 action={
                   permissions.canManageCatalog ? (
-                    <Button type="button" className="h-9 rounded-lg" onClick={openNewAgencyServiceSheet}>
+                    <Button type="button" className="h-9 rounded-lg px-3.5" onClick={openNewAgencyServiceSheet}>
                       <Plus className="size-4" />
                       {text.createCatalogItem}
                     </Button>
@@ -1809,7 +2031,7 @@ export function ContractsPage() {
                   <Button
                     type="button"
                     variant="outline"
-                    className="h-9 rounded-lg"
+                    className="h-9 rounded-lg px-3.5"
                     onClick={() => {
                       setContractFilters({
                         ...DEFAULT_CONTRACT_FILTERS,
@@ -1820,7 +2042,7 @@ export function ContractsPage() {
                     {t.access_reset}
                   </Button>
                 </AdminToolbar>
-                {contractsError ? <Banner tone="error">{contractsError}</Banner> : null}
+                {contractsError ? <ShellBanner tone="error">{contractsError}</ShellBanner> : null}
               </div>
 
               <DataTable
@@ -1840,7 +2062,7 @@ export function ContractsPage() {
                       permissions.canCreateContract ? (
                         <Button
                           type="button"
-                          className="h-9 rounded-lg"
+                          className="h-9 rounded-lg px-3.5"
                           onClick={() => {
                             setCreateContractError(null);
                             setCreateContractForm(blankContractForm(contractFilters.patientId));
@@ -1968,7 +2190,7 @@ export function ContractsPage() {
                   <Button
                     type="button"
                     variant="outline"
-                    className="h-9 rounded-lg"
+                    className="h-9 rounded-lg px-3.5"
                     onClick={() => {
                       setQuoteFilters({
                         ...DEFAULT_QUOTE_FILTERS,
@@ -1980,7 +2202,7 @@ export function ContractsPage() {
                     {t.access_reset}
                   </Button>
                 </AdminToolbar>
-                {quotesError ? <Banner tone="error">{quotesError}</Banner> : null}
+                {quotesError ? <ShellBanner tone="error">{quotesError}</ShellBanner> : null}
               </div>
 
               <DataTable
@@ -2000,7 +2222,7 @@ export function ContractsPage() {
                       permissions.canCreateQuote ? (
                         <Button
                           type="button"
-                          className="h-9 rounded-lg"
+                          className="h-9 rounded-lg px-3.5"
                           onClick={() => {
                             setCreateQuoteError(null);
                             setCreateQuoteForm(blankQuoteForm(quoteFilters.orderId));
@@ -2035,7 +2257,7 @@ export function ContractsPage() {
                 />
               }
             >
-              {agencyServiceFormError ? <Banner tone="error">{agencyServiceFormError}</Banner> : null}
+              {agencyServiceFormError ? <ShellBanner tone="error">{agencyServiceFormError}</ShellBanner> : null}
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field label={text.serviceKey}>
                   <Input
@@ -2163,7 +2385,7 @@ export function ContractsPage() {
                 />
               }
             >
-              {createContractError ? <Banner tone="error">{createContractError}</Banner> : null}
+              {createContractError ? <ShellBanner tone="error">{createContractError}</ShellBanner> : null}
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field label={t.contracts_patient}>
                   <ShadSelect
@@ -2279,7 +2501,7 @@ export function ContractsPage() {
                 />
               }
             >
-              {createQuoteError ? <Banner tone="error">{createQuoteError}</Banner> : null}
+              {createQuoteError ? <ShellBanner tone="error">{createQuoteError}</ShellBanner> : null}
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field label={t.orders_title} className="sm:col-span-2">
                   <ShadSelect
@@ -2369,13 +2591,13 @@ export function ContractsPage() {
             {contractDetailLoading ? (
               <LoadingState label={t.common_loading} />
             ) : contractDetailError ? (
-              <Banner tone="error">{contractDetailError}</Banner>
+              <ShellBanner tone="error">{contractDetailError}</ShellBanner>
             ) : !contractDetail ? (
               <EmptyState title={t.common_not_set} description={t.contracts_subtitle} />
             ) : (
               <>
                 <AdminTableCard
-                  title={t.contracts_title}
+                  title={titleWithDot(t.contracts_title)}
                   description={text.contractOverviewDescription}
                   accessory={
                     <Badge variant="outline" className={cn("rounded-full", contractStatusClassName(contractDetail.status))}>
@@ -2401,23 +2623,23 @@ export function ContractsPage() {
                   </div>
                 </AdminTableCard>
 
-                <AdminTableCard title={t.providers_linked_patients} description={text.linkedContractDescription}>
+                <AdminTableCard title={titleWithDot(t.providers_linked_patients)} description={text.linkedContractDescription}>
                   <div className="flex flex-wrap gap-2 p-4">
-                    <Button type="button" variant="outline" className="h-9 rounded-lg" onClick={() => staffGo(`/patients?patient=${contractDetail.patient_id}`)}>
+                    <Button type="button" variant="outline" className="h-9 rounded-lg px-3.5" onClick={() => staffGo(`/patients?patient=${contractDetail.patient_id}`)}>
                       {t.contracts_patient}
                     </Button>
-                    <Button type="button" variant="outline" className="h-9 rounded-lg" onClick={() => staffGo(`/orders?patient=${contractDetail.patient_id}`)}>
+                    <Button type="button" variant="outline" className="h-9 rounded-lg px-3.5" onClick={() => staffGo(`/orders?patient=${contractDetail.patient_id}`)}>
                       {text.orders}
                     </Button>
-                    <Button type="button" variant="outline" className="h-9 rounded-lg" onClick={() => staffGo(`/documents?patient=${contractDetail.patient_id}`)}>
+                    <Button type="button" variant="outline" className="h-9 rounded-lg px-3.5" onClick={() => staffGo(`/documents?patient=${contractDetail.patient_id}`)}>
                       {text.documents}
                     </Button>
                   </div>
                 </AdminTableCard>
 
-                <AdminTableCard title={t.contracts_status} description={t.contracts_subtitle}>
+                <AdminTableCard title={titleWithDot(t.contracts_status)} description={t.contracts_subtitle}>
                   <div className="space-y-4 p-4">
-                    {contractStatusError ? <Banner tone="error">{contractStatusError}</Banner> : null}
+                    {contractStatusError ? <ShellBanner tone="error">{contractStatusError}</ShellBanner> : null}
                     <div className="grid gap-4 sm:grid-cols-2">
                       <Field label={t.users_status}>
                         <ShadSelect
@@ -2481,17 +2703,17 @@ export function ContractsPage() {
                         />
                       </Field>
                     </div>
-                    <div className="flex justify-end">
+                    <SheetActionsFooter>
                       <Button
                         type="button"
-                        className="h-9 rounded-lg"
+                        className="h-9 rounded-lg px-3.5"
                         onClick={() => void handleSaveContractStatus()}
                         disabled={contractStatusBusy || !permissions.canManageContract}
                       >
                         {contractStatusBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
                         {text.saveContract}
                       </Button>
-                    </div>
+                    </SheetActionsFooter>
                   </div>
                 </AdminTableCard>
               </>
@@ -2519,13 +2741,13 @@ export function ContractsPage() {
             {quoteDetailLoading ? (
               <LoadingState label={t.common_loading} />
             ) : quoteDetailError ? (
-              <Banner tone="error">{quoteDetailError}</Banner>
+              <ShellBanner tone="error">{quoteDetailError}</ShellBanner>
             ) : !quoteDetail ? (
               <EmptyState title={t.common_not_set} description={t.contracts_subtitle} />
             ) : (
               <>
                 <AdminTableCard
-                  title={text.quotesTab}
+                  title={titleWithDot(text.quotesTab)}
                   description={text.quoteOverviewDescription}
                   accessory={
                     <Badge variant="outline" className={cn("rounded-full", quoteStatusClassName(quoteDetail.status))}>
@@ -2554,26 +2776,26 @@ export function ContractsPage() {
                   </div>
                 </AdminTableCard>
 
-                <AdminTableCard title={t.providers_linked_patients} description={text.linkedQuoteDescription}>
+                <AdminTableCard title={titleWithDot(t.providers_linked_patients)} description={text.linkedQuoteDescription}>
                   <div className="flex flex-wrap gap-2 p-4">
-                    <Button type="button" variant="outline" className="h-9 rounded-lg" onClick={() => staffGo(`/patients?patient=${quoteDetail.patient_id}`)}>
+                    <Button type="button" variant="outline" className="h-9 rounded-lg px-3.5" onClick={() => staffGo(`/patients?patient=${quoteDetail.patient_id}`)}>
                       {t.contracts_patient}
                     </Button>
-                    <Button type="button" variant="outline" className="h-9 rounded-lg" onClick={() => staffGo(`/orders?order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`)}>
+                    <Button type="button" variant="outline" className="h-9 rounded-lg px-3.5" onClick={() => staffGo(`/orders?order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`)}>
                       {text.order}
                     </Button>
-                    <Button type="button" variant="outline" className="h-9 rounded-lg" onClick={() => staffGo(`/invoices?quote=${quoteDetail.id}&order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`)}>
+                    <Button type="button" variant="outline" className="h-9 rounded-lg px-3.5" onClick={() => staffGo(`/invoices?quote=${quoteDetail.id}&order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`)}>
                       {text.invoices}
                     </Button>
-                    <Button type="button" variant="outline" className="h-9 rounded-lg" onClick={() => staffGo(`/documents?order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`)}>
+                    <Button type="button" variant="outline" className="h-9 rounded-lg px-3.5" onClick={() => staffGo(`/documents?order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`)}>
                       {text.documents}
                     </Button>
                   </div>
                 </AdminTableCard>
 
-                <AdminTableCard title={text.quoteLifecycle} description={text.quoteLifecycleDescription}>
+                <AdminTableCard title={titleWithDot(text.quoteLifecycle)} description={text.quoteLifecycleDescription}>
                   <div className="space-y-4 p-4">
-                    {quoteStatusError ? <Banner tone="error">{quoteStatusError}</Banner> : null}
+                    {quoteStatusError ? <ShellBanner tone="error">{quoteStatusError}</ShellBanner> : null}
                     <div className="grid gap-4 sm:grid-cols-2">
                       <Field label={t.users_status}>
                         <ShadSelect
@@ -2616,101 +2838,41 @@ export function ContractsPage() {
                         />
                       </Field>
                     </div>
-                    <div className="flex justify-end">
+                    <SheetActionsFooter>
                       <Button
                         type="button"
-                        className="h-9 rounded-lg"
+                        className="h-9 rounded-lg px-3.5"
                         onClick={() => void handleSaveQuoteStatus()}
                         disabled={quoteStatusBusy || !permissions.canManageQuote}
                       >
                         {quoteStatusBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
                         {text.saveQuote}
                       </Button>
-                    </div>
+                    </SheetActionsFooter>
                   </div>
                 </AdminTableCard>
 
-                <AdminTableCard title={text.lineItems} description={text.lineItemsDescription}>
-                  <div className="p-4">
-                    {!quoteDetail.line_items || quoteDetail.line_items.length === 0 ? (
-                      <EmptyState title={text.noLineItems} description={text.noLineItemsDescription} />
-                    ) : (
-                      <div className="space-y-3">
-                        {quoteDetail.line_items.map((line, index) => (
-                          <div key={`${line.description}-${index}`} className="rounded-xl border border-border bg-muted/20 p-4">
-                            <div className="flex flex-wrap items-start justify-between gap-3">
-                              <div>
-                                <h3 className="text-sm font-semibold text-foreground">{line.description}</h3>
-                                <p className="mt-1 text-xs text-muted-foreground">
-                                  {text.quantity} {line.quantity} · {text.unit} {formatCurrency(line.unit_price)}
-                                </p>
-                              </div>
-                              <div className="flex flex-wrap gap-2">
-                                <Badge variant="outline" className="rounded-full">
-                                  {t.invoices_vat} {line.vat_rate}%
-                                </Badge>
-                                {line.is_cost_passthrough ? (
-                                  <Badge variant="outline" className="rounded-full border-orange-200 bg-orange-50 text-orange-700">
-                                    {t.orders_cost_pass_through_badge}
-                                  </Badge>
-                                ) : null}
-                              </div>
-                            </div>
-                            <div className="mt-4 grid gap-3 md:grid-cols-3">
-                              <MiniMetric label={text.net} value={formatCurrency(line.line_net)} />
-                              <MiniMetric label={t.invoices_vat} value={formatCurrency(line.line_vat)} />
-                              <MiniMetric label={text.gross} value={formatCurrency(line.line_gross)} />
-                            </div>
-                            {line.notes ? <div className="mt-3 text-sm text-muted-foreground">{line.notes}</div> : null}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                <AdminTableCard title={titleWithDot(text.lineItems)} description={text.lineItemsDescription}>
+                  <DataTable
+                    rows={quoteLineItemRows}
+                    columns={quoteLineItemColumns}
+                    rowId={(row) => row.id}
+                    density="compact"
+                    rowAccent={(row) => (row.is_cost_passthrough ? "bg-amber-500" : null)}
+                    emptyState={<EmptyState title={text.noLineItems} description={text.noLineItemsDescription} />}
+                  />
                 </AdminTableCard>
 
-                <AdminTableCard title={text.versionHistory} description={text.versionHistoryDescription}>
-                  <div className="p-4">
-                    {quoteVersionsLoading ? (
-                      <LoadingState label={t.common_loading} />
-                    ) : quoteVersionsError ? (
-                      <Banner tone="error">{quoteVersionsError}</Banner>
-                    ) : quoteVersions.length === 0 ? (
-                      <EmptyState title={text.noVersions} description={text.noVersionsDescription} />
-                    ) : (
-                      <div className="space-y-3">
-                        {quoteVersions.map((version) => (
-                          <div key={version.id} className="rounded-xl border border-border bg-muted/20 p-4">
-                            <div className="flex flex-wrap items-start justify-between gap-3">
-                              <div>
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <h3 className="text-sm font-semibold text-foreground">
-                                    {text.version} {version.version_number}
-                                  </h3>
-                                  <Badge variant="outline" className={cn("rounded-full", quoteStatusClassName(version.status))}>
-                                    {quoteStatusLabel(version.status)}
-                                  </Badge>
-                                </div>
-                                <p className="mt-1 text-xs text-muted-foreground">
-                                  {formatDateTime(version.created_at, locale, t.common_not_set)} · {version.created_by_name} ({roleLabel(version.created_by_role)})
-                                </p>
-                                <p className="mt-2 text-sm text-muted-foreground">
-                                  {(version.change_reason || text.snapshotFallback).replaceAll("_", " ")} · {version.line_item_count} {text.lineItemsCount}
-                                </p>
-                              </div>
-                              <div className="grid min-w-[220px] gap-3 md:grid-cols-2">
-                                <MiniMetric label={text.gross} value={formatCurrency(version.total_gross)} />
-                                <MiniMetric label={t.invoices_paid} value={formatCurrency(version.paid_amount)} />
-                                <MiniMetric label={t.providers_service_valid_to} value={formatDate(version.valid_until, locale, t.common_not_set)} />
-                                <MiniMetric label={t.invoices_paid_at} value={formatDateTime(version.paid_at, locale, t.common_not_set)} />
-                              </div>
-                            </div>
-                            {version.notes ? <div className="mt-3 text-sm text-muted-foreground">{version.notes}</div> : null}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                <AdminTableCard title={titleWithDot(text.versionHistory)} description={text.versionHistoryDescription}>
+                  {quoteVersionsError ? <div className="p-4"><ShellBanner tone="error">{quoteVersionsError}</ShellBanner></div> : null}
+                  <DataTable
+                    rows={quoteVersions}
+                    columns={quoteVersionColumns}
+                    rowId={(row) => row.id}
+                    density="compact"
+                    loading={quoteVersionsLoading}
+                    emptyState={<EmptyState title={text.noVersions} description={text.noVersionsDescription} />}
+                  />
                 </AdminTableCard>
               </>
             )}
@@ -2725,7 +2887,7 @@ function DetailField({ label, value }: { label: string; value: ReactNode }) {
   const rendered =
     typeof value === "string" && value.includes("{") && value.includes("}")
       ? (
-          <pre className="whitespace-pre-wrap break-words rounded-lg border border-border bg-muted/20 p-3 text-xs text-foreground">
+          <pre className="whitespace-pre-wrap break-words rounded-xl border border-border bg-muted/20 px-4 py-3 text-xs text-foreground">
             {value}
           </pre>
         )
@@ -2734,8 +2896,8 @@ function DetailField({ label, value }: { label: string; value: ReactNode }) {
         );
 
   return (
-    <div className="rounded-xl border border-border bg-muted/20 p-4">
-      <div className="text-[11.5px] font-medium leading-tight text-muted-foreground">
+    <div className="rounded-xl border border-border bg-muted/20 px-4 py-3">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
         {label}
       </div>
       <div className="mt-2">{rendered}</div>
@@ -2745,12 +2907,21 @@ function DetailField({ label, value }: { label: string; value: ReactNode }) {
 
 function MiniMetric({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="rounded-lg border border-border bg-muted/20 p-3">
-      <div className="text-[11.5px] font-medium leading-tight text-muted-foreground">
+    <div className="rounded-xl border border-border bg-muted/20 px-4 py-3">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
         {label}
       </div>
       <div className="mt-2 text-sm text-foreground">{value}</div>
     </div>
+  );
+}
+
+function titleWithDot(title: ReactNode) {
+  return (
+    <span className="inline-flex items-center gap-2">
+      <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
+      <span>{title}</span>
+    </span>
   );
 }
 
@@ -2770,27 +2941,6 @@ function Field({
       </span>
       {children}
     </label>
-  );
-}
-
-function Banner({
-  tone,
-  children,
-}: {
-  tone: "error" | "info";
-  children: ReactNode;
-}) {
-  return (
-    <div
-      className={cn(
-        "rounded-xl border px-4 py-3 text-sm",
-        tone === "error"
-          ? "border-rose-200 bg-rose-50 text-rose-700"
-          : "border-sky-200 bg-sky-50 text-sky-700",
-      )}
-    >
-      {children}
-    </div>
   );
 }
 
@@ -2820,4 +2970,5 @@ function EmptyState({
     </div>
   );
 }
+
 
