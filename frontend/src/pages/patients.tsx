@@ -1240,7 +1240,7 @@ export function PatientsPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => openPatient(p.id)}
+                  onClick={() => staffGo(`/patients/${p.id}`)}
                   title={t.patients_edit ?? "Edit"}
                   aria-label={t.patients_edit ?? "Edit"}
                   className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
