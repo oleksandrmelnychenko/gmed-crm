@@ -24,6 +24,15 @@ import {
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import {
+  AdminSheetScaffold,
+  AdminInlineMetric,
+  AdminTableCard,
+  AdminToolbar,
+  SheetFormFooter,
+} from "@/components/admin-page-patterns";
+import { DataTable } from "@/components/data-table/data-table";
+import type { ColumnDef } from "@/components/data-table/types";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -34,12 +43,25 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  Select as ShadSelect,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Sheet,
   SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
 } from "@/components/ui/sheet";
+import {
+  PageHeader,
+  StatusBadge,
+  inputClass as shellInputClassName,
+  selectClass as shellSelectClassName,
+  textareaClass as shellTextareaClass,
+  tokens,
+  type StatusTone,
+} from "@/components/ui-shell";
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
@@ -629,10 +651,37 @@ const DEFAULT_FILTERS: OrdersFilters = {
   doctorId: "",
 };
 
-const selectClassName =
-  "h-10 w-full rounded-xl border border-input bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
-const textareaClassName =
-  "min-h-[104px] w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
+const selectClassName = shellSelectClassName;
+const textareaClassName = shellTextareaClass;
+
+function orderPhaseTone(phase: string): StatusTone {
+  switch (phase) {
+    case "intake":
+      return "info";
+    case "execution":
+      return "warning";
+    case "closure":
+      return "success";
+    case "followup":
+      return "brand";
+    default:
+      return "neutral";
+  }
+}
+
+function orderStatusTone(status: string): StatusTone {
+  switch (status) {
+    case "active":
+    case "completed":
+      return "success";
+    case "paused":
+      return "warning";
+    case "cancelled":
+      return "error";
+    default:
+      return "neutral";
+  }
+}
 
 function orderPermissions(role?: string): OrdersPermissions {
   switch (role) {
@@ -1044,21 +1093,19 @@ function sumLeistungTotals(items: Leistung[]) {
 
 function StatCard({ label, value, description, icon }: StatCardProps) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+    <div className="rounded-xl border border-border bg-card p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="space-y-1">
-          <div className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">
-            {label}
-          </div>
-          <div className="text-2xl font-semibold tracking-tight text-slate-900">
+          <div className={tokens.text.eyebrow}>{label}</div>
+          <div className="text-xl font-semibold tracking-tight text-foreground">
             {value}
           </div>
         </div>
-        <div className="rounded-xl border border-slate-200 bg-slate-50 p-2 text-slate-600">
+        <div className="rounded-xl border border-border bg-muted/30 p-2 text-muted-foreground">
           {icon}
         </div>
       </div>
-      <p className="mt-3 text-sm text-slate-500">{description}</p>
+      <p className="mt-3 text-xs text-muted-foreground">{description}</p>
     </div>
   );
 }
@@ -1073,51 +1120,59 @@ function SectionCard({
   return (
     <section
       className={cn(
-        "rounded-2xl border border-slate-200 bg-white shadow-sm",
+        "overflow-hidden rounded-xl border border-border bg-card",
         className,
       )}
     >
-      <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
-        <div>
-          <h2 className="text-sm font-semibold tracking-[0.02em] text-slate-900">
-            {title}
+      <div className="flex flex-col gap-3 border-b border-border px-4 py-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-1">
+          <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
+            <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
+            <span>{title}</span>
           </h2>
           {description ? (
-            <p className="mt-1 text-sm text-slate-500">{description}</p>
+            <p className={tokens.text.muted}>{description}</p>
           ) : null}
         </div>
-        {action}
+        {action ? <div className="shrink-0">{action}</div> : null}
       </div>
-      <div className="p-5">{children}</div>
+      <div className="px-4 py-4">{children}</div>
     </section>
   );
 }
 
 function DetailField({ label, value }: DetailFieldProps) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-        {label}
-      </div>
-      <div className="mt-2 text-sm text-slate-900">{value}</div>
+    <div className={cn("rounded-xl p-3", tokens.surface.mutedCard)}>
+      <div className={tokens.text.eyebrow}>{label}</div>
+      <div className="mt-2 text-sm text-foreground">{value}</div>
     </div>
   );
 }
 
 function EmptyState({ title, description, action }: EmptyStateProps) {
   return (
-    <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-10 text-center shadow-sm">
+    <div className={cn("rounded-xl px-6 py-10 text-center", tokens.surface.dashed)}>
       <div className="mx-auto flex max-w-md flex-col items-center gap-3">
-        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-slate-500">
+        <div className="rounded-xl border border-border bg-card p-3 text-muted-foreground">
           <ClipboardList className="size-5" />
         </div>
         <div>
-          <h3 className="text-base font-semibold text-slate-900">{title}</h3>
-          <p className="mt-2 text-sm text-slate-500">{description}</p>
+          <h3 className="text-base font-semibold text-foreground">{title}</h3>
+          <p className="mt-2 text-sm text-muted-foreground">{description}</p>
         </div>
         {action}
       </div>
     </div>
+  );
+}
+
+function titleWithDot(title: ReactNode) {
+  return (
+    <span className="inline-flex items-center gap-2">
+      <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
+      <span>{title}</span>
+    </span>
   );
 }
 
@@ -1535,6 +1590,21 @@ export function OrdersPage() {
       filters.providerId ? (providerDoctors[filters.providerId] ?? []) : [],
     [filters.providerId, providerDoctors],
   );
+  const selectedFilterPatient = useMemo(
+    () => patients.find((patient) => patient.id === filters.patientId) ?? null,
+    [filters.patientId, patients],
+  );
+  const selectedFilterProvider = useMemo(
+    () =>
+      providers.find((provider) => provider.id === filters.providerId) ?? null,
+    [filters.providerId, providers],
+  );
+  const selectedFilterDoctor = useMemo(
+    () =>
+      filterDoctorOptions.find((doctor) => doctor.id === filters.doctorId) ??
+      null,
+    [filterDoctorOptions, filters.doctorId],
+  );
   const leistungDoctorOptions = useMemo(
     () =>
       leistungForm.providerId
@@ -1569,6 +1639,90 @@ export function OrdersPage() {
       estimatedTotal,
     };
   }, [orders]);
+
+  const orderTableColumns: ColumnDef<OrderSummary>[] = [
+    {
+      id: "order_number",
+      label: l("Auftrag", "Заказ"),
+      accessor: (row) => row.order_number,
+      sortable: true,
+      searchable: true,
+      required: true,
+      width: 160,
+      render: (row) => (
+        <span className="font-mono text-xs font-semibold tracking-[0.12em] text-foreground">
+          {row.order_number}
+        </span>
+      ),
+    },
+    {
+      id: "patient",
+      label: t.orders_patient,
+      accessor: (row) => `${row.patient_pid} ${row.patient_name}`,
+      sortable: true,
+      searchable: true,
+      required: true,
+      width: 260,
+      render: (row) => (
+        <div className="min-w-0">
+          <div className="truncate text-sm font-medium text-foreground">
+            {row.patient_name}
+          </div>
+          <div className="mt-0.5 truncate text-xs text-muted-foreground">
+            {row.patient_pid}
+          </div>
+        </div>
+      ),
+    },
+    {
+      id: "phase",
+      label: t.orders_phase,
+      accessor: (row) => phaseLabel(row.phase),
+      sortable: true,
+      width: 170,
+      render: (row) => (
+        <StatusBadge tone={orderPhaseTone(row.phase)}>
+          {phaseLabel(row.phase)}
+        </StatusBadge>
+      ),
+    },
+    {
+      id: "status",
+      label: t.users_status,
+      accessor: (row) => orderStatusLabel(row.status),
+      sortable: true,
+      width: 150,
+      render: (row) => (
+        <StatusBadge tone={orderStatusTone(row.status)}>
+          {orderStatusLabel(row.status)}
+        </StatusBadge>
+      ),
+    },
+    {
+      id: "created_at",
+      label: l("Erstellt", "Создано"),
+      accessor: (row) => row.created_at,
+      sortable: true,
+      width: 160,
+      render: (row) => (
+        <span className="text-sm text-foreground">
+          {formatDateOnlyLabel(row.created_at)}
+        </span>
+      ),
+    },
+    {
+      id: "total_estimated",
+      label: l("Geschaftsvolumen", "Оценочный объём"),
+      accessor: (row) => numberFromUnknown(row.total_estimated) ?? 0,
+      sortable: true,
+      width: 170,
+      render: (row) => (
+        <span className="block text-right text-sm font-medium tabular-nums text-foreground">
+          {formatMoney(row.total_estimated)}
+        </span>
+      ),
+    },
+  ];
 
   const leistungMetrics = useMemo(() => {
     const items = orderDetail?.leistungen ?? [];
@@ -2543,68 +2697,74 @@ export function OrdersPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <div className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
-            {l("Operationen", "Операционный контур")}
-          </div>
-          <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">
-            {t.orders_title}
-          </h1>
-          <p className="mt-2 max-w-3xl text-sm text-slate-500">
-            {t.orders_subtitle}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" onClick={triggerReload}>
-            <RefreshCw className="mr-2 size-4" />
-            {l("Aktualisieren", "Обновить")}
-          </Button>
-          {permissions.canCreate ? (
-            <Button className="h-9 rounded-lg px-3.5" onClick={() => setCreateOpen(true)}>
-              <Plus className="mr-2 size-4" />
-              {l("Neuen Auftrag", "Создать заказ")}
+      <PageHeader
+        title={t.orders_title}
+        description={t.orders_subtitle}
+        actions={
+          <>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-9 rounded-lg px-3.5"
+              onClick={triggerReload}
+            >
+              <RefreshCw className="size-4" />
+              {l("Aktualisieren", "Обновить")}
             </Button>
-          ) : null}
-        </div>
-      </div>
+            {permissions.canCreate ? (
+              <Button
+                type="button"
+                className="h-9 rounded-lg px-3.5"
+                onClick={() => setCreateOpen(true)}
+              >
+                <Plus className="size-4" />
+                {l("Neuen Auftrag", "Создать заказ")}
+              </Button>
+            ) : null}
+          </>
+        }
+      />
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <StatCard
+      <div className="flex flex-wrap gap-6 rounded-xl border border-border bg-card px-4 py-3">
+        <AdminInlineMetric
+          icon={ClipboardList}
           label={tx.orders_title}
           value={String(metrics.total)}
           description={l(
             "Alle Auftrage im aktuellen Filter-Scope.",
             "Все заказы в текущем видимом скоупе.",
           )}
-          icon={<ClipboardList className="size-4" />}
+          tone="sky"
         />
-        <StatCard
+        <AdminInlineMetric
+          icon={CheckCircle2}
           label={l("Aktive Auftrage", "Активные заказы")}
           value={String(metrics.active)}
           description={l(
             "Auftrage mit laufender Bearbeitung im sichtbaren Scope.",
             "Заказы с активной операционной работой в видимом скоупе.",
           )}
-          icon={<CheckCircle2 className="size-4" />}
+          tone="emerald"
         />
-        <StatCard
+        <AdminInlineMetric
+          icon={Stethoscope}
           label={l("In Durchfuhrung", "В исполнении")}
           value={String(metrics.execution)}
           description={l(
             "Auftrage, die sich aktuell in der Durchfuhrung befinden.",
             "Заказы, которые сейчас находятся в фазе исполнения.",
           )}
-          icon={<Stethoscope className="size-4" />}
+          tone="amber"
         />
-        <StatCard
+        <AdminInlineMetric
+          icon={Wallet}
           label={l("Geschaftsvolumen", "Оценочный объём")}
           value={formatMoney(metrics.estimatedTotal)}
           description={l(
             "Geschatztes Gesamtvolumen der sichtbaren Auftrage.",
             "Оценочный совокупный объём видимых заказов.",
           )}
-          icon={<Wallet className="size-4" />}
+          tone="slate"
         />
       </div>
 
@@ -2687,136 +2847,177 @@ export function OrdersPage() {
         </SectionCard>
       ) : null}
 
-      <SectionCard title={tx.common_search} description={tx.orders_subtitle}>
-        <div className="grid gap-4 xl:grid-cols-6">
-          <div className="xl:col-span-2">
-            <Label htmlFor="orders-search">{t.common_search}</Label>
-            <div className="relative mt-1">
-              <Search className="pointer-events-none absolute top-3 left-3 size-4 text-slate-400" />
+      <AdminTableCard
+        title={titleWithDot(tx.orders_title)}
+        description={tx.orders_subtitle}
+        count={orders.length}
+      >
+        <div className="space-y-4 border-b border-border px-4 py-4">
+          <AdminToolbar className="gap-2">
+            <div className="relative min-w-[260px] flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 id="orders-search"
                 value={filters.search}
                 onChange={(event) =>
-                  setFilters((current) => ({
-                    ...current,
-                    search: event.target.value,
-                  }))
+                  startTransition(() =>
+                    setFilters((current) => ({
+                      ...current,
+                      search: event.target.value,
+                    })),
+                  )
                 }
                 placeholder={t.search_placeholder}
-                className="pl-9"
+                className={cn(shellInputClassName, "pl-9")}
               />
             </div>
-          </div>
-          <div>
-            <Label>{t.orders_phase}</Label>
-            <select
-              value={filters.phase}
-              onChange={(event) =>
-                setFilters((current) => ({
-                  ...current,
-                  phase: event.target.value,
-                }))
-              }
-              className={`mt-1 ${selectClassName}`}
-            >
-              <option value="">{t.providers_all}</option>
-              {ORDER_PHASES.map((phase) => (
-                <option key={phase} value={phase}>
-                  {phaseLabel(phase)}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <Label>{t.users_status}</Label>
-            <select
-              value={filters.status}
-              onChange={(event) =>
-                setFilters((current) => ({
-                  ...current,
-                  status: event.target.value,
-                }))
-              }
-              className={`mt-1 ${selectClassName}`}
-            >
-              <option value="">{t.providers_all}</option>
-              {ORDER_STATUSES.map((status) => (
-                <option key={status} value={status}>
-                  {orderStatusLabel(status)}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <Label>{t.orders_patient}</Label>
-            <select
-              value={filters.patientId}
-              onChange={(event) => {
-                const patientId = event.target.value;
-                setFilters((current) => ({ ...current, patientId }));
-                syncQuery({ patient: patientId || null });
-              }}
-              className={`mt-1 ${selectClassName}`}
-            >
-              <option value="">{l("Alle Patienten", "Все пациенты")}</option>
-              {patients.map((patient) => (
-                <option key={patient.id} value={patient.id}>
-                  {patientLabel(patient, l("Patient", "Пациент"))}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <Label>{l("Provider", "Провайдер")}</Label>
-            <select
-              value={filters.providerId}
-              onChange={(event) => {
-                const providerId = event.target.value;
-                setFilters((current) => ({
-                  ...current,
-                  providerId,
-                  doctorId: "",
-                }));
-                syncQuery({ provider: providerId || null, doctor: null });
-              }}
-              className={`mt-1 ${selectClassName}`}
-            >
-              <option value="">{t.providers_all}</option>
-              {providers.map((provider) => (
-                <option key={provider.id} value={provider.id}>
-                  {provider.name}
-                  {provider.address_city ? ` (${provider.address_city})` : ""}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
 
-        <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto]">
-          <div className="max-w-xs">
-            <Label>{l("Arzt", "Врач")}</Label>
-            <select
-              value={filters.doctorId}
-              onChange={(event) => {
-                const doctorId = event.target.value;
-                setFilters((current) => ({ ...current, doctorId }));
-                syncQuery({ doctor: doctorId || null });
-              }}
-              className={`mt-1 ${selectClassName}`}
-              disabled={!filters.providerId}
-            >
-              <option value="">{t.providers_all}</option>
-              {filterDoctorOptions.map((doctor) => (
-                <option key={doctor.id} value={doctor.id}>
-                  {doctor.name}
-                  {doctor.fachbereich ? ` (${doctor.fachbereich})` : ""}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="flex items-end gap-2">
+            <div className="w-[180px] min-w-[180px]">
+              <ShadSelect
+                value={filters.phase || "__all__"}
+                onValueChange={(value) =>
+                  setFilters((current) => ({
+                    ...current,
+                    phase: value && value !== "__all__" ? value : "",
+                  }))
+                }
+              >
+                <SelectTrigger className={cn(selectClassName, "w-[180px] min-w-[180px]")}>
+                  <SelectValue>
+                    {filters.phase ? phaseLabel(filters.phase) : t.providers_all}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all__">{t.providers_all}</SelectItem>
+                  {ORDER_PHASES.map((phase) => (
+                    <SelectItem key={phase} value={phase}>
+                      {phaseLabel(phase)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </ShadSelect>
+            </div>
+
+            <div className="w-[180px] min-w-[180px]">
+              <ShadSelect
+                value={filters.status || "__all__"}
+                onValueChange={(value) =>
+                  setFilters((current) => ({
+                    ...current,
+                    status: value && value !== "__all__" ? value : "",
+                  }))
+                }
+              >
+                <SelectTrigger className={cn(selectClassName, "w-[180px] min-w-[180px]")}>
+                  <SelectValue>
+                    {filters.status ? orderStatusLabel(filters.status) : t.providers_all}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all__">{t.providers_all}</SelectItem>
+                  {ORDER_STATUSES.map((status) => (
+                    <SelectItem key={status} value={status}>
+                      {orderStatusLabel(status)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </ShadSelect>
+            </div>
+
+            <div className="w-[220px] min-w-[220px]">
+              <ShadSelect
+                value={filters.patientId || "__all__"}
+                onValueChange={(value) => {
+                  const patientId = value && value !== "__all__" ? value : "";
+                  setFilters((current) => ({ ...current, patientId }));
+                  syncQuery({ patient: patientId || null });
+                }}
+              >
+                <SelectTrigger className={cn(selectClassName, "w-[220px] min-w-[220px]")}>
+                  <SelectValue>
+                    {selectedFilterPatient
+                      ? patientLabel(selectedFilterPatient, l("Patient", "Пациент"))
+                      : l("Alle Patienten", "Все пациенты")}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all__">
+                    {l("Alle Patienten", "Все пациенты")}
+                  </SelectItem>
+                  {patients.map((patient) => (
+                    <SelectItem key={patient.id} value={patient.id}>
+                      {patientLabel(patient, l("Patient", "Пациент"))}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </ShadSelect>
+            </div>
+
+            <div className="w-[220px] min-w-[220px]">
+              <ShadSelect
+                value={filters.providerId || "__all__"}
+                onValueChange={(value) => {
+                  const providerId = value && value !== "__all__" ? value : "";
+                  setFilters((current) => ({
+                    ...current,
+                    providerId,
+                    doctorId: "",
+                  }));
+                  syncQuery({ provider: providerId || null, doctor: null });
+                }}
+              >
+                <SelectTrigger className={cn(selectClassName, "w-[220px] min-w-[220px]")}>
+                  <SelectValue>
+                    {selectedFilterProvider
+                      ? `${selectedFilterProvider.name}${selectedFilterProvider.address_city ? ` (${selectedFilterProvider.address_city})` : ""}`
+                      : t.providers_all}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all__">{t.providers_all}</SelectItem>
+                  {providers.map((provider) => (
+                    <SelectItem key={provider.id} value={provider.id}>
+                      {provider.name}
+                      {provider.address_city ? ` (${provider.address_city})` : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </ShadSelect>
+            </div>
+
+            <div className="w-[200px] min-w-[200px]">
+              <ShadSelect
+                value={filters.doctorId || "__all__"}
+                onValueChange={(value) => {
+                  const doctorId = value && value !== "__all__" ? value : "";
+                  setFilters((current) => ({ ...current, doctorId }));
+                  syncQuery({ doctor: doctorId || null });
+                }}
+                disabled={!filters.providerId}
+              >
+                <SelectTrigger className={cn(selectClassName, "w-[200px] min-w-[200px]")}>
+                  <SelectValue>
+                    {selectedFilterDoctor
+                      ? `${selectedFilterDoctor.name}${selectedFilterDoctor.fachbereich ? ` (${selectedFilterDoctor.fachbereich})` : ""}`
+                      : l("Arzt", "Врач")}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all__">{t.providers_all}</SelectItem>
+                  {filterDoctorOptions.map((doctor) => (
+                    <SelectItem key={doctor.id} value={doctor.id}>
+                      {doctor.name}
+                      {doctor.fachbereich ? ` (${doctor.fachbereich})` : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </ShadSelect>
+            </div>
+
             <Button
+              type="button"
               variant="outline"
+              className="h-9 rounded-lg px-3.5"
               onClick={() => {
                 setFilters(DEFAULT_FILTERS);
                 syncQuery({
@@ -2827,108 +3028,53 @@ export function OrdersPage() {
                 });
               }}
             >
-              {l("Filter zurucksetzen", "Сбросить фильтры")}
+              {t.access_reset}
             </Button>
-          </div>
+          </AdminToolbar>
         </div>
-      </SectionCard>
 
-      {listError ? (
-        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-          {listError}
+        <div className="space-y-3 p-4">
+          {listError ? (
+            <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+              {listError}
+            </div>
+          ) : null}
+          <DataTable
+            rows={orders}
+            columns={orderTableColumns}
+            rowId={(row) => row.id}
+            density="compact"
+            loading={loading}
+            activeRowId={selectedOrderId}
+            onRowClick={(row) => openOrder(row.id)}
+            rowAccent={(row) => {
+              if (row.id === selectedOrderId) return "bg-sky-500";
+              if (row.status === "cancelled") return "bg-rose-500";
+              if (row.status === "completed") return "bg-emerald-500";
+              if (row.phase === "execution") return "bg-amber-500";
+              return null;
+            }}
+            emptyState={
+              <EmptyState
+                title={tx.common_not_set}
+                description={tx.orders_subtitle}
+                action={
+                  permissions.canCreate ? (
+                    <Button
+                      type="button"
+                      className="h-9 rounded-lg px-3.5"
+                      onClick={() => setCreateOpen(true)}
+                    >
+                      <Plus className="size-4" />
+                      {l("Neuen Auftrag", "Создать заказ")}
+                    </Button>
+                  ) : undefined
+                }
+              />
+            }
+          />
         </div>
-      ) : null}
-
-      {loading ? (
-        <div className="rounded-2xl border border-slate-200 bg-white px-6 py-12 text-center text-sm text-slate-500 shadow-sm">
-          <LoaderCircle className="mx-auto mb-3 size-5 animate-spin" />
-          {t.common_loading}
-        </div>
-      ) : orders.length === 0 ? (
-        <EmptyState
-          title={tx.common_not_set}
-          description={tx.orders_subtitle}
-          action={
-            permissions.canCreate ? (
-              <Button onClick={() => setCreateOpen(true)}>
-                <Plus className="mr-2 size-4" />
-                {l("Neuen Auftrag", "Создать заказ")}
-              </Button>
-            ) : undefined
-          }
-        />
-      ) : (
-        <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
-          {orders.map((order) => {
-            const isSelected = order.id === selectedOrderId;
-            return (
-              <button
-                key={order.id}
-                type="button"
-                onClick={() => openOrder(order.id)}
-                className={cn(
-                  "rounded-2xl border bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md",
-                  isSelected
-                    ? "border-sky-300 ring-4 ring-sky-100"
-                    : "border-slate-200",
-                )}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="font-mono text-xs font-semibold tracking-[0.16em] text-slate-500">
-                      {order.order_number}
-                    </div>
-                    <h2 className="mt-2 text-lg font-semibold text-slate-950">
-                      {order.patient_name}
-                    </h2>
-                    <p className="mt-1 text-sm text-slate-500">
-                      {order.patient_pid}
-                    </p>
-                  </div>
-                  <ChevronRight className="mt-1 size-4 text-slate-400" />
-                </div>
-
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <Badge
-                    variant="outline"
-                    className={cn("rounded-full", phaseClassName(order.phase))}
-                  >
-                    {phaseLabel(order.phase)}
-                  </Badge>
-                  <Badge
-                    variant="outline"
-                    className={cn(
-                      "rounded-full",
-                      statusClassName(order.status),
-                    )}
-                  >
-                    {orderStatusLabel(order.status)}
-                  </Badge>
-                </div>
-
-                <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                      {l("Erstellt", "Создано")}
-                    </div>
-                    <div className="mt-2 text-sm text-slate-900">
-                      {formatDateOnlyLabel(order.created_at)}
-                    </div>
-                  </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                      {l("Geschaftsvolumen", "Оценочный объём")}
-                    </div>
-                    <div className="mt-2 text-sm text-slate-900">
-                      {formatMoney(order.total_estimated)}
-                    </div>
-                  </div>
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      )}
+      </AdminTableCard>
 
       <Sheet
         open={Boolean(selectedOrderId)}
@@ -2948,30 +3094,31 @@ export function OrdersPage() {
       >
         <SheetContent
           side="right"
-          className="w-full overflow-y-auto border-l border-slate-200 p-0 sm:max-w-3xl"
+          className="w-full border-l border-border p-0 sm:max-w-3xl"
         >
-          <SheetHeader className="border-b border-slate-200 px-6 py-5">
-            <SheetTitle>
-              {orderDetail
+          <AdminSheetScaffold
+            title={
+              orderDetail
                 ? `${orderDetail.order_number} / ${orderDetail.patient_name}`
-                : tx.orders_title}
-            </SheetTitle>
-            <SheetDescription>
-              {l(
-                "Vollstandige operative Sicht auf den aktuellen Auftrag inklusive Phasensteuerung und providerbezogener Leistungen.",
-                "Полная операционная картина текущего заказа, включая управление фазой и Leistungen, привязанные к провайдеру.",
-              )}
-            </SheetDescription>
-          </SheetHeader>
-
-          <div className="space-y-6 px-6 py-6">
+                : tx.orders_title
+            }
+            description={l(
+              "Vollstandige operative Sicht auf den aktuellen Auftrag inklusive Phasensteuerung und providerbezogener Leistungen.",
+              "Полная операционная картина текущего заказа, включая управление фазой и услугами провайдеров.",
+            )}
+          >
             {detailLoading ? (
-              <div className="rounded-2xl border border-slate-200 bg-white px-6 py-12 text-center text-sm text-slate-500 shadow-sm">
+              <div
+                className={cn(
+                  "rounded-xl px-6 py-12 text-center text-sm text-muted-foreground",
+                  tokens.surface.card,
+                )}
+              >
                 <LoaderCircle className="mx-auto mb-3 size-5 animate-spin" />
                 {t.common_loading}
               </div>
             ) : detailError ? (
-              <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+              <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
                 {detailError}
               </div>
             ) : !orderDetail ? (
@@ -2981,33 +3128,21 @@ export function OrdersPage() {
               />
             ) : (
               <>
-                <SectionCard
-                  title={tx.orders_title}
+                <AdminTableCard
+                  title={titleWithDot(tx.orders_title)}
                   description={tx.orders_subtitle}
-                  action={
+                  accessory={
                     <div className="flex flex-wrap items-center gap-2">
-                      <Badge
-                        variant="outline"
-                        className={cn(
-                          "rounded-full",
-                          phaseClassName(orderDetail.phase),
-                        )}
-                      >
+                      <StatusBadge tone={orderPhaseTone(orderDetail.phase)}>
                         {phaseLabel(orderDetail.phase)}
-                      </Badge>
-                      <Badge
-                        variant="outline"
-                        className={cn(
-                          "rounded-full",
-                          statusClassName(orderDetail.status),
-                        )}
-                      >
+                      </StatusBadge>
+                      <StatusBadge tone={orderStatusTone(orderDetail.status)}>
                         {orderStatusLabel(orderDetail.status)}
-                      </Badge>
+                      </StatusBadge>
                     </div>
                   }
                 >
-                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-4">
                     <DetailField
                       label={t.orders_patient}
                       value={`${orderDetail.patient_name} (${orderDetail.patient_pid})`}
@@ -3058,20 +3193,20 @@ export function OrdersPage() {
                       )}
                     />
                   </div>
-                </SectionCard>
+                </AdminTableCard>
 
-                <SectionCard
-                  title={tx.providers_linked_patients}
+                <AdminTableCard
+                  title={titleWithDot(tx.providers_linked_patients)}
                   description={l(
                     "Direkt in Patienten-, Fall- und Terminkontexte springen, ohne Filter manuell neu aufzubauen.",
                     "Переходите в соседние контексты пациента, кейса и приёмов без ручной пересборки фильтров.",
                   )}
                 >
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-2 p-4">
                     <Button
                       type="button"
                       variant="outline"
-                      className="rounded-2xl"
+                      className="h-9 rounded-lg px-3.5"
                       onClick={() =>
                         staffGo(`/patients?patient=${orderDetail.patient_id}`)
                       }
@@ -3081,7 +3216,7 @@ export function OrdersPage() {
                     <Button
                       type="button"
                       variant="outline"
-                      className="rounded-2xl"
+                      className="h-9 rounded-lg px-3.5"
                       onClick={() =>
                         staffGo(`/cases?patient=${orderDetail.patient_id}`)
                       }
@@ -3091,7 +3226,7 @@ export function OrdersPage() {
                     <Button
                       type="button"
                       variant="outline"
-                      className="rounded-2xl"
+                      className="h-9 rounded-lg px-3.5"
                       onClick={() =>
                         staffGo(
                           `/appointments?patient=${orderDetail.patient_id}`,
@@ -3103,7 +3238,7 @@ export function OrdersPage() {
                     <Button
                       type="button"
                       variant="outline"
-                      className="rounded-2xl"
+                      className="h-9 rounded-lg px-3.5"
                       onClick={() =>
                         staffGo(
                           `/contracts?order=${orderDetail.id}&patient=${orderDetail.patient_id}&tab=quotes`,
@@ -3115,7 +3250,7 @@ export function OrdersPage() {
                     <Button
                       type="button"
                       variant="outline"
-                      className="rounded-2xl"
+                      className="h-9 rounded-lg px-3.5"
                       onClick={() =>
                         staffGo(
                           `/invoices?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
@@ -3127,7 +3262,7 @@ export function OrdersPage() {
                     <Button
                       type="button"
                       variant="outline"
-                      className="rounded-2xl"
+                      className="h-9 rounded-lg px-3.5"
                       onClick={() =>
                         staffGo(
                           `/documents?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
@@ -3137,7 +3272,7 @@ export function OrdersPage() {
                       {l("Dokumente", "Документы")}
                     </Button>
                   </div>
-                </SectionCard>
+                </AdminTableCard>
 
                 {orderDetail.process_gates ? (
                   <SectionCard
@@ -3232,7 +3367,7 @@ export function OrdersPage() {
                       <div className="grid gap-4 xl:grid-cols-3">
                         {canManageDebt ? (
                           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                            <div className="text-sm font-semibold text-slate-900">
+                            <div className="text-sm font-semibold text-foreground">
                               {l("Debt-Management", "Debt-management")}
                             </div>
                             <div className="mt-1 text-sm text-slate-500">
@@ -3388,7 +3523,7 @@ export function OrdersPage() {
 
                         {user?.role === "billing" || user?.role === "ceo" ? (
                           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                            <div className="text-sm font-semibold text-slate-900">
+                            <div className="text-sm font-semibold text-foreground">
                               {l("Billing-Release", "Billing-release")}
                             </div>
                             <div className="mt-1 text-sm text-slate-500">
@@ -3447,7 +3582,7 @@ export function OrdersPage() {
                         {user?.role === "patient_manager" ||
                         user?.role === "ceo" ? (
                           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                            <div className="text-sm font-semibold text-slate-900">
+                            <div className="text-sm font-semibold text-foreground">
                               {l("Paketdeckung", "Покрытие пакетом")}
                             </div>
                             <div className="mt-1 text-sm text-slate-500">
@@ -3649,7 +3784,7 @@ export function OrdersPage() {
                       user?.role === "ceo" ? (
                         <div className="grid gap-4 xl:grid-cols-2">
                           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                            <div className="text-sm font-semibold text-slate-900">
+                            <div className="text-sm font-semibold text-foreground">
                               {l("Planungssteuerung", "Управление планированием")}
                             </div>
                             <div className="mt-1 text-sm text-slate-500">
@@ -3790,7 +3925,7 @@ export function OrdersPage() {
                           </div>
 
                           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                            <div className="text-sm font-semibold text-slate-900">
+                            <div className="text-sm font-semibold text-foreground">
                               {l("Operative Übergabe", "Операционная передача")}
                             </div>
                             <div className="mt-1 text-sm text-slate-500">
@@ -3978,7 +4113,7 @@ export function OrdersPage() {
 
                       <div className="grid gap-4 xl:grid-cols-2">
                         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                          <div className="text-sm font-semibold text-slate-900">
+                          <div className="text-sm font-semibold text-foreground">
                             {l("Steuerung der Durchführung", "Управление исполнением")}
                           </div>
                           <div className="mt-1 text-sm text-slate-500">
@@ -4142,7 +4277,7 @@ export function OrdersPage() {
                         </div>
 
                         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                          <div className="text-sm font-semibold text-slate-900">
+                          <div className="text-sm font-semibold text-foreground">
                             {l("Nachweise der Durchführung", "Подтверждения исполнения")}
                           </div>
                           <div className="mt-1 text-sm text-slate-500">
@@ -4340,7 +4475,7 @@ export function OrdersPage() {
 
                       <div className="grid gap-4 xl:grid-cols-2">
                         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                          <div className="text-sm font-semibold text-slate-900">
+                          <div className="text-sm font-semibold text-foreground">
                             {l("Steuerung der Nachsorge", "Управление follow-up")}
                           </div>
                           <div className="mt-1 text-sm text-slate-500">
@@ -4518,7 +4653,7 @@ export function OrdersPage() {
                         </div>
 
                         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                          <div className="text-sm font-semibold text-slate-900">
+                          <div className="text-sm font-semibold text-foreground">
                             {l(
                               "Empfohlene Meilenstein-Anker",
                               "Рекомендуемые контрольные даты",
@@ -4728,7 +4863,7 @@ export function OrdersPage() {
                                 {transitionKindLabel(event.transition_kind)}
                               </p>
                             </div>
-                            <span className="text-xs text-slate-500">
+                            <span className="text-xs text-muted-foreground">
                               {formatDateTimeLabel(event.created_at)}
                             </span>
                           </div>
@@ -5361,7 +5496,7 @@ export function OrdersPage() {
                       >
                         <div className="flex items-start justify-between gap-4">
                           <div>
-                            <h3 className="text-sm font-semibold text-slate-900">
+                            <h3 className="text-sm font-semibold text-foreground">
                               {l("Externe Rechnung erfassen", "Зарегистрировать внешний счёт")}
                             </h3>
                             <p className="mt-1 text-sm text-slate-500">
@@ -5700,57 +5835,96 @@ export function OrdersPage() {
                 </SectionCard>
               </>
             )}
-          </div>
+          </AdminSheetScaffold>
         </SheetContent>
       </Sheet>
 
-      <Dialog open={createOpen} onOpenChange={resetCreateDialog}>
-        <DialogContent className="max-w-xl">
-          <DialogHeader>
-            <DialogTitle>{l("Auftrag anlegen", "Создать заказ")}</DialogTitle>
-          </DialogHeader>
-          <form onSubmit={handleCreateOrder} className="space-y-4">
+      <Sheet open={createOpen} onOpenChange={resetCreateDialog}>
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
+          <form className="flex h-full flex-col" onSubmit={handleCreateOrder}>
+            <AdminSheetScaffold
+              title={l("Auftrag anlegen", "Создать заказ")}
+              description={l(
+                "Patient auswahlen, Bestandskunden-Re-Check prufen und Intake-Notiz fur den neuen Auftrag erfassen.",
+                "Выберите пациента, проверьте re-check существующего клиента и добавьте intake-заметку для нового заказа.",
+              )}
+              footer={
+                <SheetFormFooter
+                  cancelLabel={t.common_cancel}
+                  submitLabel={t.common_save}
+                  submitting={createSaving}
+                  submitDisabled={
+                    createRecheckLoading ||
+                    (!!createForm.patientId &&
+                      !createRecheck &&
+                      !createRecheckLoading) ||
+                    (!!createForm.patientId &&
+                      createRecheck?.requires_recheck === true &&
+                      !createRecheck.can_create_order)
+                  }
+                  onCancel={() => resetCreateDialog(false)}
+                />
+              }
+            >
             {createError ? (
               <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
                 {createError}
               </div>
             ) : null}
 
-            <div>
+            <div className="space-y-1.5">
               <Label>{t.orders_patient}</Label>
-              <select
-                required
-                value={createForm.patientId}
-                onChange={(event) => {
+              <ShadSelect
+                value={createForm.patientId || "__empty__"}
+                onValueChange={(value) => {
+                  const patientId = value && value !== "__empty__" ? value : "";
                   setCreateError(null);
                   setCreateRecheck(null);
                   setCreateForm((current) => ({
                     ...current,
-                    patientId: event.target.value,
+                    patientId,
                   }));
                 }}
-                className={`mt-1 ${selectClassName}`}
               >
-                <option value="">{t.orders_patient}</option>
-                {patients.map((patient) => (
-                  <option key={patient.id} value={patient.id}>
-                    {patientLabel(patient, l("Patient", "Пациент"))}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger className={selectClassName}>
+                  <SelectValue>
+                    {createForm.patientId
+                      ? patientLabel(
+                          patients.find(
+                            (patient) => patient.id === createForm.patientId,
+                          ) ?? {
+                            id: createForm.patientId,
+                            patient_id: createForm.patientId,
+                            first_name: "",
+                            last_name: "",
+                          },
+                          l("Patient", "Пациент"),
+                        )
+                      : t.orders_patient}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__empty__">{t.orders_patient}</SelectItem>
+                  {patients.map((patient) => (
+                    <SelectItem key={patient.id} value={patient.id}>
+                      {patientLabel(patient, l("Patient", "Пациент"))}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </ShadSelect>
             </div>
 
             {createForm.patientId ? (
-              <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
+              <div className={cn("rounded-xl p-4", tokens.surface.mutedCard)}>
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="space-y-1">
-                    <div className="text-sm font-semibold text-slate-900">
+                    <div className="text-sm font-semibold text-foreground">
                       {l(
                         "Re-Check fur Bestandskunden",
                         "Повторная проверка для существующего клиента",
                       )}
                     </div>
-                    <p className="text-xs text-slate-500">
+                    <p className="text-xs text-muted-foreground">
                       {l(
                         "Stammdaten, Compliance, Identitat, Dokumentenpaket, Vertragsstatus und Debt-Hold vor dem Anlegen eines neuen Auftrags prufen.",
                         "Проверьте базовые данные, compliance, идентификацию, комплект документов, статус договора и debt-hold перед созданием нового заказа.",
@@ -5778,7 +5952,7 @@ export function OrdersPage() {
                 </div>
 
                 {createRecheckLoading ? (
-                  <div className="mt-3 flex items-center gap-2 text-sm text-slate-600">
+                  <div className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
                     <LoaderCircle className="size-4 animate-spin" />
                     {l(
                       "Patienten-Re-Check wird geladen...",
@@ -5800,10 +5974,10 @@ export function OrdersPage() {
                         {createRecheck.checks.map((check) => (
                           <div
                             key={check.key}
-                            className="rounded-xl border border-white/80 bg-white px-3 py-2 shadow-sm"
+                            className="rounded-xl border border-border bg-card px-3 py-2"
                           >
                             <div className="flex items-center justify-between gap-2">
-                              <span className="text-sm text-slate-700">
+                              <span className="text-sm text-foreground">
                                 {check.key === "base_data"
                                   ? l("Stammdaten vollstandig", "Базовые данные заполнены")
                                   : check.key === "compliance"
@@ -5884,7 +6058,7 @@ export function OrdersPage() {
                       </div>
                     ) : null}
 
-                    <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500">
+                    <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
                       <div className="space-y-1">
                         <div>
                           {createRecheck.requires_recheck &&
@@ -5967,7 +6141,7 @@ export function OrdersPage() {
                       <Button
                         type="button"
                         variant="outline"
-                        className="rounded-xl"
+                        className="h-9 rounded-lg px-3.5"
                         onClick={() =>
                           staffGo(`/patients?patient=${createForm.patientId}`)
                         }
@@ -5995,36 +6169,10 @@ export function OrdersPage() {
               />
             </div>
 
-            <div className="flex items-center justify-end gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => resetCreateDialog(false)}
-              >
-                {t.common_cancel}
-              </Button>
-              <Button
-                type="submit"
-                disabled={
-                  createSaving ||
-                  createRecheckLoading ||
-                  (!!createForm.patientId &&
-                    !createRecheck &&
-                    !createRecheckLoading) ||
-                  (!!createForm.patientId &&
-                    createRecheck?.requires_recheck === true &&
-                    !createRecheck.can_create_order)
-                }
-              >
-                {createSaving ? (
-                  <LoaderCircle className="mr-2 size-4 animate-spin" />
-                ) : null}
-                {t.common_save}
-              </Button>
-            </div>
+            </AdminSheetScaffold>
           </form>
-        </DialogContent>
-      </Dialog>
+        </SheetContent>
+      </Sheet>
 
       <Dialog open={leistungOpen} onOpenChange={resetLeistungDialog}>
         <DialogContent className="max-w-2xl">
