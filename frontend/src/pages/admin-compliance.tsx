@@ -1235,7 +1235,7 @@ export function AdminCompliancePage() {
           </Section>
 
           <Sheet open={consentSheetOpen} onOpenChange={setConsentSheetOpen}>
-            <SheetContent side="right" className="w-full sm:max-w-[720px]">
+            <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
               <AdminSheetScaffold
                 title={t.compliance_consent_type_label}
                 description={activePatientLabel}
@@ -1305,7 +1305,7 @@ export function AdminCompliancePage() {
           </Sheet>
 
           <Sheet open={privacySheetOpen} onOpenChange={setPrivacySheetOpen}>
-            <SheetContent side="right" className="w-full sm:max-w-[720px]">
+            <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
               <AdminSheetScaffold
                 title={t.compliance_privacy_requests_title}
                 description={activePatientLabel}
@@ -1359,7 +1359,7 @@ export function AdminCompliancePage() {
             open={Boolean(reviewSheetRecord)}
             onOpenChange={(open) => !open && setReviewSheetRecord(null)}
           >
-            <SheetContent side="right" className="w-full sm:max-w-[720px]">
+            <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
               {reviewSheetRecord ? (
                 <AdminSheetScaffold
                   title={t.compliance_privacy_review_queue}

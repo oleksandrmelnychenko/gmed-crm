@@ -658,7 +658,7 @@ export function AdminSecurityPage() {
       </div>
 
       <Sheet open={maintOpen} onOpenChange={closeMaintenanceSheet}>
-        <SheetContent side="right" className="w-full sm:max-w-[720px]">
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
           <AdminSheetScaffold
             title={t.security_maintenance}
             description={t.security_subtitle}
@@ -725,7 +725,7 @@ export function AdminSecurityPage() {
       </Sheet>
 
       <Sheet open={ipOpen} onOpenChange={closeIpSheet}>
-        <SheetContent side="right" className="w-full sm:max-w-[720px]">
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
           <form onSubmit={addIp} className="flex flex-1 min-h-0 flex-col">
             <AdminSheetScaffold
               title={t.security_ip_add}

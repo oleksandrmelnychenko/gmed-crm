@@ -338,7 +338,7 @@ export function AdminUsersPage() {
       ) : null}
 
       <Sheet open={showCreate} onOpenChange={handleCreateSheetOpenChange}>
-        <SheetContent side="right" className="w-full sm:max-w-[720px]">
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
           <form onSubmit={onSubmitCreate} className="flex min-h-0 flex-1 flex-col">
             <AdminSheetScaffold
               title={t.users_create_title}
@@ -411,7 +411,7 @@ export function AdminUsersPage() {
       </Sheet>
 
       <Sheet open={editUser !== null} onOpenChange={handleEditSheetOpenChange}>
-        <SheetContent side="right" className="w-full sm:max-w-[720px]">
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
           <form
             className="flex min-h-0 flex-1 flex-col"
             onSubmit={(event) => {

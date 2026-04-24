@@ -341,7 +341,7 @@ export function AdminHealthPage() {
       ) : null}
 
       <Sheet open={Boolean(detailPanel && data)} onOpenChange={(open) => !open && setDetailPanel(null)}>
-        <SheetContent side="right" className="w-full sm:max-w-[720px]">
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
           {data && detailPanel && detailMeta ? (
             <AdminSheetScaffold title={detailMeta.title} description={detailMeta.description}>
               {detailPanel === "database" ? (

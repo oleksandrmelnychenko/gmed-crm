@@ -262,7 +262,7 @@ export function AdminAnnouncementsPage() {
       </div>
 
       <Sheet open={showCreate} onOpenChange={setShowCreate}>
-        <SheetContent side="right" className="w-full sm:max-w-[720px]">
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
           <form onSubmit={onCreate} className="flex flex-1 min-h-0 flex-col">
             <AdminSheetScaffold
               title={t.ann_new}

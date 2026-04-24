@@ -387,7 +387,7 @@ export function AdminActivityPage() {
       </div>
 
       <Sheet open={detailOpen} onOpenChange={setDetailOpen}>
-        <SheetContent side="right" className="w-full sm:max-w-[720px]">
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
           <AdminSheetScaffold
             title={selectedActivity ? actionLabel(selectedActivity.action) : t.activity_details}
             description={

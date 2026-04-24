@@ -477,7 +477,7 @@ export function AdminNotificationsPage() {
       </div>
 
       <Sheet open={createOpen} onOpenChange={handleCreateOpenChange}>
-        <SheetContent side="right" className="w-full sm:max-w-[720px]">
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
           <form onSubmit={handleCreate} className="flex flex-1 min-h-0 flex-col">
             <AdminSheetScaffold
               title={t.notif_new}
@@ -537,7 +537,7 @@ export function AdminNotificationsPage() {
       </Sheet>
 
       <Sheet open={detailOpen} onOpenChange={handleDetailOpenChange}>
-        <SheetContent side="right" className="w-full sm:max-w-[720px]">
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
           <AdminSheetScaffold
             title={selectedChannel?.name ?? t.notif_title}
             description={selectedChannel ? selectedChannel.id : t.notif_subtitle}

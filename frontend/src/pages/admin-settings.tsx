@@ -710,7 +710,7 @@ export function AdminSettingsPage() {
       </div>
 
       <Sheet open={Boolean(selectedGroup)} onOpenChange={handleGroupSheetOpenChange}>
-        <SheetContent side="right" className="w-full sm:max-w-[860px]">
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[860px]">
           <AdminSheetScaffold
             title={selectedGroup ? tr[selectedGroup.titleKey] : t.settings_title}
             description={selectedGroup ? tr[selectedGroup.descriptionKey] : t.settings_subtitle}

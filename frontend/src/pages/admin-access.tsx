@@ -536,7 +536,7 @@ export function AdminAccessPage() {
       </div>
 
       <Sheet open={Boolean(selectedField)} onOpenChange={handleDetailOpenChange}>
-        <SheetContent side="right" className="w-full sm:max-w-[720px]">
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
           <AdminSheetScaffold
             title={selectedField ? fieldLabels[selectedField] : t.access_title}
             description={selectedField ? ui.fieldWorkspace : t.access_subtitle}
