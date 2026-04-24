@@ -9,13 +9,8 @@ import {
 } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
-  ArrowDownRight,
-  ArrowUpRight,
   CheckCircle2,
   LoaderCircle,
-  Mail,
-  MapPin,
-  Phone,
   Plus,
   RefreshCw,
   Search,
@@ -24,6 +19,15 @@ import {
   Users,
 } from "lucide-react";
 
+import {
+  AdminInlineMetric,
+  AdminSheetScaffold,
+  AdminTableCard,
+  AdminToolbar,
+  SheetFormFooter,
+} from "@/components/admin-page-patterns";
+import { DataTable } from "@/components/data-table/data-table";
+import type { ColumnDef } from "@/components/data-table/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -36,17 +40,31 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import {
+  Select as ShadSelect,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Sheet,
   SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
 } from "@/components/ui/sheet";
+import {
+  Banner as ShellBanner,
+  PageHeader,
+  StatusBadge,
+  SuccessBanner,
+  inputClass as shellInputClassName,
+  selectClass as shellSelectClassName,
+  textareaClass as shellTextareaClass,
+  tokens,
+  type StatusTone,
+} from "@/components/ui-shell";
 import { apiFetch } from "@/lib/api";
 import { convertLead as apiConvertLead, downloadLeadAttachment } from "@/lib/api/leads";
-import { computeLeadConversionGate } from "./leads.helpers";
+import { computeLeadConversionGate, filterLeadsByContact } from "./leads.helpers";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
@@ -65,6 +83,8 @@ type LeadListItem = Lead;
 type LeadFilters = {
   search: string;
   status: string;
+  email: string;
+  phone: string;
   source: string;
   country: string;
   includeArchived: string;
@@ -108,6 +128,8 @@ type LeadPermissions = {
 const DEFAULT_FILTERS: LeadFilters = {
   search: "",
   status: "",
+  email: "",
+  phone: "",
   source: "",
   country: "",
   includeArchived: "false",
@@ -121,15 +143,6 @@ const STATUS_OPTIONS = [
   "converted",
   "archived",
 ] as const;
-
-const STATUS_VARIANTS: Record<string, string> = {
-  new: "border-blue-200 bg-blue-50 text-blue-700",
-  in_progress: "border-amber-200 bg-amber-50 text-amber-700",
-  qualified: "border-emerald-200 bg-emerald-50 text-emerald-700",
-  not_qualified: "border-rose-200 bg-rose-50 text-rose-700",
-  converted: "border-purple-200 bg-purple-50 text-purple-700",
-  archived: "border-slate-200 bg-slate-100 text-slate-600",
-};
 
 const COMPLIANCE_OPTIONS = [
   "pending",
@@ -196,12 +209,12 @@ function nonempty(value: string): string | null {
 function yesNo(value: boolean | null | undefined): string {
   if (value === true) return "Yes";
   if (value === false) return "No";
-  return "—";
+  return "-";
 }
 
 function dashOrValue(value?: string | null): string {
   const trimmed = value?.trim();
-  return trimmed ? trimmed : "—";
+  return trimmed ? trimmed : "-";
 }
 
 function formatSize(bytes: number) {
@@ -221,11 +234,83 @@ function buildLeadsPath(filters: LeadFilters) {
   return query ? `/leads?${query}` : "/leads";
 }
 
-function statusBadge(status: string) {
-  return cn(
-    "rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em]",
-    STATUS_VARIANTS[status] ?? STATUS_VARIANTS.archived
+const selectClassName = shellSelectClassName;
+const textareaClassName = shellTextareaClass;
+
+function titleWithDot(title: ReactNode) {
+  return (
+    <span className="inline-flex items-center gap-2">
+      <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
+      <span>{title}</span>
+    </span>
   );
+}
+
+function statusLabel(status: string) {
+  return status
+    .split("_")
+    .filter(Boolean)
+    .map((chunk) => chunk.charAt(0).toUpperCase() + chunk.slice(1))
+    .join(" ");
+}
+
+function leadStatusTone(status: string): StatusTone {
+  switch (status) {
+    case "new":
+      return "info";
+    case "in_progress":
+      return "warning";
+    case "qualified":
+      return "success";
+    case "not_qualified":
+      return "error";
+    case "converted":
+      return "info";
+    case "archived":
+      return "neutral";
+    default:
+      return "neutral";
+  }
+}
+
+function complianceTone(status?: string | null): StatusTone {
+  switch (status) {
+    case "signed":
+      return "success";
+    case "documents_sent":
+      return "warning";
+    case "rejected":
+      return "error";
+    case "pending":
+      return "neutral";
+    default:
+      return "neutral";
+  }
+}
+
+function failedOutcomeTone(status?: string | null): StatusTone {
+  if (!status || status === "none") return "neutral";
+  if (status === "delete_anonymized") return "error";
+  return "warning";
+}
+
+function leadRowAccent(status: string): string {
+  switch (status) {
+    case "new":
+      return "bg-sky-500";
+    case "in_progress":
+      return "bg-amber-500";
+    case "qualified":
+      return "bg-emerald-500";
+    case "not_qualified":
+      return "bg-rose-500";
+    case "converted":
+      return "bg-indigo-500";
+    case "archived":
+      return "bg-slate-300";
+    default:
+      return "bg-slate-300";
+  }
 }
 
 function formatDate(value?: string | null) {
@@ -242,10 +327,7 @@ function formatDate(value?: string | null) {
 }
 
 function cardClass(extra?: string) {
-  return cn(
-    "rounded-[1.75rem] border border-border/70 bg-card shadow-[0_20px_60px_rgba(15,23,42,0.05)]",
-    extra
-  );
+  return cn("rounded-xl border border-border bg-card", extra);
 }
 
 function Banner({
@@ -255,58 +337,10 @@ function Banner({
   tone: "error" | "warning" | "success";
   children: ReactNode;
 }) {
-  return (
-    <div
-      className={cn(
-        "rounded-2xl border px-4 py-3 text-sm",
-        tone === "error"
-          ? "border-rose-200 bg-rose-50 text-rose-700"
-          : tone === "warning"
-            ? "border-amber-200 bg-amber-50 text-amber-700"
-            : "border-emerald-200 bg-emerald-50 text-emerald-700"
-      )}
-    >
-      {children}
-    </div>
-  );
-}
-
-function StatCard({
-  icon: Icon,
-  label,
-  value,
-  footer,
-  tone,
-}: {
-  icon: typeof Users;
-  label: string;
-  value: number;
-  footer?: ReactNode;
-  tone: "sky" | "emerald" | "purple" | "slate";
-}) {
-  const iconBg =
-    tone === "sky"
-      ? "bg-sky-100 text-sky-700"
-      : tone === "emerald"
-        ? "bg-emerald-100 text-emerald-700"
-        : tone === "purple"
-          ? "bg-purple-100 text-purple-700"
-          : "bg-slate-100 text-slate-700";
-
-  return (
-    <div className="rounded-[1.5rem] border border-white/90 bg-white/88 p-4 shadow-sm backdrop-blur">
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">
-          {label}
-        </span>
-        <span className={cn("rounded-2xl p-2", iconBg)}>
-          <Icon className="size-4" />
-        </span>
-      </div>
-      <p className="mt-4 text-3xl font-semibold tracking-tight text-slate-950">{value}</p>
-      {footer ? <div className="mt-2">{footer}</div> : null}
-    </div>
-  );
+  if (tone === "success") {
+    return <SuccessBanner>{children}</SuccessBanner>;
+  }
+  return <ShellBanner tone={tone}>{children}</ShellBanner>;
 }
 
 export function LeadsPage() {
@@ -359,10 +393,109 @@ export function LeadsPage() {
     [deferredSearch, filters]
   );
   const leadsPath = useMemo(() => buildLeadsPath(effectiveFilters), [effectiveFilters]);
+  const filteredLeads = useMemo(
+    () => filterLeadsByContact(leads, { email: filters.email, phone: filters.phone }),
+    [filters.email, filters.phone, leads]
+  );
   const maxMonthly = useMemo(() => Math.max(1, ...monthly.map((item) => item.count)), [monthly]);
   const totalByStatus = useMemo(
     () => byStatus.reduce((acc, item) => acc + item.count, 0),
     [byStatus]
+  );
+  const leadColumns = useMemo<ColumnDef<LeadListItem>[]>(
+    () => [
+      {
+        id: "lead",
+        label: t.leads_title,
+        accessor: (row) => `${row.first_name} ${row.last_name}`.trim(),
+        sortable: true,
+        width: 260,
+        pinned: "left",
+        render: (row) => <span className="text-sm font-medium text-foreground">{`${row.first_name} ${row.last_name}`.trim()}</span>,
+      },
+      {
+        id: "status",
+        label: t.users_status,
+        accessor: (row) => row.qualification_status,
+        sortable: true,
+        width: 180,
+        render: (row) => (
+          <StatusBadge tone={leadStatusTone(row.qualification_status)}>
+            {statusLabel(row.qualification_status)}
+          </StatusBadge>
+        ),
+      },
+      {
+        id: "compliance",
+        label: "Compliance",
+        accessor: (row) => row.compliance_status ?? "",
+        width: 170,
+        render: (row) => (
+          <StatusBadge tone={complianceTone(row.compliance_status)}>
+            {row.compliance_status ? statusLabel(row.compliance_status) : t.common_not_set}
+          </StatusBadge>
+        ),
+      },
+      {
+        id: "email",
+        label: t.patients_email,
+        accessor: (row) => row.email ?? "",
+        width: 240,
+        render: (row) => <span className="text-xs text-foreground">{row.email || t.common_not_set}</span>,
+      },
+      {
+        id: "phone",
+        label: t.field_phone,
+        accessor: (row) => row.phone ?? "",
+        width: 180,
+        render: (row) => <span className="text-xs text-foreground">{row.phone || t.common_not_set}</span>,
+      },
+      {
+        id: "source",
+        label: t.leads_source,
+        accessor: (row) => row.source ?? "",
+        width: 180,
+        render: (row) => <span className="text-xs text-foreground">{row.source || t.common_not_set}</span>,
+      },
+      {
+        id: "country",
+        label: t.providers_country,
+        accessor: (row) => row.country ?? "",
+        width: 150,
+        render: (row) => <span className="text-xs text-foreground">{row.country || t.common_not_set}</span>,
+      },
+      {
+        id: "created",
+        label: "Date",
+        accessor: (row) => row.created_at,
+        sortable: true,
+        width: 130,
+        render: (row) => <span className="text-xs text-foreground">{formatDate(row.created_at)}</span>,
+      },
+      {
+        id: "failed",
+        label: "Failed",
+        accessor: (row) => row.failed_outcome?.status ?? "",
+        width: 170,
+        render: (row) =>
+          row.failed_outcome?.status && row.failed_outcome.status !== "none" ? (
+            <StatusBadge tone={failedOutcomeTone(row.failed_outcome.status)}>
+              {statusLabel(row.failed_outcome.status)}
+            </StatusBadge>
+          ) : (
+            <span className="text-xs text-muted-foreground">-</span>
+          ),
+      },
+    ],
+    [
+      t.common_not_set,
+      t.field_phone,
+      t.leads_source,
+      t.leads_title,
+      t.patients_email,
+      t.providers_country,
+      t.users_status,
+    ]
   );
 
   useEffect(() => {
@@ -555,7 +688,7 @@ export function LeadsPage() {
       // are not visually occluded by the modal overlay.
       setPendingConvertLead(null);
       setSuccessMessage(
-        `Patient ${result.patient_pid} created. Opening detail view…`,
+        `Patient ${result.patient_pid} created. Opening detail view...`,
       );
       reload();
       // Give the banner a beat to register before routing away.
@@ -632,58 +765,31 @@ export function LeadsPage() {
 
   if (!permissions.canViewPage) {
     return (
-      <div className="space-y-6">
-        <section className={cardClass("p-8")}>
-          <h1 className="text-3xl font-semibold tracking-tight text-slate-950">
-            {l("Lead-Bereich", "Раздел лидов", "Leads workspace")}
-          </h1>
-          <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600">
-            {l(
-              "Dieser Bereich ist auf Patientenmanager und Sales beschränkt, weil er die Intake-Qualifizierung und die Umwandlung in Patientenakten steuert.",
-              "Этот экран доступен только менеджерам пациентов и sales, потому что он управляет квалификацией входящих обращений и конверсией в карточки пациентов.",
-              "This screen is limited to patient managers and sales because it drives intake qualification and conversion into patient records.",
-            )}
-          </p>
-        </section>
+      <div className="rounded-xl">
+        <ShellBanner tone="warning" withIcon>
+          {l(
+            "Dieser Bereich ist auf Patientenmanager und Sales beschraenkt.",
+            "Section is limited to patient managers and sales.",
+            "This screen is limited to patient managers and sales.",
+          )}
+        </ShellBanner>
       </div>
     );
   }
 
-  const growthPositive = (stats?.growth_pct ?? 0) >= 0;
-  const growthSign = growthPositive ? "+" : "";
+  const growthPct = stats?.growth_pct ?? 0;
+  const growthAbs = stats?.growth_abs ?? 0;
+  const growthSign = growthPct >= 0 ? "+" : "";
 
   return (
     <>
       <div className="space-y-6">
-        <section className="rounded-[2rem] border border-white/70 bg-[radial-gradient(circle_at_top_left,_rgba(125,211,252,0.28),_transparent_38%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(241,245,249,0.92))] p-6 shadow-[0_32px_80px_rgba(15,23,42,0.08)]">
-          <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
-            <div className="max-w-3xl">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="outline" className="rounded-full border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-sky-700">
-                  {l("Intake und Qualifizierung", "Приём и квалификация", "Intake and qualification")}
-                </Badge>
-                <Badge variant="outline" className="rounded-full border-slate-200 bg-white/80 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-600">
-                  {permissions.canConvert ? t.leads_title : t.leads_subtitle}
-                </Badge>
-              </div>
-              <h1 className="mt-4 text-3xl font-semibold tracking-tight text-slate-950 md:text-4xl">
-                {l(
-                  "Lead-Pipeline mit direkter Patientenkonvertierung",
-                  "Пайплайн лидов с прямой конверсией в пациента",
-                  "Lead pipeline connected to patient conversion",
-                )}
-              </h1>
-              <p className="mt-3 text-sm leading-7 text-slate-600 md:text-[15px]">
-                {l(
-                  "Bearbeiten Sie die Intake-Warteschlange mit echten Backend-Filtern, Qualifizierungsaktionen und direkter Umwandlung in Patientenakten aus demselben Bereich.",
-                  "Работайте с очередью входящих обращений через реальные backend-фильтры, действия квалификации и прямую конверсию в карточки пациентов из того же раздела.",
-                  "Work the intake queue with real backend filters, qualification actions and direct conversion into patient records from the same workspace.",
-                )}
-              </p>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-3">
-              <Button type="button" variant="outline" className="rounded-2xl" onClick={reload}>
+        <PageHeader
+          title={t.leads_title}
+          description={t.leads_subtitle}
+          actions={
+            <>
+              <Button type="button" variant="outline" className="h-9 rounded-lg px-3.5" onClick={reload}>
                 <RefreshCw className="size-4" />
                 {l("Aktualisieren", "Обновить", "Refresh")}
               </Button>
@@ -701,32 +807,43 @@ export function LeadsPage() {
                   {l("Neuer Lead", "Новый лид", "New lead")}
                 </Button>
               ) : null}
-            </div>
-          </div>
+            </>
+          }
+        />
 
-          <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <StatCard
-              icon={Users}
-              label={t.common_active}
-              value={stats?.total_this_month ?? 0}
-              tone="sky"
-              footer={
-                <span className={cn("flex items-center gap-1 text-xs font-medium", growthPositive ? "text-emerald-600" : "text-rose-600")}>
-                  {growthPositive ? <ArrowUpRight className="size-3" /> : <ArrowDownRight className="size-3" />}
-                  {growthSign}
-                  {stats?.growth_pct ?? 0}% ({growthSign}
-                  {stats?.growth_abs ?? 0}) vs last
-                </span>
-              }
-            />
-            <StatCard icon={CheckCircle2} label={t.users_status} value={stats?.qualified_this_month ?? 0} tone="emerald" />
-            <StatCard icon={UserPlus} label={t.leads_convert} value={stats?.converted_this_month ?? 0} tone="purple" />
-            <StatCard icon={TrendingUp} label={t.common_active} value={stats?.total_all ?? 0} tone="slate" />
-          </div>
-        </section>
+        <div className="flex flex-wrap gap-6 rounded-xl border border-border bg-card px-4 py-3">
+          <AdminInlineMetric
+            icon={Users}
+            label={t.leads_title}
+            value={String(stats?.total_this_month ?? 0)}
+            description={`${growthSign}${growthPct}% (${growthSign}${growthAbs})`}
+            tone="sky"
+          />
+          <AdminInlineMetric
+            icon={CheckCircle2}
+            label={t.users_status}
+            value={String(stats?.qualified_this_month ?? 0)}
+            description={statusLabel("qualified")}
+            tone="emerald"
+          />
+          <AdminInlineMetric
+            icon={UserPlus}
+            label={t.leads_convert}
+            value={String(stats?.converted_this_month ?? 0)}
+            description={statusLabel("converted")}
+            tone="amber"
+          />
+          <AdminInlineMetric
+            icon={TrendingUp}
+            label={t.common_active}
+            value={String(stats?.total_all ?? 0)}
+            description={t.common_archive}
+            tone="slate"
+          />
+        </div>
 
         <div className="grid gap-4 lg:grid-cols-3">
-          <div className={cardClass("p-5 lg:col-span-2")}>
+          <div className="rounded-[1.75rem] border border-border/70 bg-card p-5 shadow-[0_20px_60px_rgba(15,23,42,0.05)] lg:col-span-2">
             <h2 className="mb-4 text-sm font-semibold text-slate-900">Monthly growth</h2>
             <div className="flex h-48 items-end gap-2">
               {monthly.map((item) => {
@@ -743,7 +860,7 @@ export function LeadsPage() {
             </div>
           </div>
 
-          <div className={cardClass("p-5")}>
+          <div className="rounded-[1.75rem] border border-border/70 bg-card p-5 shadow-[0_20px_60px_rgba(15,23,42,0.05)]">
             <h2 className="mb-2 text-sm font-semibold text-slate-900">By status</h2>
             <p className="mb-4 text-3xl font-bold text-slate-950">{totalByStatus}</p>
             <div className="space-y-3">
@@ -765,301 +882,303 @@ export function LeadsPage() {
           </div>
         </div>
 
-        <div className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
-          <section className={cardClass("p-5")}>
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-sm font-semibold text-slate-950">{t.common_search}</h2>
-                <p className="mt-1 text-sm text-slate-600">
-                  Search by person or origin and narrow the queue by lifecycle stage.
-                </p>
+        {error ? <ShellBanner tone="error">{error}</ShellBanner> : null}
+        {successMessage ? <SuccessBanner>{successMessage}</SuccessBanner> : null}
+
+        <AdminTableCard
+          title={titleWithDot(t.leads_title)}
+          description="Lead queue with qualification and conversion actions."
+          count={filteredLeads.length}
+        >
+          <div className="space-y-4 border-b border-border px-4 py-4">
+            <AdminToolbar className="gap-2">
+              <div className="relative min-w-[260px] flex-1">
+                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  className={cn(shellInputClassName, "pl-9")}
+                  placeholder={t.common_search}
+                  value={filters.search}
+                  onChange={(event) =>
+                    setFilters((current) => ({ ...current, search: event.target.value }))
+                  }
+                />
               </div>
-              <Button type="button" variant="ghost" size="sm" className="rounded-xl" onClick={() => setFilters(DEFAULT_FILTERS)}>
-                Reset
-              </Button>
-            </div>
-
-            <div className="mt-5 space-y-4">
-              <FilterField label={t.common_search}>
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
-                  <Input
-                    className="h-10 rounded-xl bg-slate-50 pl-9"
-                    placeholder={t.common_search}
-                    value={filters.search}
-                    onChange={(event) => setFilters((current) => ({ ...current, search: event.target.value }))}
-                  />
-                </div>
-              </FilterField>
-
-              <FilterField label={t.users_status}>
-                <select
-                  value={filters.status}
-                  onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value }))}
-                  className="h-10 w-full rounded-xl border border-input bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
-                >
-                  <option value="">{t.providers_all}</option>
+              <ShadSelect
+                value={filters.status || "__all__"}
+                onValueChange={(value) =>
+                  setFilters((current) => ({
+                    ...current,
+                    status: value && value !== "__all__" ? value : "",
+                  }))
+                }
+              >
+                <SelectTrigger className={cn(selectClassName, "w-[180px] min-w-[180px]")}>
+                  <SelectValue>
+                    {filters.status ? statusLabel(filters.status) : t.providers_all}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all__">{t.providers_all}</SelectItem>
                   {STATUS_OPTIONS.map((status) => (
-                    <option key={status} value={status}>
-                      {status}
-                    </option>
+                    <SelectItem key={status} value={status}>
+                      {statusLabel(status)}
+                    </SelectItem>
                   ))}
-                </select>
-              </FilterField>
+                </SelectContent>
+              </ShadSelect>
+              <Input
+                value={filters.email}
+                onChange={(event) =>
+                  setFilters((current) => ({ ...current, email: event.target.value }))
+                }
+                className={cn(shellInputClassName, "w-[220px] min-w-[220px]")}
+                placeholder={t.patients_email}
+              />
+              <Input
+                value={filters.phone}
+                onChange={(event) =>
+                  setFilters((current) => ({ ...current, phone: event.target.value }))
+                }
+                className={cn(shellInputClassName, "w-[180px] min-w-[180px]")}
+                placeholder={t.field_phone}
+              />
+              <Input
+                value={filters.source}
+                onChange={(event) =>
+                  setFilters((current) => ({ ...current, source: event.target.value }))
+                }
+                className={cn(shellInputClassName, "w-[180px] min-w-[180px]")}
+                placeholder={t.leads_source}
+              />
+              <Input
+                value={filters.country}
+                onChange={(event) =>
+                  setFilters((current) => ({ ...current, country: event.target.value }))
+                }
+                className={cn(shellInputClassName, "w-[180px] min-w-[180px]")}
+                placeholder={t.providers_country}
+              />
+              <ShadSelect
+                value={filters.includeArchived || "false"}
+                onValueChange={(value) =>
+                  setFilters((current) => ({
+                    ...current,
+                    includeArchived: value === "true" ? "true" : "false",
+                  }))
+                }
+              >
+                <SelectTrigger className={cn(selectClassName, "w-[180px] min-w-[180px]")}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="false">Hide archived</SelectItem>
+                  <SelectItem value="true">Include archived</SelectItem>
+                </SelectContent>
+              </ShadSelect>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-9 rounded-lg px-3.5"
+                onClick={() => setFilters(DEFAULT_FILTERS)}
+              >
+                {t.access_reset}
+              </Button>
+            </AdminToolbar>
+          </div>
 
-              <FilterField label={t.leads_source}>
-                <Input value={filters.source} onChange={(event) => setFilters((current) => ({ ...current, source: event.target.value }))} className="h-10 rounded-xl bg-slate-50" />
-              </FilterField>
+          <DataTable
+            rows={filteredLeads}
+            columns={leadColumns}
+            rowId={(row) => row.id}
+            density="compact"
+            loading={loading}
+            activeRowId={selectedLeadId || null}
+            onRowClick={(row) => openLeadDetail(row.id)}
+            rowAccent={(row) => leadRowAccent(row.qualification_status)}
+            rowActions={(row) => {
+              const canQualify =
+                row.qualification_status === "new" || row.qualification_status === "in_progress";
+              const {
+                canConvertRole,
+                canConvert,
+                disabledReason: convertDisabledReason,
+              } = computeLeadConversionGate(row, {
+                canConvert: permissions.canConvert,
+              });
+              const canResolveFailed =
+                row.qualification_status !== "converted" &&
+                row.failed_outcome?.status !== "delete_anonymized";
 
-              <FilterField label={t.providers_country}>
-                <Input value={filters.country} onChange={(event) => setFilters((current) => ({ ...current, country: event.target.value }))} className="h-10 rounded-xl bg-slate-50" />
-              </FilterField>
-
-              <FilterField label={t.common_archive}>
-                <select
-                  value={filters.includeArchived}
-                  onChange={(event) => setFilters((current) => ({ ...current, includeArchived: event.target.value }))}
-                  className="h-10 w-full rounded-xl border border-input bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
-                >
-                  <option value="false">Hide archived</option>
-                  <option value="true">Include archived</option>
-                </select>
-              </FilterField>
-            </div>
-          </section>
-
-          <section className={cardClass("p-5")}>
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-sm font-semibold text-slate-950">Lead queue</h2>
-                <p className="mt-1 text-sm text-slate-600">
-                  Open a lead to review the intake payload and trigger the next workflow action.
+              return (
+                <>
+                  {canQualify ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-7 rounded-md px-2 text-[11px]"
+                      disabled={Boolean(actionBusy)}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void updateStatus(row.id, "qualified");
+                      }}
+                    >
+                      {actionBusy === `status:${row.id}:qualified` ? (
+                        <LoaderCircle className="size-3 animate-spin" />
+                      ) : null}
+                      Qualify
+                    </Button>
+                  ) : null}
+                  {canConvertRole ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-7 rounded-md px-2 text-[11px]"
+                      disabled={Boolean(actionBusy) || !canConvert}
+                      title={convertDisabledReason ?? undefined}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setPendingConvertLead(row);
+                      }}
+                    >
+                      {actionBusy === `convert:${row.id}` ? (
+                        <LoaderCircle className="size-3 animate-spin" />
+                      ) : null}
+                      Convert
+                    </Button>
+                  ) : null}
+                  {canResolveFailed ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 rounded-md px-2 text-[11px]"
+                      disabled={
+                        Boolean(actionBusy) ||
+                        row.failed_outcome?.status === "delete_anonymized"
+                      }
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openLeadDetail(row.id);
+                      }}
+                    >
+                      Resolve
+                    </Button>
+                  ) : null}
+                </>
+              );
+            }}
+            emptyState={
+              <div className={cn("rounded-xl px-6 py-10 text-center", tokens.surface.dashed)}>
+                <div className="text-sm font-medium text-foreground">No leads found</div>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Adjust filters or create a new lead from the right-side flow.
                 </p>
               </div>
-              <div className="text-xs uppercase tracking-[0.12em] text-slate-500">
-                {loading ? t.patients_syncing : `${leads.length} records`}
-              </div>
-            </div>
-
-            {error ? (
-              <div className="mt-5">
-                <Banner tone="error">{error}</Banner>
-              </div>
-            ) : null}
-
-            {successMessage ? (
-              <div className="mt-5">
-                <Banner tone="success">{successMessage}</Banner>
-              </div>
-            ) : null}
-
-            {loading ? (
-              <div className="flex min-h-[320px] items-center justify-center text-sm text-slate-500">
-                <LoaderCircle className="mr-2 size-4 animate-spin" />
-                Loading leads
-              </div>
-            ) : leads.length === 0 ? (
-              <div className="mt-5">
-                <Banner tone="warning">No leads matched the current filter set.</Banner>
-              </div>
-            ) : (
-              <div className="mt-5 grid gap-4 xl:grid-cols-2">
-                {leads.map((lead) => {
-                  const canQualify =
-                    lead.qualification_status === "new" || lead.qualification_status === "in_progress";
-                  const {
-                    canConvertRole,
-                    canConvert,
-                    disabledReason: convertDisabledReason,
-                  } = computeLeadConversionGate(lead, {
-                    canConvert: permissions.canConvert,
-                  });
-                  const canResolveFailed =
-                    lead.qualification_status !== "converted" &&
-                    lead.failed_outcome?.status !== "delete_anonymized";
-
-                  return (
-                    <div
-                      key={lead.id}
-                      role="button"
-                      tabIndex={0}
-                      aria-label={`Open lead ${lead.first_name} ${lead.last_name}`}
-                      onClick={() => {
-                        openLeadDetail(lead.id);
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.target !== event.currentTarget) return;
-                        if (event.key === "Enter" || event.key === " ") {
-                          event.preventDefault();
-                          openLeadDetail(lead.id);
-                        }
-                      }}
-                      className="rounded-[1.6rem] border border-slate-200 bg-white p-5 text-left transition hover:-translate-y-0.5 hover:shadow-[0_18px_48px_rgba(15,23,42,0.08)]"
-                    >
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className={statusBadge(lead.qualification_status)}>
-                              {lead.qualification_status}
-                            </span>
-                            {lead.compliance_status ? (
-                              <Badge variant="outline" className="rounded-full border-slate-200 bg-white text-slate-700">
-                                Compliance {lead.compliance_status}
-                              </Badge>
-                            ) : null}
-                            {lead.failed_outcome?.status &&
-                            lead.failed_outcome.status !== "none" ? (
-                              <Badge
-                                variant="outline"
-                                className={cn(
-                                  "rounded-full",
-                                  lead.failed_outcome.status === "delete_anonymized"
-                                    ? "border-rose-200 bg-rose-50 text-rose-700"
-                                    : "border-slate-200 bg-slate-100 text-slate-700"
-                                )}
-                              >
-                                {lead.failed_outcome.status === "delete_anonymized"
-                                  ? "Deleted payload"
-                                  : "Failed lead archived"}
-                              </Badge>
-                            ) : null}
-                          </div>
-                          <h3 className="mt-3 text-lg font-semibold text-slate-950">
-                            {lead.first_name} {lead.last_name}
-                          </h3>
-                          <p className="mt-1 text-sm text-slate-600">{formatDate(lead.created_at)}</p>
-                        </div>
-                      </div>
-
-                      <div className="mt-4 grid gap-2 text-sm text-slate-600">
-                        <div className="flex items-center gap-2">
-                          <Mail className="size-4 text-slate-400" />
-                          <span>{lead.email || t.common_not_set}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Phone className="size-4 text-slate-400" />
-                          <span>{lead.phone || t.common_not_set}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <MapPin className="size-4 text-slate-400" />
-                          <span>{lead.country || lead.source || t.common_not_set}</span>
-                        </div>
-                      </div>
-
-                      <div className="mt-5 flex flex-wrap justify-end gap-2">
-                        {canQualify ? (
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="rounded-2xl"
-                            disabled={Boolean(actionBusy)}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              void updateStatus(lead.id, "qualified");
-                            }}
-                          >
-                            {actionBusy === `status:${lead.id}:qualified` ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                            Qualify
-                          </Button>
-                        ) : null}
-                        {canConvertRole ? (
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="rounded-2xl"
-                            disabled={Boolean(actionBusy) || !canConvert}
-                            title={convertDisabledReason ?? undefined}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              setPendingConvertLead(lead);
-                            }}
-                          >
-                            {actionBusy === `convert:${lead.id}` ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                            Convert
-                          </Button>
-                        ) : null}
-                        {canResolveFailed ? (
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            className="rounded-2xl text-rose-600 hover:text-rose-700"
-                            disabled={Boolean(actionBusy) || lead.failed_outcome?.status === "delete_anonymized"}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              openLeadDetail(lead.id);
-                            }}
-                          >
-                            Resolve failed
-                          </Button>
-                        ) : null}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </section>
-        </div>
+            }
+          />
+        </AdminTableCard>
       </div>
 
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Create lead</DialogTitle>
-            <DialogDescription>
-              Capture intake data once and keep the qualification flow consistent from the first touch.
-            </DialogDescription>
-          </DialogHeader>
+      <Sheet open={createOpen} onOpenChange={setCreateOpen}>
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
+          <form onSubmit={handleCreate} className="flex h-full flex-col">
+            <AdminSheetScaffold
+              title={l("Neuer Lead", "Новый лид", "New lead")}
+              description="Capture intake data and keep qualification flow consistent."
+              footer={(
+                <SheetFormFooter
+                  cancelLabel={l("Abbrechen", "Отмена", "Cancel")}
+                  submitLabel={t.common_save}
+                  submittingLabel={t.patients_creating}
+                  submitting={createBusy}
+                  onCancel={() => setCreateOpen(false)}
+                />
+              )}
+            >
+              {createError ? <ShellBanner tone="error">{createError}</ShellBanner> : null}
 
-          <form onSubmit={handleCreate} className="space-y-4">
-            {createError ? <Banner tone="error">{createError}</Banner> : null}
+              <div className="grid gap-4 md:grid-cols-2">
+                <LeadField label={t.patients_first_name}>
+                  <Input
+                    className={shellInputClassName}
+                    value={createForm.firstName}
+                    onChange={(event) =>
+                      setCreateForm((current) => ({ ...current, firstName: event.target.value }))
+                    }
+                    required
+                  />
+                </LeadField>
+                <LeadField label={t.patients_last_name}>
+                  <Input
+                    className={shellInputClassName}
+                    value={createForm.lastName}
+                    onChange={(event) =>
+                      setCreateForm((current) => ({ ...current, lastName: event.target.value }))
+                    }
+                    required
+                  />
+                </LeadField>
+              </div>
 
-            <div className="grid gap-4 md:grid-cols-2">
-              <LeadField label={t.patients_first_name}>
-                <Input value={createForm.firstName} onChange={(event) => setCreateForm((current) => ({ ...current, firstName: event.target.value }))} required />
-              </LeadField>
-              <LeadField label={t.patients_last_name}>
-                <Input value={createForm.lastName} onChange={(event) => setCreateForm((current) => ({ ...current, lastName: event.target.value }))} required />
-              </LeadField>
-            </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <LeadField label={t.field_phone}>
+                  <Input
+                    className={shellInputClassName}
+                    value={createForm.phone}
+                    onChange={(event) =>
+                      setCreateForm((current) => ({ ...current, phone: event.target.value }))
+                    }
+                  />
+                </LeadField>
+                <LeadField label={t.patients_email}>
+                  <Input
+                    type="email"
+                    className={shellInputClassName}
+                    value={createForm.email}
+                    onChange={(event) =>
+                      setCreateForm((current) => ({ ...current, email: event.target.value }))
+                    }
+                  />
+                </LeadField>
+              </div>
 
-            <div className="grid gap-4 md:grid-cols-2">
-              <LeadField label={t.field_phone}>
-                <Input value={createForm.phone} onChange={(event) => setCreateForm((current) => ({ ...current, phone: event.target.value }))} />
-              </LeadField>
-              <LeadField label={t.patients_email}>
-                <Input type="email" value={createForm.email} onChange={(event) => setCreateForm((current) => ({ ...current, email: event.target.value }))} />
-              </LeadField>
-            </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <LeadField label={t.leads_source}>
+                  <Input
+                    className={shellInputClassName}
+                    value={createForm.source}
+                    onChange={(event) =>
+                      setCreateForm((current) => ({ ...current, source: event.target.value }))
+                    }
+                  />
+                </LeadField>
+                <LeadField label={t.providers_country}>
+                  <Input
+                    className={shellInputClassName}
+                    value={createForm.country}
+                    onChange={(event) =>
+                      setCreateForm((current) => ({ ...current, country: event.target.value }))
+                    }
+                  />
+                </LeadField>
+              </div>
 
-            <div className="grid gap-4 md:grid-cols-2">
-              <LeadField label={t.leads_source}>
-                <Input value={createForm.source} onChange={(event) => setCreateForm((current) => ({ ...current, source: event.target.value }))} />
+              <LeadField label={t.patients_notes}>
+                <textarea
+                  value={createForm.notes}
+                  onChange={(event) =>
+                    setCreateForm((current) => ({ ...current, notes: event.target.value }))
+                  }
+                  className={cn(textareaClassName, "min-h-[104px]")}
+                  rows={4}
+                />
               </LeadField>
-              <LeadField label={t.providers_country}>
-                <Input value={createForm.country} onChange={(event) => setCreateForm((current) => ({ ...current, country: event.target.value }))} />
-              </LeadField>
-            </div>
-
-            <LeadField label={t.patients_notes}>
-              <textarea value={createForm.notes} onChange={(event) => setCreateForm((current) => ({ ...current, notes: event.target.value }))} className="min-h-[104px] w-full rounded-xl border border-input bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30" rows={4} />
-            </LeadField>
-
-            <div className="flex justify-end gap-3 pt-2">
-              <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>
-                {l("Abbrechen", "Отмена", "Cancel")}
-              </Button>
-              <Button type="submit" disabled={createBusy}>
-                {createBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                {createBusy ? t.patients_creating : t.common_save}
-              </Button>
-            </div>
+            </AdminSheetScaffold>
           </form>
-        </DialogContent>
-      </Dialog>
+        </SheetContent>
+      </Sheet>
 
       <Sheet
         open={detailOpen}
@@ -1070,17 +1189,11 @@ export function LeadsPage() {
           }
         }}
       >
-        <SheetContent side="right" className="w-full sm:max-w-[760px]">
-          <SheetHeader className="border-b border-border/70 pb-4">
-            <SheetTitle>
-              {detail ? `${detail.first_name} ${detail.last_name}` : t.leads_title}
-            </SheetTitle>
-            <SheetDescription>
-              Review intake data, qualification state and patient conversion readiness.
-            </SheetDescription>
-          </SheetHeader>
-
-          <div className="flex-1 overflow-y-auto px-4 pb-6">
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-3xl">
+          <AdminSheetScaffold
+            title={detail ? `${detail.first_name} ${detail.last_name}` : t.leads_title}
+            description="Review intake data, qualification state and patient conversion readiness."
+          >
             {detailLoading ? (
               <div className="flex min-h-[320px] items-center justify-center text-sm text-slate-500">
                 <LoaderCircle className="mr-2 size-4 animate-spin" />
@@ -1094,31 +1207,21 @@ export function LeadsPage() {
               <div className="space-y-6 pt-5">
                 <section className={cardClass("p-5")}>
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className={statusBadge(detail.qualification_status)}>
-                      {detail.qualification_status}
-                    </span>
-                    <Badge variant="outline" className="rounded-full border-slate-200 bg-white text-slate-700">
-                      Compliance {detail.compliance_status}
-                    </Badge>
+                    <StatusBadge tone={leadStatusTone(detail.qualification_status)}>
+                      {statusLabel(detail.qualification_status)}
+                    </StatusBadge>
+                    <StatusBadge tone={complianceTone(detail.compliance_status)}>
+                      {`Compliance ${detail.compliance_status ?? t.common_not_set}`}
+                    </StatusBadge>
                     {detail.failed_outcome.status !== "none" ? (
-                      <Badge
-                        variant="outline"
-                        className={cn(
-                          "rounded-full",
-                          detail.failed_outcome.status === "delete_anonymized"
-                            ? "border-rose-200 bg-rose-50 text-rose-700"
-                            : "border-slate-200 bg-slate-100 text-slate-700"
-                        )}
-                      >
+                      <StatusBadge tone={failedOutcomeTone(detail.failed_outcome.status)}>
                         {detail.failed_outcome.status === "delete_anonymized"
                           ? "Deleted payload"
                           : "Failed lead archived"}
-                      </Badge>
+                      </StatusBadge>
                     ) : null}
                     {detail.converted_patient_id ? (
-                      <Badge variant="outline" className="rounded-full border-emerald-200 bg-emerald-50 text-emerald-700">
-                        Converted
-                      </Badge>
+                      <StatusBadge tone="success">Converted</StatusBadge>
                     ) : null}
                   </div>
                   <h2 className="mt-4 text-2xl font-semibold text-slate-950">
@@ -1130,9 +1233,7 @@ export function LeadsPage() {
                 <section className={cardClass("p-5")}>
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
-                      <h3 className="text-sm font-semibold text-slate-950">
-                        Process readiness
-                      </h3>
+                      <SectionTitle>Process readiness</SectionTitle>
                       <p className="mt-1 text-sm text-slate-600">
                         Qualification and conversion are now blocked by explicit gate checks.
                       </p>
@@ -1199,7 +1300,7 @@ export function LeadsPage() {
                       </p>
                       <ul className="mt-2 space-y-1 text-sm text-rose-700">
                         {detail.readiness.blocking_reasons.map((reason) => (
-                          <li key={reason}>• {reason}</li>
+                          <li key={reason}>- {reason}</li>
                         ))}
                       </ul>
                     </div>
@@ -1209,14 +1310,14 @@ export function LeadsPage() {
                 <section className={cardClass("p-5")}>
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
-                      <h3 className="text-sm font-semibold text-slate-950">Lead lifecycle</h3>
+                      <SectionTitle>Lead lifecycle</SectionTitle>
                       <p className="mt-1 text-sm text-slate-600">
                         Sequential lifecycle history for qualification, failed-lead handling and conversion.
                       </p>
                     </div>
-                    <Badge variant="outline" className="rounded-full border-slate-200 bg-white text-slate-700">
-                      Current stage {detail.lifecycle.current_stage}
-                    </Badge>
+                    <StatusBadge tone="neutral">
+                      {`Current stage ${detail.lifecycle.current_stage}`}
+                    </StatusBadge>
                   </div>
 
                   <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -1261,9 +1362,7 @@ export function LeadsPage() {
                   <section className={cardClass("p-5")}>
                     <div className="flex items-center justify-between gap-3">
                       <div>
-                        <h3 className="text-sm font-semibold text-slate-950">
-                          Qualification gate data
-                        </h3>
+                        <SectionTitle>Qualification gate data</SectionTitle>
                         <p className="mt-1 text-sm text-slate-600">
                           Fill missing compliance and identity fields directly from the lead workspace.
                         </p>
@@ -1275,6 +1374,7 @@ export function LeadsPage() {
                         <LeadField label={t.patients_email} htmlFor="lead-gate-email">
                           <Input
                             id="lead-gate-email"
+                            className={shellInputClassName}
                             value={gateForm.email}
                             onChange={(event) =>
                               setGateForm((current) =>
@@ -1288,6 +1388,7 @@ export function LeadsPage() {
                         <LeadField label={t.field_phone} htmlFor="lead-gate-phone">
                           <Input
                             id="lead-gate-phone"
+                            className={shellInputClassName}
                             value={gateForm.phone}
                             onChange={(event) =>
                               setGateForm((current) =>
@@ -1301,6 +1402,7 @@ export function LeadsPage() {
                         <LeadField label={t.providers_country} htmlFor="lead-gate-country">
                           <Input
                             id="lead-gate-country"
+                            className={shellInputClassName}
                             value={gateForm.country}
                             onChange={(event) =>
                               setGateForm((current) =>
@@ -1317,6 +1419,7 @@ export function LeadsPage() {
                         >
                           <Input
                             id="lead-gate-primary-language"
+                            className={shellInputClassName}
                             value={gateForm.primaryLanguage}
                             onChange={(event) =>
                               setGateForm((current) =>
@@ -1334,6 +1437,7 @@ export function LeadsPage() {
                           <Input
                             id="lead-gate-date-of-birth"
                             type="date"
+                            className={shellInputClassName}
                             value={gateForm.dateOfBirth}
                             onChange={(event) =>
                               setGateForm((current) =>
@@ -1345,52 +1449,63 @@ export function LeadsPage() {
                           />
                         </LeadField>
                         <LeadField label="Legal sex" htmlFor="lead-gate-legal-sex">
-                          <select
-                            id="lead-gate-legal-sex"
-                            value={gateForm.legalSex}
-                            onChange={(event) =>
+                          <ShadSelect
+                            value={gateForm.legalSex || "__unset__"}
+                            onValueChange={(value) =>
                               setGateForm((current) =>
                                 current
-                                  ? { ...current, legalSex: event.target.value }
+                                  ? {
+                                      ...current,
+                                      legalSex:
+                                        value && value !== "__unset__" ? value : "",
+                                    }
                                   : current
                               )
                             }
-                            className="h-10 w-full rounded-xl border border-input bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
                           >
-                            <option value="">{t.common_not_set}</option>
-                            {LEGAL_SEX_OPTIONS.map((option) => (
-                              <option key={option} value={option}>
-                                {option}
-                              </option>
-                            ))}
-                          </select>
+                            <SelectTrigger className={selectClassName}>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__unset__">{t.common_not_set}</SelectItem>
+                              {LEGAL_SEX_OPTIONS.map((option) => (
+                                <SelectItem key={option} value={option}>
+                                  {option}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </ShadSelect>
                         </LeadField>
                         <LeadField
                           label="Compliance status"
                           htmlFor="lead-gate-compliance-status"
                         >
-                          <select
-                            id="lead-gate-compliance-status"
+                          <ShadSelect
                             value={gateForm.complianceStatus}
-                            onChange={(event) =>
+                            onValueChange={(value) =>
                               setGateForm((current) =>
                                 current
-                                  ? { ...current, complianceStatus: event.target.value }
+                                  ? { ...current, complianceStatus: value ?? "" }
                                   : current
                               )
                             }
-                            className="h-10 w-full rounded-xl border border-input bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
                           >
-                            {COMPLIANCE_OPTIONS.map((option) => (
-                              <option key={option} value={option}>
-                                {option}
-                              </option>
-                            ))}
-                          </select>
+                            <SelectTrigger className={selectClassName}>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {COMPLIANCE_OPTIONS.map((option) => (
+                                <SelectItem key={option} value={option}>
+                                  {option}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </ShadSelect>
                         </LeadField>
                         <LeadField label={t.patients_notes} htmlFor="lead-gate-notes">
                           <Input
                             id="lead-gate-notes"
+                            className={shellInputClassName}
                             value={gateForm.notes}
                             onChange={(event) =>
                               setGateForm((current) =>
@@ -1454,9 +1569,7 @@ export function LeadsPage() {
                   <section className={cardClass("p-5")}>
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
-                        <h3 className="text-sm font-semibold text-slate-950">
-                          Failed-lead resolution
-                        </h3>
+                        <SectionTitle>Failed-lead resolution</SectionTitle>
                         <p className="mt-1 text-sm text-slate-600">
                           Use the controlled archive or delete-anonymize flow instead of setting archived directly.
                         </p>
@@ -1505,26 +1618,30 @@ export function LeadsPage() {
                       <form className="mt-4 space-y-4" onSubmit={handleResolveFailedLead}>
                         <div className="grid gap-4 md:grid-cols-2">
                           <LeadField label="Resolution" htmlFor="lead-failed-resolution">
-                            <select
-                              id="lead-failed-resolution"
+                            <ShadSelect
                               value={failedLeadForm.resolution}
-                              onChange={(event) =>
+                              onValueChange={(value) =>
                                 setFailedLeadForm((current) => ({
                                   ...current,
-                                  resolution: event.target.value as "archive" | "delete",
+                                  resolution: (value === "delete" ? "delete" : "archive"),
                                 }))
                               }
-                              className="h-10 w-full rounded-xl border border-input bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
                             >
-                              <option value="archive">Archive</option>
-                              {user?.role === "patient_manager" || user?.role === "ceo" ? (
-                                <option value="delete">Delete and anonymize</option>
-                              ) : null}
-                            </select>
+                              <SelectTrigger className={selectClassName}>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="archive">Archive</SelectItem>
+                                {user?.role === "patient_manager" || user?.role === "ceo" ? (
+                                  <SelectItem value="delete">Delete and anonymize</SelectItem>
+                                ) : null}
+                              </SelectContent>
+                            </ShadSelect>
                           </LeadField>
                           <LeadField label="Failure reason" htmlFor="lead-failed-reason">
                             <Input
                               id="lead-failed-reason"
+                              className={shellInputClassName}
                               value={failedLeadForm.reason}
                               onChange={(event) =>
                                 setFailedLeadForm((current) => ({
@@ -1547,7 +1664,7 @@ export function LeadsPage() {
                                 note: event.target.value,
                               }))
                             }
-                            className="min-h-[96px] w-full rounded-xl border border-input bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
+                            className={cn(textareaClassName, "min-h-[96px]")}
                             rows={4}
                           />
                         </LeadField>
@@ -1570,7 +1687,7 @@ export function LeadsPage() {
                 )}
 
                 <section className={cardClass("p-5")}>
-                  <h3 className="text-sm font-semibold text-slate-950">Contact and origin</h3>
+                  <SectionTitle>Contact and origin</SectionTitle>
                   <div className="mt-4 grid gap-4 md:grid-cols-2">
                     <DetailCard label={t.patients_email} value={detail.email || t.common_not_set} />
                     <DetailCard label={t.field_phone} value={detail.phone || t.common_not_set} />
@@ -1605,7 +1722,7 @@ export function LeadsPage() {
                 ) : null}
 
                 <section className={cardClass("p-5")}>
-                  <h3 className="text-sm font-semibold text-slate-950">Identity</h3>
+                  <SectionTitle>Identity</SectionTitle>
                   <div className="mt-4 grid gap-4 md:grid-cols-2">
                     <DetailCard
                       label="Full name"
@@ -1628,7 +1745,7 @@ export function LeadsPage() {
                 </section>
 
                 <section className={cardClass("p-5")}>
-                  <h3 className="text-sm font-semibold text-slate-950">Address</h3>
+                  <SectionTitle>Address</SectionTitle>
                   <div className="mt-4 grid gap-4 md:grid-cols-2">
                     <DetailCard label="Country" value={dashOrValue(detail.country)} />
                     <DetailCard label="City" value={dashOrValue(detail.city)} />
@@ -1645,7 +1762,7 @@ export function LeadsPage() {
                   detail.has_medical_records ||
                   detail.has_travel_documents !== null) ? (
                   <section className={cardClass("p-5")}>
-                    <h3 className="text-sm font-semibold text-slate-950">Eligibility & path</h3>
+                    <SectionTitle>Eligibility & path</SectionTitle>
                     <div className="mt-4 grid gap-4 md:grid-cols-2">
                       <DetailCard label="Location" value={dashOrValue(detail.location)} />
                       <DetailCard label="Location detailed" value={dashOrValue(detail.location_detailed)} />
@@ -1664,7 +1781,7 @@ export function LeadsPage() {
                   detail.primary_concern_text ||
                   detail.additional_concerns) ? (
                   <section className={cardClass("p-5")}>
-                    <h3 className="text-sm font-semibold text-slate-950">Health & concern</h3>
+                    <SectionTitle>Health & concern</SectionTitle>
                     <div className="mt-4 grid gap-4 md:grid-cols-2">
                       <DetailCard label="Currently in treatment" value={yesNo(detail.currently_in_treatment)} />
                       <DetailCard label="Health risk for travel" value={yesNo(detail.has_health_risk_for_travel)} />
@@ -1686,7 +1803,7 @@ export function LeadsPage() {
                   detail.has_insurance !== null ||
                   detail.insurance_covers_germany) ? (
                   <section className={cardClass("p-5")}>
-                    <h3 className="text-sm font-semibold text-slate-950">Services & insurance</h3>
+                    <SectionTitle>Services & insurance</SectionTitle>
                     <div className="mt-4 grid gap-4 md:grid-cols-2">
                       <DetailCard
                         label="Services"
@@ -1702,7 +1819,7 @@ export function LeadsPage() {
                   detail.visit_timing ||
                   detail.message) ? (
                   <section className={cardClass("p-5")}>
-                    <h3 className="text-sm font-semibold text-slate-950">Wrap up</h3>
+                    <SectionTitle>Wrap up</SectionTitle>
                     <div className="mt-4 grid gap-4 md:grid-cols-2">
                       <DetailCard label="Preferred location" value={dashOrValue(detail.preferred_location)} />
                       <DetailCard label="Visit timing" value={dashOrValue(detail.visit_timing)} />
@@ -1717,7 +1834,7 @@ export function LeadsPage() {
 
                 {detail.intake_source === "visitor_facade" ? (
                   <section className={cardClass("p-5")}>
-                    <h3 className="text-sm font-semibold text-slate-950">Consents</h3>
+                    <SectionTitle>Consents</SectionTitle>
                     <div className="mt-4 grid gap-4 md:grid-cols-2">
                       <DetailCard label="Automated contact" value={yesNo(detail.consent_automated_contact)} />
                       <DetailCard label="Healthcare" value={yesNo(detail.consent_healthcare)} />
@@ -1730,9 +1847,9 @@ export function LeadsPage() {
                 ) : null}
 
                 <section className={cardClass("p-5")}>
-                  <h3 className="text-sm font-semibold text-slate-950">
-                    Attachments ({detail.attachments?.length ?? 0})
-                  </h3>
+                  <SectionTitle>
+                    {`Attachments (${detail.attachments?.length ?? 0})`}
+                  </SectionTitle>
                   {detail.attachments && detail.attachments.length > 0 ? (
                     <ul className="mt-4 space-y-2">
                       {detail.attachments.map((file) => (
@@ -1743,7 +1860,7 @@ export function LeadsPage() {
                           <div>
                             <div className="font-medium text-slate-800">{file.file_name}</div>
                             <div className="text-xs text-slate-500">
-                              {dashOrValue(file.content_type)} · {formatSize(file.size_bytes)}
+                              {dashOrValue(file.content_type)} - {formatSize(file.size_bytes)}
                             </div>
                           </div>
                           <Button
@@ -1791,7 +1908,7 @@ export function LeadsPage() {
                 Select a lead from the queue.
               </div>
             )}
-          </div>
+          </AdminSheetScaffold>
         </SheetContent>
       </Sheet>
 
@@ -1803,23 +1920,23 @@ export function LeadsPage() {
       >
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>{l("Lead in Patienten umwandeln?", "Преобразовать лида в пациента?", "Convert lead to patient?")}</DialogTitle>
+            <DialogTitle>{l("Lead in Patienten umwandeln?", "Convert lead to patient?", "Convert lead to patient?")}</DialogTitle>
             <DialogDescription>
               {pendingConvertLead ? (
                 <>
-                  {l("Dadurch wird eine Patientenakte für", "Будет создана карточка пациента для", "This will create a patient record for")}{" "}
+                  {l("Dadurch wird eine Patientenakte fuer", "This creates a patient record for", "This will create a patient record for")}{" "}
                   <span className="font-medium text-slate-900">
                     {pendingConvertLead.first_name} {pendingConvertLead.last_name}
                   </span>
                   {l(
-                    ", Sie als Patientenmanager zuweisen und die standardmäßige Workflow-Checkliste vorbereiten. Der Lead selbst wechselt in den Status",
-                    ", вам будет назначена роль менеджера пациента, и будет создан стандартный workflow-checklist. Сам лид перейдёт в статус",
+                    ", Sie als Patientenmanager zuweisen und die standardmaessige Workflow-Checkliste vorbereiten. Der Lead selbst wechselt in den Status",
+                    ", assign patient manager ownership and prepare the default workflow checklist. The lead then moves to status",
                     ", assign you as the patient manager, and bootstrap the default workflow checklist. The lead itself moves to the",
                   )}{" "}
                   <span className="font-mono text-xs">{l("converted", "converted", "converted")}</span>{" "}
                   {l(
-                    "umgeschaltet. Diese Aktion kann nicht rückgängig gemacht werden.",
-                    "и это действие нельзя отменить.",
+                    "umgeschaltet. Diese Aktion kann nicht rueckgaengig gemacht werden.",
+                    "this action cannot be undone.",
                     "state. This action cannot be undone.",
                   )}
                 </>
@@ -1830,7 +1947,7 @@ export function LeadsPage() {
             <DialogClose
               render={
                 <Button type="button" variant="outline" disabled={Boolean(actionBusy)}>
-                  {l("Abbrechen", "Отмена", "Cancel")}
+                  {l("Abbrechen", "Cancel", "Cancel")}
                 </Button>
               }
             />
@@ -1846,7 +1963,7 @@ export function LeadsPage() {
               {pendingConvertLead && actionBusy === `convert:${pendingConvertLead.id}` ? (
                 <LoaderCircle className="mr-2 size-4 animate-spin" />
               ) : null}
-              {l("Patient anlegen", "Создать пациента", "Create patient")}
+              {l("Patient anlegen", "Create patient", "Create patient")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1855,39 +1972,42 @@ export function LeadsPage() {
   );
 }
 
-function FilterField({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <label className="block space-y-2">
-      <span className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">
-        {label}
-      </span>
-      {children}
-    </label>
-  );
-}
-
 function LeadField({
   label,
   htmlFor,
   children,
 }: {
-  label: string;
+  label: ReactNode;
   htmlFor?: string;
   children: ReactNode;
 }) {
   return (
-    <div className="space-y-2">
-      <Label htmlFor={htmlFor}>{label}</Label>
+    <div className="space-y-1.5">
+      <label htmlFor={htmlFor} className={tokens.text.label}>
+        {label}
+      </label>
       {children}
     </div>
   );
 }
 
+function SectionTitle({ children }: { children: ReactNode }) {
+  return (
+    <h3 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
+      <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
+      <span>{children}</span>
+    </h3>
+  );
+}
+
 function DetailCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl bg-slate-50 px-4 py-4">
-      <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{label}</p>
-      <p className="mt-2 text-sm font-medium text-slate-900">{value}</p>
+    <div className={cn("rounded-xl px-4 py-4", tokens.surface.mutedCard)}>
+      <p className={tokens.text.eyebrow}>{label}</p>
+      <p className="mt-2 text-sm text-foreground">{value}</p>
     </div>
   );
 }
+
+
+

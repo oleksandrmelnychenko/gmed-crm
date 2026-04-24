@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { computeLeadConversionGate } from "./leads.helpers";
+import { computeLeadConversionGate, filterLeadsByContact } from "./leads.helpers";
 import type { Lead } from "@/lib/api/types";
 
 function lead(overrides: Partial<Lead> = {}): Lead {
@@ -102,5 +102,57 @@ describe("computeLeadConversionGate", () => {
     );
     expect(gate.canConvertRole).toBe(false);
     expect(gate.disabledReason).toBeNull();
+  });
+});
+
+describe("filterLeadsByContact", () => {
+  const rows = [
+    lead({
+      id: "lead-1",
+      first_name: "Anna",
+      email: "anna@example.com",
+      phone: "+49 155 101",
+    }),
+    lead({
+      id: "lead-2",
+      first_name: "Bob",
+      email: "bob@sample.com",
+      phone: "+49 155 202",
+    }),
+    lead({
+      id: "lead-3",
+      first_name: "Cara",
+      email: null,
+      phone: null,
+    }),
+  ];
+
+  it("returns all leads when both filters are empty", () => {
+    const out = filterLeadsByContact(rows, { email: "", phone: "" });
+    expect(out).toHaveLength(3);
+    expect(out.map((row) => row.id)).toEqual(["lead-1", "lead-2", "lead-3"]);
+  });
+
+  it("filters by email case-insensitively and trims input", () => {
+    const out = filterLeadsByContact(rows, { email: "  ANNA@EXAMPLE  ", phone: "" });
+    expect(out.map((row) => row.id)).toEqual(["lead-1"]);
+  });
+
+  it("filters by phone case-insensitively and trims input", () => {
+    const out = filterLeadsByContact(rows, { email: "", phone: " 155 202 " });
+    expect(out.map((row) => row.id)).toEqual(["lead-2"]);
+  });
+
+  it("applies email and phone filters together (AND semantics)", () => {
+    const out = filterLeadsByContact(rows, {
+      email: "sample.com",
+      phone: "155 202",
+    });
+    expect(out.map((row) => row.id)).toEqual(["lead-2"]);
+  });
+
+  it("handles leads with null contact values safely", () => {
+    const out = filterLeadsByContact(rows, { email: "none@none", phone: "000" });
+    expect(out).toHaveLength(0);
   });
 });

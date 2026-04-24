@@ -49,3 +49,21 @@ export function computeLeadConversionGate(
       : null;
   return { canConvertRole, canConvert, disabledReason };
 }
+
+export function filterLeadsByContact(
+  leads: readonly Lead[],
+  filters: { email: string; phone: string },
+): Lead[] {
+  const emailNeedle = filters.email.trim().toLowerCase();
+  const phoneNeedle = filters.phone.trim().toLowerCase();
+
+  if (!emailNeedle && !phoneNeedle) return [...leads];
+
+  return leads.filter((lead) => {
+    const leadEmail = (lead.email ?? "").toLowerCase();
+    const leadPhone = (lead.phone ?? "").toLowerCase();
+    const emailMatches = !emailNeedle || leadEmail.includes(emailNeedle);
+    const phoneMatches = !phoneNeedle || leadPhone.includes(phoneNeedle);
+    return emailMatches && phoneMatches;
+  });
+}
