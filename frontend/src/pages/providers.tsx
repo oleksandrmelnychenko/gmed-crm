@@ -30,11 +30,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
+  AdminSheetScaffold,
+  SheetActionsFooter,
+  SheetFormFooter,
+} from "@/components/admin-page-patterns";
+import {
   Sheet,
   SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
 } from "@/components/ui/sheet";
 import {
   Select as ShadSelect,
@@ -57,7 +59,12 @@ import {
   type ColumnFilterKind,
   type SortDir,
 } from "@/components/data-table";
-import { PageHeader } from "@/components/ui-shell";
+import {
+  PageHeader,
+  inputClass as shellInputClassName,
+  selectClass as shellSelectClassName,
+  textareaClass as shellTextareaClass,
+} from "@/components/ui-shell";
 
 type ProviderType = "medical" | "non_medical";
 
@@ -252,8 +259,8 @@ const DEFAULT_FILTERS: ProviderFilters = {
   ratingGte: "",
 };
 
-const textareaClassName =
-  "min-h-[104px] w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
+const selectTriggerClassName = shellSelectClassName;
+const textareaClassName = shellTextareaClass;
 
 type ProviderColumnKey =
   | "status"
@@ -1292,8 +1299,7 @@ function ProvidersPage() {
               <Button
                 type="button"
                 variant="outline"
-                size="sm"
-                className="h-8 rounded-lg gap-1.5"
+                className="h-9 rounded-lg px-3.5"
                 onClick={() => {
                   refreshList();
                   if (detailOpen && selectedId) {
@@ -1301,17 +1307,16 @@ function ProvidersPage() {
                   }
                 }}
               >
-                <RefreshCw className="size-3.5" />
+                <RefreshCw className="size-4" />
                 {l("Aktualisieren", "Обновить", "Refresh")}
               </Button>
               {permissions.canManageRegistry ? (
                 <Button
                   type="button"
-                  size="sm"
-                  className="h-8 rounded-lg gap-1.5"
+                  className="h-9 rounded-lg px-3.5"
                   onClick={openCreateSheet}
                 >
-                  <Plus className="size-3.5" />
+                  <Plus className="size-4" />
                   {t.providers_new}
                 </Button>
               ) : null}
@@ -1565,13 +1570,21 @@ function ProvidersPage() {
       </div>
 
       <Sheet open={createOpen} onOpenChange={setCreateOpen}>
-        <SheetContent side="right" className="w-full sm:max-w-[760px]">
-          <form onSubmit={handleCreateProvider} className="flex flex-col flex-1 min-h-0">
-            <SheetHeader className="shrink-0 border-b border-border/60 px-4 pt-3 pb-3">
-              <SheetTitle>{l("Anbieter anlegen", "Создать провайдера", "Create provider")}</SheetTitle>
-              <SheetDescription>{t.providers_create_description}</SheetDescription>
-            </SheetHeader>
-            <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
+          <form onSubmit={handleCreateProvider} className="flex flex-1 min-h-0 flex-col">
+            <AdminSheetScaffold
+              title={t.providers_new}
+              description={t.providers_create_description}
+              footer={(
+                <SheetFormFooter
+                  cancelLabel={t.common_cancel}
+                  submitLabel={t.providers_new}
+                  submittingLabel={t.patients_creating}
+                  submitting={createBusy}
+                  onCancel={() => setCreateOpen(false)}
+                />
+              )}
+            >
               {createError ? <Banner tone="error">{createError}</Banner> : null}
               <ProviderFormFields
                 form={createForm}
@@ -1580,29 +1593,7 @@ function ProvidersPage() {
                 }
                 forceNonMedical={permissions.forceNonMedical}
               />
-            </div>
-            <div className="shrink-0 flex justify-end gap-2 border-t border-border/60 px-4 py-3 bg-popover">
-              <Button
-                type="button"
-                variant="outline"
-                className="h-9 rounded-lg"
-                onClick={() => setCreateOpen(false)}
-              >
-                {l("Abbrechen", "Отмена", "Cancel")}
-              </Button>
-              <Button
-                type="submit"
-                className="h-9 rounded-lg gap-1.5"
-                disabled={createBusy}
-              >
-                {createBusy ? (
-                  <LoaderCircle className="size-4 animate-spin" />
-                ) : (
-                  <Plus className="size-4" />
-                )}
-                {createBusy ? t.patients_creating : t.providers_new}
-              </Button>
-            </div>
+            </AdminSheetScaffold>
           </form>
         </SheetContent>
       </Sheet>
@@ -1623,19 +1614,40 @@ function ProvidersPage() {
           }
         }}
       >
-        <SheetContent side="right" className="w-full sm:max-w-[880px]">
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[880px]">
           {detailBusy ? (
             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
               <LoaderCircle className="mr-2 size-4 animate-spin" />
               {l("Anbieter wird geladen", "Загрузка провайдера", "Loading provider")}
             </div>
           ) : detail ? (
-            <form onSubmit={handleUpdateProvider} className="flex flex-col flex-1 min-h-0">
-              <SheetHeader className="shrink-0 border-b border-border/60 px-4 pt-3 pb-3">
-                <SheetTitle>{detail.name || t.providers_detail}</SheetTitle>
-              </SheetHeader>
-
-              <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+            <form onSubmit={handleUpdateProvider} className="flex flex-1 min-h-0 flex-col">
+              <AdminSheetScaffold
+                title={detail.name || t.providers_detail}
+                description={t.providers_subtitle}
+                footer={(
+                  <SheetActionsFooter>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-9 rounded-lg"
+                      onClick={() => setDetailOpen(false)}
+                    >
+                      {t.common_cancel}
+                    </Button>
+                    {permissions.canManageRegistry ? (
+                      <Button
+                        type="submit"
+                        className="h-9 rounded-lg gap-1.5"
+                        disabled={providerBusy}
+                      >
+                        {providerBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                        {providerBusy ? t.patients_saving : t.common_save}
+                      </Button>
+                    ) : null}
+                  </SheetActionsFooter>
+                )}
+              >
                 {detailError ? <Banner tone="error">{detailError}</Banner> : null}
                 {providerError ? <Banner tone="error">{providerError}</Banner> : null}
 
@@ -1725,28 +1737,7 @@ function ProvidersPage() {
                   }
                   onOpenOrder={(orderId) => staffGo(`/orders?order=${orderId}`)}
                 />
-              </div>
-
-              <div className="shrink-0 flex justify-end gap-2 border-t border-border/60 px-4 py-3 bg-popover">
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-9 rounded-lg"
-                  onClick={() => setDetailOpen(false)}
-                >
-                  {t.common_cancel}
-                </Button>
-                {permissions.canManageRegistry ? (
-                  <Button
-                    type="submit"
-                    className="h-9 rounded-lg gap-1.5"
-                    disabled={providerBusy}
-                  >
-                    {providerBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                    {providerBusy ? t.patients_saving : t.common_save}
-                  </Button>
-                ) : null}
-              </div>
+              </AdminSheetScaffold>
             </form>
           ) : detailError ? (
             <div className="p-4">
@@ -2552,7 +2543,7 @@ function ProviderFormFields({
           <Input
             value={form.name}
             onChange={(event) => onChange("name", event.target.value)}
-            className="h-10 rounded-xl bg-slate-50"
+            className={shellInputClassName}
             placeholder={t.providers_title}
             required
             disabled={disabled}
@@ -2563,7 +2554,7 @@ function ProviderFormFields({
           <Input
             value={form.legalName}
             onChange={(event) => onChange("legalName", event.target.value)}
-            className="h-10 rounded-xl bg-slate-50"
+            className={shellInputClassName}
             placeholder={l("Rechtsträger / Vertragsname", "Юридическое лицо / название договора", "Legal entity / contract name")}
             disabled={disabled}
           />
@@ -2571,7 +2562,7 @@ function ProviderFormFields({
 
         <Field label={t.providers_type}>
           <ShadSelect value={forceNonMedical ? "non_medical" : form.providerType} onValueChange={(v) => onChange("providerType", v ?? "medical")} disabled={disabled || forceNonMedical}>
-            <SelectTrigger className="w-full h-10 rounded-xl bg-slate-50">
+            <SelectTrigger className={selectTriggerClassName}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -2587,7 +2578,7 @@ function ProviderFormFields({
           <Input
             value={form.taxId}
             onChange={(event) => onChange("taxId", event.target.value)}
-            className="h-10 rounded-xl bg-slate-50"
+            className={shellInputClassName}
             placeholder={l("USt-IdNr. / Steuer-ID", "VAT / налоговый ID", "VAT / tax ID")}
             disabled={disabled}
           />
@@ -2597,7 +2588,7 @@ function ProviderFormFields({
           <Input
             value={form.fachbereich}
             onChange={(event) => onChange("fachbereich", event.target.value)}
-            className="h-10 rounded-xl bg-slate-50"
+            className={shellInputClassName}
             placeholder={t.providers_fachbereich}
             disabled={disabled}
           />
@@ -2607,7 +2598,7 @@ function ProviderFormFields({
           <Input
             value={form.website}
             onChange={(event) => onChange("website", event.target.value)}
-            className="h-10 rounded-xl bg-slate-50"
+            className={shellInputClassName}
             placeholder={l("https://...", "https://...", "https://...")}
             disabled={disabled}
           />
@@ -2618,7 +2609,7 @@ function ProviderFormFields({
         <Input
           value={form.addressStreet}
           onChange={(event) => onChange("addressStreet", event.target.value)}
-          className="h-10 rounded-xl bg-slate-50"
+          className={shellInputClassName}
           disabled={disabled}
         />
       </Field>
@@ -2628,7 +2619,7 @@ function ProviderFormFields({
           <Input
             value={form.addressCity}
             onChange={(event) => onChange("addressCity", event.target.value)}
-            className="h-10 rounded-xl bg-slate-50"
+            className={shellInputClassName}
             disabled={disabled}
           />
         </Field>
@@ -2636,7 +2627,7 @@ function ProviderFormFields({
           <Input
             value={form.addressZip}
             onChange={(event) => onChange("addressZip", event.target.value)}
-            className="h-10 rounded-xl bg-slate-50"
+            className={shellInputClassName}
             disabled={disabled}
           />
         </Field>
@@ -2644,7 +2635,7 @@ function ProviderFormFields({
           <Input
             value={form.addressCountry}
             onChange={(event) => onChange("addressCountry", event.target.value)}
-            className="h-10 rounded-xl bg-slate-50"
+            className={shellInputClassName}
             disabled={disabled}
           />
         </Field>
@@ -2655,7 +2646,7 @@ function ProviderFormFields({
           <Input
             value={form.phone}
             onChange={(event) => onChange("phone", event.target.value)}
-            className="h-10 rounded-xl bg-slate-50"
+            className={shellInputClassName}
             disabled={disabled}
           />
         </Field>
@@ -2664,7 +2655,7 @@ function ProviderFormFields({
             type="email"
             value={form.email}
             onChange={(event) => onChange("email", event.target.value)}
-            className="h-10 rounded-xl bg-slate-50"
+            className={shellInputClassName}
             disabled={disabled}
           />
         </Field>
@@ -2711,7 +2702,7 @@ function DoctorFormFields({
           <Input
             value={form.name}
             onChange={(event) => onChange("name", event.target.value)}
-            className="h-10 rounded-xl bg-slate-50"
+            className={shellInputClassName}
             required
           />
         </Field>
@@ -2719,7 +2710,7 @@ function DoctorFormFields({
           <Input
             value={form.title}
             onChange={(event) => onChange("title", event.target.value)}
-            className="h-10 rounded-xl bg-slate-50"
+            className={shellInputClassName}
             placeholder={t.providers_doctor_title}
           />
         </Field>
@@ -2730,14 +2721,14 @@ function DoctorFormFields({
           <Input
             value={form.fachbereich}
             onChange={(event) => onChange("fachbereich", event.target.value)}
-            className="h-10 rounded-xl bg-slate-50"
+            className={shellInputClassName}
           />
         </Field>
         <Field label={l("Sprachen", "Языки", "Languages")}>
           <Input
             value={form.languages}
             onChange={(event) => onChange("languages", event.target.value)}
-            className="h-10 rounded-xl bg-slate-50"
+            className={shellInputClassName}
             placeholder={l("de, en, uk", "de, en, uk", "de, en, uk")}
           />
         </Field>
@@ -2745,7 +2736,7 @@ function DoctorFormFields({
           <Input
             value={form.phone}
             onChange={(event) => onChange("phone", event.target.value)}
-            className="h-10 rounded-xl bg-slate-50"
+            className={shellInputClassName}
           />
         </Field>
       </div>
@@ -2756,21 +2747,21 @@ function DoctorFormFields({
             type="email"
             value={form.email}
             onChange={(event) => onChange("email", event.target.value)}
-            className="h-10 rounded-xl bg-slate-50"
+            className={shellInputClassName}
           />
         </Field>
         <Field label={l("Lizenznummer", "Номер лицензии", "License number")}>
           <Input
             value={form.licenseNumber}
             onChange={(event) => onChange("licenseNumber", event.target.value)}
-            className="h-10 rounded-xl bg-slate-50"
+            className={shellInputClassName}
           />
         </Field>
         <Field label={l("Lizenzland", "Страна лицензии", "Licensing country")}>
           <Input
             value={form.licensingCountry}
             onChange={(event) => onChange("licensingCountry", event.target.value)}
-            className="h-10 rounded-xl bg-slate-50"
+            className={shellInputClassName}
           />
         </Field>
       </div>
@@ -2781,7 +2772,7 @@ function DoctorFormFields({
             type="date"
             value={form.licensingValidUntil}
             onChange={(event) => onChange("licensingValidUntil", event.target.value)}
-            className="h-10 rounded-xl bg-slate-50"
+            className={shellInputClassName}
           />
         </Field>
         <Field label={t.providers_notes}>
@@ -2812,7 +2803,7 @@ function ServiceFormFields({
           <Input
             value={form.serviceName}
             onChange={(event) => onChange("serviceName", event.target.value)}
-            className="h-10 rounded-xl bg-slate-50"
+            className={shellInputClassName}
             required
           />
         </Field>
@@ -2823,7 +2814,7 @@ function ServiceFormFields({
             step="0.01"
             value={form.price}
             onChange={(event) => onChange("price", event.target.value)}
-            className="h-10 rounded-xl bg-slate-50"
+            className={shellInputClassName}
             required
           />
         </Field>
@@ -2843,7 +2834,7 @@ function ServiceFormFields({
           <Input
             value={form.currency}
             onChange={(event) => onChange("currency", event.target.value.toUpperCase())}
-            className="h-10 rounded-xl bg-slate-50"
+            className={shellInputClassName}
           />
         </Field>
         <Field label={t.providers_service_valid_from}>
@@ -2851,7 +2842,7 @@ function ServiceFormFields({
             type="date"
             value={form.validFrom}
             onChange={(event) => onChange("validFrom", event.target.value)}
-            className="h-10 rounded-xl bg-slate-50"
+            className={shellInputClassName}
           />
         </Field>
         <Field label={t.providers_service_valid_to}>
@@ -2859,7 +2850,7 @@ function ServiceFormFields({
             type="date"
             value={form.validTo}
             onChange={(event) => onChange("validTo", event.target.value)}
-            className="h-10 rounded-xl bg-slate-50"
+            className={shellInputClassName}
           />
         </Field>
       </div>
@@ -2868,3 +2859,4 @@ function ServiceFormFields({
 }
 
 export { ProvidersPage };
+
