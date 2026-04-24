@@ -325,6 +325,15 @@ function CreateAppointmentSheet({
     }
   }
 
+  function sectionTitle(label: string) {
+    return (
+      <h3 className="inline-flex items-center gap-2 text-[13px] font-semibold tracking-tight text-foreground">
+        <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
+        <span>{label}</span>
+      </h3>
+    );
+  }
+
   return (
     <AppointmentEditorSheet
       open={open}
@@ -362,6 +371,7 @@ function CreateAppointmentSheet({
       <div className="space-y-4">
         {error ? <Banner tone="error" withIcon>{error}</Banner> : null}
         <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
+                {sectionTitle(appointmentText("Termin und Zeit", "Прием и время", "Appointment and timing"))}
                 <div className="grid gap-4 md:grid-cols-3">
                   <Field compact label={t.orders_patient}>
                     <ShadSelect
@@ -619,6 +629,7 @@ function CreateAppointmentSheet({
                 </div>
         </section>
         <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
+                {sectionTitle(appointmentText("Provider und Arzt", "Провайдер и врач", "Provider and doctor"))}
                 <div className="grid gap-4 md:grid-cols-2">
                   <Field compact label={t.common_provider}>
                     <ShadSelect
@@ -672,6 +683,7 @@ function CreateAppointmentSheet({
                 </div>
         </section>
         <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
+                {sectionTitle(appointmentText("Koordination und Notizen", "Координация и заметки", "Coordination and notes"))}
                 <div className="grid gap-4 md:grid-cols-2">
                   <Field compact label={t.patients_assign_owner}>
                     <ShadSelect

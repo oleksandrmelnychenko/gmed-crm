@@ -38,6 +38,7 @@ import {
 } from "@/components/ui/sheet";
 import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
 import { formatAdminDateTime } from "@/pages/admin-pages.helpers";
 import {
   Banner,
@@ -411,8 +412,9 @@ export function AdminActivityPage() {
             {selectedActivity ? (
               <>
                 <section className={`space-y-3 rounded-xl p-3.5 ${tokens.surface.softCard}`}>
-                  <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
-                    {t.activity_details}
+                  <h3 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
+                    <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
+                    <span>{t.activity_details}</span>
                   </h3>
 
                   <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -449,8 +451,9 @@ export function AdminActivityPage() {
                 </section>
 
                 <section className={`space-y-3 rounded-xl p-3.5 ${tokens.surface.softCard}`}>
-                  <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
-                    Payload
+                  <h3 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
+                    <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
+                    <span>Payload</span>
                   </h3>
                   <pre className="overflow-x-auto rounded-lg border border-border/50 bg-card/60 p-3 text-xs leading-6 text-muted-foreground">
                     {prettyContext(selectedActivity.context)}
