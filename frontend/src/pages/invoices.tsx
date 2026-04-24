@@ -8,13 +8,37 @@ import {
   type ReactNode,
 } from "react";
 import { useSearchParams } from "react-router-dom";
-import { CalendarClock, ChevronRight, Download, LoaderCircle, Plus, RefreshCw, Search, Wallet } from "lucide-react";
+import { CalendarClock, Download, LoaderCircle, Plus, RefreshCw, Search, Wallet } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
+import {
+  AdminInlineMetric,
+  AdminSheetScaffold,
+  AdminTableCard,
+  AdminToolbar,
+  SheetFormFooter,
+} from "@/components/admin-page-patterns";
+import { DataTable } from "@/components/data-table/data-table";
+import type { ColumnDef } from "@/components/data-table/types";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import {
+  Select as ShadSelect,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import {
+  Banner as ShellBanner,
+  PageHeader,
+  StatusBadge,
+  type StatusTone,
+  inputClass as shellInputClassName,
+  selectClass as shellSelectClassName,
+  textareaClass as shellTextareaClass,
+  tokens,
+} from "@/components/ui-shell";
 import { apiFetch, buildApiUrl, getAccessToken } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
@@ -130,6 +154,7 @@ type AccountingLedgerPayload = {
   }>;
   entries: AccountingEntry[];
 };
+type AccountingMonthlyItem = AccountingLedgerPayload["monthly"][number];
 
 type PatientOption = { id: string; patient_id: string; first_name?: string; last_name?: string };
 type OrderOption = { id: string; order_number: string; patient_id: string; patient_name: string; patient_pid: string };
@@ -152,8 +177,8 @@ const EMPTY_ACCOUNTING_SUMMARY: AccountingLedgerPayload["summary"] = {
   cost_passthrough_revenue_gross: "0.00",
   provider_expense_gross: "0.00",
 };
-const selectClassName = "h-10 w-full rounded-xl border border-input bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
-const textareaClassName = "min-h-[104px] w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
+const selectClassName = shellSelectClassName;
+const textareaClassName = shellTextareaClass;
 
 function permissions(role?: string) {
   return {
@@ -223,10 +248,17 @@ function formatDateTime(
   catch { return value; }
 }
 
-function formatCurrency(value: unknown) {
+function formatCurrency(value: unknown, locale = "de-DE") {
   const numeric = typeof value === "number" ? value : Number(value ?? 0);
-  if (!Number.isFinite(numeric)) return "EUR 0.00";
-  return new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(numeric);
+  if (!Number.isFinite(numeric)) {
+    return new Intl.NumberFormat(locale, {
+      style: "currency",
+      currency: "EUR",
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(0);
+  }
+  return new Intl.NumberFormat(locale, { style: "currency", currency: "EUR", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(numeric);
 }
 
 async function fetchProtectedBlob(path: string) {
@@ -282,23 +314,35 @@ async function downloadAccountingLedgerExport(year: string) {
   URL.revokeObjectURL(url);
 }
 
-function statusBadgeClass(status: string) {
+function statusBadgeClass(status: string): StatusTone {
   switch (status) {
-    case "paid": return "border-emerald-200 bg-emerald-50 text-emerald-700";
-    case "partially_paid": return "border-amber-200 bg-amber-50 text-amber-700";
-    case "sent": return "border-sky-200 bg-sky-50 text-sky-700";
+    case "paid": return "success";
+    case "partially_paid": return "warning";
+    case "sent": return "info";
     case "overdue":
-    case "cancelled": return "border-rose-200 bg-rose-50 text-rose-700";
-    default: return "border-slate-200 bg-slate-50 text-slate-700";
+    case "cancelled": return "error";
+    default: return "neutral";
   }
 }
 
-function typeBadgeClass(invoiceType: string) {
+function invoiceTypeTone(invoiceType: string): StatusTone {
   switch (invoiceType) {
-    case "advance": return "border-violet-200 bg-violet-50 text-violet-700";
-    case "interim": return "border-sky-200 bg-sky-50 text-sky-700";
-    case "final": return "border-emerald-200 bg-emerald-50 text-emerald-700";
-    default: return "border-slate-200 bg-slate-50 text-slate-700";
+    case "advance": return "warning";
+    case "interim": return "info";
+    case "final": return "success";
+    default: return "neutral";
+  }
+}
+
+function dunningLevelTone(level: string): StatusTone {
+  switch (level) {
+    case "first":
+      return "warning";
+    case "second":
+    case "collections":
+      return "error";
+    default:
+      return "neutral";
   }
 }
 
@@ -321,249 +365,126 @@ function StaffInvoicesPage() {
   const { user } = useAuth();
   const access = permissions(user?.role);
   const locale = lang === "de" ? "de-DE" : "ru-RU";
-  const text = lang === "de"
-    ? {
-        accessDenied:
-          "Rechnungen sind nur für CEO, CEO-Assistenz, Patientenmanager und Abrechnung verfügbar.",
-        workspaceKicker: "Abrechnungsarbeitsbereich",
-        workspaceDescription:
-          "Voraus-, Zwischen- und Schlussrechnungen, die aus Live-Snapshots der Angebote erzeugt werden.",
-        refresh: "Aktualisieren",
-        newInvoice: "Neue Rechnung",
-        grossTotal: "Gesamt brutto",
-        grossTotalDescription: "Aktuell sichtbares Rechnungsvolumen",
-        openBalance: "Offener Saldo",
-        openBalanceDescription: "Noch fälliger Betrag",
-        quotesReady: "Verfügbare Angebote",
-        quotesReadyDescription: "Verfügbare Angebotskontexte",
-        accountingTitle: "Buchhaltungsledger",
-        accountingDescription:
-          "EÜR-Read-Model auf Cash-Basis aus bezahlten Rechnungen und beglichenen externen Rechnungen.",
-        refreshLedger: "Ledger aktualisieren",
-        exportCsv: "CSV exportieren",
-        cashIncome: "Zahlungseingänge",
-        cashExpense: "Zahlungsausgänge",
-        euerSurplus: "EÜR-Überschuss",
-        costPassthroughRevenue: "Durchlaufkosten-Umsatz",
-        noAccountingEntries: "Keine Buchungszeilen",
-        noAccountingEntriesDescription:
-          "Sobald Rechnungen bezahlt oder externe Rechnungen beglichen werden, erscheinen hier Cash-Ledger-Zeilen.",
-        noOrder: "Kein Auftrag",
-        noPatient: "Kein Patient",
-        net: "Netto",
-        gross: "Brutto",
-        monthlyEuer: "Monatliche EÜR",
-        noCashMovement: "Für {year} wurde noch kein Geldfluss erfasst.",
-        income: "Einnahmen",
-        expense: "Ausgaben",
-        surplus: "Überschuss",
-        searchPlaceholder: "Nach Rechnung, Angebot, Auftrag oder Patient suchen",
-        allOrders: "Alle Aufträge",
-        allQuotes: "Alle Angebote",
-        emptyInvoicesDescription:
-          "Erstelle die erste Rechnung aus einem Live-Snapshot eines Angebots.",
-        balance: "Saldo",
-        pageLabel: "Seite",
-        invoiceCount: "Rechnungen",
-        previous: "Zurück",
-        next: "Weiter",
-        createInvoiceDescription:
-          "Erzeuge eine Voraus-, Zwischen- oder Schlussrechnung aus einem Angebots-Snapshot.",
-        selectedQuoteSnapshot: "Ausgewählter Angebots-Snapshot",
-        chooseQuote: "Angebot auswählen",
-        notes: "Notizen",
-        billingNotePlaceholder: "Abrechnungshinweis oder Zahlungsanweisung",
-        detailSheetDescription:
-          "Summen, Zahlungsstatus und Positions-Snapshot für die ausgewählte Rechnung.",
-        noInvoiceSelected: "Keine Rechnung ausgewählt",
-        noInvoiceSelectedDescription:
-          "Wähle eine Rechnungskarte aus, um den Abrechnungs-Workspace zu öffnen.",
-        invoiceOverview: "Rechnungsübersicht",
-        invoiceOverviewDescription:
-          "Kaufmännische Summen und verknüpfter Angebots-/Auftragskontext.",
-        previewPdf: "PDF-Vorschau",
-        downloadPdf: "PDF herunterladen",
-        balanceDue: "Offener Betrag",
-        linkedContextDescription:
-          "Mit dem aktuellen Rechnungskontext direkt zu Patient, Auftrag, Angebot oder Dokumenten springen.",
-        quotes: "Angebote",
-        documents: "Dokumente",
-        saveInvoice: "Rechnung speichern",
-        dunningTitle: "Mahnwesen",
-        dunningDescription:
-          "Verlauf von erster Mahnung, zweiter Mahnung und Inkasso-Eskalation.",
-        noDunningEvents: "Keine Mahnereignisse",
-        noDunningEventsDescription:
-          "Sobald die Rechnung überfällig ist, kann die Abrechnung hier die erste Mahnung auslösen.",
-        nextEscalation: "Nächste Eskalation",
-        completed: "Abgeschlossen",
-        balancePrefix: "Saldo",
-        dunningNote: "Mahnhinweis",
-        dunningPlaceholder: "Erinnerungstext oder interner Abrechnungshinweis",
-        noFurtherEscalation: "Keine weitere Eskalation",
-        lineItems: "Positionen",
-        lineItemsDescription: "Rechnungssnapshot zum Zeitpunkt der Erstellung.",
-        noLineItems: "Keine Positionen",
-        noLineItemsDescription:
-          "Diese Rechnung enthält noch keine materialisierten Positionen.",
-        quantity: "Menge",
-        unit: "Einheit",
-        supportingDocuments: "Belege",
-        supportingDocumentsDescription:
-          "Belege und Provider-Rechnungen, die mit Durchlaufkosten-Positionen verknüpft sind.",
-        noSupportingDocuments: "Keine Belege",
-        noSupportingDocumentsDescription:
-          "Diese Rechnung enthält keine verknüpften Belege oder Provider-Rechnungen.",
-        linkedOrderDocument: "Verknüpftes Auftragsdokument",
-        openDocuments: "Dokumente öffnen",
-        popupBlocked: "Bitte erlaube Pop-ups, um die Rechnungs-PDF zu öffnen.",
-        pdfOpenError: "Rechnungs-PDF konnte nicht geöffnet werden.",
-        pdfDownloadError: "Rechnungs-PDF konnte nicht heruntergeladen werden.",
-        system: "System",
-        statuses: {
-          draft: "Entwurf",
-          sent: "Versendet",
-          partially_paid: "Teilbezahlt",
-          paid: "Bezahlt",
-          overdue: "Überfällig",
-          cancelled: "Storniert",
-        },
-        types: {
-          advance: "Vorausrechnung",
-          interim: "Zwischenrechnung",
-          final: "Schlussrechnung",
-        },
-        dunningLevels: {
-          first: "Erste Mahnung",
-          second: "Zweite Mahnung",
-          collections: "Inkasso",
-        },
-        directions: {
-          income: "Einnahme",
-          expense: "Ausgabe",
-        },
-      }
-    : {
-        accessDenied:
-          "Счета доступны только CEO, ассистенту CEO, пациент-менеджерам и биллингу.",
-        workspaceKicker: "Рабочее пространство биллинга",
-        workspaceDescription:
-          "Авансовые, промежуточные и финальные счета, создаваемые из живых снимков предложений.",
-        refresh: "Обновить",
-        newInvoice: "Новый счёт",
-        grossTotal: "Итого брутто",
-        grossTotalDescription: "Текущий видимый объём счетов",
-        openBalance: "Открытый баланс",
-        openBalanceDescription: "Оставшаяся к оплате сумма",
-        quotesReady: "Доступные предложения",
-        quotesReadyDescription: "Доступные контексты предложений",
-        accountingTitle: "Бухгалтерский реестр",
-        accountingDescription:
-          "Cash-based read model для EÜR на основе оплаченных счетов и закрытых внешних инвойсов.",
-        refreshLedger: "Обновить реестр",
-        exportCsv: "Экспорт CSV",
-        cashIncome: "Денежные поступления",
-        cashExpense: "Денежные расходы",
-        euerSurplus: "Профицит EÜR",
-        costPassthroughRevenue: "Выручка по проходным расходам",
-        noAccountingEntries: "Нет бухгалтерских записей",
-        noAccountingEntriesDescription:
-          "Когда счета будут оплачены или внешние инвойсы будут погашены, здесь появятся строки денежного реестра.",
-        noOrder: "Без заказа",
-        noPatient: "Без пациента",
-        net: "Нетто",
-        gross: "Брутто",
-        monthlyEuer: "Помесячный EÜR",
-        noCashMovement: "За {year} движение денежных средств ещё не зафиксировано.",
-        income: "Доход",
-        expense: "Расход",
-        surplus: "Профицит",
-        searchPlaceholder: "Поиск по счёту, предложению, заказу или пациенту",
-        allOrders: "Все заказы",
-        allQuotes: "Все предложения",
-        emptyInvoicesDescription:
-          "Создайте первый счёт из живого снимка предложения.",
-        balance: "Баланс",
-        pageLabel: "Страница",
-        invoiceCount: "счетов",
-        previous: "Назад",
-        next: "Далее",
-        createInvoiceDescription:
-          "Создайте авансовый, промежуточный или финальный счёт из снимка предложения.",
-        selectedQuoteSnapshot: "Выбранный снимок предложения",
-        chooseQuote: "Выберите предложение",
-        notes: "Заметки",
-        billingNotePlaceholder: "Примечание для биллинга или инструкция по оплате",
-        detailSheetDescription:
-          "Суммы, статус оплаты и снимок позиций для выбранного счёта.",
-        noInvoiceSelected: "Счёт не выбран",
-        noInvoiceSelectedDescription:
-          "Выберите карточку счёта, чтобы открыть рабочее пространство биллинга.",
-        invoiceOverview: "Обзор счёта",
-        invoiceOverviewDescription:
-          "Коммерческие итоги и связанный контекст предложения/заказа.",
-        previewPdf: "Предпросмотр PDF",
-        downloadPdf: "Скачать PDF",
-        balanceDue: "К оплате",
-        linkedContextDescription:
-          "Быстрый переход к пациенту, заказу, предложению или документам в контексте текущего счёта.",
-        quotes: "Предложения",
-        documents: "Документы",
-        saveInvoice: "Сохранить счёт",
-        dunningTitle: "Mahnwesen",
-        dunningDescription:
-          "История первой, второй и коллекторской эскалации по просрочке.",
-        noDunningEvents: "Нет событий по просрочке",
-        noDunningEventsDescription:
-          "Как только счёт станет просроченным, биллинг сможет запустить здесь первое напоминание.",
-        nextEscalation: "Следующая эскалация",
-        completed: "Завершено",
-        balancePrefix: "Баланс",
-        dunningNote: "Примечание по просрочке",
-        dunningPlaceholder: "Текст напоминания или внутренняя заметка биллинга",
-        noFurtherEscalation: "Дальнейшая эскалация не требуется",
-        lineItems: "Позиции",
-        lineItemsDescription: "Снимок счёта в момент создания.",
-        noLineItems: "Нет позиций",
-        noLineItemsDescription:
-          "В этом счёте пока нет материализованных позиций.",
-        quantity: "Кол-во",
-        unit: "Единица",
-        supportingDocuments: "Подтверждающие документы",
-        supportingDocumentsDescription:
-          "Чеки и счета провайдеров, связанные со строками проходных расходов.",
-        noSupportingDocuments: "Нет подтверждающих документов",
-        noSupportingDocumentsDescription:
-          "В этом счёте нет связанных чеков или счетов провайдера.",
-        linkedOrderDocument: "Связанный документ заказа",
-        openDocuments: "Открыть документы",
-        popupBlocked: "Разрешите всплывающие окна для открытия PDF счёта.",
-        pdfOpenError: "Не удалось открыть PDF счёта.",
-        pdfDownloadError: "Не удалось скачать PDF счёта.",
-        system: "Система",
-        statuses: {
-          draft: "Черновик",
-          sent: "Отправлен",
-          partially_paid: "Частично оплачен",
-          paid: "Оплачен",
-          overdue: "Просрочен",
-          cancelled: "Отменён",
-        },
-        types: {
-          advance: "Авансовый счёт",
-          interim: "Промежуточный счёт",
-          final: "Финальный счёт",
-        },
-        dunningLevels: {
-          first: "Первое напоминание",
-          second: "Второе напоминание",
-          collections: "Коллекторы",
-        },
-        directions: {
-          income: "Поступление",
-          expense: "Расход",
-        },
-      };
+  const formatMoney = (value: unknown) => formatCurrency(value, locale);
+  const text = {
+    accessDenied: t.invoices_workspace_access_denied,
+    workspaceKicker: t.invoices_workspace_kicker,
+    workspaceDescription: t.invoices_workspace_description,
+    refresh: t.invoices_workspace_refresh,
+    newInvoice: t.invoices_workspace_new_invoice,
+    grossTotal: t.invoices_workspace_gross_total,
+    grossTotalDescription: t.invoices_workspace_gross_total_description,
+    openBalance: t.invoices_workspace_open_balance,
+    openBalanceDescription: t.invoices_workspace_open_balance_description,
+    quotesReady: t.invoices_workspace_quotes_ready,
+    quotesReadyDescription: t.invoices_workspace_quotes_ready_description,
+    accountingTitle: t.invoices_workspace_accounting_title,
+    accountingDescription: t.invoices_workspace_accounting_description,
+    refreshLedger: t.invoices_workspace_refresh_ledger,
+    exportCsv: t.invoices_workspace_export_csv,
+    cashIncome: t.invoices_workspace_cash_income,
+    cashExpense: t.invoices_workspace_cash_expense,
+    euerSurplus: t.invoices_workspace_euer_surplus,
+    costPassthroughRevenue: t.invoices_workspace_cost_passthrough_revenue,
+    noAccountingEntries: t.invoices_workspace_no_accounting_entries,
+    noAccountingEntriesDescription: t.invoices_workspace_no_accounting_entries_description,
+    noOrder: t.invoices_workspace_no_order,
+    noPatient: t.invoices_workspace_no_patient,
+    net: t.invoices_workspace_net,
+    gross: t.invoices_workspace_gross,
+    monthlyEuer: t.invoices_workspace_monthly_euer,
+    noCashMovement: t.invoices_workspace_no_cash_movement,
+    income: t.invoices_workspace_income,
+    expense: t.invoices_workspace_expense,
+    surplus: t.invoices_workspace_surplus,
+    searchPlaceholder: t.invoices_workspace_search_placeholder,
+    allOrders: t.invoices_workspace_all_orders,
+    allQuotes: t.invoices_workspace_all_quotes,
+    emptyInvoicesDescription: t.invoices_workspace_empty_invoices_description,
+    balance: t.invoices_workspace_balance,
+    pageLabel: t.invoices_workspace_page_label,
+    invoiceCount: t.invoices_workspace_invoice_count,
+    previous: t.invoices_workspace_previous,
+    next: t.invoices_workspace_next,
+    createInvoiceDescription:
+      lang === "de"
+        ? "Erstelle eine Rechnung aus einem Angebots-Snapshot. Positionen und Summen werden beim Erstellen fixiert."
+        : "Сформируйте счёт из снимка предложения. Позиции и суммы фиксируются в момент создания.",
+    selectedQuoteSnapshot: t.invoices_workspace_selected_quote_snapshot,
+    chooseQuote: t.invoices_workspace_choose_quote,
+    notes: t.invoices_workspace_notes,
+    billingNotePlaceholder: t.invoices_workspace_billing_note_placeholder,
+    detailSheetDescription: t.invoices_workspace_detail_sheet_description,
+    noInvoiceSelected: t.invoices_workspace_no_invoice_selected,
+    noInvoiceSelectedDescription: t.invoices_workspace_no_invoice_selected_description,
+    invoiceOverview: t.invoices_workspace_invoice_overview,
+    invoiceOverviewDescription: t.invoices_workspace_invoice_overview_description,
+    previewPdf: t.invoices_workspace_preview_pdf,
+    downloadPdf: t.invoices_workspace_download_pdf,
+    balanceDue: t.invoices_workspace_balance_due,
+    linkedContextDescription: t.invoices_workspace_linked_context_description,
+    quotes: t.invoices_workspace_quotes,
+    documents: t.invoices_workspace_documents,
+    saveInvoice: t.invoices_workspace_save_invoice,
+    dunningTitle: t.invoices_workspace_dunning_title,
+    dunningDescription: t.invoices_workspace_dunning_description,
+    noDunningEvents: t.invoices_workspace_no_dunning_events,
+    noDunningEventsDescription: t.invoices_workspace_no_dunning_events_description,
+    nextEscalation: t.invoices_workspace_next_escalation,
+    completed: t.invoices_workspace_completed,
+    balancePrefix: t.invoices_workspace_balance_prefix,
+    dunningNote: t.invoices_workspace_dunning_note,
+    dunningPlaceholder: t.invoices_workspace_dunning_placeholder,
+    noFurtherEscalation: t.invoices_workspace_no_further_escalation,
+    lineItems: t.invoices_workspace_line_items,
+    lineItemsDescription: t.invoices_workspace_line_items_description,
+    noLineItems: t.invoices_workspace_no_line_items,
+    noLineItemsDescription: t.invoices_workspace_no_line_items_description,
+    quantity: t.invoices_workspace_quantity,
+    unit: t.invoices_workspace_unit,
+    supportingDocuments: t.invoices_workspace_supporting_documents,
+    supportingDocumentsDescription: t.invoices_workspace_supporting_documents_description,
+    noSupportingDocuments: t.invoices_workspace_no_supporting_documents,
+    noSupportingDocumentsDescription: t.invoices_workspace_no_supporting_documents_description,
+    linkedOrderDocument: t.invoices_workspace_linked_order_document,
+    openDocuments: t.invoices_workspace_open_documents,
+    popupBlocked: t.invoices_workspace_popup_blocked,
+    pdfOpenError: t.invoices_workspace_pdf_open_error,
+    pdfDownloadError: t.invoices_workspace_pdf_download_error,
+    system: t.invoices_workspace_system,
+    statsSentWord: t.invoices_workspace_stats_sent_word,
+    statsPaidWord: t.invoices_workspace_stats_paid_word,
+    pageOf: t.invoices_workspace_page_of,
+    linkedOrder: t.invoices_workspace_linked_order,
+    ledgerDate: lang === "de" ? "Datum" : "Дата",
+    ledgerDirection: lang === "de" ? "Richtung" : "Направление",
+    ledgerEntry: lang === "de" ? "Buchung" : "Проводка",
+    ledgerCategory: lang === "de" ? "Kategorie" : "Категория",
+    ledgerPeriod: lang === "de" ? "Monat" : "Период",
+    sendDunning: (level: string) => t.invoices_workspace_send_dunning.replace("{level}", level),
+    statuses: {
+      draft: t.invoices_workspace_status_draft,
+      sent: t.invoices_workspace_status_sent,
+      partially_paid: t.invoices_workspace_status_partially_paid,
+      paid: t.invoices_workspace_status_paid,
+      overdue: t.invoices_workspace_status_overdue,
+      cancelled: t.invoices_workspace_status_cancelled,
+    },
+    types: {
+      advance: t.invoices_workspace_type_advance,
+      interim: t.invoices_workspace_type_interim,
+      final: t.invoices_workspace_type_final,
+    },
+    dunningLevels: {
+      first: t.invoices_workspace_dunning_level_first,
+      second: t.invoices_workspace_dunning_level_second,
+      collections: t.invoices_workspace_dunning_level_collections,
+    },
+    directions: {
+      income: t.invoices_workspace_direction_income,
+      expense: t.invoices_workspace_direction_expense,
+    },
+  };
   const invoiceStatusLabel = (status: string) => enumLabel(status, text.statuses);
   const invoiceTypeLabel = (invoiceType: string) => enumLabel(invoiceType, text.types);
   const dunningLevelLabel = (level: string) => enumLabel(level, text.dunningLevels);
@@ -634,6 +555,18 @@ function StaffInvoicesPage() {
       return true;
     });
   }, [filters.orderId, filters.patientId, quotes]);
+  const selectedFilterPatient = useMemo(
+    () => patients.find((patient) => patient.id === filters.patientId) ?? null,
+    [patients, filters.patientId],
+  );
+  const selectedFilterOrder = useMemo(
+    () => filteredOrders.find((order) => order.id === filters.orderId) ?? null,
+    [filteredOrders, filters.orderId],
+  );
+  const selectedFilterQuote = useMemo(
+    () => filteredQuotes.find((quote) => quote.id === filters.quoteId) ?? null,
+    [filteredQuotes, filters.quoteId],
+  );
 
   const selectedCreateQuote = useMemo(() => quotes.find((quote) => quote.id === createForm.quoteId) ?? null, [quotes, createForm.quoteId]);
   const stats = useMemo(() => {
@@ -643,6 +576,286 @@ function StaffInvoicesPage() {
     const balance = invoices.reduce((sum, invoice) => sum + Number(invoice.balance_due ?? 0), 0);
     return { total: invoiceTotal, paid, sent, gross, balance };
   }, [invoiceTotal, invoices]);
+  const invoiceTableColumns: ColumnDef<InvoiceItem>[] = [
+      {
+        id: "invoice_number",
+        label: t.invoices_number,
+        accessor: (row) => row.invoice_number,
+        sortable: true,
+        required: true,
+        width: 180,
+        render: (row) => (
+          <span className="font-mono text-xs font-semibold tracking-[0.14em] text-muted-foreground">
+            {row.invoice_number}
+          </span>
+        ),
+      },
+      {
+        id: "issued_at",
+        label: t.invoices_issued_at,
+        accessor: (row) => row.issued_at,
+        sortable: true,
+        width: 170,
+        render: (row) => formatDateTime(row.issued_at, locale, t.common_not_set),
+      },
+      {
+        id: "patient_name",
+        label: t.invoices_patient,
+        accessor: (row) => row.patient_name,
+        sortable: true,
+        required: true,
+        width: 220,
+        render: (row) => (
+          <div>
+            <div className="text-sm font-medium text-foreground">{row.patient_name}</div>
+            <div className="mt-1 text-[11px] text-muted-foreground">{row.patient_pid}</div>
+          </div>
+        ),
+      },
+      {
+        id: "order_number",
+        label: t.orders_title,
+        accessor: (row) => row.order_number,
+        sortable: true,
+        width: 180,
+      },
+      {
+        id: "quote_number",
+        label: t.contracts_type,
+        accessor: (row) => row.quote_number ?? "",
+        sortable: true,
+        width: 160,
+        render: (row) => row.quote_number ?? t.common_not_set,
+      },
+      {
+        id: "invoice_type",
+        label: t.invoices_type,
+        accessor: (row) => row.invoice_type,
+        sortable: true,
+        width: 140,
+        render: (row) => (
+          <StatusBadge tone={invoiceTypeTone(row.invoice_type)}>
+            {invoiceTypeLabel(row.invoice_type)}
+          </StatusBadge>
+        ),
+      },
+      {
+        id: "status",
+        label: t.invoices_status,
+        accessor: (row) => row.status,
+        sortable: true,
+        width: 150,
+        render: (row) => (
+          <StatusBadge tone={statusBadgeClass(row.status)}>
+            {invoiceStatusLabel(row.status)}
+          </StatusBadge>
+        ),
+      },
+      {
+        id: "due_date",
+        label: t.invoices_due_at,
+        accessor: (row) => row.due_date ?? "",
+        sortable: true,
+        width: 150,
+        render: (row) => formatDate(row.due_date, locale, t.common_not_set),
+      },
+      {
+        id: "paid_amount",
+        label: t.invoices_paid,
+        accessor: (row) => Number(row.paid_amount ?? 0),
+        sortable: true,
+        width: 140,
+        render: (row) => (
+          <span className="block text-right font-medium tabular-nums text-foreground">
+            {formatMoney(row.paid_amount)}
+          </span>
+        ),
+      },
+      {
+        id: "balance_due",
+        label: text.balance,
+        accessor: (row) => Number(row.balance_due ?? 0),
+        sortable: true,
+        width: 140,
+        render: (row) => (
+          <span className="block text-right font-medium tabular-nums text-foreground">
+            {formatMoney(row.balance_due)}
+          </span>
+        ),
+      },
+      {
+        id: "total_gross",
+        label: t.invoices_total,
+        accessor: (row) => Number(row.total_gross ?? 0),
+        sortable: true,
+        width: 150,
+        render: (row) => (
+          <span className="block text-right font-semibold tabular-nums text-foreground">
+            {formatMoney(row.total_gross)}
+          </span>
+        ),
+      },
+  ];
+  const accountingTableColumns: ColumnDef<AccountingEntry>[] = [
+    {
+      id: "entry_date",
+      label: text.ledgerDate,
+      accessor: (row) => row.entry_date,
+      sortable: true,
+      required: true,
+      width: 130,
+      render: (row) => formatDate(row.entry_date, locale, t.common_not_set),
+    },
+    {
+      id: "direction",
+      label: text.ledgerDirection,
+      accessor: (row) => row.direction,
+      sortable: true,
+      width: 130,
+      render: (row) => (
+        <StatusBadge tone={row.direction === "income" ? "success" : "error"}>
+          {accountingDirectionLabel(row.direction)}
+        </StatusBadge>
+      ),
+    },
+    {
+      id: "invoice_number",
+      label: t.invoices_number,
+      accessor: (row) => row.invoice_number ?? row.external_invoice_number ?? "",
+      sortable: true,
+      width: 170,
+      render: (row) => (
+        <span className="font-mono text-xs text-muted-foreground">
+          {row.invoice_number ?? row.external_invoice_number ?? t.common_not_set}
+        </span>
+      ),
+    },
+    {
+      id: "description",
+      label: text.ledgerEntry,
+      accessor: (row) => row.description,
+      sortable: true,
+      width: 260,
+      render: (row) => (
+        <span className="block truncate text-sm text-foreground">{row.description}</span>
+      ),
+    },
+    {
+      id: "category",
+      label: text.ledgerCategory,
+      accessor: (row) => row.category,
+      sortable: true,
+      width: 150,
+    },
+    {
+      id: "order_number",
+      label: t.orders_title,
+      accessor: (row) => row.order_number ?? "",
+      sortable: true,
+      width: 160,
+      render: (row) => row.order_number ?? text.noOrder,
+    },
+    {
+      id: "patient_name",
+      label: t.invoices_patient,
+      accessor: (row) => row.patient_name ?? "",
+      sortable: true,
+      width: 210,
+      render: (row) =>
+        row.patient_name ? `${row.patient_name}${row.patient_pid ? ` (${row.patient_pid})` : ""}` : text.noPatient,
+    },
+    {
+      id: "amount_net",
+      label: text.net,
+      accessor: (row) => Number(row.amount_net ?? 0),
+      sortable: true,
+      width: 130,
+      render: (row) => (
+        <span className="block text-right font-medium tabular-nums text-foreground">
+          {formatMoney(row.amount_net)}
+        </span>
+      ),
+    },
+    {
+      id: "amount_vat",
+      label: t.invoices_vat,
+      accessor: (row) => Number(row.amount_vat ?? 0),
+      sortable: true,
+      width: 130,
+      render: (row) => (
+        <span className="block text-right font-medium tabular-nums text-foreground">
+          {formatMoney(row.amount_vat)}
+        </span>
+      ),
+    },
+    {
+      id: "amount_gross",
+      label: text.gross,
+      accessor: (row) => Number(row.amount_gross ?? 0),
+      sortable: true,
+      width: 140,
+      render: (row) => (
+        <span className="block text-right font-semibold tabular-nums text-foreground">
+          {formatMoney(row.amount_gross)}
+        </span>
+      ),
+    },
+  ];
+  const accountingMonthlyTableColumns: ColumnDef<AccountingMonthlyItem>[] = [
+    {
+      id: "period",
+      label: text.ledgerPeriod,
+      accessor: (row) => row.period,
+      sortable: true,
+      required: true,
+      width: 160,
+      render: (row) => <span className="font-medium text-foreground">{row.period}</span>,
+    },
+    {
+      id: "income_gross",
+      label: text.income,
+      accessor: (row) => Number(row.income_gross ?? 0),
+      sortable: true,
+      width: 170,
+      render: (row) => (
+        <span className="block text-right font-medium tabular-nums text-foreground">
+          {formatMoney(row.income_gross)}
+        </span>
+      ),
+    },
+    {
+      id: "expense_gross",
+      label: text.expense,
+      accessor: (row) => Number(row.expense_gross ?? 0),
+      sortable: true,
+      width: 170,
+      render: (row) => (
+        <span className="block text-right font-medium tabular-nums text-foreground">
+          {formatMoney(row.expense_gross)}
+        </span>
+      ),
+    },
+    {
+      id: "net_surplus",
+      label: text.surplus,
+      accessor: (row) => Number(row.net_surplus ?? 0),
+      sortable: true,
+      width: 180,
+      render: (row) => {
+        const value = Number(row.net_surplus ?? 0);
+        return (
+          <span
+            className={cn(
+              "block text-right font-semibold tabular-nums",
+              value > 0 ? "text-emerald-700" : value < 0 ? "text-rose-700" : "text-foreground",
+            )}
+          >
+            {formatMoney(row.net_surplus)}
+          </span>
+        );
+      },
+    },
+  ];
   const nextDunning = useMemo(() => nextDunningLevel(dunningEvents), [dunningEvents]);
   const accountingSummary = accountingLedger?.summary ?? EMPTY_ACCOUNTING_SUMMARY;
   const accountingEntries = Array.isArray(accountingLedger?.entries) ? accountingLedger.entries : [];
@@ -864,44 +1077,78 @@ function StaffInvoicesPage() {
 
   if (!access.canView) {
     return (
-      <div className="rounded-3xl border border-amber-200 bg-amber-50 px-6 py-5 text-sm text-amber-800 shadow-sm">
-        {text.accessDenied}
+      <div className="rounded-xl">
+        <ShellBanner tone="warning" withIcon>
+          {text.accessDenied}
+        </ShellBanner>
       </div>
     );
   }
 
   return (
     <>
-      <div className="space-y-8">
-        <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-            <div>
-              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">{text.workspaceKicker}</div>
-              <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">{t.invoices_title}</h1>
-              <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">
-                {text.workspaceDescription}
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="outline" className="rounded-2xl" onClick={() => setReloadToken((current) => current + 1)}>
+      <div className="space-y-6">
+        <PageHeader
+          title={t.invoices_title}
+          description={text.workspaceDescription}
+          actions={(
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                className="rounded-lg"
+                onClick={() => setReloadToken((current) => current + 1)}
+              >
                 <RefreshCw className="mr-2 size-4" />
                 {text.refresh}
               </Button>
               {access.canCreate ? (
-                <Button type="button" className="h-9 rounded-lg px-3.5" onClick={() => { setCreateForm(blankCreateForm(filters.quoteId)); setCreateError(null); setCreateOpen(true); }}>
+                <Button
+                  type="button"
+                  className="h-9 rounded-lg px-3.5"
+                  onClick={() => {
+                    setCreateForm(blankCreateForm(filters.quoteId));
+                    setCreateError(null);
+                    setCreateOpen(true);
+                  }}
+                >
                   <Plus className="mr-2 size-4" />
                   {text.newInvoice}
                 </Button>
               ) : null}
-            </div>
-          </div>
-        </section>
+            </>
+          )}
+        />
 
-        <div className="grid gap-4 xl:grid-cols-4">
-          <StatCard label={t.invoices_title} value={String(stats.total)} description={lang === "de" ? `${stats.sent} versendet / ${stats.paid} bezahlt` : `${stats.sent} отправлено / ${stats.paid} оплачено`} icon={<Wallet className="size-5" />} />
-          <StatCard label={text.grossTotal} value={formatCurrency(stats.gross)} description={text.grossTotalDescription} icon={<CalendarClock className="size-5" />} />
-          <StatCard label={text.openBalance} value={formatCurrency(stats.balance)} description={text.openBalanceDescription} icon={<Wallet className="size-5" />} />
-          <StatCard label={text.quotesReady} value={String(filteredQuotes.length)} description={text.quotesReadyDescription} icon={<Plus className="size-5" />} />
+        <div className="flex flex-wrap gap-6 rounded-xl border border-border bg-card px-4 py-3">
+          <AdminInlineMetric
+            icon={Wallet}
+            label={t.invoices_title}
+            value={String(stats.total)}
+            description={`${stats.sent} ${text.statsSentWord} / ${stats.paid} ${text.statsPaidWord}`}
+            tone="sky"
+          />
+          <AdminInlineMetric
+            icon={CalendarClock}
+            label={text.grossTotal}
+            value={formatMoney(stats.gross)}
+            description={text.grossTotalDescription}
+            tone="emerald"
+          />
+          <AdminInlineMetric
+            icon={Wallet}
+            label={text.openBalance}
+            value={formatMoney(stats.balance)}
+            description={text.openBalanceDescription}
+            tone="amber"
+          />
+          <AdminInlineMetric
+            icon={Plus}
+            label={text.quotesReady}
+            value={String(filteredQuotes.length)}
+            description={text.quotesReadyDescription}
+            tone="slate"
+          />
         </div>
 
         {access.canAccounting ? (
@@ -916,12 +1163,12 @@ function StaffInvoicesPage() {
                   max="2100"
                   value={accountingYear}
                   onChange={(event) => setAccountingYear(event.target.value || currentYear)}
-                  className="h-10 w-28 rounded-2xl border-slate-200 bg-slate-50"
+                  className={cn(shellInputClassName, "w-28")}
                 />
                 <Button
                   type="button"
                   variant="outline"
-                  className="rounded-2xl"
+                  className="rounded-lg"
                   onClick={() => setReloadToken((current) => current + 1)}
                 >
                   <RefreshCw className="mr-2 size-4" />
@@ -930,7 +1177,7 @@ function StaffInvoicesPage() {
                 <Button
                   type="button"
                   variant="outline"
-                  className="rounded-2xl"
+                  className="rounded-lg"
                   onClick={() =>
                     void downloadAccountingLedgerExport(accountingYear).catch((error) =>
                       setAccountingError(
@@ -948,212 +1195,305 @@ function StaffInvoicesPage() {
             {accountingBusy ? (
               <LoadingState label={t.common_loading} />
             ) : accountingError ? (
-              <Banner tone="error">{accountingError}</Banner>
+              <ShellBanner tone="error">{accountingError}</ShellBanner>
             ) : accountingLedger ? (
               <div className="space-y-4">
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                   <MiniMetric
                     label={text.cashIncome}
-                    value={formatCurrency(accountingSummary.income_gross)}
+                    value={formatMoney(accountingSummary.income_gross)}
                   />
                   <MiniMetric
                     label={text.cashExpense}
-                    value={formatCurrency(accountingSummary.expense_gross)}
+                    value={formatMoney(accountingSummary.expense_gross)}
                   />
                   <MiniMetric
                     label={text.euerSurplus}
-                    value={formatCurrency(accountingSummary.net_surplus)}
+                    value={formatMoney(accountingSummary.net_surplus)}
                   />
                   <MiniMetric
                     label={text.costPassthroughRevenue}
-                    value={formatCurrency(accountingSummary.cost_passthrough_revenue_gross)}
+                    value={formatMoney(accountingSummary.cost_passthrough_revenue_gross)}
                   />
                 </div>
-                <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-                  <div className="space-y-3">
-                    {accountingEntries.slice(0, 8).length === 0 ? (
+                <DataTable
+                  rows={accountingEntries}
+                  columns={accountingTableColumns}
+                  rowId={(row) => row.id}
+                  density="compact"
+                  rowAccent={(row) => (row.direction === "income" ? "bg-emerald-500" : "bg-rose-500")}
+                  emptyState={
+                    <EmptyState
+                      title={text.noAccountingEntries}
+                      description={text.noAccountingEntriesDescription}
+                    />
+                  }
+                />
+                <div className="space-y-3">
+                  <div className={tokens.text.eyebrow}>{text.monthlyEuer}</div>
+                  <DataTable
+                    rows={accountingMonthly}
+                    columns={accountingMonthlyTableColumns}
+                    rowId={(row) => row.period}
+                    density="compact"
+                    rowAccent={(row) => {
+                      const value = Number(row.net_surplus ?? 0);
+                      if (value > 0) return "bg-emerald-500";
+                      if (value < 0) return "bg-rose-500";
+                      return "bg-slate-300";
+                    }}
+                    emptyState={
                       <EmptyState
-                        title={text.noAccountingEntries}
-                        description={text.noAccountingEntriesDescription}
+                        title={text.monthlyEuer}
+                        description={text.noCashMovement.replace("{year}", accountingYear)}
                       />
-                    ) : (
-                      accountingEntries.slice(0, 8).map((entry) => (
-                        <div
-                          key={entry.id}
-                          className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
-                        >
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div>
-                              <div className="text-sm font-semibold text-slate-900">
-                                {entry.description}
-                              </div>
-                              <div className="mt-1 text-xs text-slate-500">
-                                {`${formatDate(entry.entry_date, locale, t.common_not_set)} · ${entry.order_number ?? text.noOrder} · ${entry.patient_name ?? text.noPatient}`}
-                              </div>
-                            </div>
-                            <Badge
-                              variant="outline"
-                              className={cn(
-                                "rounded-full",
-                                entry.direction === "income"
-                                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                  : "border-rose-200 bg-rose-50 text-rose-700",
-                              )}
-                            >
-                              {accountingDirectionLabel(entry.direction)}
-                            </Badge>
-                          </div>
-                          <div className="mt-3 grid gap-3 md:grid-cols-3">
-                            <MiniMetric label={text.net} value={formatCurrency(entry.amount_net)} />
-                            <MiniMetric label={t.invoices_vat} value={formatCurrency(entry.amount_vat)} />
-                            <MiniMetric label={text.gross} value={formatCurrency(entry.amount_gross)} />
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                      {text.monthlyEuer}
-                    </div>
-                    <div className="mt-3 space-y-3">
-                      {accountingMonthly.length === 0 ? (
-                        <p className="text-sm text-slate-500">
-                          {text.noCashMovement.replace("{year}", accountingYear)}
-                        </p>
-                      ) : (
-                        accountingMonthly.map((month) => (
-                          <div
-                            key={month.period}
-                            className="rounded-xl border border-slate-200 bg-white px-4 py-3"
-                          >
-                            <div className="text-sm font-semibold text-slate-900">
-                              {month.period}
-                            </div>
-                            <div className="mt-2 grid gap-2 text-sm text-slate-600">
-                              <div>{`${text.income} ${formatCurrency(month.income_gross)}`}</div>
-                              <div>{`${text.expense} ${formatCurrency(month.expense_gross)}`}</div>
-                              <div className="font-medium text-slate-900">
-                                {`${text.surplus} ${formatCurrency(month.net_surplus)}`}
-                              </div>
-                            </div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
+                    }
+                  />
                 </div>
               </div>
             ) : null}
           </SectionCard>
         ) : null}
 
-        {optionsError ? <Banner tone="error">{optionsError}</Banner> : null}
+        {optionsError ? <ShellBanner tone="error">{optionsError}</ShellBanner> : null}
 
-        <SectionCard title={t.invoices_title} description={t.invoices_subtitle}>
-          <div className="grid gap-3 lg:grid-cols-[minmax(0,1.1fr)_minmax(220px,1fr)_minmax(220px,1fr)_minmax(220px,1fr)_minmax(180px,0.8fr)_minmax(180px,0.8fr)_auto]">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
-              <Input value={filters.search} onChange={(event) => startTransition(() => {
-                setFilters((current) => ({ ...current, search: event.target.value }));
-                setInvoicePage(1);
-              })} className="h-11 rounded-2xl border-slate-200 bg-slate-50 pl-9" placeholder={text.searchPlaceholder} />
-            </div>
-            <select value={filters.patientId} onChange={(event) => {
-              const patientId = event.target.value;
-              setFilters((current) => ({ ...current, patientId, orderId: current.orderId && orders.some((order) => order.id === current.orderId && order.patient_id === patientId) ? current.orderId : "", quoteId: current.quoteId && quotes.some((quote) => quote.id === current.quoteId && quote.patient_id === patientId) ? current.quoteId : "" }));
-              setInvoicePage(1);
-              syncQuery({ patient: patientId || null, order: null, quote: null });
-            }} className={selectClassName}>
-              <option value="">{t.providers_all}</option>
-              {patients.map((patient) => <option key={patient.id} value={patient.id}>{`${patient.patient_id} · ${[patient.first_name, patient.last_name].filter(Boolean).join(" ")}`}</option>)}
-            </select>
-            <select value={filters.orderId} onChange={(event) => {
-              const orderId = event.target.value;
-              setFilters((current) => ({ ...current, orderId, quoteId: current.quoteId && quotes.some((quote) => quote.id === current.quoteId && quote.order_id === orderId) ? current.quoteId : "" }));
-              setInvoicePage(1);
-              syncQuery({ order: orderId || null, quote: null });
-            }} className={selectClassName}>
-              <option value="">{text.allOrders}</option>
-              {filteredOrders.map((order) => <option key={order.id} value={order.id}>{`${order.order_number} · ${order.patient_pid} · ${order.patient_name}`}</option>)}
-            </select>
-            <select value={filters.quoteId} onChange={(event) => {
-              const quoteId = event.target.value;
-              setFilters((current) => ({ ...current, quoteId }));
-              setInvoicePage(1);
-              syncQuery({ quote: quoteId || null });
-            }} className={selectClassName}>
-              <option value="">{text.allQuotes}</option>
-              {filteredQuotes.map((quote) => <option key={quote.id} value={quote.id}>{`${quote.quote_number} · ${quote.order_number} · ${quote.patient_pid}`}</option>)}
-            </select>
-            <select value={filters.status} onChange={(event) => {
-              setFilters((current) => ({ ...current, status: event.target.value }));
-              setInvoicePage(1);
-            }} className={selectClassName}>
-              <option value="">{t.providers_all}</option>
-              {INVOICE_STATUSES.map((status) => <option key={status} value={status}>{invoiceStatusLabel(status)}</option>)}
-            </select>
-            <select value={filters.invoiceType} onChange={(event) => {
-              setFilters((current) => ({ ...current, invoiceType: event.target.value }));
-              setInvoicePage(1);
-            }} className={selectClassName}>
-              <option value="">{t.providers_all}</option>
-              {INVOICE_TYPES.map((invoiceType) => <option key={invoiceType} value={invoiceType}>{invoiceTypeLabel(invoiceType)}</option>)}
-            </select>
-            <Button type="button" variant="outline" className="h-11 rounded-2xl" onClick={() => {
-              setFilters({ ...DEFAULT_FILTERS, patientId: searchParams.get("patient") ?? "", orderId: searchParams.get("order") ?? "", quoteId: searchParams.get("quote") ?? "" });
-              setInvoicePage(1);
-            }}>{t.access_reset}</Button>
-          </div>
-        </SectionCard>
-
-        {listBusy ? (
-          <LoadingState label={t.common_loading} />
-        ) : listError ? (
-          <Banner tone="error">{listError}</Banner>
-        ) : invoices.length === 0 ? (
-          <EmptyState title={t.common_not_set} description={text.emptyInvoicesDescription} action={access.canCreate ? <Button type="button" onClick={() => setCreateOpen(true)}><Plus className="mr-2 size-4" />{t.invoices_new}</Button> : null} />
-        ) : (
-          <div className="space-y-4">
-            <div className="grid gap-4 xl:grid-cols-2">
-              {invoices.map((invoice) => {
-                const isSelected = selectedInvoiceId === invoice.id;
-                return (
-                  <button key={invoice.id} type="button" onClick={() => openInvoice(invoice.id)} className={cn("rounded-[1.6rem] border bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md", isSelected ? "border-sky-300 ring-4 ring-sky-100" : "border-slate-200")}>
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <div className="font-mono text-xs font-semibold tracking-[0.16em] text-slate-500">{invoice.invoice_number}</div>
-                        <h2 className="mt-2 text-lg font-semibold text-slate-950">{invoice.patient_name}</h2>
-                        <p className="mt-1 text-sm text-slate-500">{`${invoice.order_number} · ${invoice.patient_pid}`}</p>
-                      </div>
-                      <ChevronRight className="mt-1 size-4 text-slate-400" />
-                    </div>
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      <Badge variant="outline" className={cn("rounded-full", statusBadgeClass(invoice.status))}>{invoiceStatusLabel(invoice.status)}</Badge>
-                      <Badge variant="outline" className={cn("rounded-full", typeBadgeClass(invoice.invoice_type))}>{invoiceTypeLabel(invoice.invoice_type)}</Badge>
-                      <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">{formatCurrency(invoice.total_gross)}</Badge>
-                    </div>
-                    <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                      <MiniMetric label={t.contracts_type} value={invoice.quote_number ?? t.common_not_set} />
-                      <MiniMetric label={t.invoices_due_at} value={formatDate(invoice.due_date, locale, t.common_not_set)} />
-                      <MiniMetric label={t.invoices_paid} value={formatCurrency(invoice.paid_amount)} />
-                      <MiniMetric label={text.balance} value={formatCurrency(invoice.balance_due)} />
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-            <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="text-sm text-slate-600">
-                {lang === "de"
-                  ? `${text.pageLabel} ${invoicePage} von ${invoiceTotalPages} · ${invoiceTotal} ${text.invoiceCount}`
-                  : `${text.pageLabel} ${invoicePage} из ${invoiceTotalPages} · ${invoiceTotal} ${text.invoiceCount}`}
+        <AdminTableCard
+          title={titleWithDot(t.invoices_title)}
+          description={t.invoices_subtitle}
+          count={invoiceTotal}
+        >
+          <div className="space-y-4 border-b border-border px-4 py-4">
+            <AdminToolbar className="gap-2">
+              <div className="relative min-w-[260px] flex-1">
+                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={filters.search}
+                  onChange={(event) => startTransition(() => {
+                    setFilters((current) => ({ ...current, search: event.target.value }));
+                    setInvoicePage(1);
+                  })}
+                  className={cn(shellInputClassName, "pl-9")}
+                  placeholder={text.searchPlaceholder}
+                />
               </div>
+              <div className="w-[220px] min-w-[220px]">
+                <ShadSelect
+                  value={filters.patientId || "__all__"}
+                  onValueChange={(value) => {
+                    const patientId = value && value !== "__all__" ? value : "";
+                    setFilters((current) => ({
+                      ...current,
+                      patientId,
+                      orderId:
+                        current.orderId &&
+                        orders.some((order) => order.id === current.orderId && order.patient_id === patientId)
+                          ? current.orderId
+                          : "",
+                      quoteId:
+                        current.quoteId &&
+                        quotes.some((quote) => quote.id === current.quoteId && quote.patient_id === patientId)
+                          ? current.quoteId
+                          : "",
+                    }));
+                    setInvoicePage(1);
+                    syncQuery({ patient: patientId || null, order: null, quote: null });
+                  }}
+                >
+                  <SelectTrigger className={cn(selectClassName, "w-[220px] min-w-[220px]")}>
+                    <SelectValue>
+                      {selectedFilterPatient
+                        ? `${selectedFilterPatient.patient_id} | ${[
+                            selectedFilterPatient.first_name,
+                            selectedFilterPatient.last_name,
+                          ]
+                            .filter(Boolean)
+                            .join(" ")}`
+                        : t.providers_all}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">{t.providers_all}</SelectItem>
+                    {patients.map((patient) => (
+                      <SelectItem key={patient.id} value={patient.id}>
+                        {`${patient.patient_id} | ${[patient.first_name, patient.last_name].filter(Boolean).join(" ")}`}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </ShadSelect>
+              </div>
+              <div className="w-[220px] min-w-[220px]">
+                <ShadSelect
+                  value={filters.orderId || "__all__"}
+                  onValueChange={(value) => {
+                    const orderId = value && value !== "__all__" ? value : "";
+                    setFilters((current) => ({
+                      ...current,
+                      orderId,
+                      quoteId:
+                        current.quoteId &&
+                        quotes.some((quote) => quote.id === current.quoteId && quote.order_id === orderId)
+                          ? current.quoteId
+                          : "",
+                    }));
+                    setInvoicePage(1);
+                    syncQuery({ order: orderId || null, quote: null });
+                  }}
+                >
+                  <SelectTrigger className={cn(selectClassName, "w-[220px] min-w-[220px]")}>
+                    <SelectValue>
+                      {selectedFilterOrder
+                        ? `${selectedFilterOrder.order_number} | ${selectedFilterOrder.patient_pid} | ${selectedFilterOrder.patient_name}`
+                        : text.allOrders}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">{text.allOrders}</SelectItem>
+                    {filteredOrders.map((order) => (
+                      <SelectItem key={order.id} value={order.id}>
+                        {`${order.order_number} | ${order.patient_pid} | ${order.patient_name}`}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </ShadSelect>
+              </div>
+              <div className="w-[220px] min-w-[220px]">
+                <ShadSelect
+                  value={filters.quoteId || "__all__"}
+                  onValueChange={(value) => {
+                    const quoteId = value && value !== "__all__" ? value : "";
+                    setFilters((current) => ({ ...current, quoteId }));
+                    setInvoicePage(1);
+                    syncQuery({ quote: quoteId || null });
+                  }}
+                >
+                  <SelectTrigger className={cn(selectClassName, "w-[220px] min-w-[220px]")}>
+                    <SelectValue>
+                      {selectedFilterQuote
+                        ? `${selectedFilterQuote.quote_number} | ${selectedFilterQuote.order_number} | ${selectedFilterQuote.patient_pid}`
+                        : text.allQuotes}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">{text.allQuotes}</SelectItem>
+                    {filteredQuotes.map((quote) => (
+                      <SelectItem key={quote.id} value={quote.id}>
+                        {`${quote.quote_number} | ${quote.order_number} | ${quote.patient_pid}`}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </ShadSelect>
+              </div>
+              <div className="w-[180px] min-w-[180px]">
+                <ShadSelect
+                  value={filters.status || "__all__"}
+                  onValueChange={(value) => {
+                    setFilters((current) => ({
+                      ...current,
+                      status: value && value !== "__all__" ? value : "",
+                    }));
+                    setInvoicePage(1);
+                  }}
+                >
+                  <SelectTrigger className={cn(selectClassName, "w-[180px] min-w-[180px]")}>
+                    <SelectValue>
+                      {filters.status ? invoiceStatusLabel(filters.status) : t.providers_all}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">{t.providers_all}</SelectItem>
+                    {INVOICE_STATUSES.map((status) => (
+                      <SelectItem key={status} value={status}>
+                        {invoiceStatusLabel(status)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </ShadSelect>
+              </div>
+              <div className="w-[180px] min-w-[180px]">
+                <ShadSelect
+                  value={filters.invoiceType || "__all__"}
+                  onValueChange={(value) => {
+                    setFilters((current) => ({
+                      ...current,
+                      invoiceType: value && value !== "__all__" ? value : "",
+                    }));
+                    setInvoicePage(1);
+                  }}
+                >
+                  <SelectTrigger className={cn(selectClassName, "w-[180px] min-w-[180px]")}>
+                    <SelectValue>
+                      {filters.invoiceType
+                        ? invoiceTypeLabel(filters.invoiceType)
+                        : t.providers_all}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">{t.providers_all}</SelectItem>
+                    {INVOICE_TYPES.map((invoiceType) => (
+                      <SelectItem key={invoiceType} value={invoiceType}>
+                        {invoiceTypeLabel(invoiceType)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </ShadSelect>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-9 rounded-lg px-3.5"
+                onClick={() => {
+                  setFilters({
+                    ...DEFAULT_FILTERS,
+                    patientId: searchParams.get("patient") ?? "",
+                    orderId: searchParams.get("order") ?? "",
+                    quoteId: searchParams.get("quote") ?? "",
+                  });
+                  setInvoicePage(1);
+                }}
+              >
+                {t.access_reset}
+              </Button>
+            </AdminToolbar>
+          </div>
+
+          <div className="space-y-3 p-4">
+            {listError ? <ShellBanner tone="error">{listError}</ShellBanner> : null}
+            <DataTable
+              rows={invoices}
+              columns={invoiceTableColumns}
+              rowId={(row) => row.id}
+              density="compact"
+              loading={listBusy}
+              activeRowId={selectedInvoiceId || null}
+              onRowClick={(row) => openInvoice(row.id)}
+              rowAccent={(row) => {
+                if (row.id === selectedInvoiceId) return "bg-sky-500";
+                if (row.status === "overdue") return "bg-rose-500";
+                if (row.status === "paid") return "bg-emerald-500";
+                return null;
+              }}
+              emptyState={
+                <EmptyState
+                  title={t.common_not_set}
+                  description={text.emptyInvoicesDescription}
+                  action={
+                    access.canCreate ? (
+                      <Button type="button" onClick={() => setCreateOpen(true)}>
+                        <Plus className="mr-2 size-4" />
+                        {t.invoices_new}
+                      </Button>
+                    ) : null
+                  }
+                />
+              }
+              footer={`${text.pageLabel} ${invoicePage} ${text.pageOf} ${invoiceTotalPages} | ${invoiceTotal} ${text.invoiceCount}`}
+            />
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
               <div className="flex gap-2">
                 <Button
                   type="button"
                   variant="outline"
-                  className="rounded-2xl"
+                  className="rounded-lg"
                   disabled={listBusy || invoicePage <= 1}
                   onClick={() => setInvoicePage((current) => Math.max(1, current - 1))}
                 >
@@ -1162,7 +1502,7 @@ function StaffInvoicesPage() {
                 <Button
                   type="button"
                   variant="outline"
-                  className="rounded-2xl"
+                  className="rounded-lg"
                   disabled={listBusy || invoicePage >= invoiceTotalPages}
                   onClick={() =>
                     setInvoicePage((current) => Math.min(invoiceTotalPages, current + 1))
@@ -1173,51 +1513,103 @@ function StaffInvoicesPage() {
               </div>
             </div>
           </div>
-        )}
+        </AdminTableCard>
       </div>
 
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="sm:max-w-2xl">
-            <DialogHeader>
-              <DialogTitle>{t.invoices_new}</DialogTitle>
-            <DialogDescription>{text.createInvoiceDescription}</DialogDescription>
-            </DialogHeader>
-          <form className="space-y-5" onSubmit={handleCreateInvoice}>
-            {createError ? <Banner tone="error">{createError}</Banner> : null}
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label={t.contracts_type} className="sm:col-span-2">
-                <select required value={createForm.quoteId} onChange={(event) => setCreateForm((current) => ({ ...current, quoteId: event.target.value }))} className={selectClassName}>
-                  <option value="">{text.chooseQuote}</option>
-                  {filteredQuotes.map((quote) => <option key={quote.id} value={quote.id}>{`${quote.quote_number} · ${quote.order_number} · ${quote.patient_pid}`}</option>)}
-                </select>
-              </Field>
-              <Field label={t.invoices_type}>
-                <select value={createForm.invoiceType} onChange={(event) => setCreateForm((current) => ({ ...current, invoiceType: event.target.value as InvoiceType }))} className={selectClassName}>
-                  {INVOICE_TYPES.map((invoiceType) => <option key={invoiceType} value={invoiceType}>{invoiceTypeLabel(invoiceType)}</option>)}
-                </select>
-              </Field>
-              <Field label={t.invoices_due_at}>
-                <Input type="date" value={createForm.dueDate} onChange={(event) => setCreateForm((current) => ({ ...current, dueDate: event.target.value }))} />
-              </Field>
-              <Field label={text.selectedQuoteSnapshot} className="sm:col-span-2">
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-                  {selectedCreateQuote ? `${selectedCreateQuote.quote_number} · ${selectedCreateQuote.order_number} · ${formatCurrency(selectedCreateQuote.total_gross)}` : text.chooseQuote}
-                </div>
-              </Field>
-              <Field label={text.notes} className="sm:col-span-2">
-                <textarea className={textareaClassName} value={createForm.notes} onChange={(event) => setCreateForm((current) => ({ ...current, notes: event.target.value }))} placeholder={text.billingNotePlaceholder} />
-              </Field>
-            </div>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>{t.common_cancel}</Button>
-              <Button type="submit" disabled={createBusy || !createForm.quoteId}>
-                {createBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : <Plus className="mr-2 size-4" />}
-                {t.invoices_new}
-              </Button>
-            </DialogFooter>
+      <Sheet open={createOpen} onOpenChange={setCreateOpen}>
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
+          <form className="flex h-full flex-col" onSubmit={handleCreateInvoice}>
+            <AdminSheetScaffold
+              title={t.invoices_new}
+              description={text.createInvoiceDescription}
+              footer={(
+                <SheetFormFooter
+                  cancelLabel={t.common_cancel}
+                  submitLabel={t.invoices_new}
+                  submitting={createBusy}
+                  submitDisabled={!createForm.quoteId}
+                  onCancel={() => setCreateOpen(false)}
+                />
+              )}
+            >
+              {createError ? <ShellBanner tone="error">{createError}</ShellBanner> : null}
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label={t.contracts_type} className="sm:col-span-2">
+                  <ShadSelect
+                    value={createForm.quoteId || "__empty__"}
+                    onValueChange={(value) =>
+                      setCreateForm((current) => ({
+                        ...current,
+                        quoteId: value && value !== "__empty__" ? value : "",
+                      }))
+                    }
+                  >
+                    <SelectTrigger className={selectClassName}>
+                      <SelectValue>
+                        {selectedCreateQuote
+                          ? `${selectedCreateQuote.quote_number} | ${selectedCreateQuote.order_number} | ${selectedCreateQuote.patient_pid}`
+                          : text.chooseQuote}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__empty__">{text.chooseQuote}</SelectItem>
+                      {filteredQuotes.map((quote) => (
+                        <SelectItem key={quote.id} value={quote.id}>
+                          {`${quote.quote_number} | ${quote.order_number} | ${quote.patient_pid}`}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </ShadSelect>
+                </Field>
+                <Field label={t.invoices_type}>
+                  <ShadSelect
+                    value={createForm.invoiceType}
+                    onValueChange={(value) =>
+                      setCreateForm((current) => ({ ...current, invoiceType: value as InvoiceType }))
+                    }
+                  >
+                    <SelectTrigger className={selectClassName}>
+                      <SelectValue>{invoiceTypeLabel(createForm.invoiceType)}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {INVOICE_TYPES.map((invoiceType) => (
+                        <SelectItem key={invoiceType} value={invoiceType}>
+                          {invoiceTypeLabel(invoiceType)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </ShadSelect>
+                </Field>
+                <Field label={t.invoices_due_at}>
+                  <Input
+                    type="date"
+                    className={shellInputClassName}
+                    value={createForm.dueDate}
+                    onChange={(event) =>
+                      setCreateForm((current) => ({ ...current, dueDate: event.target.value }))
+                    }
+                  />
+                </Field>
+                <Field label={text.selectedQuoteSnapshot} className="sm:col-span-2">
+                  <div className={cn("rounded-xl px-3 py-2 text-sm text-foreground", tokens.surface.mutedCard)}>
+                    {selectedCreateQuote
+                      ? `${selectedCreateQuote.quote_number} | ${selectedCreateQuote.order_number} | ${formatMoney(selectedCreateQuote.total_gross)}`
+                      : text.chooseQuote}
+                  </div>
+                </Field>
+                <Field label={text.notes} className="sm:col-span-2">
+                  <textarea
+                    className={textareaClassName}
+                    value={createForm.notes}
+                    onChange={(event) => setCreateForm((current) => ({ ...current, notes: event.target.value }))}
+                    placeholder={text.billingNotePlaceholder}
+                  />
+                </Field>
+              </div>
+            </AdminSheetScaffold>
           </form>
-        </DialogContent>
-      </Dialog>
+        </SheetContent>
+      </Sheet>
 
       <Sheet open={Boolean(selectedInvoiceId)} onOpenChange={(open) => {
         if (!open) {
@@ -1229,13 +1621,13 @@ function StaffInvoicesPage() {
           syncQuery({ invoice: null });
         }
       }}>
-        <SheetContent side="right" className="w-full overflow-y-auto border-l border-slate-200 p-0 sm:max-w-3xl">
-          <SheetHeader className="border-b border-slate-200 px-6 py-5">
+        <SheetContent side="right" className="w-full overflow-y-auto border-l border-border p-0 sm:max-w-3xl">
+          <SheetHeader className="border-b border-border px-6 py-5">
             <SheetTitle>{detail ? `${detail.invoice_number} / ${detail.patient_name}` : t.invoices_title}</SheetTitle>
             <SheetDescription>{text.detailSheetDescription}</SheetDescription>
           </SheetHeader>
           <div className="space-y-6 px-6 py-6">
-            {detailBusy ? <LoadingState label={t.common_loading} /> : detailError ? <Banner tone="error">{detailError}</Banner> : !detail ? <EmptyState title={text.noInvoiceSelected} description={text.noInvoiceSelectedDescription} /> : (
+            {detailBusy ? <LoadingState label={t.common_loading} /> : detailError ? <ShellBanner tone="error">{detailError}</ShellBanner> : !detail ? <EmptyState title={text.noInvoiceSelected} description={text.noInvoiceSelectedDescription} /> : (
               <>
                 <SectionCard
                   title={text.invoiceOverview}
@@ -1245,7 +1637,7 @@ function StaffInvoicesPage() {
                       <Button
                         type="button"
                         variant="outline"
-                        className="rounded-2xl"
+                        className="rounded-lg"
                         onClick={() =>
                           void openInvoicePdfPreview(detail.id, text.popupBlocked).catch((error) =>
                             setDetailError(error instanceof Error ? error.message : text.pdfOpenError),
@@ -1257,7 +1649,7 @@ function StaffInvoicesPage() {
                       <Button
                         type="button"
                         variant="outline"
-                        className="rounded-2xl"
+                        className="rounded-lg"
                         onClick={() =>
                           void downloadInvoicePdf(detail.id, `${detail.invoice_number}.pdf`).catch((error) =>
                             setDetailError(error instanceof Error ? error.message : text.pdfDownloadError),
@@ -1267,12 +1659,12 @@ function StaffInvoicesPage() {
                         <Download className="size-4" />
                         {text.downloadPdf}
                       </Button>
-                      <Badge variant="outline" className={cn("rounded-full", statusBadgeClass(detail.status))}>
+                      <StatusBadge tone={statusBadgeClass(detail.status)}>
                         {invoiceStatusLabel(detail.status)}
-                      </Badge>
-                      <Badge variant="outline" className={cn("rounded-full", typeBadgeClass(detail.invoice_type))}>
+                      </StatusBadge>
+                      <StatusBadge tone={invoiceTypeTone(detail.invoice_type)}>
                         {invoiceTypeLabel(detail.invoice_type)}
-                      </Badge>
+                      </StatusBadge>
                     </div>
                   }
                 >
@@ -1283,24 +1675,24 @@ function StaffInvoicesPage() {
                     <DetailField label={t.invoices_issued_at} value={formatDateTime(detail.issued_at, locale, t.common_not_set)} />
                     <DetailField label={t.invoices_due_at} value={formatDate(detail.due_date, locale, t.common_not_set)} />
                     <DetailField label={t.invoices_paid_at} value={formatDateTime(detail.paid_at, locale, t.common_not_set)} />
-                    <DetailField label={text.grossTotal} value={formatCurrency(detail.total_gross)} />
-                    <DetailField label={t.invoices_paid} value={formatCurrency(detail.paid_amount)} />
-                    <DetailField label={text.balanceDue} value={formatCurrency(detail.balance_due)} />
+                    <DetailField label={text.grossTotal} value={formatMoney(detail.total_gross)} />
+                    <DetailField label={t.invoices_paid} value={formatMoney(detail.paid_amount)} />
+                    <DetailField label={text.balanceDue} value={formatMoney(detail.balance_due)} />
                     <DetailField label={text.notes} value={detail.notes || t.common_not_set} />
                   </div>
                 </SectionCard>
 
                 <SectionCard title={t.providers_linked_patients} description={text.linkedContextDescription}>
                   <div className="flex flex-wrap gap-2">
-                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => staffGo(`/patients?patient=${detail.patient_id}`)}>{t.invoices_patient}</Button>
-                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => staffGo(`/orders?order=${detail.order_id}&patient=${detail.patient_id}`)}>{lang === "de" ? "Auftrag" : "Заказ"}</Button>
-                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => staffGo(`/contracts?quote=${detail.quote_id ?? ""}&order=${detail.order_id}&patient=${detail.patient_id}&tab=quotes`)}>{text.quotes}</Button>
-                    <Button type="button" variant="outline" className="rounded-2xl" onClick={() => staffGo(`/documents?order=${detail.order_id}&patient=${detail.patient_id}`)}>{text.documents}</Button>
+                    <Button type="button" variant="outline" className="rounded-lg" onClick={() => staffGo(`/patients?patient=${detail.patient_id}`)}>{t.invoices_patient}</Button>
+                    <Button type="button" variant="outline" className="rounded-lg" onClick={() => staffGo(`/orders?order=${detail.order_id}&patient=${detail.patient_id}`)}>{text.linkedOrder}</Button>
+                    <Button type="button" variant="outline" className="rounded-lg" onClick={() => staffGo(`/contracts?quote=${detail.quote_id ?? ""}&order=${detail.order_id}&patient=${detail.patient_id}&tab=quotes`)}>{text.quotes}</Button>
+                    <Button type="button" variant="outline" className="rounded-lg" onClick={() => staffGo(`/documents?order=${detail.order_id}&patient=${detail.patient_id}`)}>{text.documents}</Button>
                   </div>
                 </SectionCard>
 
                 <SectionCard title={t.invoices_status} description={t.invoices_subtitle}>
-                  {statusError ? <Banner tone="error">{statusError}</Banner> : null}
+                  {statusError ? <ShellBanner tone="error">{statusError}</ShellBanner> : null}
                   <div className="grid gap-4 sm:grid-cols-2">
                     <Field label={t.users_status}>
                       <select value={statusForm.status} onChange={(event) => setStatusForm((current) => ({ ...current, status: event.target.value as InvoiceStatus }))} className={selectClassName} disabled={!access.canManage}>
@@ -1326,33 +1718,33 @@ function StaffInvoicesPage() {
                 </SectionCard>
 
                 <SectionCard title={text.dunningTitle} description={text.dunningDescription}>
-                  {dunningError ? <Banner tone="error">{dunningError}</Banner> : null}
+                  {dunningError ? <ShellBanner tone="error">{dunningError}</ShellBanner> : null}
                   <div className="grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
                     <div className="space-y-3">
                       {dunningEvents.length === 0 ? (
                         <EmptyState title={text.noDunningEvents} description={text.noDunningEventsDescription} />
                       ) : (
                         dunningEvents.map((event) => (
-                          <div key={event.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                          <div key={event.id} className={cn("rounded-xl p-4", tokens.surface.mutedCard)}>
                             <div className="flex flex-wrap items-start justify-between gap-3">
                               <div>
-                                <div className="text-sm font-semibold text-slate-900">{dunningLevelLabel(event.level)}</div>
-                                <div className="mt-1 text-xs text-slate-500">{`${formatDateTime(event.sent_at, locale, t.common_not_set)} · ${event.created_by_name ?? text.system}`}</div>
+                                <div className={tokens.text.sectionTitle}>{dunningLevelLabel(event.level)}</div>
+                                <div className={cn("mt-1", tokens.text.muted)}>{`${formatDateTime(event.sent_at, locale, t.common_not_set)} | ${event.created_by_name ?? text.system}`}</div>
                               </div>
-                              <Badge variant="outline" className={cn("rounded-full", statusBadgeClass("overdue"))}>{formatCurrency(event.balance_due)}</Badge>
+                              <StatusBadge tone="error">{formatMoney(event.balance_due)}</StatusBadge>
                             </div>
-                            {event.note ? <div className="mt-3 text-sm text-slate-600">{event.note}</div> : null}
+                            {event.note ? <div className="mt-3 text-sm text-muted-foreground">{event.note}</div> : null}
                           </div>
                         ))
                       )}
                     </div>
-                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">{text.nextEscalation}</div>
+                    <div className={cn("rounded-xl p-4", tokens.surface.mutedCard)}>
+                      <div className={tokens.text.eyebrow}>{text.nextEscalation}</div>
                       <div className="mt-2 flex flex-wrap items-center gap-2">
-                        <Badge variant="outline" className={cn("rounded-full", nextDunning ? typeBadgeClass(nextDunning) : "border-slate-200 bg-white text-slate-500")}>
+                        <StatusBadge tone={nextDunning ? dunningLevelTone(nextDunning) : "neutral"}>
                           {nextDunning ? dunningLevelLabel(nextDunning) : text.completed}
-                        </Badge>
-                        <span className="text-sm text-slate-600">{`${text.balancePrefix} ${formatCurrency(detail.balance_due)}`}</span>
+                        </StatusBadge>
+                        <span className="text-sm text-muted-foreground">{`${text.balancePrefix} ${formatMoney(detail.balance_due)}`}</span>
                       </div>
                       <div className="mt-4 space-y-3">
                         <Field label={text.dunningNote}>
@@ -1360,7 +1752,7 @@ function StaffInvoicesPage() {
                         </Field>
                         <Button type="button" className="w-full" onClick={() => void handleCreateDunning()} disabled={dunningBusy || !access.canManage || !nextDunning}>
                           {dunningBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
-                          {nextDunning ? (lang === "de" ? `${dunningLevelLabel(nextDunning)} senden` : `Отправить: ${dunningLevelLabel(nextDunning)}`) : text.noFurtherEscalation}
+                          {nextDunning ? text.sendDunning(dunningLevelLabel(nextDunning)) : text.noFurtherEscalation}
                         </Button>
                       </div>
                     </div>
@@ -1371,23 +1763,25 @@ function StaffInvoicesPage() {
                   {!detail.line_items || detail.line_items.length === 0 ? <EmptyState title={text.noLineItems} description={text.noLineItemsDescription} /> : (
                     <div className="space-y-3">
                       {detail.line_items.map((line, index) => (
-                        <div key={`${line.description}-${index}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                        <div key={`${line.description}-${index}`} className={cn("rounded-xl p-4", tokens.surface.mutedCard)}>
                           <div className="flex flex-wrap items-start justify-between gap-3">
                             <div>
-                              <h3 className="text-sm font-semibold text-slate-900">{line.description}</h3>
-                              <p className="mt-1 text-xs text-slate-500">{`${text.quantity} ${line.quantity} · ${text.unit} ${formatCurrency(line.unit_price)}`}</p>
+                              <h3 className={tokens.text.sectionTitle}>{line.description}</h3>
+                              <p className={cn("mt-1", tokens.text.muted)}>{`${text.quantity} ${line.quantity} | ${text.unit} ${formatMoney(line.unit_price)}`}</p>
                             </div>
                             <div className="flex flex-wrap gap-2">
-                              <Badge variant="outline" className="rounded-full border-slate-200 bg-white text-slate-700">{`${t.invoices_vat} ${line.vat_rate}%`}</Badge>
-                              {line.is_cost_passthrough ? <Badge variant="outline" className="rounded-full border-orange-200 bg-orange-50 text-orange-700">{t.orders_cost_pass_through_badge}</Badge> : null}
+                              <StatusBadge tone="neutral">{`${t.invoices_vat} ${line.vat_rate}%`}</StatusBadge>
+                              {line.is_cost_passthrough ? (
+                                <StatusBadge tone="warning">{t.orders_cost_pass_through_badge}</StatusBadge>
+                              ) : null}
                             </div>
                           </div>
                           <div className="mt-4 grid gap-3 md:grid-cols-3">
-                            <MiniMetric label={text.net} value={formatCurrency(line.line_net)} />
-                            <MiniMetric label={t.invoices_vat} value={formatCurrency(line.line_vat)} />
-                            <MiniMetric label={text.gross} value={formatCurrency(line.line_gross)} />
+                            <MiniMetric label={text.net} value={formatMoney(line.line_net)} />
+                            <MiniMetric label={t.invoices_vat} value={formatMoney(line.line_vat)} />
+                            <MiniMetric label={text.gross} value={formatMoney(line.line_gross)} />
                           </div>
-                          {line.notes ? <div className="mt-3 text-sm text-slate-600">{line.notes}</div> : null}
+                          {line.notes ? <div className="mt-3 text-sm text-muted-foreground">{line.notes}</div> : null}
                         </div>
                       ))}
                     </div>
@@ -1408,23 +1802,23 @@ function StaffInvoicesPage() {
                       {detail.supporting_documents.map((document) => (
                         <div
                           key={document.id}
-                          className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                          className={cn("rounded-xl p-4", tokens.surface.mutedCard)}
                         >
                           <div className="flex flex-wrap items-start justify-between gap-3">
                             <div>
-                              <h3 className="text-sm font-semibold text-slate-900">
+                              <h3 className={tokens.text.sectionTitle}>
                                 {document.auto_name || document.original_filename || document.id}
                               </h3>
-                              <p className="mt-1 text-xs text-slate-500">
+                              <p className={cn("mt-1", tokens.text.muted)}>
                                 {[document.art, document.category, document.original_filename]
                                   .filter(Boolean)
-                                  .join(" · ") || text.linkedOrderDocument}
+                                  .join(" | ") || text.linkedOrderDocument}
                               </p>
                             </div>
                             <Button
                               type="button"
                               variant="outline"
-                              className="rounded-2xl"
+                              className="rounded-lg"
                               onClick={() =>
                                 staffGo(
                                   `/documents?order=${detail.order_id}&patient=${detail.patient_id}`,
@@ -1458,48 +1852,47 @@ export function InvoicesPage() {
   return <StaffInvoicesPage />;
 }
 
-function StatCard({ label, value, description, icon }: { label: string; value: string; description: string; icon: ReactNode }) {
+function SectionCard({ title, description, action, children }: { title: string; description?: string; action?: ReactNode; children: ReactNode }) {
   return (
-    <div className="rounded-[1.8rem] border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="flex items-center justify-between">
-        <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">{label}</span>
-        <span className="rounded-full border border-slate-200 bg-slate-50 p-2 text-slate-600">{icon}</span>
+    <section className="overflow-hidden rounded-xl border border-border bg-card">
+      <div className="flex flex-col gap-3 border-b border-border px-4 py-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-1">
+          <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
+            <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
+            <span>{title}</span>
+          </h2>
+          {description ? <p className={tokens.text.muted}>{description}</p> : null}
+        </div>
+        {action ? <div className="shrink-0">{action}</div> : null}
       </div>
-      <div className="mt-5 text-2xl font-semibold tracking-tight text-slate-950">{value}</div>
-      <p className="mt-2 text-sm text-slate-600">{description}</p>
-    </div>
+      <div className="px-4 py-4">{children}</div>
+    </section>
   );
 }
 
-function SectionCard({ title, description, action, children }: { title: string; description?: string; action?: ReactNode; children: ReactNode }) {
+function titleWithDot(title: ReactNode) {
   return (
-    <section className="rounded-[1.8rem] border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="flex flex-col gap-3 border-b border-slate-200 pb-4 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <h2 className="text-lg font-semibold text-slate-950">{title}</h2>
-          {description ? <p className="mt-1 text-sm text-slate-600">{description}</p> : null}
-        </div>
-        {action ? <div>{action}</div> : null}
-      </div>
-      <div className="pt-5">{children}</div>
-    </section>
+    <span className="inline-flex items-center gap-2">
+      <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
+      <span>{title}</span>
+    </span>
   );
 }
 
 function DetailField({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">{label}</div>
-      <div className="mt-2 text-sm text-slate-900">{value}</div>
+    <div className={cn("rounded-xl p-4", tokens.surface.mutedCard)}>
+      <div className={tokens.text.eyebrow}>{label}</div>
+      <div className="mt-2 text-sm text-foreground">{value}</div>
     </div>
   );
 }
 
 function MiniMetric({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">{label}</div>
-      <div className="mt-2 text-sm text-slate-900">{value}</div>
+    <div className={cn("rounded-xl p-3", tokens.surface.mutedCard)}>
+      <div className={tokens.text.eyebrow}>{label}</div>
+      <div className="mt-2 text-sm text-foreground">{value}</div>
     </div>
   );
 }
@@ -1507,7 +1900,7 @@ function MiniMetric({ label, value }: { label: string; value: ReactNode }) {
 function Field({ label, className, children }: { label: string; className?: string; children: ReactNode }) {
   return (
     <label className={cn("flex flex-col gap-1.5", className)}>
-      <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
+      <span className={tokens.text.label}>
         {label}
       </span>
       {children}
@@ -1515,17 +1908,9 @@ function Field({ label, className, children }: { label: string; className?: stri
   );
 }
 
-function Banner({ tone, children }: { tone: "error" | "info"; children: ReactNode }) {
-  return (
-    <div className={cn("rounded-2xl border px-4 py-3 text-sm", tone === "error" ? "border-rose-200 bg-rose-50 text-rose-700" : "border-sky-200 bg-sky-50 text-sky-700")}>
-      {children}
-    </div>
-  );
-}
-
 function LoadingState({ label }: { label: string }) {
   return (
-    <div className="rounded-[1.8rem] border border-slate-200 bg-white px-6 py-12 text-center text-sm text-slate-500 shadow-sm">
+    <div className={cn("rounded-xl px-6 py-12 text-center text-sm text-muted-foreground", tokens.surface.card)}>
       <LoaderCircle className="mx-auto mb-3 size-5 animate-spin" />
       {label}
     </div>
@@ -1534,9 +1919,9 @@ function LoadingState({ label }: { label: string }) {
 
 function EmptyState({ title, description, action }: { title: string; description: string; action?: ReactNode }) {
   return (
-    <div className="rounded-[1.8rem] border border-dashed border-slate-300 bg-white px-6 py-12 text-center shadow-sm">
-      <h3 className="text-lg font-semibold text-slate-950">{title}</h3>
-      <p className="mx-auto mt-3 max-w-2xl text-sm leading-6 text-slate-600">{description}</p>
+    <div className={cn("rounded-xl px-6 py-12 text-center", tokens.surface.dashed)}>
+      <h3 className="text-lg font-semibold text-foreground">{title}</h3>
+      <p className="mx-auto mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">{description}</p>
       {action ? <div className="mt-5 flex justify-center">{action}</div> : null}
     </div>
   );
