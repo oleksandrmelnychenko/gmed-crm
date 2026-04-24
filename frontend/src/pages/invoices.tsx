@@ -15,6 +15,7 @@ import {
   AdminSheetScaffold,
   AdminTableCard,
   AdminToolbar,
+  SheetActionsFooter,
   SheetFormFooter,
 } from "@/components/admin-page-patterns";
 import { DataTable } from "@/components/data-table/data-table";
@@ -28,7 +29,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import {
   Banner as ShellBanner,
   PageHeader,
@@ -1621,14 +1622,13 @@ function StaffInvoicesPage() {
           syncQuery({ invoice: null });
         }
       }}>
-        <SheetContent side="right" className="w-full overflow-y-auto border-l border-border p-0 sm:max-w-3xl">
-          <SheetHeader className="border-b border-border px-6 py-5">
-            <SheetTitle>{detail ? `${detail.invoice_number} / ${detail.patient_name}` : t.invoices_title}</SheetTitle>
-            <SheetDescription>{text.detailSheetDescription}</SheetDescription>
-          </SheetHeader>
-          <div className="space-y-6 px-6 py-6">
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-3xl">
+          <AdminSheetScaffold
+            title={detail ? `${detail.invoice_number} / ${detail.patient_name}` : t.invoices_title}
+            description={text.detailSheetDescription}
+          >
             {detailBusy ? <LoadingState label={t.common_loading} /> : detailError ? <ShellBanner tone="error">{detailError}</ShellBanner> : !detail ? <EmptyState title={text.noInvoiceSelected} description={text.noInvoiceSelectedDescription} /> : (
-              <>
+              <div className="space-y-6">
                 <SectionCard
                   title={text.invoiceOverview}
                   description={text.invoiceOverviewDescription}
@@ -1700,21 +1700,21 @@ function StaffInvoicesPage() {
                       </select>
                     </Field>
                     <Field label={t.invoices_due_at}>
-                      <Input type="date" value={statusForm.dueDate} onChange={(event) => setStatusForm((current) => ({ ...current, dueDate: event.target.value }))} disabled={!access.canManage} />
+                      <Input type="date" className={shellInputClassName} value={statusForm.dueDate} onChange={(event) => setStatusForm((current) => ({ ...current, dueDate: event.target.value }))} disabled={!access.canManage} />
                     </Field>
                     <Field label={t.invoices_paid}>
-                      <Input type="number" step="0.01" min="0" value={statusForm.paidAmount} onChange={(event) => setStatusForm((current) => ({ ...current, paidAmount: event.target.value }))} disabled={!access.canManage} />
+                      <Input type="number" step="0.01" min="0" className={shellInputClassName} value={statusForm.paidAmount} onChange={(event) => setStatusForm((current) => ({ ...current, paidAmount: event.target.value }))} disabled={!access.canManage} />
                     </Field>
                     <Field label={text.notes} className="sm:col-span-2">
                       <textarea className={textareaClassName} value={statusForm.notes} onChange={(event) => setStatusForm((current) => ({ ...current, notes: event.target.value }))} disabled={!access.canManage} />
                     </Field>
                   </div>
-                  <div className="mt-4 flex justify-end">
-                    <Button type="button" onClick={() => void handleSaveStatus()} disabled={statusBusy || !access.canManage}>
+                  <SheetActionsFooter>
+                    <Button type="button" className="h-9 rounded-lg" onClick={() => void handleSaveStatus()} disabled={statusBusy || !access.canManage}>
                       {statusBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
                       {text.saveInvoice}
                     </Button>
-                  </div>
+                  </SheetActionsFooter>
                 </SectionCard>
 
                 <SectionCard title={text.dunningTitle} description={text.dunningDescription}>
@@ -1833,9 +1833,9 @@ function StaffInvoicesPage() {
                     </div>
                   )}
                 </SectionCard>
-              </>
+              </div>
             )}
-          </div>
+          </AdminSheetScaffold>
         </SheetContent>
       </Sheet>
     </>

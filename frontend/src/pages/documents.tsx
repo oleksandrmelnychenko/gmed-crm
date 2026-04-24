@@ -30,12 +30,19 @@ import { DocumentsGrid } from "@/components/documents-grid";
 import { DocumentRightViewDetails } from "@/components/document-right-view-details";
 import { localizeDocumentCode } from "@/lib/required-document-labels";
 import {
+  AdminSheetScaffold,
+  SheetFormFooter,
+} from "@/components/admin-page-patterns";
+import {
   CountBadge,
   EmptyCell,
   ListItem,
   PageHeader,
   Section,
   TabLoader,
+  inputClass as shellInputClassName,
+  selectClass as shellSelectClassName,
+  textareaClass as shellTextareaClass,
 } from "@/components/ui-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -52,9 +59,6 @@ import { Label } from "@/components/ui/label";
 import {
   Sheet,
   SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
 } from "@/components/ui/sheet";
 import { apiFetch, buildApiUrl, getAccessToken } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -324,10 +328,8 @@ const VISIBILITY_OPTIONS: DocumentVisibility[] = [
   "released_external",
   "patient_visible",
 ];
-const selectClassName =
-  "h-10 w-full rounded-xl border border-input bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
-const textareaClassName =
-  "min-h-[104px] w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
+const selectClassName = shellSelectClassName;
+const textareaClassName = shellTextareaClass;
 
 function canManageDocuments(role?: string) {
   return role === "ceo" || role === "patient_manager";
@@ -2603,16 +2605,25 @@ function StaffDocumentsPage() {
       </Section>
 
       <Sheet open={templateOpen} onOpenChange={setTemplateOpen}>
-        <SheetContent side="right" className="w-full sm:max-w-[880px]">
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[880px]">
           <form
             onSubmit={handleGenerateDocument}
-            className="flex flex-col flex-1 min-h-0"
+            className="flex flex-1 min-h-0 flex-col"
           >
-            <SheetHeader className="shrink-0 border-b border-border/60 px-4 pt-3 pb-3">
-              <SheetTitle>{t.documents_generate_title}</SheetTitle>
-              <SheetDescription>{t.documents_generate_description}</SheetDescription>
-            </SheetHeader>
-            <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+            <AdminSheetScaffold
+              title={t.documents_generate_title}
+              description={t.documents_generate_description}
+              footer={(
+                <SheetFormFooter
+                  cancelLabel={t.common_cancel}
+                  submitLabel={t.documents_generate_document}
+                  submittingLabel={t.documents_generating}
+                  submitting={generateBusy}
+                  submitDisabled={templates.length === 0}
+                  onCancel={() => setTemplateOpen(false)}
+                />
+              )}
+            >
             {generateError ? (
               <Banner tone="error">{generateError}</Banner>
             ) : null}
@@ -2679,7 +2690,7 @@ function StaffDocumentsPage() {
                       autoName: event.target.value,
                     }))
                   }
-                  className="h-10 rounded-xl border-border/60 bg-muted/25"
+                  className={shellInputClassName}
                 />
               </Field>
               <Field label={t.orders_patient} required>
@@ -2798,7 +2809,7 @@ function StaffDocumentsPage() {
                       titleOverride: event.target.value,
                     }))
                   }
-                  className="h-10 rounded-xl border-border/60 bg-muted/25"
+                  className={shellInputClassName}
                   placeholder={t.patients_notes}
                 />
               </Field>
@@ -2811,7 +2822,7 @@ function StaffDocumentsPage() {
                       klinik: event.target.value,
                     }))
                   }
-                  className="h-10 rounded-xl border-border/60 bg-muted/25"
+                  className={shellInputClassName}
                   placeholder={t.common_provider}
                 />
               </Field>
@@ -2824,7 +2835,7 @@ function StaffDocumentsPage() {
                       ursprung: event.target.value,
                     }))
                   }
-                  className="h-10 rounded-xl border-border/60 bg-muted/25"
+                  className={shellInputClassName}
                   placeholder={t.documents_default_template_source.replace(
                     "{id}",
                     selectedTemplate?.id ?? "{id}",
@@ -2922,45 +2933,27 @@ function StaffDocumentsPage() {
                 placeholder={t.patients_notes}
               />
             </Field>
-            </div>
-            <div className="shrink-0 flex justify-end gap-2 border-t border-border/60 px-4 py-3 bg-popover">
-              <Button
-                type="button"
-                variant="outline"
-                className="h-9 rounded-lg"
-                onClick={() => setTemplateOpen(false)}
-              >
-                {t.common_cancel}
-              </Button>
-              <Button
-                type="submit"
-                className="h-9 rounded-lg gap-1.5"
-                disabled={generateBusy || templates.length === 0}
-              >
-                {generateBusy ? (
-                  <LoaderCircle className="size-4 animate-spin" />
-                ) : (
-                  <FileText className="size-4" />
-                )}
-                {generateBusy
-                  ? t.documents_generating
-                  : t.documents_generate_document}
-              </Button>
-            </div>
+            </AdminSheetScaffold>
           </form>
         </SheetContent>
       </Sheet>
 
       <Sheet open={uploadOpen} onOpenChange={setUploadOpen}>
-        <SheetContent side="right" className="w-full sm:max-w-[760px]">
-          <form onSubmit={handleUpload} className="flex flex-col flex-1 min-h-0">
-            <SheetHeader className="shrink-0 border-b border-border/60 px-4 pt-3 pb-3">
-              <SheetTitle>{t.documents_upload}</SheetTitle>
-              <SheetDescription>
-                {text.uploadDescription}
-              </SheetDescription>
-            </SheetHeader>
-            <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[760px]">
+          <form onSubmit={handleUpload} className="flex flex-1 min-h-0 flex-col">
+            <AdminSheetScaffold
+              title={t.documents_upload}
+              description={text.uploadDescription}
+              footer={(
+                <SheetFormFooter
+                  cancelLabel={t.common_cancel}
+                  submitLabel={t.documents_upload}
+                  submittingLabel={t.documents_uploading}
+                  submitting={uploadBusy}
+                  onCancel={() => setUploadOpen(false)}
+                />
+              )}
+            >
             {uploadError ? <Banner tone="error">{uploadError}</Banner> : null}
             {!canManage ? (
               <Banner tone="warning">
@@ -2974,7 +2967,7 @@ function StaffDocumentsPage() {
                 <Input
                   type="file"
                   onChange={handleUploadFileChange}
-                  className="h-10 rounded-xl border-border/60 bg-muted/25"
+                  className={shellInputClassName}
                 />
               </Field>
               <Field label={t.documents_filename}>
@@ -2986,7 +2979,7 @@ function StaffDocumentsPage() {
                       autoName: event.target.value,
                     }))
                   }
-                  className="h-10 rounded-xl border-border/60 bg-muted/25"
+                  className={shellInputClassName}
                 />
               </Field>
               <Field label={t.orders_patient}>
@@ -3063,7 +3056,7 @@ function StaffDocumentsPage() {
                     }))
                   }
                   list="documents-art-options"
-                  className="h-10 rounded-xl border-border/60 bg-muted/25"
+                  className={shellInputClassName}
                   placeholder={t.documents_auto_classification_optional}
                 />
               </Field>
@@ -3135,7 +3128,7 @@ function StaffDocumentsPage() {
                       klinik: event.target.value,
                     }))
                   }
-                  className="h-10 rounded-xl border-border/60 bg-muted/25"
+                  className={shellInputClassName}
                 />
               </Field>
               {canManage ? (
@@ -3148,7 +3141,7 @@ function StaffDocumentsPage() {
                         ursprung: event.target.value,
                       }))
                     }
-                    className="h-10 rounded-xl border-border/60 bg-muted/25"
+                    className={shellInputClassName}
                   />
                 </Field>
               ) : null}
@@ -3179,29 +3172,7 @@ function StaffDocumentsPage() {
                 className={textareaClassName}
               />
             </Field>
-            </div>
-            <div className="shrink-0 flex justify-end gap-2 border-t border-border/60 px-4 py-3 bg-popover">
-              <Button
-                type="button"
-                variant="outline"
-                className="h-9 rounded-lg"
-                onClick={() => setUploadOpen(false)}
-              >
-                {t.common_cancel}
-              </Button>
-              <Button
-                type="submit"
-                className="h-9 rounded-lg gap-1.5"
-                disabled={uploadBusy}
-              >
-                {uploadBusy ? (
-                  <LoaderCircle className="size-4 animate-spin" />
-                ) : (
-                  <FolderPlus className="size-4" />
-                )}
-                {uploadBusy ? t.documents_uploading : t.documents_upload}
-              </Button>
-            </div>
+            </AdminSheetScaffold>
           </form>
         </SheetContent>
       </Sheet>
@@ -3277,12 +3248,11 @@ function StaffDocumentsPage() {
         open={Boolean(selectedId)}
         onOpenChange={(open) => (!open ? closeDetail() : undefined)}
       >
-        <SheetContent side="right" className="w-full sm:max-w-[820px]">
-          <SheetHeader className="border-b border-border/70 pb-4">
-            <SheetTitle>{detail?.auto_name || t.documents_title}</SheetTitle>
-            <SheetDescription>{t.documents_detail_description}</SheetDescription>
-          </SheetHeader>
-          <div className="flex-1 overflow-y-auto px-4 pb-6">
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[820px]">
+          <AdminSheetScaffold
+            title={detail?.auto_name || t.documents_title}
+            description={t.documents_detail_description}
+          >
             <DocumentRightViewDetails
               busy={detailBusy}
               error={detailError}
@@ -3961,7 +3931,7 @@ function StaffDocumentsPage() {
                               )
                             }
                             list="documents-art-options"
-                            className="h-10 rounded-xl border-border/60 bg-muted/25"
+                            className={shellInputClassName}
                           />
                         </Field>
                         <Field label={t.documents_taxonomy_category}>
@@ -4004,18 +3974,18 @@ function StaffDocumentsPage() {
                         {t.documents_mark_medical_data}
                       </label>
                       <Field label={t.documents_review_notes}>
-                        <textarea
-                          value={editForm.notes}
-                          onChange={(event) =>
-                            setEditForm((current) =>
-                              current
-                                ? { ...current, notes: event.target.value }
-                                : current,
-                            )
-                          }
-                          className="min-h-[120px] w-full rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
-                          placeholder={t.documents_review_notes}
-                        />
+                          <textarea
+                            value={editForm.notes}
+                            onChange={(event) =>
+                              setEditForm((current) =>
+                                current
+                                  ? { ...current, notes: event.target.value }
+                                  : current,
+                              )
+                            }
+                            className={cn(textareaClassName, "min-h-[120px]")}
+                            placeholder={t.documents_review_notes}
+                          />
                       </Field>
                       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-muted-foreground">
                         <span>{t.documents_release_internal_hint}</span>
@@ -4127,7 +4097,7 @@ function StaffDocumentsPage() {
                                   : current,
                               )
                             }
-                            className="h-10 rounded-xl border-border/60 bg-muted/25"
+                            className={shellInputClassName}
                           />
                         </Field>
                         <Field label={t.documents_category} required>
@@ -4141,7 +4111,7 @@ function StaffDocumentsPage() {
                               )
                             }
                             list="documents-art-options"
-                            className="h-10 rounded-xl border-border/60 bg-muted/25"
+                            className={shellInputClassName}
                           />
                         </Field>
                         <Field label={t.documents_category}>
@@ -4220,7 +4190,7 @@ function StaffDocumentsPage() {
                                   : current,
                               )
                             }
-                            className="h-10 rounded-xl border-border/60 bg-muted/25"
+                            className={shellInputClassName}
                           />
                         </Field>
                         <Field label={t.documents_source}>
@@ -4233,7 +4203,7 @@ function StaffDocumentsPage() {
                                   : current,
                               )
                             }
-                            className="h-10 rounded-xl border-border/60 bg-muted/25"
+                            className={shellInputClassName}
                           />
                         </Field>
                       </div>
@@ -4628,7 +4598,7 @@ function StaffDocumentsPage() {
                                 channel: event.target.value,
                               }))
                             }
-                            className="h-10 rounded-xl border-border/60 bg-card"
+                            className={shellInputClassName}
                           />
                         </Field>
                       </div>
@@ -4683,7 +4653,7 @@ function StaffDocumentsPage() {
               </div>
               ) : null}
             </DocumentRightViewDetails>
-          </div>
+          </AdminSheetScaffold>
         </SheetContent>
       </Sheet>
     </div>

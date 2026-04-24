@@ -1,11 +1,13 @@
 import { startTransition, useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { Download, LoaderCircle, RefreshCw, Upload } from "lucide-react";
 
+import { AdminSheetScaffold } from "@/components/admin-page-patterns";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { Banner, inputClass, textareaClass, tokens } from "@/components/ui-shell";
 import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import {
@@ -291,34 +293,37 @@ export function PatientInvoicesPage() {
       )}
 
       <Sheet open={Boolean(selectedInvoiceId)} onOpenChange={(open) => { if (!open) setSelectedInvoiceId(""); }}>
-        <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-3xl">
-          <SheetHeader>
-            <SheetTitle>{detail ? detail.invoice_number : l("Rechnungsdetails", "Детали счета", "Invoice detail")}</SheetTitle>
-            <SheetDescription>
-              {l("Kaufmännische Summen, Positionen und Übergabe des Zahlungsnachweises für die ausgewählte Rechnung.", "Коммерческие суммы, позиции и передача подтверждения оплаты для выбранного счета.", "Commercial totals, line items and payment-proof handoff for the selected invoice.")}
-            </SheetDescription>
-          </SheetHeader>
-          <div className="mt-6 space-y-6">
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-3xl">
+          <AdminSheetScaffold
+            title={detail ? detail.invoice_number : l("Rechnungsdetails", "Детали счета", "Invoice detail")}
+            description={l("Kaufmännische Summen, Positionen und Übergabe des Zahlungsnachweises für die ausgewählte Rechnung.", "Коммерческие суммы, позиции и передача подтверждения оплаты для выбранного счета.", "Commercial totals, line items and payment-proof handoff for the selected invoice.")}
+            headerClassName="px-4 py-3"
+            bodyClassName="min-h-0 overscroll-y-contain px-4 py-2"
+          >
+            <div className="space-y-6">
             {detailBusy ? (
-              <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
+              <div className={cn("flex items-center gap-3 rounded-xl px-4 py-3 text-sm text-muted-foreground", tokens.surface.softCard)}>
                 <LoaderCircle className="size-4 animate-spin" />
                 {l("Rechnungsdetails werden geladen...", "Загрузка деталей счета...", "Loading invoice detail...")}
               </div>
             ) : detailError ? (
-              <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+              <Banner tone="error">
                 {detailError}
-              </div>
+              </Banner>
             ) : !detail ? (
-              <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
+              <div className={cn("rounded-xl px-4 py-6 text-sm text-muted-foreground", tokens.surface.dashed)}>
                 {l("Wählen Sie eine Rechnungskarte, um die Detailansicht zu öffnen.", "Выберите карточку счета, чтобы открыть детальное представление.", "Choose an invoice card to open the detail workspace.")}
               </div>
             ) : (
               <>
-                <section className={shellCard("p-5")}>
+                <section className={cn("rounded-xl p-5", tokens.surface.card)}>
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <h2 className="text-lg font-semibold text-slate-950">{l("Rechnungsübersicht", "Обзор счета", "Invoice overview")}</h2>
-                      <p className="mt-1 text-sm text-slate-500">{l("Beträge, Fälligkeitsdatum und verknüpfter Angebots-/Auftragskontext.", "Суммы, срок оплаты и связанный контекст предложения/заказа.", "Amounts, due date and linked quote/order context.")}</p>
+                      <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
+                        <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
+                        <span>{l("Rechnungsübersicht", "Обзор счета", "Invoice overview")}</span>
+                      </h2>
+                      <p className={cn("mt-1", tokens.text.muted)}>{l("Beträge, Fälligkeitsdatum und verknüpfter Angebots-/Auftragskontext.", "Суммы, срок оплаты и связанный контекст предложения/заказа.", "Amounts, due date and linked quote/order context.")}</p>
                     </div>
                     <div className="flex flex-wrap gap-2">
                       <Button
@@ -363,17 +368,20 @@ export function PatientInvoicesPage() {
                     <Detail label={l("Offener Saldo", "Остаток к оплате", "Open balance")} value={formatPortalCurrency(detail.balance_due)} />
                   </div>
                   {detail.notes ? (
-                    <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                    <div className={cn("mt-4 rounded-xl px-4 py-3 text-sm text-muted-foreground", tokens.surface.mutedCard)}>
                       {detail.notes}
                     </div>
                   ) : null}
                 </section>
 
-                <section className={shellCard("p-5")}>
+                <section className={cn("rounded-xl p-5", tokens.surface.card)}>
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <h2 className="text-lg font-semibold text-slate-950">{l("Zahlungsnachweis", "Подтверждение оплаты", "Payment proof")}</h2>
-                      <p className="mt-1 text-sm text-slate-500">
+                      <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
+                        <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
+                        <span>{l("Zahlungsnachweis", "Подтверждение оплаты", "Payment proof")}</span>
+                      </h2>
+                      <p className={cn("mt-1", tokens.text.muted)}>
                         {l("Laden Sie Überweisungsbeleg oder Zahlungsbestätigung hoch, sobald die Zahlung erfolgt ist.", "Загрузите квитанцию о переводе или подтверждение оплаты после отправки средств.", "Upload transfer receipt or payment confirmation once funds were sent.")}
                       </p>
                     </div>
@@ -399,12 +407,15 @@ export function PatientInvoicesPage() {
                   </div>
                 </section>
 
-                <section className={shellCard("p-5")}>
-                  <h2 className="text-lg font-semibold text-slate-950">{l("Positionen", "Позиции", "Line items")}</h2>
-                  <p className="mt-1 text-sm text-slate-500">{l("Materialisierte Abrechnungspositionen für den aktuellen Rechnungsstand.", "Материализованные строки биллинга для текущего снимка счета.", "Materialized billing lines for the current invoice snapshot.")}</p>
+                <section className={cn("rounded-xl p-5", tokens.surface.card)}>
+                  <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
+                    <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
+                    <span>{l("Positionen", "Позиции", "Line items")}</span>
+                  </h2>
+                  <p className={cn("mt-1", tokens.text.muted)}>{l("Materialisierte Abrechnungspositionen für den aktuellen Rechnungsstand.", "Материализованные строки биллинга для текущего снимка счета.", "Materialized billing lines for the current invoice snapshot.")}</p>
                   <div className="mt-5 space-y-3">
                     {!detail.line_items || detail.line_items.length === 0 ? (
-                      <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
+                      <div className={cn("rounded-xl px-4 py-6 text-sm text-muted-foreground", tokens.surface.dashed)}>
                         {l("Keine Positionen verfügbar.", "Нет доступных позиций.", "No line items available.")}
                       </div>
                     ) : (
@@ -416,7 +427,8 @@ export function PatientInvoicesPage() {
                 </section>
               </>
             )}
-          </div>
+            </div>
+          </AdminSheetScaffold>
         </SheetContent>
       </Sheet>
 
@@ -443,7 +455,10 @@ export function PatientInvoicesPage() {
               <input
                 id="invoice-payment-proof"
                 type="file"
-                className="block w-full rounded-xl border border-slate-200 bg-card px-3 py-2 text-sm text-foreground"
+                className={cn(
+                  inputClass,
+                  "block w-full py-1.5 file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-foreground",
+                )}
                 onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)}
               />
             </div>
@@ -451,7 +466,7 @@ export function PatientInvoicesPage() {
               <Label htmlFor="invoice-payment-proof-note">{l("Notiz", "Заметка", "Note")}</Label>
               <textarea
                 id="invoice-payment-proof-note"
-                className="min-h-[110px] w-full rounded-xl border border-slate-200 bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
+                className={cn(textareaClass, "min-h-[110px]")}
                 placeholder={l("Optionale Überweisungsreferenz, Zahlungsdatum oder Erläuterung.", "Необязательная ссылка на перевод, дата оплаты или пояснение.", "Optional transfer reference, payment date or clarification.")}
                 value={uploadNote}
                 onChange={(event) => setUploadNote(event.target.value)}
@@ -499,9 +514,9 @@ function MetricChip({ label, value }: { label: string; value: string }) {
 
 function Detail({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-      <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500">{label}</p>
-      <p className="mt-2 text-sm text-slate-900">{value}</p>
+    <div className={cn("rounded-xl px-4 py-3", tokens.surface.mutedCard)}>
+      <p className={tokens.text.eyebrow}>{label}</p>
+      <p className="mt-2 text-sm text-foreground">{value}</p>
     </div>
   );
 }
@@ -510,19 +525,19 @@ function InvoiceLineCard({ line }: { line: PortalInvoiceLineItem }) {
   const { lang } = useLang();
   const l = (de: string, ru: string, en: string) => (lang === "de" ? de : lang === "ru" ? ru : en);
   return (
-    <article className="rounded-[1.35rem] border border-slate-200 bg-slate-50/80 px-4 py-4">
+    <article className={cn("rounded-xl px-4 py-4", tokens.surface.mutedCard)}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-sm font-semibold text-slate-950">{line.description}</p>
-          <p className="mt-1 text-xs text-slate-500">
+          <p className="text-sm font-semibold text-foreground">{line.description}</p>
+          <p className={cn("mt-1", tokens.text.muted)}>
             {l("Menge", "Кол-во", "Qty")} {line.quantity} · {l("Einheit", "Цена за единицу", "Unit")} {formatPortalCurrency(line.unit_price)} · VAT {line.vat_rate}%
           </p>
         </div>
-        <Badge variant="outline" className="rounded-full border-slate-200 bg-white text-slate-700">
+        <Badge variant="outline" className="rounded-full border-border bg-card text-foreground">
           {formatPortalCurrency(line.line_gross)}
         </Badge>
       </div>
-      {line.notes ? <p className="mt-3 text-xs text-slate-500">{line.notes}</p> : null}
+      {line.notes ? <p className={cn("mt-3", tokens.text.muted)}>{line.notes}</p> : null}
     </article>
   );
 }
