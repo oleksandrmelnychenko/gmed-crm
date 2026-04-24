@@ -4005,7 +4005,7 @@ function Panel({ title, description, action, children, className, accent = true,
   );
 }
 
-function Field({ label, children, required: _required, hint }: FieldProps) {
+function Field({ label, children, hint }: FieldProps) {
   return (
     <div className="space-y-1.5">
       <label className="block text-[11.5px] font-medium leading-tight text-muted-foreground">

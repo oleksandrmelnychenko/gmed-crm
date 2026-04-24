@@ -1,5 +1,6 @@
 import {
   startTransition,
+  useCallback,
   useDeferredValue,
   useEffect,
   useMemo,
@@ -510,7 +511,8 @@ export function ContractsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const permissions = contractsPermissions(user?.role);
   const locale = lang === "de" ? "de-DE" : "ru-RU";
-  const text = lang === "de"
+  const text = useMemo(
+    () => (lang === "de"
     ? {
         accessDenied:
           "Verträge und Angebote sind nur für CEO, CEO-Assistenz, Patientenmanager und Abrechnung verfügbar.",
@@ -732,11 +734,21 @@ export function ContractsPage() {
           accepted: "Принято",
           rejected: "Отклонено",
         },
-      };
-  const contractStatusLabel = (status: string) => enumLabel(status, text.roleLabels);
-  const quoteStatusLabel = (status: string) => enumLabel(status, text.roleLabels);
-  const roleLabel = (roleValue: string) =>
-    tr[`role_${roleValue}`] ?? roleValue.replaceAll("_", " ");
+      }),
+    [lang],
+  );
+  const contractStatusLabel = useCallback(
+    (status: string) => enumLabel(status, text.roleLabels),
+    [text.roleLabels],
+  );
+  const quoteStatusLabel = useCallback(
+    (status: string) => enumLabel(status, text.roleLabels),
+    [text.roleLabels],
+  );
+  const roleLabel = useCallback(
+    (roleValue: string) => tr[`role_${roleValue}`] ?? roleValue.replaceAll("_", " "),
+    [tr],
+  );
 
   const initialTab =
     searchParams.get("tab") === "quotes" || searchParams.has("quote") || searchParams.has("order")
@@ -1064,6 +1076,7 @@ export function ContractsPage() {
       t.providers_service_valid_to,
       t.users_status,
       text.updatedAt,
+      contractStatusLabel,
     ],
   );
 
@@ -1149,6 +1162,7 @@ export function ContractsPage() {
       text.grossTotal,
       text.quotesTab,
       text.updatedAt,
+      quoteStatusLabel,
     ],
   );
 
@@ -1365,6 +1379,8 @@ export function ContractsPage() {
       text.snapshotFallback,
       text.updatedAt,
       text.version,
+      quoteStatusLabel,
+      roleLabel,
     ],
   );
 
@@ -1825,7 +1841,7 @@ export function ContractsPage() {
         {optionsError ? <ShellBanner tone="error">{optionsError}</ShellBanner> : null}
 
         <AdminTableCard
-          title={text.agencyServiceTitle}
+          title={titleWithDot(text.agencyServiceTitle)}
           description={text.agencyServiceDescription}
           count={agencyServices.length}
           accessory={
@@ -1959,7 +1975,7 @@ export function ContractsPage() {
           </TabsList>
 
           <TabsContent value="contracts" className="space-y-4">
-            <AdminTableCard title={text.contractsTab} description={t.contracts_subtitle} count={contracts.length}>
+            <AdminTableCard title={titleWithDot(text.contractsTab)} description={t.contracts_subtitle} count={contracts.length}>
               <div className="space-y-4 border-b border-border px-4 py-4">
                 <AdminToolbar>
                   <div className="relative min-w-[260px] flex-1">
@@ -2081,7 +2097,7 @@ export function ContractsPage() {
           </TabsContent>
 
           <TabsContent value="quotes" className="space-y-4">
-            <AdminTableCard title={text.quotesTab} description={t.contracts_subtitle} count={quotes.length}>
+            <AdminTableCard title={titleWithDot(text.quotesTab)} description={t.contracts_subtitle} count={quotes.length}>
               <div className="space-y-4 border-b border-border px-4 py-4">
                 <AdminToolbar>
                   <div className="relative min-w-[240px] flex-1">
