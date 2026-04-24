@@ -1,11 +1,10 @@
 import { memo } from "react";
 import { LoaderCircle } from "lucide-react";
 
+import { AdminSheetScaffold } from "@/components/admin-page-patterns";
 import { Banner } from "@/components/ui-shell";
 import {
   SheetContent,
-  SheetHeader,
-  SheetTitle,
 } from "@/components/ui/sheet";
 import { useLang } from "@/lib/i18n";
 import { appointmentText } from "@/pages/appointments/model/labels";
@@ -191,13 +190,13 @@ function AppointmentMobileDetailSheetContent({
   const { t } = useLang();
 
   return (
-    <SheetContent side="right" className="w-full gap-0 sm:max-w-[860px]">
-      <div className="flex flex-col flex-1 min-h-0">
-        <SheetHeader className="px-4 py-3">
-          <SheetTitle>{t.appointments_title}</SheetTitle>
-        </SheetHeader>
-        <div className="flex-1 overflow-y-auto overscroll-y-contain px-4 pb-6 pt-4">
-          {detailLoading ? (
+    <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[860px]">
+      <AdminSheetScaffold
+        title={t.appointments_title}
+        headerClassName="px-4 py-3"
+        bodyClassName="flex-1 overflow-y-auto overscroll-y-contain px-4 pb-6 pt-4"
+      >
+        {detailLoading ? (
             <div className="flex min-h-[320px] items-center justify-center text-muted-foreground">
               <LoaderCircle className="mr-2 size-4 animate-spin" />
               {appointmentText(
@@ -481,7 +480,7 @@ function AppointmentMobileDetailSheetContent({
                 hideWhenUnavailable
               />
             </div>
-          ) : (
+        ) : (
             <div className="flex min-h-[320px] items-center justify-center text-muted-foreground">
               {appointmentText(
                 "Termin im Kalender oder in der Liste auswahlen.",
@@ -489,9 +488,8 @@ function AppointmentMobileDetailSheetContent({
                 "Select an appointment from the calendar or list.",
               )}
             </div>
-          )}
-        </div>
-      </div>
+        )}
+      </AdminSheetScaffold>
     </SheetContent>
   );
 }

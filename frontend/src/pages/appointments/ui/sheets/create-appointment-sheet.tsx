@@ -59,7 +59,10 @@ import type {
   StaffOption,
 } from "@/pages/appointments/model/types";
 import { parsePositiveIntegerInput } from "@/pages/appointments/model/workflow-helpers";
-import { Field } from "@/pages/appointments/ui/shared/workspace-primitives";
+import {
+  AppointmentEditorSheet,
+  Field,
+} from "@/pages/appointments/ui/shared/workspace-primitives";
 import {
   ConflictPanel,
   ScheduleWarningsPanel,
@@ -70,6 +73,7 @@ const createSheetTextareaClassName = textareaClass;
 
 export type CreateAppointmentSheetProps = {
   open: boolean;
+  title: string;
   seed: AppointmentFormState;
   appointments: AppointmentListItem[];
   patients: PatientSummary[];
@@ -83,6 +87,7 @@ export type CreateAppointmentSheetProps = {
 
 function CreateAppointmentSheet({
   open,
+  title,
   seed,
   appointments,
   patients,
@@ -321,13 +326,42 @@ function CreateAppointmentSheet({
   }
 
   return (
-    <div>
-      {open ? (
-        <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
-          <div className="flex-1 overflow-y-auto overscroll-y-contain px-4 py-4">
-            <div className="space-y-4">
-              {error ? <Banner tone="error" withIcon>{error}</Banner> : null}
-              <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
+    <AppointmentEditorSheet
+      open={open}
+      onOpenChange={onOpenChange}
+      title={title}
+      maxWidthClassName="sm:max-w-[760px]"
+      onSubmit={handleSubmit}
+      footer={
+        <>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 rounded-lg"
+            onClick={() => onOpenChange(false)}
+          >
+            {tr.common_cancel}
+          </Button>
+          <Button
+            type="submit"
+            size="sm"
+            className="h-8 rounded-lg gap-1.5 px-3.5"
+            disabled={busy}
+          >
+            {busy ? (
+              <LoaderCircle className="size-3.5 animate-spin" />
+            ) : (
+              <Plus className="size-3.5" />
+            )}
+            {busy ? t.patients_creating : t.appointments_new}
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        {error ? <Banner tone="error" withIcon>{error}</Banner> : null}
+        <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
                 <div className="grid gap-4 md:grid-cols-3">
                   <Field compact label={t.orders_patient}>
                     <ShadSelect
@@ -583,8 +617,8 @@ function CreateAppointmentSheet({
                     </div>
                   ) : null}
                 </div>
-              </section>
-              <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
+        </section>
+        <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
                 <div className="grid gap-4 md:grid-cols-2">
                   <Field compact label={t.common_provider}>
                     <ShadSelect
@@ -636,8 +670,8 @@ function CreateAppointmentSheet({
                     </ShadSelect>
                   </Field>
                 </div>
-              </section>
-              <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
+        </section>
+        <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
                 <div className="grid gap-4 md:grid-cols-2">
                   <Field compact label={t.patients_assign_owner}>
                     <ShadSelect
@@ -725,38 +759,11 @@ function CreateAppointmentSheet({
                     rows={4}
                   />
                 </Field>
-              </section>
-              <ConflictPanel conflicts={conflicts} />
-              <ScheduleWarningsPanel warnings={localWarnings} />
-            </div>
-          </div>
-          <div className="shrink-0 flex justify-end gap-2 px-4 py-3 bg-popover">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 rounded-lg"
-              onClick={() => onOpenChange(false)}
-            >
-              {tr.common_cancel}
-            </Button>
-            <Button
-              type="submit"
-              size="sm"
-              className="h-8 rounded-lg gap-1.5 px-3.5"
-              disabled={busy}
-            >
-              {busy ? (
-                <LoaderCircle className="size-3.5 animate-spin" />
-              ) : (
-                <Plus className="size-3.5" />
-              )}
-              {busy ? t.patients_creating : t.appointments_new}
-            </Button>
-          </div>
-        </form>
-      ) : null}
-    </div>
+        </section>
+        <ConflictPanel conflicts={conflicts} />
+        <ScheduleWarningsPanel warnings={localWarnings} />
+      </div>
+    </AppointmentEditorSheet>
   );
 }
 

@@ -1,13 +1,14 @@
 import type { ElementType, FormEvent, ReactNode } from "react";
 import { LoaderCircle } from "lucide-react";
 
+import {
+  AdminSheetScaffold,
+  SheetActionsFooter,
+} from "@/components/admin-page-patterns";
 import { EmptyCell } from "@/components/ui-shell";
 import {
   Sheet,
   SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
 } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { appointmentPreviewInfoCardClassName } from "@/pages/appointments/appearance/surface-appearance";
@@ -90,29 +91,29 @@ export function AppointmentEditorSheet({
   footer: ReactNode;
 }) {
   const content = (
-    <>
-      <SheetHeader className="px-4 py-3">
-        <SheetTitle>{title}</SheetTitle>
-        {description ? <SheetDescription>{description}</SheetDescription> : null}
-      </SheetHeader>
-      <div className="flex-1 overflow-y-auto overscroll-y-contain px-4 py-4 space-y-4">
-        {children}
-      </div>
-      <div className="flex shrink-0 justify-end gap-2 px-4 py-3 bg-popover">
-        {footer}
-      </div>
-    </>
+    <AdminSheetScaffold
+      title={title}
+      description={description}
+      headerClassName="px-4 py-3"
+      bodyClassName="min-h-0 overscroll-y-contain px-4 py-4 space-y-4"
+      footer={<SheetActionsFooter>{footer}</SheetActionsFooter>}
+    >
+      {children}
+    </AdminSheetScaffold>
   );
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className={cn("w-full gap-0", maxWidthClassName)}>
+      <SheetContent
+        side="right"
+        className={cn("w-full border-l border-border p-0", maxWidthClassName)}
+      >
         {onSubmit ? (
-          <form className="flex flex-col flex-1 min-h-0" onSubmit={onSubmit}>
+          <form className="flex min-h-0 flex-1 flex-col" onSubmit={onSubmit}>
             {content}
           </form>
         ) : (
-          <div className="flex flex-col flex-1 min-h-0">{content}</div>
+          <div className="flex min-h-0 flex-1 flex-col">{content}</div>
         )}
       </SheetContent>
     </Sheet>
@@ -140,22 +141,21 @@ export function AppointmentPreviewSheet({
 }) {
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className={cn("w-full gap-0", maxWidthClassName)}>
-        <div className="flex flex-col flex-1 min-h-0">
-          <SheetHeader className={cn("px-4 py-3", headerClassName)}>
-            <SheetTitle>{title}</SheetTitle>
-            {description ? <SheetDescription>{description}</SheetDescription> : null}
-          </SheetHeader>
-          <div
-            className={cn(
-              "flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-4",
-              "overscroll-y-contain",
-              bodyClassName,
-            )}
-          >
-            {children}
-          </div>
-        </div>
+      <SheetContent
+        side="right"
+        className={cn("w-full border-l border-border p-0", maxWidthClassName)}
+      >
+        <AdminSheetScaffold
+          title={title}
+          description={description}
+          headerClassName={cn("px-4 py-3", headerClassName)}
+          bodyClassName={cn(
+            "min-h-0 overscroll-y-contain px-4 py-4 space-y-4",
+            bodyClassName,
+          )}
+        >
+          {children}
+        </AdminSheetScaffold>
       </SheetContent>
     </Sheet>
   );

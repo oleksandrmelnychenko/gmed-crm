@@ -117,20 +117,28 @@ export function AdminSheetScaffold({
   children,
   footer,
   className,
+  headerClassName,
+  bodyClassName,
 }: {
   title: ReactNode;
   description?: ReactNode;
   children: ReactNode;
   footer?: ReactNode;
   className?: string;
+  headerClassName?: string;
+  bodyClassName?: string;
 }) {
   return (
     <div className={cn("flex flex-1 min-h-0 flex-col", className)}>
-      <SheetHeader className="shrink-0 px-4 pt-3 pb-1">
+      <SheetHeader className={cn("shrink-0 px-4 pt-3 pb-1", headerClassName)}>
         <SheetTitle>{title}</SheetTitle>
         {description ? <SheetDescription>{description}</SheetDescription> : null}
       </SheetHeader>
-      <div className="flex-1 overflow-y-auto px-4 py-2 space-y-4">{children}</div>
+      <div
+        className={cn("flex-1 overflow-y-auto px-4 py-2 space-y-4", bodyClassName)}
+      >
+        {children}
+      </div>
       {footer}
     </div>
   );

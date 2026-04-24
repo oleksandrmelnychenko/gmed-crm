@@ -1,11 +1,5 @@
 import { Suspense, lazy } from "react";
 
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
 import type { CreateAppointmentSheetProps } from "@/pages/appointments/ui/sheets/create-appointment-sheet";
 import { AppointmentPreviewSheetLoadingState } from "@/pages/appointments/ui/shared/workspace-primitives";
 
@@ -47,14 +41,7 @@ export function CreateSheetLayer({
         />
       }
     >
-      <Sheet open={open} onOpenChange={sheetProps.onOpenChange}>
-        <SheetContent side="right" className="w-full gap-0 sm:max-w-[760px]">
-          <SheetHeader className="px-4 py-3">
-            <SheetTitle>{title}</SheetTitle>
-          </SheetHeader>
-          <LazyCreateAppointmentSheet open={open} {...sheetProps} />
-        </SheetContent>
-      </Sheet>
+      <LazyCreateAppointmentSheet open={open} title={title} {...sheetProps} />
     </Suspense>
   );
 }
