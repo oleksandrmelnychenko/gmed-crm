@@ -6,14 +6,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
+  inputClass,
+  textareaClass,
+} from "@/components/ui-shell";
 import { toast } from "@/components/ui/toast";
 import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
+import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
 type FormState = {
   measuredAt: string;
@@ -70,8 +70,7 @@ function formatBmi(value: number) {
   return value.toLocaleString(undefined, { maximumFractionDigits: 1 });
 }
 
-const textareaClassName =
-  "min-h-[80px] w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
+const vitalsTextareaClassName = cn(textareaClass, "min-h-[80px]");
 
 export function PatientVitalsSheet({
   patientId,
@@ -103,7 +102,7 @@ export function PatientVitalsSheet({
     event.preventDefault();
     const measuredAt = new Date(form.measuredAt);
     if (Number.isNaN(measuredAt.getTime())) {
-      toast.error(l("Ungültiges Datum.", "Некорректная дата.", "Invalid date."));
+      toast.error(l("Ungueltiges Datum.", "Nekorrektnaya data.", "Invalid date."));
       return;
     }
     const bmiOverride = parseNumber(form.bmi);
@@ -124,7 +123,7 @@ export function PatientVitalsSheet({
           notes: form.notes.trim() || null,
         }),
       });
-      toast.success(l("Vitalwert gespeichert.", "Показатель сохранён.", "Vital measurement saved."));
+      toast.success(l("Vitalwert gespeichert.", "Pokazatel sohranen.", "Vital measurement saved."));
       onOpenChange(false);
       onSaved();
     } catch (error) {
@@ -135,157 +134,169 @@ export function PatientVitalsSheet({
   }
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full sm:max-w-[540px] gap-0">
-        <SheetHeader className="px-4 py-3 flex-row items-center justify-between">
-          <SheetTitle>
-            {l("Vitalwert erfassen", "Добавить показатель", "Add vital measurement")}
-          </SheetTitle>
+    <PatientSheetScaffold
+      open={open}
+      onOpenChange={onOpenChange}
+      maxWidthClassName="sm:max-w-[540px]"
+      onSubmit={handleSubmit}
+      title={
+        <span className="flex w-full items-center justify-between gap-2">
+          <span>
+            {l("Vitalwert erfassen", "Dobavit pokazatel", "Add vital measurement")}
+          </span>
           {bmiPreview != null ? (
-            <Badge variant="outline" className="rounded-full border-sky-200 bg-sky-50 text-sky-700 text-[11px]">
+            <Badge
+              variant="outline"
+              className="rounded-full border-sky-200 bg-sky-50 text-[11px] text-sky-700"
+            >
               {l("BMI", "BMI", "BMI")} {formatBmi(bmiPreview)}
             </Badge>
           ) : null}
-        </SheetHeader>
+        </span>
+      }
+      bodyClassName="px-4 py-4 space-y-4"
+      footer={
+        <>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 rounded-lg"
+            onClick={() => onOpenChange(false)}
+          >
+            {t.common_cancel}
+          </Button>
+          <Button type="submit" size="sm" className="h-8 rounded-lg gap-1.5" disabled={busy}>
+            {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
+            {t.common_save}
+          </Button>
+        </>
+      }
+    >
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="flex flex-col gap-1.5 md:col-span-2">
+          <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-vitals-measured-at">
+            {l("Gemessen am", "Izmereno", "Measured at")}
+          </Label>
+          <Input
+            id="patient-vitals-measured-at"
+            type="datetime-local"
+            value={form.measuredAt}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, measuredAt: event.target.value }))
+            }
+            className={inputClass}
+            required
+          />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-vitals-bp-systolic">
+            {l("RR systolisch", "Sistolicheskoe AD", "BP systolic")}
+          </Label>
+          <Input
+            id="patient-vitals-bp-systolic"
+            inputMode="decimal"
+            value={form.bpSystolic}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, bpSystolic: event.target.value }))
+            }
+            className={inputClass}
+            placeholder="mmHg"
+          />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-vitals-bp-diastolic">
+            {l("RR diastolisch", "Diastolicheskoe AD", "BP diastolic")}
+          </Label>
+          <Input
+            id="patient-vitals-bp-diastolic"
+            inputMode="decimal"
+            value={form.bpDiastolic}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, bpDiastolic: event.target.value }))
+            }
+            className={inputClass}
+            placeholder="mmHg"
+          />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-vitals-heart-rate">
+            {l("Herzfrequenz", "ChSS", "Heart rate")}
+          </Label>
+          <Input
+            id="patient-vitals-heart-rate"
+            inputMode="numeric"
+            value={form.heartRate}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, heartRate: event.target.value }))
+            }
+            className={inputClass}
+            placeholder="bpm"
+          />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-vitals-weight">
+            {l("Gewicht (kg)", "Ves (kg)", "Weight (kg)")}
+          </Label>
+          <Input
+            id="patient-vitals-weight"
+            inputMode="decimal"
+            value={form.weightKg}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, weightKg: event.target.value }))
+            }
+            className={inputClass}
+          />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-vitals-height">
+            {l("Groesse (cm)", "Rost (cm)", "Height (cm)")}
+          </Label>
+          <Input
+            id="patient-vitals-height"
+            inputMode="decimal"
+            value={form.heightCm}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, heightCm: event.target.value }))
+            }
+            className={inputClass}
+          />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-vitals-bmi">
+            {l("BMI (optional)", "BMI (opcionalno)", "BMI (optional)")}
+          </Label>
+          <Input
+            id="patient-vitals-bmi"
+            inputMode="decimal"
+            value={form.bmi}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, bmi: event.target.value }))
+            }
+            className={inputClass}
+            placeholder={bmiPreview != null ? formatBmi(bmiPreview) : ""}
+          />
+        </div>
+      </div>
 
-        <form className="flex flex-col flex-1 min-h-0" onSubmit={handleSubmit}>
-          <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="flex flex-col gap-1.5 md:col-span-2">
-                <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-vitals-measured-at">
-                  {l("Gemessen am", "Измерено", "Measured at")}
-                </Label>
-                <Input
-                  id="patient-vitals-measured-at"
-                  type="datetime-local"
-                  value={form.measuredAt}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, measuredAt: event.target.value }))
-                  }
-                  required
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-vitals-bp-systolic">
-                  {l("RR systolisch", "Систолическое АД", "BP systolic")}
-                </Label>
-                <Input
-                  id="patient-vitals-bp-systolic"
-                  inputMode="decimal"
-                  value={form.bpSystolic}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, bpSystolic: event.target.value }))
-                  }
-                  placeholder="mmHg"
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-vitals-bp-diastolic">
-                  {l("RR diastolisch", "Диастолическое АД", "BP diastolic")}
-                </Label>
-                <Input
-                  id="patient-vitals-bp-diastolic"
-                  inputMode="decimal"
-                  value={form.bpDiastolic}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, bpDiastolic: event.target.value }))
-                  }
-                  placeholder="mmHg"
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-vitals-heart-rate">
-                  {l("Herzfrequenz", "ЧСС", "Heart rate")}
-                </Label>
-                <Input
-                  id="patient-vitals-heart-rate"
-                  inputMode="numeric"
-                  value={form.heartRate}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, heartRate: event.target.value }))
-                  }
-                  placeholder="bpm"
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-vitals-weight">
-                  {l("Gewicht (kg)", "Вес (кг)", "Weight (kg)")}
-                </Label>
-                <Input
-                  id="patient-vitals-weight"
-                  inputMode="decimal"
-                  value={form.weightKg}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, weightKg: event.target.value }))
-                  }
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-vitals-height">
-                  {l("Größe (cm)", "Рост (см)", "Height (cm)")}
-                </Label>
-                <Input
-                  id="patient-vitals-height"
-                  inputMode="decimal"
-                  value={form.heightCm}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, heightCm: event.target.value }))
-                  }
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-vitals-bmi">
-                  {l("BMI (optional)", "BMI (опционально)", "BMI (optional)")}
-                </Label>
-                <Input
-                  id="patient-vitals-bmi"
-                  inputMode="decimal"
-                  value={form.bmi}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, bmi: event.target.value }))
-                  }
-                  placeholder={bmiPreview != null ? formatBmi(bmiPreview) : ""}
-                />
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-vitals-notes">
-                {l("Notizen", "Заметки", "Notes")}
-              </Label>
-              <textarea
-                id="patient-vitals-notes"
-                className={textareaClassName}
-                value={form.notes}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, notes: event.target.value }))
-                }
-                placeholder={l(
-                  "Klinischer Kontext, Beobachtungen, Umstände.",
-                  "Клинический контекст, наблюдения, обстоятельства.",
-                  "Clinical context, observations, circumstances.",
-                )}
-              />
-            </div>
-          </div>
-
-          <div className="flex justify-end gap-2 px-4 py-3">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 rounded-lg"
-              onClick={() => onOpenChange(false)}
-            >
-              {t.common_cancel}
-            </Button>
-            <Button type="submit" size="sm" className="h-8 rounded-lg gap-1.5" disabled={busy}>
-              {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
-              {t.common_save}
-            </Button>
-          </div>
-        </form>
-      </SheetContent>
-    </Sheet>
+      <div className="flex flex-col gap-1.5">
+        <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-vitals-notes">
+          {l("Notizen", "Zametki", "Notes")}
+        </Label>
+        <textarea
+          id="patient-vitals-notes"
+          className={vitalsTextareaClassName}
+          value={form.notes}
+          onChange={(event) =>
+            setForm((current) => ({ ...current, notes: event.target.value }))
+          }
+          placeholder={l(
+            "Klinischer Kontext, Beobachtungen, Umstaende.",
+            "Klinicheskiy kontekst, nablyudeniya, obstoyatelstva.",
+            "Clinical context, observations, circumstances.",
+          )}
+        />
+      </div>
+    </PatientSheetScaffold>
   );
 }

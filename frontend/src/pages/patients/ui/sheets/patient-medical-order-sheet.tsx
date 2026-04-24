@@ -12,14 +12,15 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
+  inputClass,
+  selectClass,
+  textareaClass,
+} from "@/components/ui-shell";
 import { toast } from "@/components/ui/toast";
 import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
+import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
 const ORDER_TYPE_OPTIONS = [
   "physiotherapy",
@@ -39,19 +40,19 @@ function orderTypeLabel(
 ): string {
   switch (value) {
     case "physiotherapy":
-      return l("Physiotherapie", "Физиотерапия", "Physiotherapy");
+      return l("Physiotherapie", "Fizioterapiya", "Physiotherapy");
     case "diet":
-      return l("Ernährung", "Диета", "Diet");
+      return l("Ernaehrung", "Dieta", "Diet");
     case "lab_recheck":
-      return l("Laborkontrolle", "Повторный анализ", "Lab recheck");
+      return l("Laborkontrolle", "Povtornyy analiz", "Lab recheck");
     case "imaging":
-      return l("Bildgebung", "Визуализация", "Imaging");
+      return l("Bildgebung", "Vizualizaciya", "Imaging");
     case "medication_followup":
-      return l("Medikationskontrolle", "Контроль медикации", "Medication follow-up");
+      return l("Medikationskontrolle", "Kontrol medikacii", "Medication follow-up");
     case "procedure":
-      return l("Eingriff", "Процедура", "Procedure");
+      return l("Eingriff", "Procedura", "Procedure");
     case "other":
-      return l("Sonstiges", "Другое", "Other");
+      return l("Sonstiges", "Drugoe", "Other");
     default:
       return value.replaceAll("_", " ");
   }
@@ -82,8 +83,7 @@ function blankForm(): FormState {
   };
 }
 
-const textareaClassName =
-  "min-h-[96px] w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
+const medicalOrderTextareaClassName = cn(textareaClass, "min-h-[96px]");
 
 export function PatientMedicalOrderSheet({
   patientId,
@@ -110,15 +110,15 @@ export function PatientMedicalOrderSheet({
     event.preventDefault();
     const orderDate = new Date(form.orderDate);
     if (Number.isNaN(orderDate.getTime())) {
-      toast.error(l("Ungültiges Datum.", "Некорректная дата.", "Invalid date."));
+      toast.error(l("Ungueltiges Datum.", "Nekorrektnaya data.", "Invalid date."));
       return;
     }
     if (!form.title.trim()) {
-      toast.error(l("Titel ist erforderlich.", "Название обязательно.", "Title required."));
+      toast.error(l("Titel ist erforderlich.", "Nazvanie obyazatelno.", "Title required."));
       return;
     }
     if (!form.instructions.trim()) {
-      toast.error(l("Anweisungen erforderlich.", "Инструкции обязательны.", "Instructions required."));
+      toast.error(l("Anweisungen erforderlich.", "Instrukcii obyazatelny.", "Instructions required."));
       return;
     }
 
@@ -135,7 +135,7 @@ export function PatientMedicalOrderSheet({
           source: form.source.trim() || null,
         }),
       });
-      toast.success(l("Anordnung gespeichert.", "Назначение сохранено.", "Order saved."));
+      toast.success(l("Anordnung gespeichert.", "Naznachenie sohraneno.", "Order saved."));
       onOpenChange(false);
       onSaved();
     } catch (error) {
@@ -146,132 +146,133 @@ export function PatientMedicalOrderSheet({
   }
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full sm:max-w-[540px] gap-0">
-        <SheetHeader className="px-4 py-3">
-          <SheetTitle>
-            {l("Medizinische Anordnung hinzufügen", "Добавить медицинское назначение", "Add medical order")}
-          </SheetTitle>
-        </SheetHeader>
-        <form className="flex flex-col flex-1 min-h-0" onSubmit={handleSubmit}>
-          <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="flex flex-col gap-1.5">
-                <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-medical-order-date">
-                  {l("Anordnungsdatum", "Дата назначения", "Order date")}
-                </Label>
-                <Input
-                  id="patient-medical-order-date"
-                  type="datetime-local"
-                  value={form.orderDate}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, orderDate: event.target.value }))
-                  }
-                  required
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-medical-order-type">
-                  {l("Anordnungstyp", "Тип назначения", "Order type")}
-                </Label>
-                <ShadSelect
-                  value={form.orderType}
-                  onValueChange={(value) =>
-                    setForm((current) => ({
-                      ...current,
-                      orderType: (value ?? ORDER_TYPE_OPTIONS[0]) as OrderType,
-                    }))
-                  }
-                >
-                  <SelectTrigger id="patient-medical-order-type" className="w-full">
-                    <SelectValue placeholder={l("Typ wählen", "Выберите тип", "Select order type")}>
-                      {form.orderType ? orderTypeLabel(form.orderType, l) : null}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {ORDER_TYPE_OPTIONS.map((option) => (
-                      <SelectItem key={option} value={option}>
-                        {orderTypeLabel(option, l)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </ShadSelect>
-              </div>
-              <div className="flex flex-col gap-1.5 md:col-span-2">
-                <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-medical-order-title">
-                  {l("Titel", "Название", "Title")}
-                </Label>
-                <Input
-                  id="patient-medical-order-title"
-                  value={form.title}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, title: event.target.value }))
-                  }
-                  placeholder={l("Physiotherapie 2x pro Woche", "Физиотерапия 2 раза в неделю", "Physiotherapy 2x per week")}
-                  required
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-medical-order-due-date">
-                  {l("Fälligkeitsdatum", "Срок", "Due date")}
-                </Label>
-                <Input
-                  id="patient-medical-order-due-date"
-                  type="date"
-                  value={form.dueDate}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, dueDate: event.target.value }))
-                  }
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-medical-order-source">
-                  {l("Quelle", "Источник", "Source")}
-                </Label>
-                <Input
-                  id="patient-medical-order-source"
-                  value={form.source}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, source: event.target.value }))
-                  }
-                  placeholder={l("Arzt, Klinik, Entlassungsbericht", "Врач, клиника, выписка", "Doctor, clinic, discharge note")}
-                />
-              </div>
-            </div>
+    <PatientSheetScaffold
+      open={open}
+      onOpenChange={onOpenChange}
+      maxWidthClassName="sm:max-w-[540px]"
+      onSubmit={handleSubmit}
+      title={l("Medizinische Anordnung hinzufugen", "Dobavit medicinskoe naznachenie", "Add medical order")}
+      bodyClassName="px-4 py-4 space-y-4"
+      footer={
+        <>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 rounded-lg"
+            onClick={() => onOpenChange(false)}
+          >
+            {t.common_cancel}
+          </Button>
+          <Button type="submit" size="sm" className="h-8 rounded-lg gap-1.5" disabled={busy}>
+            {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
+            {t.common_save}
+          </Button>
+        </>
+      }
+    >
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="flex flex-col gap-1.5">
+          <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-medical-order-date">
+            {l("Anordnungsdatum", "Data naznacheniya", "Order date")}
+          </Label>
+          <Input
+            id="patient-medical-order-date"
+            type="datetime-local"
+            value={form.orderDate}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, orderDate: event.target.value }))
+            }
+            className={inputClass}
+            required
+          />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-medical-order-type">
+            {l("Anordnungstyp", "Tip naznacheniya", "Order type")}
+          </Label>
+          <ShadSelect
+            value={form.orderType}
+            onValueChange={(value) =>
+              setForm((current) => ({
+                ...current,
+                orderType: (value ?? ORDER_TYPE_OPTIONS[0]) as OrderType,
+              }))
+            }
+          >
+            <SelectTrigger id="patient-medical-order-type" className={cn("w-full", selectClass)}>
+              <SelectValue placeholder={l("Typ waehlen", "Vyberite tip", "Select order type")}>
+                {form.orderType ? orderTypeLabel(form.orderType, l) : null}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {ORDER_TYPE_OPTIONS.map((option) => (
+                <SelectItem key={option} value={option}>
+                  {orderTypeLabel(option, l)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </ShadSelect>
+        </div>
+        <div className="flex flex-col gap-1.5 md:col-span-2">
+          <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-medical-order-title">
+            {l("Titel", "Nazvanie", "Title")}
+          </Label>
+          <Input
+            id="patient-medical-order-title"
+            value={form.title}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, title: event.target.value }))
+            }
+            className={inputClass}
+            placeholder={l("Physiotherapie 2x pro Woche", "Fizioterapiya 2 raza v nedelyu", "Physiotherapy 2x per week")}
+            required
+          />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-medical-order-due-date">
+            {l("Faelligkeitsdatum", "Srok", "Due date")}
+          </Label>
+          <Input
+            id="patient-medical-order-due-date"
+            type="date"
+            value={form.dueDate}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, dueDate: event.target.value }))
+            }
+            className={inputClass}
+          />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-medical-order-source">
+            {l("Quelle", "Istochnik", "Source")}
+          </Label>
+          <Input
+            id="patient-medical-order-source"
+            value={form.source}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, source: event.target.value }))
+            }
+            className={inputClass}
+            placeholder={l("Arzt, Klinik, Entlassungsbericht", "Vrach, klinika, vypiska", "Doctor, clinic, discharge note")}
+          />
+        </div>
+      </div>
 
-            <div className="flex flex-col gap-1.5">
-              <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-medical-order-instructions">
-                {l("Anweisungen", "Инструкции", "Instructions")}
-              </Label>
-              <textarea
-                id="patient-medical-order-instructions"
-                className={textareaClassName}
-                value={form.instructions}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, instructions: event.target.value }))
-                }
-                required
-              />
-            </div>
-          </div>
-
-          <div className="flex justify-end gap-2 px-4 py-3">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 rounded-lg"
-              onClick={() => onOpenChange(false)}
-            >
-              {t.common_cancel}
-            </Button>
-            <Button type="submit" size="sm" className="h-8 rounded-lg gap-1.5" disabled={busy}>
-              {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
-              {t.common_save}
-            </Button>
-          </div>
-        </form>
-      </SheetContent>
-    </Sheet>
+      <div className="flex flex-col gap-1.5">
+        <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-medical-order-instructions">
+          {l("Anweisungen", "Instrukcii", "Instructions")}
+        </Label>
+        <textarea
+          id="patient-medical-order-instructions"
+          className={medicalOrderTextareaClassName}
+          value={form.instructions}
+          onChange={(event) =>
+            setForm((current) => ({ ...current, instructions: event.target.value }))
+          }
+          required
+        />
+      </div>
+    </PatientSheetScaffold>
   );
 }

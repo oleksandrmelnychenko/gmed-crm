@@ -21,12 +21,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
 import { Banner, tokens } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -55,6 +49,7 @@ import {
 } from "../../model/list-model";
 import { parseFunctionalLabels, formInputClassName, humanizeFunctionalLabel } from "../shared/patient-form-primitives";
 import { PatientFormFields } from "../shared/patient-form-fields";
+import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
 export type PatientDetailSheetProps = {
   open: boolean;
@@ -432,83 +427,88 @@ function PatientDetailSheet({
   }
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full sm:max-w-[860px]">
-        {detailBusy ? (
-          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-            <LoaderCircle className="mr-2 size-4 animate-spin" />
-            {dictionary.common_loading}
-          </div>
-        ) : detail ? (
-          <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
-            <SheetHeader className="shrink-0 px-4 pt-3 pb-1">
-              <SheetTitle>{getPatientDisplayName(detail)}</SheetTitle>
-            </SheetHeader>
-
-            <div className="flex-1 overflow-y-auto px-4 py-2 space-y-4">
-              {detailError ? <Banner tone="error">{detailError}</Banner> : null}
-              {error ? <Banner tone="error">{error}</Banner> : null}
-              <PatientOverviewSection
-                detail={detail}
-                onOpenCases={onOpenCases}
-                onOpenOrders={onOpenOrders}
-                onOpenAppointments={onOpenAppointments}
-                onOpenContracts={onOpenContracts}
-                onOpenDocuments={onOpenDocuments}
-                hideActions={hideWorkspaceActions}
-              />
-              <PatientProfileSection
-                detail={detail}
-                form={form}
-                canEdit={canCreateEdit}
-                onChange={(field, value) =>
-                  setForm((current) => ({ ...current, [field]: value }))
-                }
-              />
-              {canViewAssignments ? (
-                <AssignmentsSection
-                  assignments={assignments}
-                  assignableStaff={assignableStaff}
-                  canManage={canManageAssignments}
-                  assignmentBusy={assignmentBusy}
-                  assignmentError={assignmentError}
-                  selectedAssignee={selectedAssignee}
-                  onAssigneeChange={onAssigneeChange}
-                  onAssign={onAssign}
-                />
-              ) : null}
-            </div>
-
-            {!hideFooterActions ? (
-              <div className="shrink-0 flex justify-end gap-2 px-4 py-3 bg-popover">
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-9 rounded-lg"
-                  onClick={() => onOpenChange(false)}
-                >
-                  {dictionary.common_cancel}
-                </Button>
-                {canCreateEdit ? (
-                  <Button type="submit" className="h-9 rounded-lg gap-1.5 px-3.5" disabled={busy}>
-                    {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                    {busy ? dictionary.patients_saving : dictionary.patients_save}
-                  </Button>
-                ) : null}
-              </div>
+    <PatientSheetScaffold
+      open={open}
+      onOpenChange={onOpenChange}
+      title={
+        detail
+          ? getPatientDisplayName(detail)
+          : dictionary.patients_title || dictionary.patients_subtitle
+      }
+      width="detail-wide"
+      onSubmit={detail ? handleSubmit : undefined}
+      footer={
+        detail && !hideFooterActions ? (
+          <>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-9 rounded-lg"
+              onClick={() => onOpenChange(false)}
+            >
+              {dictionary.common_cancel}
+            </Button>
+            {canCreateEdit ? (
+              <Button
+                type="submit"
+                className="h-9 rounded-lg gap-1.5 px-3.5"
+                disabled={busy}
+              >
+                {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                {busy ? dictionary.patients_saving : dictionary.patients_save}
+              </Button>
             ) : null}
-          </form>
-        ) : detailError ? (
-          <div className="p-4">
-            <Banner tone="error">{detailError}</Banner>
-          </div>
-        ) : (
-          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-            {dictionary.patients_subtitle}
-          </div>
-        )}
-      </SheetContent>
-    </Sheet>
+          </>
+        ) : undefined
+      }
+    >
+      {detailBusy ? (
+        <div className="flex min-h-[320px] items-center justify-center text-sm text-muted-foreground">
+          <LoaderCircle className="mr-2 size-4 animate-spin" />
+          {dictionary.common_loading}
+        </div>
+      ) : detail ? (
+        <>
+          {detailError ? <Banner tone="error">{detailError}</Banner> : null}
+          {error ? <Banner tone="error">{error}</Banner> : null}
+          <PatientOverviewSection
+            detail={detail}
+            onOpenCases={onOpenCases}
+            onOpenOrders={onOpenOrders}
+            onOpenAppointments={onOpenAppointments}
+            onOpenContracts={onOpenContracts}
+            onOpenDocuments={onOpenDocuments}
+            hideActions={hideWorkspaceActions}
+          />
+          <PatientProfileSection
+            detail={detail}
+            form={form}
+            canEdit={canCreateEdit}
+            onChange={(field, value) =>
+              setForm((current) => ({ ...current, [field]: value }))
+            }
+          />
+          {canViewAssignments ? (
+            <AssignmentsSection
+              assignments={assignments}
+              assignableStaff={assignableStaff}
+              canManage={canManageAssignments}
+              assignmentBusy={assignmentBusy}
+              assignmentError={assignmentError}
+              selectedAssignee={selectedAssignee}
+              onAssigneeChange={onAssigneeChange}
+              onAssign={onAssign}
+            />
+          ) : null}
+        </>
+      ) : detailError ? (
+        <Banner tone="error">{detailError}</Banner>
+      ) : (
+        <div className="flex min-h-[320px] items-center justify-center text-sm text-muted-foreground">
+          {dictionary.patients_subtitle}
+        </div>
+      )}
+    </PatientSheetScaffold>
   );
 }
 

@@ -3,18 +3,17 @@ import { LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
 import { toast } from "@/components/ui/toast";
+import { textareaClass } from "@/components/ui-shell";
 import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
+import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
-const textareaClassName =
-  "min-h-[200px] w-full rounded-lg border border-rose-200 bg-rose-50/40 px-3 py-2 text-sm text-rose-900 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-200/60 placeholder:text-rose-400";
+const caveTextareaClassName = cn(
+  textareaClass,
+  "min-h-[200px] border-rose-200 bg-rose-50/40 text-rose-900 placeholder:text-rose-400 focus:border-rose-400 focus:ring-rose-200/60",
+);
 
 export function PatientCaveNotesSheet({
   patientId,
@@ -60,61 +59,57 @@ export function PatientCaveNotesSheet({
   }
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full sm:max-w-[520px] gap-0">
-        <SheetHeader className="px-4 py-3">
-          <SheetTitle>
-            {l("CAVE-Hinweise aktualisieren", "Обновить заметки CAVE", "Update cave notes")}
-          </SheetTitle>
-        </SheetHeader>
-
-        <form className="flex flex-col flex-1 min-h-0" onSubmit={handleSubmit}>
-          <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
-            <p className="text-[12.5px] text-muted-foreground">
-              {l(
-                "Dauerhafte klinische Warnhinweise, die vor Beginn von Koordination oder Behandlung sichtbar bleiben sollen.",
-                "Постоянные клинические предупреждения, которые должны оставаться видимыми до начала координации или лечения.",
-                "Persistent clinical warnings that should stay visible before coordination or treatment starts.",
-              )}
-            </p>
-            <div className="flex flex-col gap-1.5">
-              <Label
-                className="text-[11.5px] font-medium text-muted-foreground leading-tight"
-                htmlFor="patient-cave-notes"
-              >
-                {l("Warnhinweise", "Предупреждения", "Warnings")}
-              </Label>
-              <textarea
-                id="patient-cave-notes"
-                className={textareaClassName}
-                value={value}
-                onChange={(event) => setValue(event.target.value)}
-                placeholder={l(
-                  "Allergien, kritische Kontraindikationen, Hochrisiko-Vorerkrankungen…",
-                  "Аллергии, критические противопоказания, высокорисковые состояния…",
-                  "Allergies, critical contraindications, high-risk conditions…",
-                )}
-              />
-            </div>
-          </div>
-
-          <div className="flex justify-end gap-2 px-4 py-3">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 rounded-lg"
-              onClick={() => onOpenChange(false)}
-            >
-              {t.common_cancel}
-            </Button>
-            <Button type="submit" size="sm" className="h-8 rounded-lg gap-1.5" disabled={busy}>
-              {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
-              {t.common_save}
-            </Button>
-          </div>
-        </form>
-      </SheetContent>
-    </Sheet>
+    <PatientSheetScaffold
+      open={open}
+      onOpenChange={onOpenChange}
+      title={l("CAVE-Hinweise aktualisieren", "Обновить заметки CAVE", "Update cave notes")}
+      width="narrow"
+      onSubmit={handleSubmit}
+      bodyClassName="px-4 py-4 space-y-3"
+      footer={
+        <>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 rounded-lg"
+            onClick={() => onOpenChange(false)}
+          >
+            {t.common_cancel}
+          </Button>
+          <Button type="submit" size="sm" className="h-8 rounded-lg gap-1.5" disabled={busy}>
+            {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
+            {t.common_save}
+          </Button>
+        </>
+      }
+    >
+      <p className="text-[12.5px] text-muted-foreground">
+        {l(
+          "Dauerhafte klinische Warnhinweise, die vor Beginn von Koordination oder Behandlung sichtbar bleiben sollen.",
+          "Постоянные клинические предупреждения, которые должны оставаться видимыми до начала координации или лечения.",
+          "Persistent clinical warnings that should stay visible before coordination or treatment starts.",
+        )}
+      </p>
+      <div className="flex flex-col gap-1.5">
+        <Label
+          className="text-[11.5px] font-medium text-muted-foreground leading-tight"
+          htmlFor="patient-cave-notes"
+        >
+          {l("Warnhinweise", "Предупреждения", "Warnings")}
+        </Label>
+        <textarea
+          id="patient-cave-notes"
+          className={caveTextareaClassName}
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+          placeholder={l(
+            "Allergien, kritische Kontraindikationen, Hochrisiko-Vorerkrankungen...",
+            "Аллергии, критические противопоказания, состояния высокого риска...",
+            "Allergies, critical contraindications, high-risk conditions...",
+          )}
+        />
+      </div>
+    </PatientSheetScaffold>
   );
 }

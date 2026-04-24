@@ -19,12 +19,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
 import { toast } from "@/components/ui/toast";
 import {
   Field as FormField,
@@ -46,6 +40,7 @@ import {
   type PatientLegalStatus,
 } from "../../model/legal-status";
 import { LegalStatusPill } from "../shared/legal-status-pill";
+import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
 type PatientProfileEditorSheetProps = {
   open: boolean;
@@ -167,21 +162,41 @@ function PatientProfileEditorSheet({
   );
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full sm:max-w-[860px]">
-        {form ? (
-          <form className="flex flex-col flex-1 min-h-0" onSubmit={handleSubmit}>
-            <SheetHeader className="shrink-0 px-4 pt-3 pb-1">
-              <SheetTitle>
-                {l(
-                  "Patientenprofil bearbeiten",
-                  "Редактировать профиль пациента",
-                  "Edit patient profile"
-                )}
-              </SheetTitle>
-            </SheetHeader>
-
-            <div className="flex-1 overflow-y-auto px-4 py-2 space-y-3">
+    <PatientSheetScaffold
+      open={open}
+      onOpenChange={onOpenChange}
+      width="detail-wide"
+      onSubmit={handleSubmit}
+      title={l(
+        "Patientenprofil bearbeiten",
+        "Редактировать профиль пациента",
+        "Edit patient profile"
+      )}
+      footer={
+        form ? (
+          <>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-9 rounded-lg"
+              onClick={() => onOpenChange(false)}
+            >
+              {l("Abbrechen", "Отмена", "Cancel")}
+            </Button>
+            <Button
+              type="submit"
+              className="h-9 rounded-lg gap-1.5 px-3.5"
+              disabled={busy}
+            >
+              {busy ? <span className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" /> : null}
+              {l("Patient speichern", "Сохранить пациента", "Save patient")}
+            </Button>
+          </>
+        ) : undefined
+      }
+    >
+      {form ? (
+        <div className="space-y-3">
               <FormSection title={l("Persönliche Daten", "Личные данные", "Personal data")}>
                 <div className="grid gap-3 md:grid-cols-3">
                   <FormField label={l("Titel", "Обращение", "Title")}>
@@ -532,30 +547,9 @@ function PatientProfileEditorSheet({
                   onChange={(event) => updateField("notes", event.target.value)}
                 />
               </FormSection>
-            </div>
-
-            <div className="shrink-0 flex justify-end gap-2 px-4 py-3 bg-popover">
-              <Button
-                type="button"
-                variant="outline"
-                className="h-9 rounded-lg"
-                onClick={() => onOpenChange(false)}
-              >
-                {l("Abbrechen", "Отмена", "Cancel")}
-              </Button>
-              <Button
-                type="submit"
-                className="h-9 rounded-lg gap-1.5 px-3.5"
-                disabled={busy}
-              >
-                {busy ? <span className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" /> : null}
-                {l("Patient speichern", "Сохранить пациента", "Save patient")}
-              </Button>
-            </div>
-          </form>
-        ) : null}
-      </SheetContent>
-    </Sheet>
+        </div>
+      ) : null}
+    </PatientSheetScaffold>
   );
 }
 

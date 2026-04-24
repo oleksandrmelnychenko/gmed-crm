@@ -11,15 +11,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
 import { toast } from "@/components/ui/toast";
+import { selectClass, textareaClass } from "@/components/ui-shell";
 import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
+import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
 const CATEGORY_OPTIONS = [
   "medical_update",
@@ -41,7 +38,7 @@ function categoryLabel(
     case "patient_report":
       return l("Bericht des Patienten", "Сообщение пациента", "Patient report");
     case "provider_report":
-      return l("Bericht der Klinik", "Отчёт провайдера", "Provider report");
+      return l("Bericht der Klinik", "Отчет провайдера", "Provider report");
     case "treatment_note":
       return l("Behandlungsnotiz", "Заметка по лечению", "Treatment note");
     case "followup_note":
@@ -77,8 +74,7 @@ function blankForm(): FormState {
   };
 }
 
-const textareaClassName =
-  "min-h-[96px] w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
+const cardEntryTextareaClassName = cn(textareaClass, "min-h-[96px]");
 
 export function PatientCardEntrySheet({
   patientId,
@@ -105,7 +101,7 @@ export function PatientCardEntrySheet({
     event.preventDefault();
     const entryDate = new Date(form.entryDate);
     if (Number.isNaN(entryDate.getTime())) {
-      toast.error(l("Ungültiges Datum.", "Некорректная дата.", "Invalid date."));
+      toast.error(l("Ungultiges Datum.", "Некорректная дата.", "Invalid date."));
       return;
     }
     if (!form.content.trim()) {
@@ -135,122 +131,121 @@ export function PatientCardEntrySheet({
   }
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full sm:max-w-[540px] gap-0">
-        <SheetHeader className="px-4 py-3">
-          <SheetTitle>
-            {l("Karteneintrag hinzufügen", "Добавить запись в карту", "Add card entry")}
-          </SheetTitle>
-        </SheetHeader>
-        <form className="flex flex-col flex-1 min-h-0" onSubmit={handleSubmit}>
-          <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="flex flex-col gap-1.5">
-                <Label
-                  className="text-[11.5px] font-medium text-muted-foreground leading-tight"
-                  htmlFor="patient-card-entry-date"
-                >
-                  {l("Eintragsdatum", "Дата записи", "Entry date")}
-                </Label>
-                <Input
-                  id="patient-card-entry-date"
-                  type="datetime-local"
-                  value={form.entryDate}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, entryDate: event.target.value }))
-                  }
-                  required
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label
-                  className="text-[11.5px] font-medium text-muted-foreground leading-tight"
-                  htmlFor="patient-card-entry-category"
-                >
-                  {l("Kategorie", "Категория", "Category")}
-                </Label>
-                <ShadSelect
-                  value={form.category}
-                  onValueChange={(value) =>
-                    setForm((current) => ({
-                      ...current,
-                      category: (value ?? CATEGORY_OPTIONS[0]) as (typeof CATEGORY_OPTIONS)[number],
-                    }))
-                  }
-                >
-                  <SelectTrigger id="patient-card-entry-category" className="w-full">
-                    <SelectValue placeholder={l("Kategorie wählen", "Выберите категорию", "Select category")}>
-                      {form.category ? categoryLabel(form.category, l) : null}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {CATEGORY_OPTIONS.map((option) => (
-                      <SelectItem key={option} value={option}>
-                        {categoryLabel(option, l)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </ShadSelect>
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <Label
-                className="text-[11.5px] font-medium text-muted-foreground leading-tight"
-                htmlFor="patient-card-entry-source"
+    <PatientSheetScaffold
+      open={open}
+      onOpenChange={onOpenChange}
+      title={l("Karteneintrag hinzufugen", "Добавить запись в карту", "Add card entry")}
+      maxWidthClassName="sm:max-w-[540px]"
+      onSubmit={handleSubmit}
+      bodyClassName="px-4 py-4 space-y-4"
+      footer={
+        <>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 rounded-lg"
+            onClick={() => onOpenChange(false)}
+          >
+            {t.common_cancel}
+          </Button>
+          <Button type="submit" size="sm" className="h-8 rounded-lg gap-1.5" disabled={busy}>
+            {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
+            {t.common_save}
+          </Button>
+        </>
+      }
+    >
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="flex flex-col gap-1.5">
+          <Label
+            className="text-[11.5px] font-medium text-muted-foreground leading-tight"
+            htmlFor="patient-card-entry-date"
+          >
+            {l("Eintragsdatum", "Дата записи", "Entry date")}
+          </Label>
+          <Input
+            id="patient-card-entry-date"
+            type="datetime-local"
+            value={form.entryDate}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, entryDate: event.target.value }))
+            }
+            required
+          />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label
+            className="text-[11.5px] font-medium text-muted-foreground leading-tight"
+            htmlFor="patient-card-entry-category"
+          >
+            {l("Kategorie", "Категория", "Category")}
+          </Label>
+          <ShadSelect
+            value={form.category}
+            onValueChange={(value) =>
+              setForm((current) => ({
+                ...current,
+                category: (value ?? CATEGORY_OPTIONS[0]) as CategoryValue,
+              }))
+            }
+          >
+            <SelectTrigger id="patient-card-entry-category" className={cn("w-full", selectClass)}>
+              <SelectValue
+                placeholder={l("Kategorie wahlen", "Выберите категорию", "Select category")}
               >
-                {l("Quelle", "Источник", "Source")}
-              </Label>
-              <Input
-                id="patient-card-entry-source"
-                value={form.source}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, source: event.target.value }))
-                }
-                placeholder={l(
-                  "Patient, Klinik, Arzt, telefonische Nachverfolgung",
-                  "Пациент, клиника, врач, follow-up по телефону",
-                  "Patient, clinic, doctor, phone follow-up",
-                )}
-              />
-            </div>
+                {form.category ? categoryLabel(form.category, l) : null}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {CATEGORY_OPTIONS.map((option) => (
+                <SelectItem key={option} value={option}>
+                  {categoryLabel(option, l)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </ShadSelect>
+        </div>
+      </div>
 
-            <div className="flex flex-col gap-1.5">
-              <Label
-                className="text-[11.5px] font-medium text-muted-foreground leading-tight"
-                htmlFor="patient-card-entry-content"
-              >
-                {l("Inhalt", "Содержание", "Content")}
-              </Label>
-              <textarea
-                id="patient-card-entry-content"
-                className={textareaClassName}
-                value={form.content}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, content: event.target.value }))
-                }
-                required
-              />
-            </div>
-          </div>
+      <div className="flex flex-col gap-1.5">
+        <Label
+          className="text-[11.5px] font-medium text-muted-foreground leading-tight"
+          htmlFor="patient-card-entry-source"
+        >
+          {l("Quelle", "Источник", "Source")}
+        </Label>
+        <Input
+          id="patient-card-entry-source"
+          value={form.source}
+          onChange={(event) =>
+            setForm((current) => ({ ...current, source: event.target.value }))
+          }
+          placeholder={l(
+            "Patient, Klinik, Arzt, telefonische Nachverfolgung",
+            "Пациент, клиника, врач, follow-up по телефону",
+            "Patient, clinic, doctor, phone follow-up",
+          )}
+        />
+      </div>
 
-          <div className="flex justify-end gap-2 px-4 py-3">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 rounded-lg"
-              onClick={() => onOpenChange(false)}
-            >
-              {t.common_cancel}
-            </Button>
-            <Button type="submit" size="sm" className="h-8 rounded-lg gap-1.5" disabled={busy}>
-              {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
-              {t.common_save}
-            </Button>
-          </div>
-        </form>
-      </SheetContent>
-    </Sheet>
+      <div className="flex flex-col gap-1.5">
+        <Label
+          className="text-[11.5px] font-medium text-muted-foreground leading-tight"
+          htmlFor="patient-card-entry-content"
+        >
+          {l("Inhalt", "Содержание", "Content")}
+        </Label>
+        <textarea
+          id="patient-card-entry-content"
+          className={cardEntryTextareaClassName}
+          value={form.content}
+          onChange={(event) =>
+            setForm((current) => ({ ...current, content: event.target.value }))
+          }
+          required
+        />
+      </div>
+    </PatientSheetScaffold>
   );
 }

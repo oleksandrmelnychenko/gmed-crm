@@ -3,17 +3,11 @@ import { ExternalLink, Folder, LoaderCircle } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
 import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
+import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
 type CasePreview = {
   id: string;
@@ -229,40 +223,42 @@ export function PatientCasePreviewSheet({
     : "border-slate-200 bg-slate-100 text-slate-700";
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full gap-0 sm:max-w-[980px]">
-        <SheetHeader className="border-b border-border/70 px-6 py-5">
-          <div className="flex items-center justify-between gap-3">
-            <SheetTitle className="inline-flex items-center gap-2">
-              <Folder className="size-4 text-muted-foreground" />
-              {activeDetail?.case_id || "Case"}
-            </SheetTitle>
-            {caseId && showFullViewAction ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-8 rounded-lg gap-1 text-[12px] text-muted-foreground"
-                onClick={() => {
-                  onOpenChange(false);
-                  staffGo(
-                    patientId
-                      ? `/cases?patient=${patientId}&case=${caseId}`
-                      : `/cases?case=${caseId}`,
-                  );
-                }}
-              >
-                Full view
-                <ExternalLink className="size-3" />
-              </Button>
-            ) : null}
-          </div>
-          <SheetDescription>
-            Full narrative and structured anamnesis editor for the selected patient case.
-          </SheetDescription>
-        </SheetHeader>
+    <PatientSheetScaffold
+      open={open}
+      onOpenChange={onOpenChange}
+      maxWidthClassName="sm:max-w-[980px]"
+      title={
+        <span className="inline-flex items-center gap-2">
+          <Folder className="size-4 text-muted-foreground" />
+          {activeDetail?.case_id || "Case"}
+        </span>
+      }
+      description="Full narrative and structured anamnesis editor for the selected patient case."
+      bodyClassName="px-6 py-6 space-y-4"
+    >
+      {caseId && showFullViewAction ? (
+        <div className="flex justify-end">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-8 rounded-lg gap-1 text-[12px] text-muted-foreground"
+            onClick={() => {
+              onOpenChange(false);
+              staffGo(
+                patientId
+                  ? `/cases?patient=${patientId}&case=${caseId}`
+                  : `/cases?case=${caseId}`,
+              );
+            }}
+          >
+            Full view
+            <ExternalLink className="size-3" />
+          </Button>
+        </div>
+      ) : null}
 
-        <div className="flex-1 overflow-y-auto px-6 py-6">
+      <div className="flex-1 overflow-y-auto">
           {showLoading ? (
             <div className="flex min-h-[320px] items-center justify-center text-sm text-slate-500">
               <LoaderCircle className="mr-2 size-4 animate-spin" />
@@ -492,9 +488,8 @@ export function PatientCasePreviewSheet({
               </section>
             </div>
           )}
-        </div>
-      </SheetContent>
-    </Sheet>
+      </div>
+    </PatientSheetScaffold>
   );
 }
 

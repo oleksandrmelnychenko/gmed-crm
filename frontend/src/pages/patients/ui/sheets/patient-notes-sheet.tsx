@@ -3,18 +3,14 @@ import { LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
 import { toast } from "@/components/ui/toast";
+import { textareaClass } from "@/components/ui-shell";
 import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
+import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
-const textareaClassName =
-  "min-h-[240px] w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
+const notesTextareaClassName = cn(textareaClass, "min-h-[240px]");
 
 export function PatientNotesSheet({
   patientId,
@@ -60,54 +56,50 @@ export function PatientNotesSheet({
   }
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full sm:max-w-[520px] gap-0">
-        <SheetHeader className="px-4 py-3">
-          <SheetTitle>
-            {l("Notizen bearbeiten", "Редактировать заметки", "Edit notes")}
-          </SheetTitle>
-        </SheetHeader>
-
-        <form className="flex flex-col flex-1 min-h-0" onSubmit={handleSubmit}>
-          <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
-            <div className="flex flex-col gap-1.5">
-              <Label
-                className="text-[11.5px] font-medium text-muted-foreground leading-tight"
-                htmlFor="patient-notes"
-              >
-                {l("Notizen", "Заметки", "Notes")}
-              </Label>
-              <textarea
-                id="patient-notes"
-                className={textareaClassName}
-                value={value}
-                onChange={(event) => setValue(event.target.value)}
-                placeholder={l(
-                  "Allgemeine Notizen, Kontext, Präferenzen…",
-                  "Общие заметки, контекст, предпочтения…",
-                  "General notes, context, preferences…",
-                )}
-              />
-            </div>
-          </div>
-
-          <div className="flex justify-end gap-2 px-4 py-3">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 rounded-lg"
-              onClick={() => onOpenChange(false)}
-            >
-              {t.common_cancel}
-            </Button>
-            <Button type="submit" size="sm" className="h-8 rounded-lg gap-1.5" disabled={busy}>
-              {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
-              {t.common_save}
-            </Button>
-          </div>
-        </form>
-      </SheetContent>
-    </Sheet>
+    <PatientSheetScaffold
+      open={open}
+      onOpenChange={onOpenChange}
+      title={l("Notizen bearbeiten", "Редактировать заметки", "Edit notes")}
+      width="narrow"
+      onSubmit={handleSubmit}
+      bodyClassName="px-4 py-4 space-y-3"
+      footer={
+        <>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 rounded-lg"
+            onClick={() => onOpenChange(false)}
+          >
+            {t.common_cancel}
+          </Button>
+          <Button type="submit" size="sm" className="h-8 rounded-lg gap-1.5" disabled={busy}>
+            {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
+            {t.common_save}
+          </Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-1.5">
+        <Label
+          className="text-[11.5px] font-medium text-muted-foreground leading-tight"
+          htmlFor="patient-notes"
+        >
+          {l("Notizen", "Заметки", "Notes")}
+        </Label>
+        <textarea
+          id="patient-notes"
+          className={notesTextareaClassName}
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+          placeholder={l(
+            "Allgemeine Notizen, Kontext, Praferenzen...",
+            "Общие заметки, контекст, предпочтения...",
+            "General notes, context, preferences...",
+          )}
+        />
+      </div>
+    </PatientSheetScaffold>
   );
 }

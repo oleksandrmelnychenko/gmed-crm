@@ -20,15 +20,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
+import { inputClass, selectClass } from "@/components/ui-shell";
 
 import type { DunningEvent } from "../../model/detail-tab-types";
+import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
 type LocalizeFn = (de: string, ru: string, en: string) => string;
 type StatusLabelFn = (status: string) => string;
@@ -140,86 +136,83 @@ export function PatientFinancialDialogs({
 }: PatientFinancialDialogsProps) {
   return (
     <>
-      <Sheet open={contractCreateOpen} onOpenChange={onContractCreateOpenChange}>
-        <SheetContent side="right" className="w-full sm:max-w-[560px] gap-0">
-          <SheetHeader className="px-4 py-3">
-            <SheetTitle>
-              {l("Rahmenvertrag erstellen", "Создать рамочный договор", "Create framework contract")}
-            </SheetTitle>
-          </SheetHeader>
-          <form className="flex flex-col flex-1 min-h-0" onSubmit={onContractCreateSubmit}>
-            <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="flex flex-col gap-1.5">
-                  <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="contract-status">
-                    {l("Status", "Статус", "Status")}
-                  </Label>
-                  <ShadSelect value={contractCreateForm.status} onValueChange={(value) => onContractCreateStatusChange(value ?? contractCreateForm.status)}>
-                    <SelectTrigger id="contract-status" className="w-full">
-                      <SelectValue>{patientDetailStatusLabel(contractCreateForm.status)}</SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {contractStatusOptions.map((status) => (
-                        <SelectItem key={status} value={status}>
-                          {patientDetailStatusLabel(status)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </ShadSelect>
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="contract-signed-at">
-                    {l("Unterzeichnet am", "Подписано", "Signed at")}
-                  </Label>
-                  <Input
-                    id="contract-signed-at"
-                    type="datetime-local"
-                    value={contractCreateForm.signedAt}
-                    onChange={(event) => onContractCreateSignedAtChange(event.target.value)}
-                  />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="contract-valid-from">
-                    {l("Gültig ab", "Действует с", "Valid from")}
-                  </Label>
-                  <Input
-                    id="contract-valid-from"
-                    type="date"
-                    value={contractCreateForm.validFrom}
-                    onChange={(event) => onContractCreateValidFromChange(event.target.value)}
-                  />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="contract-valid-to">
-                    {l("Gültig bis", "Действует до", "Valid to")}
-                  </Label>
-                  <Input
-                    id="contract-valid-to"
-                    type="date"
-                    value={contractCreateForm.validTo}
-                    onChange={(event) => onContractCreateValidToChange(event.target.value)}
-                  />
-                </div>
-              </div>
-            </div>
-            <div className="flex justify-end gap-2 px-4 py-3">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-8 rounded-lg"
-                onClick={() => onContractCreateOpenChange(false)}
-              >
-                {cancelLabel}
-              </Button>
-              <Button type="submit" size="sm" className="h-8 rounded-lg gap-1.5" disabled={contractBusy}>
-                {contractBusy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
-                {l("Vertrag erstellen", "Создать договор", "Create contract")}
-              </Button>
-            </div>
-          </form>
-        </SheetContent>
-      </Sheet>
+      <PatientSheetScaffold open={contractCreateOpen} onOpenChange={onContractCreateOpenChange} width="narrow" onSubmit={onContractCreateSubmit}
+        title={l("Rahmenvertrag erstellen", "Sozdat ramochnyy dogovor", "Create framework contract")}
+        bodyClassName="px-4 py-4 space-y-4"
+        footer={
+          <>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-lg"
+              onClick={() => onContractCreateOpenChange(false)}
+            >
+              {cancelLabel}
+            </Button>
+            <Button type="submit" size="sm" className="h-8 rounded-lg gap-1.5" disabled={contractBusy}>
+              {contractBusy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
+              {l("Vertrag erstellen", "Sozdat dogovor", "Create contract")}
+            </Button>
+          </>
+        }
+      >
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="contract-status">
+              {l("Status", "Status", "Status")}
+            </Label>
+            <ShadSelect value={contractCreateForm.status} onValueChange={(value) => onContractCreateStatusChange(value ?? contractCreateForm.status)}>
+              <SelectTrigger id="contract-status" className={selectClass}>
+                <SelectValue>{patientDetailStatusLabel(contractCreateForm.status)}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {contractStatusOptions.map((status) => (
+                  <SelectItem key={status} value={status}>
+                    {patientDetailStatusLabel(status)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </ShadSelect>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="contract-signed-at">
+              {l("Unterzeichnet am", "Podpisano", "Signed at")}
+            </Label>
+            <Input
+              id="contract-signed-at"
+              type="datetime-local"
+              value={contractCreateForm.signedAt}
+              onChange={(event) => onContractCreateSignedAtChange(event.target.value)}
+              className={inputClass}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="contract-valid-from">
+              {l("Gueltig ab", "Deystvuet s", "Valid from")}
+            </Label>
+            <Input
+              id="contract-valid-from"
+              type="date"
+              value={contractCreateForm.validFrom}
+              onChange={(event) => onContractCreateValidFromChange(event.target.value)}
+              className={inputClass}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="contract-valid-to">
+              {l("Gueltig bis", "Deystvuet do", "Valid to")}
+            </Label>
+            <Input
+              id="contract-valid-to"
+              type="date"
+              value={contractCreateForm.validTo}
+              onChange={(event) => onContractCreateValidToChange(event.target.value)}
+              className={inputClass}
+            />
+          </div>
+        </div>
+      </PatientSheetScaffold>
 
       <Dialog open={Boolean(contractStatusId)} onOpenChange={(open) => { if (!open) onCloseContractStatus(); }}>
         <DialogContent className="sm:max-w-2xl">
@@ -422,3 +415,4 @@ export function PatientFinancialDialogs({
     </>
   );
 }
+

@@ -12,14 +12,15 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
+  inputClass,
+  selectClass,
+  textareaClass,
+} from "@/components/ui-shell";
 import { toast } from "@/components/ui/toast";
 import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
+import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
 const SCORE_TYPE_OPTIONS = [
   "cha2ds2_vasc",
@@ -45,13 +46,13 @@ function scoreTypeLabel(
     case "framingham":
       return "Framingham";
     case "fall_risk":
-      return l("Sturzrisiko", "Риск падения", "Fall risk");
+      return l("Sturzrisiko", "Risk padeniya", "Fall risk");
     case "frailty":
-      return l("Gebrechlichkeit", "Хрупкость", "Frailty");
+      return l("Gebrechlichkeit", "Hrupkost", "Frailty");
     case "nutrition_risk":
-      return l("Ernährungsrisiko", "Риск питания", "Nutrition risk");
+      return l("Ernaehrungsrisiko", "Risk pitaniya", "Nutrition risk");
     case "other":
-      return l("Sonstiges", "Другое", "Other");
+      return l("Sonstiges", "Drugoe", "Other");
     default:
       return value.replaceAll("_", " ");
   }
@@ -91,8 +92,7 @@ function blankForm(): FormState {
   };
 }
 
-const textareaClassName =
-  "min-h-[96px] w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
+const riskScoreTextareaClassName = cn(textareaClass, "min-h-[96px]");
 
 export function PatientRiskScoreSheet({
   patientId,
@@ -119,12 +119,12 @@ export function PatientRiskScoreSheet({
     event.preventDefault();
     const computedAt = new Date(form.computedAt);
     if (Number.isNaN(computedAt.getTime())) {
-      toast.error(l("Ungültiges Datum.", "Некорректная дата.", "Invalid date."));
+      toast.error(l("Ungueltiges Datum.", "Nekorrektnaya data.", "Invalid date."));
       return;
     }
     const scoreValue = parseNumber(form.scoreValue);
     if (scoreValue == null) {
-      toast.error(l("Wert ist erforderlich.", "Значение обязательно.", "Score value is required."));
+      toast.error(l("Wert ist erforderlich.", "Znachenie obyazatelno.", "Score value is required."));
       return;
     }
     const scaleMax = parseNumber(form.scaleMax);
@@ -138,7 +138,7 @@ export function PatientRiskScoreSheet({
         }
         inputs = parsed as Record<string, unknown>;
       } catch {
-        toast.error(l("Eingaben müssen JSON-Objekt sein.", "Входные данные должны быть JSON-объектом.", "Inputs must be a JSON object."));
+        toast.error(l("Eingaben muessen JSON-Objekt sein.", "Vhodnye dannye dolzhny byt JSON-obektom.", "Inputs must be a JSON object."));
         return;
       }
     }
@@ -157,7 +157,7 @@ export function PatientRiskScoreSheet({
           inputs,
         }),
       });
-      toast.success(l("Risikoscore gespeichert.", "Риск-скор сохранён.", "Risk score saved."));
+      toast.success(l("Risikoscore gespeichert.", "Risk-skor sohranen.", "Risk score saved."));
       onOpenChange(false);
       onSaved();
     } catch (error) {
@@ -168,145 +168,146 @@ export function PatientRiskScoreSheet({
   }
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full sm:max-w-[540px] gap-0">
-        <SheetHeader className="px-4 py-3">
-          <SheetTitle>
-            {l("Risikoscore hinzufügen", "Добавить риск-скор", "Add risk score")}
-          </SheetTitle>
-        </SheetHeader>
-        <form className="flex flex-col flex-1 min-h-0" onSubmit={handleSubmit}>
-          <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="flex flex-col gap-1.5">
-                <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-risk-score-computed-at">
-                  {l("Berechnet am", "Рассчитано", "Computed at")}
-                </Label>
-                <Input
-                  id="patient-risk-score-computed-at"
-                  type="datetime-local"
-                  value={form.computedAt}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, computedAt: event.target.value }))
-                  }
-                  required
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-risk-score-type">
-                  {l("Score-Typ", "Тип скора", "Score type")}
-                </Label>
-                <ShadSelect
-                  value={form.scoreType}
-                  onValueChange={(value) =>
-                    setForm((current) => ({
-                      ...current,
-                      scoreType: (value ?? SCORE_TYPE_OPTIONS[0]) as ScoreType,
-                    }))
-                  }
-                >
-                  <SelectTrigger id="patient-risk-score-type" className="w-full">
-                    <SelectValue placeholder={l("Typ wählen", "Выберите тип", "Select score type")}>
-                      {form.scoreType ? scoreTypeLabel(form.scoreType, l) : null}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {SCORE_TYPE_OPTIONS.map((option) => (
-                      <SelectItem key={option} value={option}>
-                        {scoreTypeLabel(option, l)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </ShadSelect>
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-risk-score-value">
-                  {l("Wert", "Значение", "Score value")}
-                </Label>
-                <Input
-                  id="patient-risk-score-value"
-                  inputMode="decimal"
-                  value={form.scoreValue}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, scoreValue: event.target.value }))
-                  }
-                  required
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-risk-score-scale-max">
-                  {l("Skalen-Max", "Макс. шкалы", "Scale max")}
-                </Label>
-                <Input
-                  id="patient-risk-score-scale-max"
-                  inputMode="decimal"
-                  value={form.scaleMax}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, scaleMax: event.target.value }))
-                  }
-                />
-              </div>
-              <div className="flex flex-col gap-1.5 md:col-span-2">
-                <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-risk-score-source">
-                  {l("Quelle", "Источник", "Source")}
-                </Label>
-                <Input
-                  id="patient-risk-score-source"
-                  value={form.source}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, source: event.target.value }))
-                  }
-                />
-              </div>
-            </div>
+    <PatientSheetScaffold
+      open={open}
+      onOpenChange={onOpenChange}
+      maxWidthClassName="sm:max-w-[540px]"
+      onSubmit={handleSubmit}
+      title={l("Risikoscore hinzufugen", "Dobavit risk-skor", "Add risk score")}
+      bodyClassName="px-4 py-4 space-y-4"
+      footer={
+        <>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 rounded-lg"
+            onClick={() => onOpenChange(false)}
+          >
+            {t.common_cancel}
+          </Button>
+          <Button type="submit" size="sm" className="h-8 rounded-lg gap-1.5" disabled={busy}>
+            {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
+            {t.common_save}
+          </Button>
+        </>
+      }
+    >
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="flex flex-col gap-1.5">
+          <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-risk-score-computed-at">
+            {l("Berechnet am", "Rasschitano", "Computed at")}
+          </Label>
+          <Input
+            id="patient-risk-score-computed-at"
+            type="datetime-local"
+            value={form.computedAt}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, computedAt: event.target.value }))
+            }
+            className={inputClass}
+            required
+          />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-risk-score-type">
+            {l("Score-Typ", "Tip skora", "Score type")}
+          </Label>
+          <ShadSelect
+            value={form.scoreType}
+            onValueChange={(value) =>
+              setForm((current) => ({
+                ...current,
+                scoreType: (value ?? SCORE_TYPE_OPTIONS[0]) as ScoreType,
+              }))
+            }
+          >
+            <SelectTrigger id="patient-risk-score-type" className={cn("w-full", selectClass)}>
+              <SelectValue placeholder={l("Typ waehlen", "Vyberite tip", "Select score type")}>
+                {form.scoreType ? scoreTypeLabel(form.scoreType, l) : null}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {SCORE_TYPE_OPTIONS.map((option) => (
+                <SelectItem key={option} value={option}>
+                  {scoreTypeLabel(option, l)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </ShadSelect>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-risk-score-value">
+            {l("Wert", "Znachenie", "Score value")}
+          </Label>
+          <Input
+            id="patient-risk-score-value"
+            inputMode="decimal"
+            value={form.scoreValue}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, scoreValue: event.target.value }))
+            }
+            className={inputClass}
+            required
+          />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-risk-score-scale-max">
+            {l("Skalen-Max", "Maks shkaly", "Scale max")}
+          </Label>
+          <Input
+            id="patient-risk-score-scale-max"
+            inputMode="decimal"
+            value={form.scaleMax}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, scaleMax: event.target.value }))
+            }
+            className={inputClass}
+          />
+        </div>
+        <div className="flex flex-col gap-1.5 md:col-span-2">
+          <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-risk-score-source">
+            {l("Quelle", "Istochnik", "Source")}
+          </Label>
+          <Input
+            id="patient-risk-score-source"
+            value={form.source}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, source: event.target.value }))
+            }
+            className={inputClass}
+          />
+        </div>
+      </div>
 
-            <div className="flex flex-col gap-1.5">
-              <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-risk-score-interpretation">
-                {l("Interpretation", "Интерпретация", "Interpretation")}
-              </Label>
-              <textarea
-                id="patient-risk-score-interpretation"
-                className={textareaClassName}
-                value={form.interpretation}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, interpretation: event.target.value }))
-                }
-              />
-            </div>
+      <div className="flex flex-col gap-1.5">
+        <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-risk-score-interpretation">
+          {l("Interpretation", "Interpretaciya", "Interpretation")}
+        </Label>
+        <textarea
+          id="patient-risk-score-interpretation"
+          className={riskScoreTextareaClassName}
+          value={form.interpretation}
+          onChange={(event) =>
+            setForm((current) => ({ ...current, interpretation: event.target.value }))
+          }
+        />
+      </div>
 
-            <div className="flex flex-col gap-1.5">
-              <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-risk-score-inputs">
-                {l("Eingaben (JSON)", "Входные данные (JSON)", "Inputs (JSON)")}
-              </Label>
-              <textarea
-                id="patient-risk-score-inputs"
-                className={textareaClassName}
-                value={form.inputsJson}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, inputsJson: event.target.value }))
-                }
-                placeholder='{"age": 72, "bmi": 27}'
-              />
-            </div>
-          </div>
-
-          <div className="flex justify-end gap-2 px-4 py-3">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 rounded-lg"
-              onClick={() => onOpenChange(false)}
-            >
-              {t.common_cancel}
-            </Button>
-            <Button type="submit" size="sm" className="h-8 rounded-lg gap-1.5" disabled={busy}>
-              {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
-              {t.common_save}
-            </Button>
-          </div>
-        </form>
-      </SheetContent>
-    </Sheet>
+      <div className="flex flex-col gap-1.5">
+        <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight" htmlFor="patient-risk-score-inputs">
+          {l("Eingaben (JSON)", "Vhodnye dannye (JSON)", "Inputs (JSON)")}
+        </Label>
+        <textarea
+          id="patient-risk-score-inputs"
+          className={riskScoreTextareaClassName}
+          value={form.inputsJson}
+          onChange={(event) =>
+            setForm((current) => ({ ...current, inputsJson: event.target.value }))
+          }
+          placeholder='{"age": 72, "bmi": 27}'
+        />
+      </div>
+    </PatientSheetScaffold>
   );
 }

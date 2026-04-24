@@ -1,20 +1,15 @@
 import { useEffect, useState } from "react";
-import { ExternalLink, FileText, FileSignature, LoaderCircle, ReceiptText } from "lucide-react";
+import { ExternalLink, FileSignature, FileText, LoaderCircle, ReceiptText } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
-import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
+import { apiFetch } from "@/lib/api";
+import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
 function formatDate(value?: string | null) {
-  if (!value) return "—";
+  if (!value) return "-";
   try {
     return new Intl.DateTimeFormat("en-GB", {
       day: "2-digit",
@@ -25,8 +20,6 @@ function formatDate(value?: string | null) {
     return value;
   }
 }
-
-/* ─────────── Documents ─────────── */
 
 type DocumentItem = {
   id: string;
@@ -69,70 +62,71 @@ export function PatientDocumentsPreviewSheet({
   }, [open, patientId]);
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full sm:max-w-[520px] gap-0">
-        <SheetHeader className="px-4 py-3 flex-row items-center justify-between">
-          <SheetTitle className="inline-flex items-center gap-2">
-            <FileText className="size-4 text-muted-foreground" />
-            {l("Dokumente", "Документы", "Documents")}
-          </SheetTitle>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-7 rounded-lg gap-1 text-[12px] text-muted-foreground"
-            onClick={() => {
-              onOpenChange(false);
-              staffGo(`/documents?patient=${patientId}`);
-            }}
-          >
-            {l("Vollansicht", "Открыть раздел", "Full view")}
-            <ExternalLink className="size-3" />
-          </Button>
-        </SheetHeader>
+    <PatientSheetScaffold
+      open={open}
+      onOpenChange={onOpenChange}
+      width="narrow"
+      title={
+        <span className="inline-flex items-center gap-2">
+          <FileText className="size-4 text-muted-foreground" />
+          {l("Dokumente", "Dokumenty", "Documents")}
+        </span>
+      }
+      bodyClassName="px-4 py-3 space-y-3"
+    >
+      <div className="flex justify-end">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-7 rounded-lg gap-1 text-[12px] text-muted-foreground"
+          onClick={() => {
+            onOpenChange(false);
+            staffGo(`/documents?patient=${patientId}`);
+          }}
+        >
+          {l("Vollansicht", "Otkryt razdel", "Full view")}
+          <ExternalLink className="size-3" />
+        </Button>
+      </div>
 
-        <div className="flex-1 overflow-y-auto px-4 py-3">
-          {busy ? (
-            <LoadingBlock />
-          ) : items.length === 0 ? (
-            <EmptyBlock text={l("Noch nicht erfasst.", "Не зафиксировано.", "Not recorded yet.")} />
-          ) : (
-            <ul className="space-y-2">
-              {items.map((item) => (
-                <li
-                  key={item.id}
-                  className="rounded-lg border border-border bg-card px-3 py-2.5 hover:bg-muted/40 transition-colors cursor-pointer"
-                  onClick={() => {
-                    onOpenChange(false);
-                    staffGo(`/documents?patient=${patientId}&document=${item.id}`);
-                  }}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <p className="text-[13px] font-medium text-foreground truncate">
-                      {item.filename}
-                    </p>
-                    {item.status ? (
-                      <Badge variant="outline" className="rounded-full text-[10px] shrink-0">
-                        {item.status}
-                      </Badge>
-                    ) : null}
-                  </div>
-                  <p className="mt-0.5 text-[11.5px] text-muted-foreground truncate">
-                    {formatDate(item.created_at)}
-                    {item.category ? ` · ${item.category}` : ""}
-                    {item.uploaded_by_name ? ` · ${item.uploaded_by_name}` : ""}
-                  </p>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </SheetContent>
-    </Sheet>
+      {busy ? (
+        <LoadingBlock />
+      ) : items.length === 0 ? (
+        <EmptyBlock text={l("Noch nicht erfasst.", "Ne zafiksirovano.", "Not recorded yet.")} />
+      ) : (
+        <ul className="space-y-2">
+          {items.map((item) => (
+            <li
+              key={item.id}
+              className="cursor-pointer rounded-lg border border-border bg-card px-3 py-2.5 transition-colors hover:bg-muted/40"
+              onClick={() => {
+                onOpenChange(false);
+                staffGo(`/documents?patient=${patientId}&document=${item.id}`);
+              }}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <p className="truncate text-[13px] font-medium text-foreground">
+                  {item.filename}
+                </p>
+                {item.status ? (
+                  <Badge variant="outline" className="shrink-0 rounded-full text-[10px]">
+                    {item.status}
+                  </Badge>
+                ) : null}
+              </div>
+              <p className="mt-0.5 truncate text-[11.5px] text-muted-foreground">
+                {formatDate(item.created_at)}
+                {item.category ? ` | ${item.category}` : ""}
+                {item.uploaded_by_name ? ` | ${item.uploaded_by_name}` : ""}
+              </p>
+            </li>
+          ))}
+        </ul>
+      )}
+    </PatientSheetScaffold>
   );
 }
-
-/* ─────────── Contracts ─────────── */
 
 type ContractItem = {
   id: string;
@@ -176,69 +170,70 @@ export function PatientContractsPreviewSheet({
   }, [open, patientId]);
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full sm:max-w-[520px] gap-0">
-        <SheetHeader className="px-4 py-3 flex-row items-center justify-between">
-          <SheetTitle className="inline-flex items-center gap-2">
-            <FileSignature className="size-4 text-muted-foreground" />
-            {l("Verträge", "Договоры", "Contracts")}
-          </SheetTitle>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-7 rounded-lg gap-1 text-[12px] text-muted-foreground"
-            onClick={() => {
-              onOpenChange(false);
-              staffGo(`/contracts?patient=${patientId}`);
-            }}
-          >
-            {l("Vollansicht", "Открыть раздел", "Full view")}
-            <ExternalLink className="size-3" />
-          </Button>
-        </SheetHeader>
+    <PatientSheetScaffold
+      open={open}
+      onOpenChange={onOpenChange}
+      width="narrow"
+      title={
+        <span className="inline-flex items-center gap-2">
+          <FileSignature className="size-4 text-muted-foreground" />
+          {l("Vertraege", "Dogovory", "Contracts")}
+        </span>
+      }
+      bodyClassName="px-4 py-3 space-y-3"
+    >
+      <div className="flex justify-end">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-7 rounded-lg gap-1 text-[12px] text-muted-foreground"
+          onClick={() => {
+            onOpenChange(false);
+            staffGo(`/contracts?patient=${patientId}`);
+          }}
+        >
+          {l("Vollansicht", "Otkryt razdel", "Full view")}
+          <ExternalLink className="size-3" />
+        </Button>
+      </div>
 
-        <div className="flex-1 overflow-y-auto px-4 py-3">
-          {busy ? (
-            <LoadingBlock />
-          ) : items.length === 0 ? (
-            <EmptyBlock text={l("Noch nicht erfasst.", "Не зафиксировано.", "Not recorded yet.")} />
-          ) : (
-            <ul className="space-y-2">
-              {items.map((item) => (
-                <li
-                  key={item.id}
-                  className="rounded-lg border border-border bg-card px-3 py-2.5 hover:bg-muted/40 transition-colors cursor-pointer"
-                  onClick={() => {
-                    onOpenChange(false);
-                    staffGo(`/contracts?patient=${patientId}&contract=${item.id}`);
-                  }}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <p className="text-[13px] font-medium text-foreground truncate font-mono">
-                      {item.contract_number}
-                    </p>
-                    <Badge variant="outline" className="rounded-full text-[10px] shrink-0">
-                      {item.status}
-                    </Badge>
-                  </div>
-                  <p className="mt-0.5 text-[11.5px] text-muted-foreground">
-                    {item.signed_at
-                      ? `${l("signiert", "подписан", "signed")} ${formatDate(item.signed_at)}`
-                      : formatDate(item.created_at)}
-                    {item.valid_from ? ` · ${formatDate(item.valid_from)}—${formatDate(item.valid_to)}` : ""}
-                  </p>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </SheetContent>
-    </Sheet>
+      {busy ? (
+        <LoadingBlock />
+      ) : items.length === 0 ? (
+        <EmptyBlock text={l("Noch nicht erfasst.", "Ne zafiksirovano.", "Not recorded yet.")} />
+      ) : (
+        <ul className="space-y-2">
+          {items.map((item) => (
+            <li
+              key={item.id}
+              className="cursor-pointer rounded-lg border border-border bg-card px-3 py-2.5 transition-colors hover:bg-muted/40"
+              onClick={() => {
+                onOpenChange(false);
+                staffGo(`/contracts?patient=${patientId}&contract=${item.id}`);
+              }}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <p className="truncate font-mono text-[13px] font-medium text-foreground">
+                  {item.contract_number}
+                </p>
+                <Badge variant="outline" className="shrink-0 rounded-full text-[10px]">
+                  {item.status}
+                </Badge>
+              </div>
+              <p className="mt-0.5 text-[11.5px] text-muted-foreground">
+                {item.signed_at
+                  ? `${l("signed", "podpisan", "signed")} ${formatDate(item.signed_at)}`
+                  : formatDate(item.created_at)}
+                {item.valid_from ? ` | ${formatDate(item.valid_from)}-${formatDate(item.valid_to)}` : ""}
+              </p>
+            </li>
+          ))}
+        </ul>
+      )}
+    </PatientSheetScaffold>
   );
 }
-
-/* ─────────── Invoices ─────────── */
 
 type InvoiceItem = {
   id: string;
@@ -283,74 +278,77 @@ export function PatientInvoicesPreviewSheet({
   }, [open, patientId]);
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full sm:max-w-[520px] gap-0">
-        <SheetHeader className="px-4 py-3 flex-row items-center justify-between">
-          <SheetTitle className="inline-flex items-center gap-2">
-            <ReceiptText className="size-4 text-muted-foreground" />
-            {l("Rechnungen", "Счета", "Invoices")}
-          </SheetTitle>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-7 rounded-lg gap-1 text-[12px] text-muted-foreground"
-            onClick={() => {
-              onOpenChange(false);
-              staffGo(`/invoices?patient=${patientId}`);
-            }}
-          >
-            {l("Vollansicht", "Открыть раздел", "Full view")}
-            <ExternalLink className="size-3" />
-          </Button>
-        </SheetHeader>
+    <PatientSheetScaffold
+      open={open}
+      onOpenChange={onOpenChange}
+      width="narrow"
+      title={
+        <span className="inline-flex items-center gap-2">
+          <ReceiptText className="size-4 text-muted-foreground" />
+          {l("Rechnungen", "Scheta", "Invoices")}
+        </span>
+      }
+      bodyClassName="px-4 py-3 space-y-3"
+    >
+      <div className="flex justify-end">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-7 rounded-lg gap-1 text-[12px] text-muted-foreground"
+          onClick={() => {
+            onOpenChange(false);
+            staffGo(`/invoices?patient=${patientId}`);
+          }}
+        >
+          {l("Vollansicht", "Otkryt razdel", "Full view")}
+          <ExternalLink className="size-3" />
+        </Button>
+      </div>
 
-        <div className="flex-1 overflow-y-auto px-4 py-3">
-          {busy ? (
-            <LoadingBlock />
-          ) : items.length === 0 ? (
-            <EmptyBlock text={l("Noch nicht erfasst.", "Не зафиксировано.", "Not recorded yet.")} />
-          ) : (
-            <ul className="space-y-2">
-              {items.map((item) => (
-                <li
-                  key={item.id}
-                  className="rounded-lg border border-border bg-card px-3 py-2.5 hover:bg-muted/40 transition-colors cursor-pointer"
-                  onClick={() => {
-                    onOpenChange(false);
-                    staffGo(`/invoices?patient=${patientId}&invoice=${item.id}`);
-                  }}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <p className="text-[13px] font-medium text-foreground font-mono">
-                      {item.invoice_number}
-                    </p>
-                    <Badge variant="outline" className="rounded-full text-[10px] shrink-0">
-                      {item.status}
-                    </Badge>
-                  </div>
-                  <p className="mt-0.5 text-[11.5px] text-muted-foreground">
-                    {formatDate(item.issued_at)}
-                    {item.total_gross ? ` · € ${item.total_gross}` : ""}
-                    {item.balance_due && item.balance_due !== "0.00"
-                      ? ` · ${l("offen", "остаток", "due")} € ${item.balance_due}`
-                      : ""}
-                  </p>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </SheetContent>
-    </Sheet>
+      {busy ? (
+        <LoadingBlock />
+      ) : items.length === 0 ? (
+        <EmptyBlock text={l("Noch nicht erfasst.", "Ne zafiksirovano.", "Not recorded yet.")} />
+      ) : (
+        <ul className="space-y-2">
+          {items.map((item) => (
+            <li
+              key={item.id}
+              className="cursor-pointer rounded-lg border border-border bg-card px-3 py-2.5 transition-colors hover:bg-muted/40"
+              onClick={() => {
+                onOpenChange(false);
+                staffGo(`/invoices?patient=${patientId}&invoice=${item.id}`);
+              }}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <p className="font-mono text-[13px] font-medium text-foreground">
+                  {item.invoice_number}
+                </p>
+                <Badge variant="outline" className="shrink-0 rounded-full text-[10px]">
+                  {item.status}
+                </Badge>
+              </div>
+              <p className="mt-0.5 text-[11.5px] text-muted-foreground">
+                {formatDate(item.issued_at)}
+                {item.total_gross ? ` | EUR ${item.total_gross}` : ""}
+                {item.balance_due && item.balance_due !== "0.00"
+                  ? ` | ${l("due", "ostatok", "due")} EUR ${item.balance_due}`
+                  : ""}
+              </p>
+            </li>
+          ))}
+        </ul>
+      )}
+    </PatientSheetScaffold>
   );
 }
 
 function LoadingBlock() {
   return (
-    <div className="flex items-center justify-center py-8 text-muted-foreground text-sm">
-      <LoaderCircle className="size-4 mr-2 animate-spin" />
-      Loading…
+    <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
+      <LoaderCircle className="mr-2 size-4 animate-spin" />
+      Loading...
     </div>
   );
 }
