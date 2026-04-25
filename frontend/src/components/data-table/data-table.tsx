@@ -1,5 +1,16 @@
-import { ArrowDown, ArrowUp, ChevronsUpDown } from "lucide-react";
-import { useRef, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
+import { ArrowDown, ArrowUp, Check, ChevronsUpDown, Pin, PinOff } from "lucide-react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+  type RefObject,
+  type ReactNode,
+} from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
 import { cn } from "@/lib/utils";
@@ -7,8 +18,23 @@ import { cn } from "@/lib/utils";
 import { DENSITY_ROW_HEIGHT } from "./density-toggle";
 import { toggleSort } from "./sort-logic";
 import type { ColumnDef, DensityLevel, SortStack } from "./types";
+import { useOutsideClose } from "./use-outside-close";
 
 const HEADER_HEIGHT = 36;
+
+type DataTableRowStyle = CSSProperties & {
+  "--dt-current-row-bg": string;
+  "--dt-row-bg": string;
+  "--dt-row-hover-bg": string;
+};
+
+export type ColumnHeaderContextMenuLabels = {
+  column?: string;
+  freeze?: string;
+  unfreeze?: string;
+  frozen?: string;
+  freezeLimitReached?: string;
+};
 
 export type DataTableProps<T> = {
   rows: readonly T[];
@@ -16,6 +42,9 @@ export type DataTableProps<T> = {
   hiddenColumns?: readonly string[];
   sort?: SortStack;
   onSortChange?: (next: SortStack) => void;
+  onColumnFreezeChange?: (columnId: string, frozen: boolean) => void;
+  isColumnFreezeDisabled?: (column: ColumnDef<T>, nextFrozen: boolean) => boolean;
+  columnHeaderContextMenuLabels?: ColumnHeaderContextMenuLabels;
   density?: DensityLevel;
   rowId: (row: T) => string;
   activeRowId?: string | null;
@@ -40,6 +69,9 @@ export function DataTable<T>({
   hiddenColumns = [],
   sort = [],
   onSortChange,
+  onColumnFreezeChange,
+  isColumnFreezeDisabled,
+  columnHeaderContextMenuLabels,
   density = "compact",
   rowId,
   activeRowId = null,
@@ -58,9 +90,18 @@ export function DataTable<T>({
   overscan = 10,
 }: DataTableProps<T>) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const columnMenuRef = useRef<HTMLDivElement | null>(null);
+  const [columnMenu, setColumnMenu] = useState<{
+    columnId: string;
+    x: number;
+    y: number;
+  } | null>(null);
   const rowHeight = DENSITY_ROW_HEIGHT[density];
 
-  const visibleCols = columns.filter((c) => !hiddenColumns.includes(c.id) || c.required);
+  const visibleCols = useMemo(
+    () => orderColumnsForPinning(columns.filter((c) => !hiddenColumns.includes(c.id) || c.required)),
+    [columns, hiddenColumns],
+  );
 
   // eslint-disable-next-line react-hooks/incompatible-library -- tanstack-virtual returns functions that the React compiler can't memoize; safe here because DataTable is not memoized.
   const virtualizer = useVirtualizer({
@@ -73,9 +114,13 @@ export function DataTable<T>({
   const virtualRows = virtualizer.getVirtualItems();
   const totalSize = virtualizer.getTotalSize();
 
-  const selectedSet = new Set(selectedIds);
+  useEffect(() => {
+    virtualizer.measure();
+  }, [rowHeight, virtualizer]);
 
-  const toggleSelection = (id: string, event: React.MouseEvent) => {
+  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+
+  const toggleSelection = (id: string, event: { stopPropagation: () => void }) => {
     if (!onSelectedIdsChange) return;
     event.stopPropagation();
     if (selectedSet.has(id)) {
@@ -130,21 +175,65 @@ export function DataTable<T>({
     }
   };
 
-  const sortLookup = new Map(sort.map((s, i) => [s.field, { ...s, index: i }]));
+  const sortLookup = useMemo(
+    () => new Map(sort.map((s, i) => [s.field, { ...s, index: i }])),
+    [sort],
+  );
 
-  const gridTemplate = buildGridTemplate(visibleCols, {
-    selection: selectionEnabled,
-    actions: Boolean(rowActions),
-  });
+  const gridTemplate = useMemo(
+    () =>
+      buildGridTemplate(visibleCols, {
+        selection: selectionEnabled,
+        actions: Boolean(rowActions),
+      }),
+    [rowActions, selectionEnabled, visibleCols],
+  );
 
   const allSelected = selectionEnabled && rows.length > 0 && selectedIds.length === rows.length;
   const someSelected = selectionEnabled && selectedIds.length > 0 && !allSelected;
+  const columnMenuColumn = columnMenu
+    ? (visibleCols.find((column) => column.id === columnMenu.columnId) ?? null)
+    : null;
+  const columnMenuNextFrozen = columnMenuColumn ? columnMenuColumn.pinned !== "left" : false;
+  const columnMenuFreezeDisabled =
+    columnMenuColumn && isColumnFreezeDisabled
+      ? isColumnFreezeDisabled(columnMenuColumn, columnMenuNextFrozen)
+      : false;
+  const closeColumnMenu = useCallback(() => setColumnMenu(null), []);
 
   const showEmpty = !loading && rows.length === 0;
   const showLoading = loading;
 
+  useOutsideClose(columnMenuRef, closeColumnMenu, { enabled: Boolean(columnMenu) });
+
+  useEffect(() => {
+    if (!columnMenu) return;
+    window.addEventListener("resize", closeColumnMenu);
+    window.addEventListener("scroll", closeColumnMenu, true);
+    return () => {
+      window.removeEventListener("resize", closeColumnMenu);
+      window.removeEventListener("scroll", closeColumnMenu, true);
+    };
+  }, [closeColumnMenu, columnMenu]);
+
+  const handleColumnContextMenu = (
+    col: ColumnDef<T>,
+    event: ReactMouseEvent<HTMLButtonElement>,
+  ) => {
+    if (!onColumnFreezeChange) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const menuWidth = 224;
+    const menuHeight = 116;
+    setColumnMenu({
+      columnId: col.id,
+      x: Math.min(event.clientX, Math.max(8, window.innerWidth - menuWidth - 8)),
+      y: Math.min(event.clientY, Math.max(8, window.innerHeight - menuHeight - 8)),
+    });
+  };
+
   return (
-    <div className={cn("flex flex-col rounded-lg border border-border bg-card", className)}>
+    <div className={cn("flex flex-col overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm", className)}>
       <div
         ref={scrollRef}
         className="relative flex-1 overflow-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
@@ -156,14 +245,14 @@ export function DataTable<T>({
         <div
           role="row"
           aria-rowindex={1}
-          className="sticky top-0 z-20 grid items-center border-b border-border bg-muted/40 text-xs font-medium text-muted-foreground"
+          className="sticky top-0 z-20 grid items-center border-b border-border/70 bg-card text-xs font-medium text-muted-foreground shadow-sm"
           style={{
             gridTemplateColumns: gridTemplate,
             height: HEADER_HEIGHT,
           }}
         >
           {selectionEnabled ? (
-            <div className="sticky left-0 z-30 flex h-full items-center justify-center border-r border-border bg-muted/40 px-2">
+            <div className="sticky left-0 z-30 flex h-full items-center justify-center border-r border-border/50 bg-card px-2 shadow-[1px_0_0_color-mix(in_oklch,var(--border)_70%,transparent)]">
               <SelectCheckbox
                 checked={allSelected}
                 indeterminate={someSelected}
@@ -181,6 +270,8 @@ export function DataTable<T>({
                 key={col.id}
                 type="button"
                 role="columnheader"
+                data-column-id={col.id}
+                data-pinned={col.pinned ?? undefined}
                 aria-sort={
                   sortState
                     ? sortState.dir === "asc"
@@ -189,16 +280,27 @@ export function DataTable<T>({
                     : "none"
                 }
                 onClick={(e) => handleSortClick(col, e)}
+                onContextMenu={(e) => handleColumnContextMenu(col, e)}
                 className={cn(
-                  "flex h-full items-center gap-1 border-r border-border px-2 text-left",
+                  "flex h-full items-center gap-1 px-2 text-left",
                   col.sortable && "cursor-pointer hover:bg-muted/80",
                   pinStyle.className,
-                  isPinned && "bg-muted/40",
+                  isPinned && "bg-card shadow-[1px_0_0_color-mix(in_oklch,var(--border)_70%,transparent)]",
                 )}
                 style={pinStyle.style}
-                disabled={!col.sortable}
+                aria-disabled={!col.sortable}
+                aria-haspopup={onColumnFreezeChange ? "menu" : undefined}
+                disabled={!col.sortable && !onColumnFreezeChange}
               >
                 <span className="truncate">{col.label}</span>
+                {isPinned ? (
+                  <span
+                    title={columnHeaderContextMenuLabels?.frozen ?? "Frozen"}
+                    className="inline-flex shrink-0 items-center text-primary"
+                  >
+                    <Pin className="size-3" />
+                  </span>
+                ) : null}
                 {col.sortable ? (
                   sortState ? (
                     <span className="inline-flex items-center gap-0.5 text-foreground">
@@ -222,7 +324,7 @@ export function DataTable<T>({
           })}
           {rowActions ? (
             <div
-              className="sticky right-0 z-30 flex h-full items-center justify-end border-l border-border bg-muted/40 px-2"
+              className="sticky right-0 z-30 flex h-full items-center justify-end border-l border-border/50 bg-card px-2 shadow-[-1px_0_0_color-mix(in_oklch,var(--border)_70%,transparent)]"
               style={{ gridColumn: `${visibleCols.length + (selectionEnabled ? 2 : 1)}` }}
             />
           ) : null}
@@ -244,19 +346,7 @@ export function DataTable<T>({
               const isSelected = selectedSet.has(id);
               const isOdd = vRow.index % 2 === 1;
               const accent = rowAccent?.(row);
-
-              const baseBg = isSelected
-                ? "bg-primary/5"
-                : isActive
-                  ? "bg-muted/50"
-                  : isOdd
-                    ? "bg-muted/30"
-                    : "bg-background";
-              const hoverBg = isSelected
-                ? "group-hover/row:bg-primary/10"
-                : isActive
-                  ? "group-hover/row:bg-muted/60"
-                  : "group-hover/row:bg-muted/40";
+              const rowTone = rowToneStyle({ isActive, isOdd, isSelected });
 
               return (
                 <div
@@ -267,15 +357,12 @@ export function DataTable<T>({
                   data-state={isSelected ? "selected" : undefined}
                   onClick={() => onRowClick?.(row)}
                   onDoubleClick={() => onRowDoubleClick?.(row)}
-                  className={cn(
-                    "group/row absolute inset-x-0 grid cursor-pointer items-center border-b border-border/60 transition-colors",
-                    baseBg,
-                    hoverBg.replace(/group-hover\/row:/g, "hover:"),
-                  )}
+                  className="data-table-row group/row absolute inset-x-0 grid cursor-pointer items-center border-b border-border/45 transition-colors"
                   style={{
                     top: vRow.start,
                     height: vRow.size,
                     gridTemplateColumns: gridTemplate,
+                    ...rowTone,
                   }}
                 >
                   {accent ? (
@@ -286,17 +373,11 @@ export function DataTable<T>({
                   ) : null}
                   {selectionEnabled ? (
                     <div
-                      className={cn(
-                        "sticky left-0 z-10 flex h-full items-center justify-center border-r border-border px-2 transition-colors",
-                        baseBg,
-                        hoverBg,
-                      )}
+                      className="data-table-cell sticky left-0 z-20 flex h-full items-center justify-center border-r border-border/45 px-2 shadow-[1px_0_0_color-mix(in_oklch,var(--border)_65%,transparent)] transition-colors"
                     >
                       <SelectCheckbox
                         checked={isSelected}
-                        onChange={(e) => {
-                          toggleSelection(id, e as unknown as React.MouseEvent);
-                        }}
+                        onChange={(e) => toggleSelection(id, e)}
                         ariaLabel="Select row"
                       />
                     </div>
@@ -308,10 +389,13 @@ export function DataTable<T>({
                       <div
                         key={col.id}
                         role="cell"
+                        data-column-id={col.id}
+                        data-pinned={col.pinned ?? undefined}
+                        data-frozen-opaque={isPinned ? "true" : undefined}
                         className={cn(
-                          "flex h-full items-center overflow-hidden border-r border-border/40 px-2 text-xs text-foreground transition-colors",
+                          "data-table-cell flex h-full items-center overflow-hidden px-2 text-xs text-foreground transition-colors",
                           pinStyle.className,
-                          isPinned && cn(baseBg, hoverBg),
+                          isPinned && "z-20 shadow-[1px_0_0_color-mix(in_oklch,var(--border)_65%,transparent)]",
                         )}
                         style={pinStyle.style}
                       >
@@ -323,15 +407,15 @@ export function DataTable<T>({
                   })}
                   {rowActions ? (
                     <div
-                      className={cn(
-                        "sticky right-0 z-10 flex h-full items-center justify-end gap-1 border-l border-border px-1 opacity-0 transition-[opacity,background-color] group-hover/row:opacity-100",
-                        baseBg,
-                        hoverBg,
-                      )}
-                      style={{ gridColumn: `${visibleCols.length + (selectionEnabled ? 2 : 1)}` }}
+                      className="data-table-cell sticky right-0 z-20 flex h-full items-center justify-end gap-1 border-l border-border/45 px-1 opacity-0 shadow-[-1px_0_0_color-mix(in_oklch,var(--border)_65%,transparent)] transition-[opacity,background-color] group-hover/row:opacity-100"
+                      style={{
+                        gridColumn: `${visibleCols.length + (selectionEnabled ? 2 : 1)}`,
+                      }}
                       onClick={(e) => e.stopPropagation()}
                     >
-                      {rowActions(row)}
+                      <span className="flex items-center justify-end gap-1">
+                        {rowActions(row)}
+                      </span>
                     </div>
                   ) : null}
                 </div>
@@ -340,7 +424,19 @@ export function DataTable<T>({
           </div>
         )}
       </div>
-      {footer ? <div className="border-t border-border bg-muted/20 px-3 py-1.5 text-xs text-muted-foreground">{footer}</div> : null}
+      {columnMenu && columnMenuColumn && onColumnFreezeChange ? (
+        <ColumnHeaderContextMenu
+          refEl={columnMenuRef}
+          column={columnMenuColumn}
+          disabled={columnMenuFreezeDisabled}
+          labels={columnHeaderContextMenuLabels}
+          x={columnMenu.x}
+          y={columnMenu.y}
+          onClose={closeColumnMenu}
+          onFreezeChange={onColumnFreezeChange}
+        />
+      ) : null}
+      {footer ? <div className="border-t border-border/60 bg-muted/15 px-3 py-1.5 text-xs text-muted-foreground">{footer}</div> : null}
     </div>
   );
 }
@@ -352,6 +448,117 @@ function defaultRender(value: unknown): ReactNode {
   return String(value);
 }
 
+type ColumnHeaderContextMenuProps<T> = {
+  column: ColumnDef<T>;
+  disabled: boolean;
+  labels?: ColumnHeaderContextMenuLabels;
+  refEl: RefObject<HTMLDivElement | null>;
+  x: number;
+  y: number;
+  onClose: () => void;
+  onFreezeChange: (columnId: string, frozen: boolean) => void;
+};
+
+function ColumnHeaderContextMenu<T>({
+  column,
+  disabled,
+  labels,
+  refEl,
+  x,
+  y,
+  onClose,
+  onFreezeChange,
+}: ColumnHeaderContextMenuProps<T>) {
+  const isFrozen = column.pinned === "left";
+  const actionLabel = isFrozen
+    ? (labels?.unfreeze ?? "Unfreeze column")
+    : (labels?.freeze ?? "Freeze column");
+
+  return (
+    <div
+      ref={refEl}
+      data-column-header-context-menu
+      role="menu"
+      aria-label={`${labels?.column ?? "Column"} ${column.label}`}
+      className="fixed z-[100] w-56 overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-xl"
+      style={{ left: x, top: y }}
+    >
+      <div className="flex items-center justify-between gap-2 border-b border-border px-2.5 py-2">
+        <span className="min-w-0 truncate text-xs font-medium">{column.label}</span>
+        {isFrozen ? (
+          <span className="inline-flex shrink-0 items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium uppercase text-primary">
+            <Pin className="size-3" />
+            {labels?.frozen ?? "Frozen"}
+          </span>
+        ) : null}
+      </div>
+      <div className="p-1">
+        <button
+          type="button"
+          role="menuitemcheckbox"
+          aria-checked={isFrozen}
+          disabled={disabled}
+          onClick={() => {
+            if (disabled) return;
+            onFreezeChange(column.id, !isFrozen);
+            onClose();
+          }}
+          className={cn(
+            "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-xs transition-colors",
+            "hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+            disabled && "pointer-events-none opacity-45",
+          )}
+        >
+          {isFrozen ? <PinOff className="size-3.5" /> : <Pin className="size-3.5" />}
+          <span className="min-w-0 flex-1 truncate">{actionLabel}</span>
+          {isFrozen ? <Check className="size-3.5 text-primary" /> : null}
+        </button>
+        {disabled ? (
+          <div className="px-2 py-1 text-[11px] leading-4 text-muted-foreground">
+            {labels?.freezeLimitReached ?? "Freeze limit reached"}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function rowToneStyle(opts: {
+  isActive: boolean;
+  isOdd: boolean;
+  isSelected: boolean;
+}): DataTableRowStyle {
+  if (opts.isSelected) {
+    return {
+      "--dt-current-row-bg": "var(--dt-row-bg)",
+      "--dt-row-bg": "color-mix(in oklch, var(--primary) 8%, var(--card))",
+      "--dt-row-hover-bg": "color-mix(in oklch, var(--primary) 12%, var(--card))",
+    };
+  }
+
+  if (opts.isActive) {
+    return {
+      "--dt-current-row-bg": "var(--dt-row-bg)",
+      "--dt-row-bg": "color-mix(in oklch, var(--muted) 72%, var(--card))",
+      "--dt-row-hover-bg": "color-mix(in oklch, var(--muted) 84%, var(--card))",
+    };
+  }
+
+  if (opts.isOdd) {
+    return {
+      "--dt-current-row-bg": "var(--dt-row-bg)",
+      "--dt-row-bg": "color-mix(in oklch, var(--muted) 55%, var(--card))",
+      "--dt-row-hover-bg": "color-mix(in oklch, var(--muted) 75%, var(--card))",
+    };
+  }
+
+  return {
+    "--dt-current-row-bg": "var(--dt-row-bg)",
+    "--dt-row-bg": "var(--card)",
+    "--dt-row-hover-bg": "color-mix(in oklch, var(--muted) 58%, var(--card))",
+  };
+}
+
 function buildGridTemplate<T>(
   cols: readonly ColumnDef<T>[],
   opts: { selection: boolean; actions: boolean },
@@ -359,14 +566,37 @@ function buildGridTemplate<T>(
   const parts: string[] = [];
   if (opts.selection) parts.push("32px");
   for (const col of cols) {
-    const width = col.width ? `${col.width}px` : "minmax(120px, 1fr)";
-    parts.push(width);
+    const width = columnWidth(col);
+    parts.push(width ? `${width}px` : "minmax(120px, 1fr)");
   }
   if (opts.actions) parts.push("auto");
   return parts.join(" ");
 }
 
+function orderColumnsForPinning<T>(cols: readonly ColumnDef<T>[]): ColumnDef<T>[] {
+  const left: ColumnDef<T>[] = [];
+  const center: ColumnDef<T>[] = [];
+  const right: ColumnDef<T>[] = [];
+
+  for (const col of cols) {
+    if (col.pinned === "left") {
+      left.push(col);
+    } else if (col.pinned === "right") {
+      right.push(col);
+    } else {
+      center.push(col);
+    }
+  }
+
+  return [...left, ...center, ...right];
+}
+
 type PinInfo = { className?: string; style?: CSSProperties };
+
+function columnWidth<T>(col: ColumnDef<T>): number | null {
+  if (col.width) return col.width;
+  return col.pinned ? 160 : null;
+}
 
 function pinnedStyle<T>(
   col: ColumnDef<T>,
@@ -377,20 +607,20 @@ function pinnedStyle<T>(
   if (col.pinned === "left") {
     let offset = selectionEnabled ? 32 : 0;
     for (let i = 0; i < index; i += 1) {
-      if (cols[i].pinned === "left") offset += cols[i].width ?? 120;
+      if (cols[i].pinned === "left") offset += columnWidth(cols[i]) ?? 120;
     }
     return {
-      className: "sticky z-10",
+      className: "sticky z-20",
       style: { left: offset },
     };
   }
   if (col.pinned === "right") {
     let offset = 0;
     for (let i = cols.length - 1; i > index; i -= 1) {
-      if (cols[i].pinned === "right") offset += cols[i].width ?? 120;
+      if (cols[i].pinned === "right") offset += columnWidth(cols[i]) ?? 120;
     }
     return {
-      className: "sticky z-10",
+      className: "sticky z-20",
       style: { right: offset },
     };
   }

@@ -34,9 +34,12 @@ type PatientsTableSurfaceProps = {
   detailOpen: boolean;
   filteredCount: number;
   emptyLabel: string;
+  frozenColumns: string[];
   hiddenColumns: string[];
   loading: boolean;
+  maxFrozenColumns: number;
   onCloseDetail: () => void;
+  onFrozenColumnsChange: (value: string[]) => void;
   onOpenPatient: (patientId: string) => void;
   onSelectionReset: () => void;
   onSelectedIdsChange: (value: string[]) => void;
@@ -60,9 +63,12 @@ export function PatientsTableSurface({
   detailOpen,
   filteredCount,
   emptyLabel,
+  frozenColumns,
   hiddenColumns,
   loading,
+  maxFrozenColumns,
   onCloseDetail,
+  onFrozenColumnsChange,
   onOpenPatient,
   onSelectionReset,
   onSelectedIdsChange,
@@ -78,6 +84,15 @@ export function PatientsTableSurface({
   tr,
   viewMode,
 }: PatientsTableSurfaceProps) {
+  function handleColumnFreezeChange(columnId: string, frozen: boolean) {
+    if (frozen) {
+      if (frozenColumns.includes(columnId) || frozenColumns.length >= maxFrozenColumns) return;
+      onFrozenColumnsChange([...frozenColumns, columnId]);
+      return;
+    }
+    onFrozenColumnsChange(frozenColumns.filter((id) => id !== columnId));
+  }
+
   return (
     <SplitView
       active={detailOpen}
@@ -133,6 +148,19 @@ export function PatientsTableSurface({
         hiddenColumns={hiddenColumns}
         sort={sortStack}
         onSortChange={onSortChange}
+        onColumnFreezeChange={handleColumnFreezeChange}
+        isColumnFreezeDisabled={(column, nextFrozen) =>
+          nextFrozen &&
+          !frozenColumns.includes(column.id) &&
+          frozenColumns.length >= maxFrozenColumns
+        }
+        columnHeaderContextMenuLabels={{
+          column: tr.table_columns ?? "Column",
+          freeze: tr.table_columns_freeze ?? "Freeze column",
+          unfreeze: tr.table_columns_unfreeze ?? "Unfreeze column",
+          frozen: tr.table_columns_frozen ?? "Frozen",
+          freezeLimitReached: tr.table_columns_freeze_limit ?? "Freeze limit reached",
+        }}
         density={density}
         rowId={(patient) => patient.id}
         activeRowId={selectedId}
@@ -179,7 +207,7 @@ export function PatientsTableSurface({
         )}
         selectedIds={selectedIds}
         onSelectedIdsChange={onSelectedIdsChange}
-        selectionEnabled={permissionsCanCreateEdit}
+        selectionEnabled={false}
         loading={loading}
         emptyState={<span className="text-sm text-muted-foreground">{emptyLabel}</span>}
         className="min-h-[400px]"
