@@ -20,7 +20,6 @@ import {
   AdminInlineMetric,
   AdminSheetScaffold,
   AdminTableCard,
-  AdminToolbar,
   SheetFormFooter,
 } from "@/components/admin-page-patterns";
 import { DataTable } from "@/components/data-table/data-table";
@@ -829,7 +828,7 @@ export function SopsPage() {
           title={text.title}
           description={text.subtitle}
           actions={
-            <AdminToolbar>
+            <>
               <Button
                 type="button"
                 variant="outline"
@@ -853,7 +852,7 @@ export function SopsPage() {
                   {text.newContent}
                 </Button>
               ) : null}
-            </AdminToolbar>
+            </>
           }
         />
 
