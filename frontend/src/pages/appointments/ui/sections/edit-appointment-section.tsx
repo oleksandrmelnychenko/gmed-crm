@@ -1,3 +1,4 @@
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   memo,
   useEffect,
@@ -296,7 +297,7 @@ function EditAppointmentSection({
             "Care path",
           )}
         >
-          <select
+          <NativeComboboxSelect
             value={form.carePathKind}
             onChange={(event) =>
               setForm((current) => ({
@@ -312,7 +313,7 @@ function EditAppointmentSection({
                 {carePathKindLabel(value)}
               </option>
             ))}
-          </select>
+          </NativeComboboxSelect>
         </Field>
         <div className="grid gap-4 md:grid-cols-3">
           <Field label={t.appointments_date}>
@@ -357,7 +358,7 @@ function EditAppointmentSection({
         </div>
         <div className="grid gap-4 md:grid-cols-2">
           <Field label={t.common_provider}>
-            <select
+            <NativeComboboxSelect
               value={form.providerId}
               onChange={(event) =>
                 setForm((current) => ({
@@ -375,10 +376,10 @@ function EditAppointmentSection({
                   {provider.name}
                 </option>
               ))}
-            </select>
+            </NativeComboboxSelect>
           </Field>
           <Field label={t.common_doctor}>
-            <select
+            <NativeComboboxSelect
               value={form.doctorId}
               onChange={(event) =>
                 setForm((current) => ({
@@ -395,12 +396,12 @@ function EditAppointmentSection({
                   {doctorLabel(doctor)}
                 </option>
               ))}
-            </select>
+            </NativeComboboxSelect>
           </Field>
         </div>
         <div className="grid gap-4 md:grid-cols-2">
           <Field label={t.patients_assign_owner}>
-            <select
+            <NativeComboboxSelect
               value={form.ownerUserId}
               onChange={(event) =>
                 setForm((current) => ({
@@ -416,10 +417,10 @@ function EditAppointmentSection({
                   {member.name} · {roleLabel(member.role)}
                 </option>
               ))}
-            </select>
+            </NativeComboboxSelect>
           </Field>
           <Field label={interpreterFieldLabel}>
-            <select
+            <NativeComboboxSelect
               value={form.interpreterId}
               onChange={(event) =>
                 setForm((current) => ({
@@ -435,7 +436,7 @@ function EditAppointmentSection({
                   {member.name} · {roleLabel(member.role)}
                 </option>
               ))}
-            </select>
+            </NativeComboboxSelect>
           </Field>
         </div>
         <Field label={t.appointments_location}>
@@ -453,7 +454,7 @@ function EditAppointmentSection({
         {detail.recurrence_frequency ? (
           <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3">
             <Field label={t.appointments_scope_apply_schedule}>
-              <select
+              <NativeComboboxSelect
                 value={recurrenceScope}
                 onChange={(event) =>
                   setRecurrenceScope(
@@ -467,7 +468,7 @@ function EditAppointmentSection({
                   {t.appointments_scope_following}
                 </option>
                 <option value="series">{t.appointments_scope_series}</option>
-              </select>
+              </NativeComboboxSelect>
             </Field>
             <p className="mt-2 text-xs text-sky-800">
               {t.appointments_scope_following_hint}
@@ -480,7 +481,7 @@ function EditAppointmentSection({
                   "Repeat frequency",
                 )}
               >
-                <select
+                <NativeComboboxSelect
                   value={form.repeatFrequency}
                   onChange={(event) =>
                     setForm((current) => ({
@@ -499,7 +500,7 @@ function EditAppointmentSection({
                   <option value="monthly">
                     {recurrenceFrequencyLabel("monthly")}
                   </option>
-                </select>
+                </NativeComboboxSelect>
               </Field>
               <Field
                 label={appointmentText(

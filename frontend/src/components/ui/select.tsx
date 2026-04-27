@@ -4,9 +4,79 @@ import * as React from "react"
 import { Select as SelectPrimitive } from "@base-ui/react/select"
 
 import { cn } from "@/lib/utils"
-import { ChevronDownIcon, CheckIcon, ChevronUpIcon } from "lucide-react"
+import { ChevronDownIcon, CheckIcon, ChevronUpIcon, SearchIcon } from "lucide-react"
 
 const Select = SelectPrimitive.Root
+
+function textFromNode(node: React.ReactNode): string {
+  if (node == null || typeof node === "boolean") {
+    return ""
+  }
+
+  if (typeof node === "string" || typeof node === "number") {
+    return String(node)
+  }
+
+  if (Array.isArray(node)) {
+    return node.map(textFromNode).join(" ")
+  }
+
+  if (React.isValidElement(node)) {
+    const props = node.props as { children?: React.ReactNode }
+
+    return textFromNode(props.children)
+  }
+
+  return ""
+}
+
+function filterSelectChildren(children: React.ReactNode, query: string) {
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+
+  if (!normalizedQuery) {
+    return { children, count: React.Children.count(children) }
+  }
+
+  const filtered: React.ReactNode[] = []
+  let count = 0
+
+  React.Children.forEach(children, (child) => {
+    if (!React.isValidElement(child)) {
+      return
+    }
+
+    const props = child.props as {
+      children?: React.ReactNode
+      value?: unknown
+    }
+    const searchable = `${String(props.value ?? "")} ${textFromNode(props.children)}`.toLocaleLowerCase()
+
+    if (searchable.includes(normalizedQuery)) {
+      filtered.push(child)
+      count += 1
+      return
+    }
+
+    if (!props.children) {
+      return
+    }
+
+    const nested = filterSelectChildren(props.children, query)
+
+    if (nested.count > 0) {
+      filtered.push(
+        React.cloneElement(
+          child as React.ReactElement<{ children?: React.ReactNode }>,
+          undefined,
+          nested.children,
+        ),
+      )
+      count += nested.count
+    }
+  })
+
+  return { children: filtered, count }
+}
 
 function SelectGroup({ className, ...props }: SelectPrimitive.Group.Props) {
   return (
@@ -70,6 +140,9 @@ function SelectContent({
     SelectPrimitive.Positioner.Props,
     "align" | "alignOffset" | "side" | "sideOffset" | "alignItemWithTrigger"
   >) {
+  const [query, setQuery] = React.useState("")
+  const filtered = React.useMemo(() => filterSelectChildren(children, query), [children, query])
+
   return (
     <SelectPrimitive.Portal>
       <SelectPrimitive.Positioner
@@ -83,11 +156,28 @@ function SelectContent({
         <SelectPrimitive.Popup
           data-slot="select-content"
           data-align-trigger={alignItemWithTrigger}
-          className={cn("relative isolate z-[120] max-h-(--available-height) w-(--anchor-width) min-w-36 origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-lg bg-popover text-popover-foreground shadow-md ring-1 ring-foreground/10 duration-100 data-[align-trigger=true]:animate-none data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95", className )}
+          className={cn("relative isolate z-[120] max-h-(--available-height) w-(--anchor-width) min-w-36 origin-(--transform-origin) overflow-hidden rounded-lg bg-popover text-popover-foreground shadow-md ring-1 ring-foreground/10 duration-100 data-[align-trigger=true]:animate-none data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95", className )}
           {...props}
         >
+          <div className="flex items-center gap-2 border-b border-border bg-popover px-2.5 py-2">
+            <SearchIcon className="size-4 shrink-0 text-muted-foreground" />
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => event.stopPropagation()}
+              onPointerDown={(event) => event.stopPropagation()}
+              placeholder="Поиск..."
+              className="h-7 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+            />
+          </div>
           <SelectScrollUpButton />
-          <SelectPrimitive.List>{children}</SelectPrimitive.List>
+          <SelectPrimitive.List className="max-h-[min(18rem,var(--available-height))] overflow-y-auto p-1">
+            {filtered.count > 0 ? (
+              filtered.children
+            ) : (
+              <div className="px-2 py-2 text-sm text-muted-foreground">Ничего не найдено</div>
+            )}
+          </SelectPrimitive.List>
           <SelectScrollDownButton />
         </SelectPrimitive.Popup>
       </SelectPrimitive.Positioner>

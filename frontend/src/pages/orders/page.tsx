@@ -1,3 +1,4 @@
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   startTransition,
   useCallback,
@@ -77,6 +78,11 @@ import {
   recheckBadgeClass,
   statusClassName,
 } from "./appearance/status-appearance";
+import {
+  DEFAULT_ORDER_SECTION,
+  type OrderSectionKey,
+  normalizeOrderSectionKey,
+} from "./sections";
 import {
   approveOrderLeistung,
   completeWorkflowChecklistItem,
@@ -167,6 +173,10 @@ const ORDER_REALTIME_EVENTS = [
   "order.external_invoice_overdue",
   "order.leistung_added",
   "order.leistung_approved",
+  "task.created",
+  "task.status_changed",
+  "workflow_checklist_item.created",
+  "workflow_checklist_item.completed",
 ] as const;
 
 type StatCardProps = {
@@ -300,6 +310,8 @@ export function OrdersPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const routeOrderId = routeOrderIdParam ?? "";
   const isOrderRouteDetail = routeOrderId !== "";
+  const patientContextId = searchParams.get("patient") ?? "";
+  const activeOrderSection = normalizeOrderSectionKey(searchParams.get("section"));
   const permissions = orderPermissions(user?.role);
   const locale = lang === "de" ? "de-DE" : "ru-RU";
   const l = useCallback((de: string, ru: string) => (lang === "de" ? de : ru), [lang]);
@@ -945,6 +957,8 @@ export function OrdersPage() {
     user?.role === "patient_manager" ||
     user?.role === "billing" ||
     user?.role === "ceo";
+  const shouldRenderOrderSection = (section: OrderSectionKey) =>
+    !isOrderRouteDetail || activeOrderSection === section;
 
   function syncQuery(next: Record<string, string | null>) {
     const params = new URLSearchParams(searchParams);
@@ -975,9 +989,32 @@ export function OrdersPage() {
     setProcessGateForm(blankOrderProcessGateForm());
   }, []);
 
+  function buildOrderWorkspaceHref(
+    orderId: string,
+    section: OrderSectionKey = DEFAULT_ORDER_SECTION,
+    patientIdOverride = "",
+  ) {
+    const params = new URLSearchParams();
+    const patientId = patientIdOverride || filters.patientId || patientContextId;
+    const providerId = filters.providerId || searchParams.get("provider") || "";
+    const doctorId = filters.doctorId || searchParams.get("doctor") || "";
+
+    if (patientId) params.set("patient", patientId);
+    if (providerId) params.set("provider", providerId);
+    if (doctorId) params.set("doctor", doctorId);
+    if (section !== DEFAULT_ORDER_SECTION) params.set("section", section);
+
+    const query = params.toString();
+    return query ? `/orders/${orderId}?${query}` : `/orders/${orderId}`;
+  }
+
   function closeOrderWorkspace() {
     resetOrderWorkspace();
     if (isOrderRouteDetail) {
+      if (patientContextId) {
+        staffGo(`/patients/${patientContextId}?tab=orders`);
+        return;
+      }
       staffGo("/orders");
       return;
     }
@@ -986,6 +1023,8 @@ export function OrdersPage() {
 
   useRealtimeSubscription(ORDER_REALTIME_EVENTS, (event) => {
     if (!permissions.canViewPage) return;
+    const eventOrderId =
+      typeof event.payload?.order_id === "string" ? event.payload.order_id : null;
     clearApiCache("/orders");
     clearApiCache("/orders/debt-management");
     if (event.entity_type === "order" && event.entity_id) {
@@ -993,7 +1032,16 @@ export function OrdersPage() {
       clearApiCache(`/orders/${event.entity_id}/workflow-checklist`);
       clearApiCache(`/documents?order_id=${event.entity_id}`);
     }
-    if (selectedOrderId && selectedOrderId !== event.entity_id) {
+    if (eventOrderId) {
+      clearApiCache(`/orders/${eventOrderId}`);
+      clearApiCache(`/orders/${eventOrderId}/workflow-checklist`);
+      clearApiCache(`/documents?order_id=${eventOrderId}`);
+    }
+    if (
+      selectedOrderId &&
+      selectedOrderId !== event.entity_id &&
+      selectedOrderId !== eventOrderId
+    ) {
       clearApiCache(`/orders/${selectedOrderId}`);
       clearApiCache(`/orders/${selectedOrderId}/workflow-checklist`);
       clearApiCache(`/documents?order_id=${selectedOrderId}`);
@@ -1031,13 +1079,13 @@ export function OrdersPage() {
     }));
   }, [activeWorkflowAssignments, user?.id, workflowForm.ownerUserId]);
 
-  function openOrder(orderId: string) {
+  function openOrder(orderId: string, patientId?: string | null) {
     setDetailError(null);
     setDetailLoading(true);
     startTransition(() => {
       setSelectedOrderId(orderId);
     });
-    staffGo(`/orders/${orderId}`);
+    staffGo(buildOrderWorkspaceHref(orderId, DEFAULT_ORDER_SECTION, patientId ?? ""));
   }
 
   function resetCreateDialog(open: boolean) {
@@ -1394,7 +1442,7 @@ export function OrdersPage() {
       });
 
       resetCreateDialog(false);
-      openOrder(created.id);
+      openOrder(created.id, createForm.patientId);
       triggerReload();
     } catch (error) {
       setCreateError(
@@ -1934,7 +1982,7 @@ export function OrdersPage() {
                 <button
                   key={item.order_id}
                   type="button"
-                  onClick={() => openOrder(item.order_id)}
+                  onClick={() => openOrder(item.order_id, item.patient_id)}
                   className="rounded-2xl border border-slate-200 bg-white px-4 py-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md"
                 >
                   <div className="flex items-start justify-between gap-3">
@@ -2191,7 +2239,7 @@ export function OrdersPage() {
           maxFrozenColumns={ORDER_MAX_FROZEN_COLUMNS}
           toolbarClassName="border-b border-border/70 bg-card px-3 py-2"
           activeRowId={selectedOrderId}
-          onRowClick={(row) => openOrder(row.id)}
+          onRowClick={(row) => openOrder(row.id, row.patient_id)}
           rowAccent={(row) => {
             if (row.id === selectedOrderId) return "bg-sky-500";
             if (row.status === "cancelled") return "bg-rose-500";
@@ -2251,7 +2299,7 @@ export function OrdersPage() {
                 onClick={closeOrderWorkspace}
               >
                 <ArrowLeft className="size-4" />
-                {tx.orders_title}
+                {patientContextId ? l("Patient", "Пациент") : tx.orders_title}
               </Button>
             </div>
           ) : null}
@@ -2287,153 +2335,157 @@ export function OrdersPage() {
               />
             ) : (
               <>
-                <AdminTableCard
-                  title={titleWithDot(tx.orders_title)}
-                  description={tx.orders_subtitle}
-                  accessory={
-                    <div className="flex flex-wrap items-center gap-2">
-                      <StatusBadge tone={orderPhaseTone(orderDetail.phase)}>
-                        {phaseLabel(orderDetail.phase)}
-                      </StatusBadge>
-                      <StatusBadge tone={orderStatusTone(orderDetail.status)}>
-                        {orderStatusLabel(orderDetail.status)}
-                      </StatusBadge>
-                    </div>
-                  }
-                >
-                  <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-4">
-                    <DetailField
-                      label={t.orders_patient}
-                      value={`${orderDetail.patient_name} (${orderDetail.patient_pid})`}
-                    />
-                    <DetailField
-                      label={tx.patients_created}
-                      value={
-                        <span className="inline-flex items-center gap-2">
-                          <CalendarClock className="size-4 text-slate-500" />
-                          {formatDateTimeLabel(orderDetail.created_at)}
-                        </span>
+                {shouldRenderOrderSection("overview") ? (
+                  <>
+                    <AdminTableCard
+                      title={titleWithDot(tx.orders_title)}
+                      description={tx.orders_subtitle}
+                      accessory={
+                        <div className="flex flex-wrap items-center gap-2">
+                          <StatusBadge tone={orderPhaseTone(orderDetail.phase)}>
+                            {phaseLabel(orderDetail.phase)}
+                          </StatusBadge>
+                          <StatusBadge tone={orderStatusTone(orderDetail.status)}>
+                            {orderStatusLabel(orderDetail.status)}
+                          </StatusBadge>
+                        </div>
                       }
-                    />
-                    <DetailField
-                      label={tx.common_loading}
-                      value={
-                        <span className="inline-flex items-center gap-2">
-                          <RefreshCw className="size-4 text-slate-500" />
-                          {formatDateTimeLabel(orderDetail.updated_at)}
-                        </span>
-                      }
-                    />
-                    <DetailField
-                      label={tx.contracts_signed}
-                      value={`${orderDetail.signed_patient ? tx.contracts_signed : tx.mfa_pending} / ${
-                        orderDetail.signed_agency
-                          ? tx.contracts_signed
-                          : tx.mfa_pending
-                      }`}
-                    />
-                    <DetailField
-                      label={t.leads_needs}
-                      value={orderDetail.needs_description || tx.common_not_set}
-                    />
-                    <DetailField
-                      label={tx.invoices_subtotal}
-                      value={formatMoney(orderDetail.total_estimated)}
-                    />
-                    <DetailField
-                      label={tx.invoices_total}
-                      value={formatMoney(orderDetail.total_actual)}
-                    />
-                    <DetailField
-                      label={tx.providers_services}
-                      value={l(
-                        `${leistungMetrics.total} Positionen / ${leistungMetrics.delivered} erbracht / ${leistungMetrics.approved} freigegeben`,
-                        `${leistungMetrics.total} позиций / ${leistungMetrics.delivered} оказано / ${leistungMetrics.approved} утверждено`,
+                    >
+                      <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-4">
+                        <DetailField
+                          label={t.orders_patient}
+                          value={`${orderDetail.patient_name} (${orderDetail.patient_pid})`}
+                        />
+                        <DetailField
+                          label={tx.patients_created}
+                          value={
+                            <span className="inline-flex items-center gap-2">
+                              <CalendarClock className="size-4 text-slate-500" />
+                              {formatDateTimeLabel(orderDetail.created_at)}
+                            </span>
+                          }
+                        />
+                        <DetailField
+                          label={tx.common_loading}
+                          value={
+                            <span className="inline-flex items-center gap-2">
+                              <RefreshCw className="size-4 text-slate-500" />
+                              {formatDateTimeLabel(orderDetail.updated_at)}
+                            </span>
+                          }
+                        />
+                        <DetailField
+                          label={tx.contracts_signed}
+                          value={`${orderDetail.signed_patient ? tx.contracts_signed : tx.mfa_pending} / ${
+                            orderDetail.signed_agency
+                              ? tx.contracts_signed
+                              : tx.mfa_pending
+                          }`}
+                        />
+                        <DetailField
+                          label={t.leads_needs}
+                          value={orderDetail.needs_description || tx.common_not_set}
+                        />
+                        <DetailField
+                          label={tx.invoices_subtotal}
+                          value={formatMoney(orderDetail.total_estimated)}
+                        />
+                        <DetailField
+                          label={tx.invoices_total}
+                          value={formatMoney(orderDetail.total_actual)}
+                        />
+                        <DetailField
+                          label={tx.providers_services}
+                          value={l(
+                            `${leistungMetrics.total} Positionen / ${leistungMetrics.delivered} erbracht / ${leistungMetrics.approved} freigegeben`,
+                            `${leistungMetrics.total} позиций / ${leistungMetrics.delivered} оказано / ${leistungMetrics.approved} утверждено`,
+                          )}
+                        />
+                      </div>
+                    </AdminTableCard>
+
+                    <AdminTableCard
+                      title={titleWithDot(tx.providers_linked_patients)}
+                      description={l(
+                        "Direkt in Patienten-, Fall- und Terminkontexte springen, ohne Filter manuell neu aufzubauen.",
+                        "Переходите в соседние контексты пациента, кейса и приёмов без ручной пересборки фильтров.",
                       )}
-                    />
-                  </div>
-                </AdminTableCard>
+                    >
+                      <div className="flex flex-wrap gap-2 p-4">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-9 rounded-lg px-3.5"
+                          onClick={() =>
+                            staffGo(`/patients/${orderDetail.patient_id}?tab=orders`)
+                          }
+                        >
+                          {l("Patient", "Пациент")}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-9 rounded-lg px-3.5"
+                          onClick={() =>
+                            staffGo(`/patients/${orderDetail.patient_id}?tab=cases`)
+                          }
+                        >
+                          {l("Fälle", "Кейсы")}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-9 rounded-lg px-3.5"
+                          onClick={() =>
+                            staffGo(
+                              `/appointments?patient=${orderDetail.patient_id}`,
+                            )
+                          }
+                        >
+                          {l("Termine", "Приёмы")}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-9 rounded-lg px-3.5"
+                          onClick={() =>
+                            staffGo(
+                              `/contracts?order=${orderDetail.id}&patient=${orderDetail.patient_id}&tab=quotes`,
+                            )
+                          }
+                        >
+                          {l("Verträge", "Договоры")}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-9 rounded-lg px-3.5"
+                          onClick={() =>
+                            staffGo(
+                              `/invoices?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
+                            )
+                          }
+                        >
+                          {l("Rechnungen", "Счета")}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-9 rounded-lg px-3.5"
+                          onClick={() =>
+                            staffGo(
+                              `/documents?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
+                            )
+                          }
+                        >
+                          {l("Dokumente", "Документы")}
+                        </Button>
+                      </div>
+                    </AdminTableCard>
+                  </>
+                ) : null}
 
-                <AdminTableCard
-                  title={titleWithDot(tx.providers_linked_patients)}
-                  description={l(
-                    "Direkt in Patienten-, Fall- und Terminkontexte springen, ohne Filter manuell neu aufzubauen.",
-                    "Переходите в соседние контексты пациента, кейса и приёмов без ручной пересборки фильтров.",
-                  )}
-                >
-                  <div className="flex flex-wrap gap-2 p-4">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="h-9 rounded-lg px-3.5"
-                      onClick={() =>
-                        staffGo(`/patients?patient=${orderDetail.patient_id}`)
-                      }
-                    >
-                      {l("Patient", "Пациент")}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="h-9 rounded-lg px-3.5"
-                      onClick={() =>
-                        staffGo(`/cases?patient=${orderDetail.patient_id}`)
-                      }
-                    >
-                      {l("Fälle", "Кейсы")}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="h-9 rounded-lg px-3.5"
-                      onClick={() =>
-                        staffGo(
-                          `/appointments?patient=${orderDetail.patient_id}`,
-                        )
-                      }
-                    >
-                      {l("Termine", "Приёмы")}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="h-9 rounded-lg px-3.5"
-                      onClick={() =>
-                        staffGo(
-                          `/contracts?order=${orderDetail.id}&patient=${orderDetail.patient_id}&tab=quotes`,
-                        )
-                      }
-                    >
-                      {l("Verträge", "Договоры")}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="h-9 rounded-lg px-3.5"
-                      onClick={() =>
-                        staffGo(
-                          `/invoices?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
-                        )
-                      }
-                    >
-                      {l("Rechnungen", "Счета")}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="h-9 rounded-lg px-3.5"
-                      onClick={() =>
-                        staffGo(
-                          `/documents?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
-                        )
-                      }
-                    >
-                      {l("Dokumente", "Документы")}
-                    </Button>
-                  </div>
-                </AdminTableCard>
-
-                {orderDetail.process_gates ? (
+                {shouldRenderOrderSection("gates") && orderDetail.process_gates ? (
                   <SectionCard
                     title={l("Prozess-Gates", "Процессные гейты")}
                     description={l(
@@ -2536,7 +2588,7 @@ export function OrdersPage() {
                               )}
                             </div>
                             <div className="mt-4 grid gap-3">
-                              <select
+                              <NativeComboboxSelect
                                 value={processGateForm.debtStatus}
                                 onChange={(event) =>
                                   setProcessGateForm((current) => ({
@@ -2558,8 +2610,8 @@ export function OrdersPage() {
                                     {debtStatusLabel(status)}
                                   </option>
                                 ))}
-                              </select>
-                              <select
+                              </NativeComboboxSelect>
+                              <NativeComboboxSelect
                                 value={processGateForm.debtOwnerUserId}
                                 onChange={(event) =>
                                   setProcessGateForm((current) => ({
@@ -2583,7 +2635,7 @@ export function OrdersPage() {
                                     {item.user_name} · {roleLabel(item.user_role)}
                                   </option>
                                 ))}
-                              </select>
+                              </NativeComboboxSelect>
                               <Input
                                 type="datetime-local"
                                 value={processGateForm.debtNextReviewAt}
@@ -2692,7 +2744,7 @@ export function OrdersPage() {
                               )}
                             </div>
                             <div className="mt-4 space-y-3">
-                              <select
+                              <NativeComboboxSelect
                                 value={processGateForm.billingReleaseStatus}
                                 onChange={(event) =>
                                   setProcessGateForm((current) => ({
@@ -2705,7 +2757,7 @@ export function OrdersPage() {
                                 <option value="pending">{billingReleaseLabel("pending")}</option>
                                 <option value="granted">{billingReleaseLabel("granted")}</option>
                                 <option value="denied">{billingReleaseLabel("denied")}</option>
-                              </select>
+                              </NativeComboboxSelect>
                               <textarea
                                 value={processGateForm.billingReleaseNote}
                                 onChange={(event) =>
@@ -2751,7 +2803,7 @@ export function OrdersPage() {
                               )}
                             </div>
                             <div className="mt-4 space-y-3">
-                              <select
+                              <NativeComboboxSelect
                                 value={processGateForm.packageCoverageStatus}
                                 onChange={(event) =>
                                   setProcessGateForm((current) => ({
@@ -2764,7 +2816,7 @@ export function OrdersPage() {
                                 <option value="unknown">{packageCoverageLabel("unknown")}</option>
                                 <option value="covered">{packageCoverageLabel("covered")}</option>
                                 <option value="not_covered">{packageCoverageLabel("not_covered")}</option>
-                              </select>
+                              </NativeComboboxSelect>
                               <textarea
                                 value={processGateForm.packageCoverageNote}
                                 onChange={(event) =>
@@ -2804,7 +2856,7 @@ export function OrdersPage() {
                   </SectionCard>
                 ) : null}
 
-                {orderDetail.planning_preparation ? (
+                {shouldRenderOrderSection("planning") && orderDetail.planning_preparation ? (
                   <SectionCard
                     title={l("Planung und Vorbereitung", "Планирование и подготовка")}
                     description={l(
@@ -2953,7 +3005,7 @@ export function OrdersPage() {
                               )}
                             </div>
                             <div className="mt-4 space-y-3">
-                              <select
+                              <NativeComboboxSelect
                                 value={planningForm.treatmentPlanStatus}
                                 onChange={(event) =>
                                   setPlanningForm((current) => ({
@@ -2969,7 +3021,7 @@ export function OrdersPage() {
                                   {treatmentPlanStatusLabel("correction_requested")}
                                 </option>
                                 <option value="finalized">{treatmentPlanStatusLabel("finalized")}</option>
-                              </select>
+                              </NativeComboboxSelect>
                               <textarea
                                 value={planningForm.treatmentPlanNote}
                                 onChange={(event) =>
@@ -3020,7 +3072,7 @@ export function OrdersPage() {
                                 />
                                 {l("Dolmetscher ist erforderlich", "Переводчик требуется")}
                               </label>
-                              <select
+                              <NativeComboboxSelect
                                 value={planningForm.preparationDocumentsStatus}
                                 onChange={(event) =>
                                   setPlanningForm((current) => ({
@@ -3040,8 +3092,8 @@ export function OrdersPage() {
                                 <option value="not_required">
                                   {preparationDocumentStatusLabel("not_required")}
                                 </option>
-                              </select>
-                              <select
+                              </NativeComboboxSelect>
+                              <NativeComboboxSelect
                                 value={planningForm.interpreterBriefingStatus}
                                 onChange={(event) =>
                                   setPlanningForm((current) => ({
@@ -3062,7 +3114,7 @@ export function OrdersPage() {
                                 <option value="completed">
                                   {interpreterBriefingStatusLabel("completed")}
                                 </option>
-                              </select>
+                              </NativeComboboxSelect>
                               <div className="flex justify-end">
                                 <Button
                                   type="button"
@@ -3153,7 +3205,7 @@ export function OrdersPage() {
                   </SectionCard>
                 ) : null}
 
-                {orderDetail.execution_flow ? (
+                {shouldRenderOrderSection("execution") && orderDetail.execution_flow ? (
                   <SectionCard
                     title={l("Durchfuhrung", "Исполнение")}
                     description={l(
@@ -3285,7 +3337,7 @@ export function OrdersPage() {
                             disabled={!permissions.canManagePhase}
                             className="mt-4 space-y-3"
                           >
-                            <select
+                            <NativeComboboxSelect
                               value={executionForm.arrivalStatus}
                               onChange={(event) =>
                                 setExecutionForm((current) => ({
@@ -3298,8 +3350,8 @@ export function OrdersPage() {
                               <option value="pending">{arrivalStatusLabel("pending")}</option>
                               <option value="arrived">{arrivalStatusLabel("arrived")}</option>
                               <option value="not_required">{arrivalStatusLabel("not_required")}</option>
-                            </select>
-                            <select
+                            </NativeComboboxSelect>
+                            <NativeComboboxSelect
                               value={executionForm.medicalExecutionStatus}
                               onChange={(event) =>
                                 setExecutionForm((current) => ({
@@ -3319,8 +3371,8 @@ export function OrdersPage() {
                               <option value="not_required">
                                 {executionStatusLabel("not_required")}
                               </option>
-                            </select>
-                            <select
+                            </NativeComboboxSelect>
+                            <NativeComboboxSelect
                               value={executionForm.nonMedicalExecutionStatus}
                               onChange={(event) =>
                                 setExecutionForm((current) => ({
@@ -3345,8 +3397,8 @@ export function OrdersPage() {
                               <option value="completed">
                                 {executionStatusLabel("completed")}
                               </option>
-                            </select>
-                            <select
+                            </NativeComboboxSelect>
+                            <NativeComboboxSelect
                               value={executionForm.interpreterServiceStatus}
                               onChange={(event) =>
                                 setExecutionForm((current) => ({
@@ -3371,8 +3423,8 @@ export function OrdersPage() {
                               <option value="completed">
                                 {executionStatusLabel("completed")}
                               </option>
-                            </select>
-                            <select
+                            </NativeComboboxSelect>
+                            <NativeComboboxSelect
                               value={executionForm.issueStatus}
                               onChange={(event) =>
                                 setExecutionForm((current) => ({
@@ -3388,7 +3440,7 @@ export function OrdersPage() {
                               </option>
                               <option value="resolved">{issueStatusLabel("resolved")}</option>
                               <option value="not_required">{issueStatusLabel("not_required")}</option>
-                            </select>
+                            </NativeComboboxSelect>
                             <textarea
                               value={executionForm.deviationNote}
                               onChange={(event) =>
@@ -3519,7 +3571,7 @@ export function OrdersPage() {
                   </SectionCard>
                 ) : null}
 
-                {orderDetail.followup_flow ? (
+                {shouldRenderOrderSection("followup") && orderDetail.followup_flow ? (
                   <SectionCard
                     title={l("Nachsorge-Ablauf", "Поток follow-up")}
                     description={l(
@@ -3647,7 +3699,7 @@ export function OrdersPage() {
                             disabled={!permissions.canManagePhase}
                             className="mt-4 space-y-3"
                           >
-                            <select
+                            <NativeComboboxSelect
                               value={followupForm.doctorFollowupStatus}
                               onChange={(event) =>
                                 setFollowupForm((current) => ({
@@ -3669,9 +3721,9 @@ export function OrdersPage() {
                               <option value="completed">
                                 {followupStatusLabel("completed")}
                               </option>
-                            </select>
+                            </NativeComboboxSelect>
                             <div className="grid gap-3 md:grid-cols-3">
-                              <select
+                              <NativeComboboxSelect
                                 value={followupForm.followup1wStatus}
                                 onChange={(event) =>
                                   setFollowupForm((current) => ({
@@ -3687,8 +3739,8 @@ export function OrdersPage() {
                                 <option value="not_required">
                                   {`1W ${followupStatusLabel("not_required")}`}
                                 </option>
-                              </select>
-                              <select
+                              </NativeComboboxSelect>
+                              <NativeComboboxSelect
                                 value={followupForm.followup1mStatus}
                                 onChange={(event) =>
                                   setFollowupForm((current) => ({
@@ -3704,8 +3756,8 @@ export function OrdersPage() {
                                 <option value="not_required">
                                   {`1M ${followupStatusLabel("not_required")}`}
                                 </option>
-                              </select>
-                              <select
+                              </NativeComboboxSelect>
+                              <NativeComboboxSelect
                                 value={followupForm.followup6mStatus}
                                 onChange={(event) =>
                                   setFollowupForm((current) => ({
@@ -3721,7 +3773,7 @@ export function OrdersPage() {
                                 <option value="not_required">
                                   {`6M ${followupStatusLabel("not_required")}`}
                                 </option>
-                              </select>
+                              </NativeComboboxSelect>
                             </div>
                             <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px]">
                               <Input
@@ -3735,7 +3787,7 @@ export function OrdersPage() {
                                 }
                                 className="h-10 rounded-xl bg-white"
                               />
-                              <select
+                              <NativeComboboxSelect
                                 value={followupForm.packageEndStatus}
                                 onChange={(event) =>
                                   setFollowupForm((current) => ({
@@ -3757,9 +3809,9 @@ export function OrdersPage() {
                               <option value="completed">
                                 {l("Paketende abgeschlossen", "Завершение пакета завершено")}
                               </option>
-                            </select>
+                            </NativeComboboxSelect>
                             </div>
-                            <select
+                            <NativeComboboxSelect
                               value={followupForm.resultsHandoffStatus}
                               onChange={(event) =>
                                 setFollowupForm((current) => ({
@@ -3778,7 +3830,7 @@ export function OrdersPage() {
                               <option value="not_required">
                                 {resultsHandoffStatusLabel("not_required")}
                               </option>
-                            </select>
+                            </NativeComboboxSelect>
                             <textarea
                               value={followupForm.followupSummary}
                               onChange={(event) =>
@@ -3896,27 +3948,28 @@ export function OrdersPage() {
                   </SectionCard>
                 ) : null}
 
-                <SectionCard
-                  title={tx.orders_phase}
-                  description={l(
-                    "Phasenwechsel laufen sequenziell und werden in der Workflow-Historie protokolliert.",
-                    "Переходы по фазам идут последовательно и сохраняются в истории workflow.",
-                  )}
-                  action={
-                    permissions.canManagePhase &&
-                    orderDetail.lifecycle?.next_stage ? (
-                      <Button
-                        variant="outline"
-                        onClick={() => void handleAdvancePhase()}
-                        disabled={Boolean(nextLifecycleTransition?.blocked)}
-                      >
-                        <ChevronRight className="mr-2 size-4" />
-                        {l("Weiter zu", "Перевести в")}{" "}
-                        {phaseLabel(orderDetail.lifecycle.next_stage)}
-                      </Button>
-                    ) : null
-                  }
-                >
+                {shouldRenderOrderSection("phase") ? (
+                  <SectionCard
+                    title={tx.orders_phase}
+                    description={l(
+                      "Phasenwechsel laufen sequenziell und werden in der Workflow-Historie protokolliert.",
+                      "Переходы по фазам идут последовательно и сохраняются в истории workflow.",
+                    )}
+                    action={
+                      permissions.canManagePhase &&
+                      orderDetail.lifecycle?.next_stage ? (
+                        <Button
+                          variant="outline"
+                          onClick={() => void handleAdvancePhase()}
+                          disabled={Boolean(nextLifecycleTransition?.blocked)}
+                        >
+                          <ChevronRight className="mr-2 size-4" />
+                          {l("Weiter zu", "Перевести в")}{" "}
+                          {phaseLabel(orderDetail.lifecycle.next_stage)}
+                        </Button>
+                      ) : null
+                    }
+                  >
                   <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto]">
                     <div className="flex flex-wrap gap-2">
                       {ORDER_PHASES.map((phase) => {
@@ -4035,15 +4088,17 @@ export function OrdersPage() {
                       ))}
                     </div>
                   ) : null}
-                </SectionCard>
+                  </SectionCard>
+                ) : null}
 
-                <SectionCard
-                  title={l("Workflow-Checkliste", "Workflow-чеклист")}
-                  description={l(
-                    "Automatisch erzeugte To-dos fur PM und Concierge zu diesem Auftrag.",
-                    "Автосозданные задачи для PM и concierge по этому заказу.",
-                  )}
-                >
+                {shouldRenderOrderSection("workflow") ? (
+                  <SectionCard
+                    title={l("Workflow-Checkliste", "Workflow-чеклист")}
+                    description={l(
+                      "Automatisch erzeugte To-dos fur PM und Concierge zu diesem Auftrag.",
+                      "Автосозданные задачи для PM и concierge по этому заказу.",
+                    )}
+                  >
                   {workflowChecklist ? (
                     <div className="space-y-4">
                       <div className="grid gap-3 md:grid-cols-3">
@@ -4220,7 +4275,7 @@ export function OrdersPage() {
                               <Label htmlFor="order-workflow-owner">
                                 {l("Verantwortlich", "Ответственный")}
                               </Label>
-                              <select
+                              <NativeComboboxSelect
                                 id="order-workflow-owner"
                                 className={selectClassName}
                                 value={workflowForm.ownerUserId}
@@ -4240,13 +4295,13 @@ export function OrdersPage() {
                                     {item.user_name} · {roleLabel(item.user_role)}
                                   </option>
                                 ))}
-                              </select>
+                              </NativeComboboxSelect>
                             </div>
                             <div className="space-y-2">
                               <Label htmlFor="order-workflow-priority">
                                 {l("Priorität", "Приоритет")}
                               </Label>
-                              <select
+                              <NativeComboboxSelect
                                 id="order-workflow-priority"
                                 className={selectClassName}
                                 value={workflowForm.priority}
@@ -4264,7 +4319,7 @@ export function OrdersPage() {
                                     </option>
                                   ),
                                 )}
-                              </select>
+                              </NativeComboboxSelect>
                             </div>
                             <div className="space-y-2">
                               <Label htmlFor="order-workflow-due">
@@ -4312,62 +4367,65 @@ export function OrdersPage() {
                       )}
                     />
                   )}
-                </SectionCard>
+                  </SectionCard>
+                ) : null}
 
-                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                  <StatCard
-                    label={tx.providers_services}
-                    value={String(leistungMetrics.total)}
-                    description={l(
-                      "Aktuelle Leistungspositionen in diesem Auftrag.",
-                      "Текущие позиции услуг в этом заказе.",
-                    )}
-                    icon={<ClipboardList className="size-4" />}
-                  />
-                  <StatCard
-                    label={l("Zur Freigabe", "Ждут утверждения")}
-                    value={String(leistungMetrics.delivered)}
-                    description={l(
-                      "Leistungspositionen, die auf PM-Freigabe warten.",
-                      "Позиции услуг, ожидающие утверждения PM.",
-                    )}
-                    icon={<CheckCircle2 className="size-4" />}
-                  />
-                  <StatCard
-                    label={l("Freigegeben", "Утверждено")}
-                    value={String(leistungMetrics.approved)}
-                    description={l(
-                      "Bereits freigegebene Leistungspositionen in diesem Auftrag.",
-                      "Позиции услуг, уже утверждённые в текущем заказе.",
-                    )}
-                    icon={<Wallet className="size-4" />}
-                  />
-                  <StatCard
-                    label={tx.contracts_total}
-                    value={formatMoney(leistungMetrics.gross)}
-                    description={l(
-                      "Menge x Preis uber alle sichtbaren Leistungspositionen.",
-                      "Количество x цена по всем видимым позициям услуг.",
-                    )}
-                    icon={<Building2 className="size-4" />}
-                  />
-                </div>
+                {shouldRenderOrderSection("services") ? (
+                  <>
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                      <StatCard
+                        label={tx.providers_services}
+                        value={String(leistungMetrics.total)}
+                        description={l(
+                          "Aktuelle Leistungspositionen in diesem Auftrag.",
+                          "Текущие позиции услуг в этом заказе.",
+                        )}
+                        icon={<ClipboardList className="size-4" />}
+                      />
+                      <StatCard
+                        label={l("Zur Freigabe", "Ждут утверждения")}
+                        value={String(leistungMetrics.delivered)}
+                        description={l(
+                          "Leistungspositionen, die auf PM-Freigabe warten.",
+                          "Позиции услуг, ожидающие утверждения PM.",
+                        )}
+                        icon={<CheckCircle2 className="size-4" />}
+                      />
+                      <StatCard
+                        label={l("Freigegeben", "Утверждено")}
+                        value={String(leistungMetrics.approved)}
+                        description={l(
+                          "Bereits freigegebene Leistungspositionen in diesem Auftrag.",
+                          "Позиции услуг, уже утверждённые в текущем заказе.",
+                        )}
+                        icon={<Wallet className="size-4" />}
+                      />
+                      <StatCard
+                        label={tx.contracts_total}
+                        value={formatMoney(leistungMetrics.gross)}
+                        description={l(
+                          "Menge x Preis uber alle sichtbaren Leistungspositionen.",
+                          "Количество x цена по всем видимым позициям услуг.",
+                        )}
+                        icon={<Building2 className="size-4" />}
+                      />
+                    </div>
 
-                <SectionCard
-                  title={tx.providers_services}
-                  description={l(
-                    "Provider- und arztbezogene Leistungen innerhalb dieses Auftrags.",
-                    "Привязанные к провайдеру и врачу услуги внутри текущего заказа.",
-                  )}
-                  action={
-                    permissions.canAddLeistung ? (
-                      <Button onClick={() => resetLeistungDialog(true)}>
-                        <Plus className="mr-2 size-4" />
-                        {l("Leistung hinzufugen", "Добавить Leistung")}
-                      </Button>
-                    ) : null
-                  }
-                >
+                    <SectionCard
+                      title={tx.providers_services}
+                      description={l(
+                        "Provider- und arztbezogene Leistungen innerhalb dieses Auftrags.",
+                        "Привязанные к провайдеру и врачу услуги внутри текущего заказа.",
+                      )}
+                      action={
+                        permissions.canAddLeistung ? (
+                          <Button onClick={() => resetLeistungDialog(true)}>
+                            <Plus className="mr-2 size-4" />
+                            {l("Leistung hinzufugen", "Добавить Leistung")}
+                          </Button>
+                        ) : null
+                      }
+                    >
                   {orderDetail.leistungen.length === 0 ? (
                     <EmptyState
                       title={tx.common_not_set}
@@ -4599,15 +4657,18 @@ export function OrdersPage() {
                       ))}
                     </div>
                   )}
-                </SectionCard>
+                    </SectionCard>
+                  </>
+                ) : null}
 
-                <SectionCard
-                  title={l("Externe Rechnungen", "Внешние счета")}
-                  description={l(
-                    "Lieferanten- und Klinikrechnungen im Auftragskontext nachverfolgen, die gepruft, bezahlt oder eskaliert werden mussen.",
-                    "Отслеживание счетов от клиник и поставщиков, которые нужно проверить, оплатить или эскалировать в контексте заказа.",
-                  )}
-                >
+                {shouldRenderOrderSection("invoices") ? (
+                  <SectionCard
+                    title={l("Externe Rechnungen", "Внешние счета")}
+                    description={l(
+                      "Lieferanten- und Klinikrechnungen im Auftragskontext nachverfolgen, die gepruft, bezahlt oder eskaliert werden mussen.",
+                      "Отслеживание счетов от клиник и поставщиков, которые нужно проверить, оплатить или эскалировать в контексте заказа.",
+                    )}
+                  >
                   <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                     <StatCard
                       label={l("Erfasste Rechnungen", "Учтённые счета")}
@@ -4687,7 +4748,7 @@ export function OrdersPage() {
                           </div>
                           <div>
                             <Label>{t.common_provider}</Label>
-                            <select
+                            <NativeComboboxSelect
                               value={externalInvoiceForm.providerId}
                               onChange={(event) =>
                                 setExternalInvoiceForm((current) => ({
@@ -4703,7 +4764,7 @@ export function OrdersPage() {
                                   {provider.name}
                                 </option>
                               ))}
-                            </select>
+                            </NativeComboboxSelect>
                           </div>
                           <div>
                             <Label>{l("Rechnungsdatum", "Дата счёта")}</Label>
@@ -4774,7 +4835,7 @@ export function OrdersPage() {
                           </div>
                           <div>
                             <Label>{l("Status", "Статус")}</Label>
-                            <select
+                            <NativeComboboxSelect
                               value={externalInvoiceForm.status}
                               onChange={(event) =>
                                 setExternalInvoiceForm((current) => ({
@@ -4790,7 +4851,7 @@ export function OrdersPage() {
                                   {externalInvoiceStatusLabel(status)}
                                 </option>
                               ))}
-                            </select>
+                            </NativeComboboxSelect>
                           </div>
                           <div className="md:col-span-2 xl:col-span-4">
                             <Label>{t.patients_notes}</Label>
@@ -4991,7 +5052,8 @@ export function OrdersPage() {
                       </div>
                     )}
                   </div>
-                </SectionCard>
+                  </SectionCard>
+                ) : null}
               </>
             )}
           </AdminSheetScaffold>
@@ -5420,7 +5482,7 @@ export function OrdersPage() {
             <div className="grid gap-4 md:grid-cols-2">
               <div>
                 <Label>{l("Provider", "Провайдер")}</Label>
-                <select
+                <NativeComboboxSelect
                   value={leistungForm.providerId}
                   onChange={(event) => {
                     const providerId = event.target.value;
@@ -5441,11 +5503,11 @@ export function OrdersPage() {
                         : ""}
                     </option>
                   ))}
-                </select>
+                </NativeComboboxSelect>
               </div>
               <div>
                 <Label>{l("Arzt", "Врач")}</Label>
-                <select
+                <NativeComboboxSelect
                   value={leistungForm.doctorId}
                   onChange={(event) =>
                     setLeistungForm((current) => ({
@@ -5463,7 +5525,7 @@ export function OrdersPage() {
                       {doctor.fachbereich ? ` (${doctor.fachbereich})` : ""}
                     </option>
                   ))}
-                </select>
+                </NativeComboboxSelect>
               </div>
             </div>
 
@@ -5497,7 +5559,7 @@ export function OrdersPage() {
             {leistungForm.isCostPassthrough ? (
               <div>
                 <Label>{t.orders_supporting_document}</Label>
-                <select
+                <NativeComboboxSelect
                   value={leistungForm.externalDocumentId}
                   onChange={(event) =>
                     setLeistungForm((current) => ({
@@ -5521,7 +5583,7 @@ export function OrdersPage() {
                         : ""}
                     </option>
                   ))}
-                </select>
+                </NativeComboboxSelect>
                 <p className="mt-2 text-xs text-slate-500">
                   {t.orders_supporting_document_pin_hint}
                 </p>

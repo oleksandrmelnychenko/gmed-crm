@@ -198,6 +198,8 @@ async fn create_task(
     if !is_valid_task_priority(&priority) {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid priority");
     }
+    let title = body.title.clone();
+    let description = body.description.clone();
 
     let due_date = match body.due_date.as_deref() {
         Some(value) if !value.trim().is_empty() => {
@@ -213,6 +215,7 @@ async fn create_task(
         }
         _ => None,
     };
+    let due_date_payload = due_date.as_ref().map(|value| value.to_rfc3339());
 
     let target_role = match load_active_assignable_role(&state, body.assigned_to).await {
         Ok(Some(role)) => role,
@@ -259,15 +262,15 @@ async fn create_task(
            )
            RETURNING id, created_at"#,
     )
-    .bind(body.title)
-    .bind(body.description)
+    .bind(body.title.as_str())
+    .bind(body.description.as_deref())
     .bind(body.assigned_to)
     .bind(auth.user_id)
     .bind(patient_id)
     .bind(order_id)
     .bind(appointment_id)
     .bind(due_date)
-    .bind(priority)
+    .bind(priority.as_str())
     .fetch_one(&state.db)
     .await
     {
@@ -288,6 +291,24 @@ async fn create_task(
                     "order_id": order_id,
                 }),
             ));
+
+            crate::realtime::publish_task_event(
+                &state,
+                Some(auth.user_id),
+                "task.created",
+                task_id,
+                serde_json::json!({
+                    "assigned_to": body.assigned_to,
+                    "patient_id": patient_id,
+                    "appointment_id": appointment_id,
+                    "order_id": order_id,
+                    "title": title,
+                    "description": description,
+                    "priority": priority,
+                    "due_date": due_date_payload,
+                }),
+            )
+            .await;
 
             (
                 StatusCode::CREATED,
@@ -371,7 +392,7 @@ async fn update_status(
                            updated_at = now()
                        WHERE linked_task_id = $1
                          AND is_completed = false
-                       RETURNING patient_id, order_id, scope_type, scope_id, item_text"#,
+                       RETURNING id, patient_id, order_id, scope_type, scope_id, item_text"#,
                 )
                 .bind(task_id)
                 .bind(auth.user_id)
@@ -380,6 +401,7 @@ async fn update_status(
 
                 match checklist_row {
                     Ok(Some(row)) => {
+                        let checklist_item_id: Option<Uuid> = row.try_get("id").ok();
                         let patient_id: Option<Uuid> = row.try_get("patient_id").ok();
                         let order_id: Option<Uuid> = row.try_get("order_id").unwrap_or_default();
                         let scope_type: String = row.try_get("scope_type").unwrap_or_default();
@@ -401,6 +423,23 @@ async fn update_status(
                                 }),
                             ));
                         }
+                        if let Some(checklist_item_id) = checklist_item_id {
+                            crate::realtime::publish_workflow_checklist_event(
+                                &state,
+                                Some(auth.user_id),
+                                "workflow_checklist_item.completed",
+                                checklist_item_id,
+                                serde_json::json!({
+                                    "scope_type": scope_type,
+                                    "scope_id": scope_id,
+                                    "order_id": order_id,
+                                    "task_id": task_id,
+                                    "item_text": item_text,
+                                    "completed_via": "task",
+                                }),
+                            )
+                            .await;
+                        }
                     }
                     Ok(None) => {}
                     Err(e) => {
@@ -408,6 +447,17 @@ async fn update_status(
                     }
                 }
             }
+
+            crate::realtime::publish_task_event(
+                &state,
+                Some(auth.user_id),
+                "task.status_changed",
+                task_id,
+                serde_json::json!({
+                    "status": status,
+                }),
+            )
+            .await;
 
             Json(serde_json::json!({"ok": true})).into_response()
         }

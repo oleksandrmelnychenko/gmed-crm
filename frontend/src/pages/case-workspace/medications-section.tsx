@@ -1,3 +1,4 @@
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { AlertTriangle } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -218,7 +219,7 @@ export function MedicationsSection() {
               />
             </Field>
             <Field label={tri(lang, "Typ", "Тип", "Type")}>
-              <select
+              <NativeComboboxSelect
                 value={form.med_typ ?? "permanent"}
                 onChange={(event) => updateField("med_typ", event.target.value)}
                 className={nativeSelectClassName}
@@ -229,7 +230,7 @@ export function MedicationsSection() {
                     {tri(lang, option.labels.de, option.labels.ru, option.labels.en)}
                   </option>
                 ))}
-              </select>
+              </NativeComboboxSelect>
             </Field>
             <Field label={tri(lang, "Gültig bis", "Действительно до", "Valid until")}>
               <Input
@@ -264,7 +265,7 @@ export function MedicationsSection() {
           <Field
             label={tri(lang, "Verordnender Arzt (Register)", "Назначивший врач (реестр)", "Prescriber (registry)")}
           >
-            <select
+            <NativeComboboxSelect
               value={form.verordnender_arzt_id ?? ""}
               onChange={(event) => {
                 const doctorId = event.target.value;
@@ -286,7 +287,7 @@ export function MedicationsSection() {
                   {doctorOptionLabel(doctor)}
                 </option>
               ))}
-            </select>
+            </NativeComboboxSelect>
           </Field>
 
           <Field label={tri(lang, "Freitext Arzt", "Наименование врача", "Doctor label")}>

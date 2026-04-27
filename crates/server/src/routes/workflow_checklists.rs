@@ -790,6 +790,37 @@ async fn create_custom_workflow_item(
         }),
     ));
 
+    crate::realtime::publish_workflow_checklist_event(
+        state,
+        Some(auth.user_id),
+        "workflow_checklist_item.created",
+        checklist_item_id,
+        json!({
+            "scope_type": scope.as_str(),
+            "scope_id": scope_id,
+            "order_id": context.order_id,
+            "checklist_item_id": checklist_item_id,
+            "task_id": task_id,
+            "item_text": item_text,
+        }),
+    )
+    .await;
+    crate::realtime::publish_task_event(
+        state,
+        Some(auth.user_id),
+        "task.created",
+        task_id,
+        json!({
+            "source": "workflow_checklist",
+            "scope_type": scope.as_str(),
+            "scope_id": scope_id,
+            "order_id": context.order_id,
+            "checklist_item_id": checklist_item_id,
+            "item_text": item_text,
+        }),
+    )
+    .await;
+
     (
         StatusCode::CREATED,
         Json(json!({
@@ -896,6 +927,39 @@ async fn complete_workflow_item(
             "item_text": row.try_get::<String, _>("item_text").unwrap_or_default(),
         }),
     ));
+
+    crate::realtime::publish_workflow_checklist_event(
+        state,
+        Some(auth.user_id),
+        "workflow_checklist_item.completed",
+        item_id,
+        json!({
+            "scope_type": scope.as_str(),
+            "scope_id": scope_id,
+            "order_id": order_id,
+            "checklist_item_id": item_id,
+            "task_id": linked_task_id,
+            "item_text": row.try_get::<String, _>("item_text").unwrap_or_default(),
+        }),
+    )
+    .await;
+    if let Some(linked_task_id) = linked_task_id {
+        crate::realtime::publish_task_event(
+            state,
+            Some(auth.user_id),
+            "task.status_changed",
+            linked_task_id,
+            json!({
+                "status": "completed",
+                "source": "workflow_checklist",
+                "scope_type": scope.as_str(),
+                "scope_id": scope_id,
+                "order_id": order_id,
+                "checklist_item_id": item_id,
+            }),
+        )
+        .await;
+    }
 
     Json(json!({ "ok": true })).into_response()
 }

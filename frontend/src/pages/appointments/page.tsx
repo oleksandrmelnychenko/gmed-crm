@@ -191,6 +191,8 @@ const APPOINTMENT_REALTIME_EVENTS = [
   "appointment.created",
   "appointment.updated",
   "appointment.status_changed",
+  "appointment_checklist.created",
+  "appointment_checklist.completed",
   "appointment_request.created",
   "appointment_request.reviewed",
   "appointment_request.converted",
@@ -198,6 +200,10 @@ const APPOINTMENT_REALTIME_EVENTS = [
   "concierge_service.updated",
   "concierge_service.cancelled",
   "concierge_service.billing_ready",
+  "reminder.created",
+  "reminder.completed",
+  "task.created",
+  "task.status_changed",
 ] as const;
 
 const loadDesktopDetailWorkspaceContent = () =>
@@ -1333,11 +1339,31 @@ function StaffAppointmentsPage() {
 
   useRealtimeSubscription(APPOINTMENT_REALTIME_EVENTS, (event) => {
     clearApiCache("/appointments");
+    const eventAppointmentId =
+      typeof event.payload?.appointment_id === "string"
+        ? event.payload.appointment_id
+        : null;
     if (event.entity_type === "concierge_service") {
       clearApiCache("/concierge-services");
       if (detailOpen) {
         refreshDetail();
       }
+      return;
+    }
+    if (
+      event.entity_type === "appointment_checklist" ||
+      event.entity_type === "reminder" ||
+      event.entity_type === "task"
+    ) {
+      clearApiCache("/tasks");
+      if (eventAppointmentId) {
+        clearApiCache(`/appointments/${eventAppointmentId}/checklist`);
+        clearApiCache(`/appointments/${eventAppointmentId}/reminders`);
+      }
+      if (detailOpen && selectedId && eventAppointmentId === selectedId) {
+        refreshDetail();
+      }
+      refreshAppointments();
       return;
     }
     if (event.entity_type === "appointment" && detailOpen && selectedId && event.entity_id === selectedId) {

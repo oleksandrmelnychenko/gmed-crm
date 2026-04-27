@@ -1,3 +1,4 @@
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   memo,
   useCallback,
@@ -457,7 +458,7 @@ function AppointmentExternalHandoffSection({
           >
             <div className="grid gap-4 md:grid-cols-2">
               <Field label={tr.patients_assign_owner}>
-                <select
+                <NativeComboboxSelect
                   value={form.target}
                   onChange={(event) =>
                     setForm((current) => ({
@@ -476,10 +477,10 @@ function AppointmentExternalHandoffSection({
                   <option value="doctor" disabled={!detail.doctor_id}>
                     Doctor
                   </option>
-                </select>
+                </NativeComboboxSelect>
               </Field>
               <Field label={tr.documents_source}>
-                <select
+                <NativeComboboxSelect
                   value={form.channel}
                   onChange={(event) =>
                     setForm((current) => ({
@@ -494,12 +495,12 @@ function AppointmentExternalHandoffSection({
                       {communicationChannelLabel(value)}
                     </option>
                   ))}
-                </select>
+                </NativeComboboxSelect>
               </Field>
             </div>
             <div className="grid gap-4 md:grid-cols-3">
               <Field label={tr.documents_source}>
-                <select
+                <NativeComboboxSelect
                   value={form.direction}
                   onChange={(event) =>
                     setForm((current) => ({
@@ -512,10 +513,10 @@ function AppointmentExternalHandoffSection({
                 >
                   <option value="outbound">{tr.common_active}</option>
                   <option value="inbound">{tr.common_active}</option>
-                </select>
+                </NativeComboboxSelect>
               </Field>
               <Field label={t.users_status}>
-                <select
+                <NativeComboboxSelect
                   value={form.status}
                   onChange={(event) =>
                     setForm((current) => ({
@@ -530,10 +531,10 @@ function AppointmentExternalHandoffSection({
                       {communicationStatusLabel(value)}
                     </option>
                   ))}
-                </select>
+                </NativeComboboxSelect>
               </Field>
               <Field label={t.patients_assign_owner}>
-                <select
+                <NativeComboboxSelect
                   value={form.assigneeId}
                   onChange={(event) =>
                     setForm((current) => ({
@@ -550,7 +551,7 @@ function AppointmentExternalHandoffSection({
                       {member.name} · {roleLabel(member.role)}
                     </option>
                   ))}
-                </select>
+                </NativeComboboxSelect>
               </Field>
             </div>
             <Field label={tr.appointments_title_col}>
@@ -632,7 +633,7 @@ function AppointmentExternalHandoffSection({
                 </span>
               </label>
               <Field label={tr.appointments_title_col}>
-                <select
+                <NativeComboboxSelect
                   value={form.taskPriority}
                   onChange={(event) =>
                     setForm((current) => ({
@@ -648,7 +649,7 @@ function AppointmentExternalHandoffSection({
                       {taskPriorityLabel(value)}
                     </option>
                   ))}
-                </select>
+                </NativeComboboxSelect>
               </Field>
             </div>
             <div className="flex flex-wrap justify-end gap-3">

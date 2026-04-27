@@ -1,3 +1,4 @@
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   memo,
   useCallback,
@@ -231,7 +232,7 @@ function PatientRelationEditorSheet({
             "Link patient in system",
           )}
         </Label>
-        <select
+        <NativeComboboxSelect
           id="relation-linked-patient"
           className={selectClass}
           value={form.relatedPatientId}
@@ -260,7 +261,7 @@ function PatientRelationEditorSheet({
               {formatRelatedPatientOption(option)}
             </option>
           ))}
-        </select>
+        </NativeComboboxSelect>
         <p className="text-[11.5px] leading-tight text-muted-foreground">
           {patientOptionsLoading
             ? l(
@@ -312,7 +313,7 @@ function PatientRelationEditorSheet({
           >
             {l("Beziehungstyp", "Tip svyazi", "Relation type")}
           </Label>
-          <select
+          <NativeComboboxSelect
             id="relation-type"
             className={selectClass}
             value={form.relationType}
@@ -325,7 +326,7 @@ function PatientRelationEditorSheet({
                 {option}
               </option>
             ))}
-          </select>
+          </NativeComboboxSelect>
         </div>
         <div className="flex flex-col gap-1.5">
           <Label

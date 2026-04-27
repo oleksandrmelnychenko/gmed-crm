@@ -1,3 +1,4 @@
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   memo,
   type Dispatch,
@@ -116,7 +117,7 @@ function SearchSheet({
         />
       </Field>
       <Field label={t.appointments_type}>
-        <select
+        <NativeComboboxSelect
           value={filters.appointmentType}
           onChange={(event) =>
             setFilters((current) => ({
@@ -132,7 +133,7 @@ function SearchSheet({
               {appointmentTypeLabel(value, tr)}
             </option>
           ))}
-        </select>
+        </NativeComboboxSelect>
       </Field>
       <Field
         label={appointmentText(
@@ -141,7 +142,7 @@ function SearchSheet({
           "Care path",
         )}
       >
-        <select
+        <NativeComboboxSelect
           value={filters.carePathKind}
           onChange={(event) =>
             setFilters((current) => ({
@@ -157,10 +158,10 @@ function SearchSheet({
               {carePathKindLabel(value)}
             </option>
           ))}
-        </select>
+        </NativeComboboxSelect>
       </Field>
       <Field label={t.users_status}>
-        <select
+        <NativeComboboxSelect
           value={filters.status}
           onChange={(event) =>
             setFilters((current) => ({
@@ -176,10 +177,10 @@ function SearchSheet({
               {statusLabel(value)}
             </option>
           ))}
-        </select>
+        </NativeComboboxSelect>
       </Field>
       <Field label={t.orders_patient}>
-        <select
+        <NativeComboboxSelect
           value={filters.patientId}
           onChange={(event) => onPatientChange(event.target.value)}
           className={selectClass}
@@ -190,10 +191,10 @@ function SearchSheet({
               {patient.patient_id} · {patientName(patient)}
             </option>
           ))}
-        </select>
+        </NativeComboboxSelect>
       </Field>
       <Field label={t.common_provider}>
-        <select
+        <NativeComboboxSelect
           value={filters.providerId}
           onChange={(event) => onProviderChange(event.target.value)}
           className={selectClass}
@@ -204,10 +205,10 @@ function SearchSheet({
               {provider.name}
             </option>
           ))}
-        </select>
+        </NativeComboboxSelect>
       </Field>
       <Field label={t.common_doctor}>
-        <select
+        <NativeComboboxSelect
           value={filters.doctorId}
           onChange={(event) => onDoctorChange(event.target.value)}
           className={selectClass}
@@ -219,10 +220,10 @@ function SearchSheet({
               {doctorLabel(doctor)}
             </option>
           ))}
-        </select>
+        </NativeComboboxSelect>
       </Field>
       <Field label={t.patients_assign_owner}>
-        <select
+        <NativeComboboxSelect
           value={filters.ownerUserId}
           onChange={(event) =>
             setFilters((current) => ({
@@ -238,7 +239,7 @@ function SearchSheet({
               {member.name} · {roleLabel(member.role)}
             </option>
           ))}
-        </select>
+        </NativeComboboxSelect>
       </Field>
       <Field
         label={
@@ -246,7 +247,7 @@ function SearchSheet({
           appointmentText("Dolmetscher", "Переводчик", "Interpreter")
         }
       >
-        <select
+        <NativeComboboxSelect
           value={filters.interpreterId}
           onChange={(event) =>
             setFilters((current) => ({
@@ -262,7 +263,7 @@ function SearchSheet({
               {member.name} · {roleLabel(member.role)}
             </option>
           ))}
-        </select>
+        </NativeComboboxSelect>
       </Field>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-1">
         <Field label={tr.providers_service_valid_from}>

@@ -28,6 +28,7 @@ import {
   SheetFormFooter,
 } from "@/components/admin-page-patterns";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
+import { SplitView } from "@/components/data-table/split-view";
 import type { ColumnDef } from "@/components/data-table/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -125,6 +126,7 @@ const LEAD_COLUMN_GROUPS = {
   lifecycle: "Lifecycle",
 };
 const FAILED_OUTCOME_OPTIONS = ["archived", "delete_anonymized"] as const;
+type LeadPaneTab = "overview" | "process" | "qualification" | "details";
 const LEAD_REALTIME_EVENTS = [
   "lead.created",
   "lead.updated",
@@ -195,6 +197,7 @@ export function LeadsPage() {
   const [detail, setDetail] = useState<LeadDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState("");
+  const [paneTab, setPaneTab] = useState<LeadPaneTab>("overview");
   const [gateForm, setGateForm] = useState<LeadGateForm | null>(null);
   const [gateBusy, setGateBusy] = useState(false);
   const [failedLeadForm, setFailedLeadForm] = useState<FailedLeadResolutionForm>(
@@ -461,6 +464,9 @@ export function LeadsPage() {
   }
 
   function openLeadDetail(leadId: string) {
+    if (leadId !== selectedLeadId) {
+      setPaneTab("overview");
+    }
     setSelectedLeadId(leadId);
     setDetailOpen(true);
     syncLeadQuery(leadId);
@@ -636,434 +642,58 @@ export function LeadsPage() {
       ? l("Mit Archiv", "С архивом", "With archive")
       : l("Aktive Leads", "Активные лиды", "Active leads");
 
-  return (
-    <>
-      <div className="space-y-6">
-        <PageHeader
-          title={t.leads_title}
-          description={t.leads_subtitle}
-          actions={
-            <>
-              {permissions.canCreate ? (
-                <Button
-                  type="button"
-                  className="h-9 rounded-lg px-3.5"
-                  onClick={() => {
-                    setCreateError("");
-                    setCreateForm(blankLeadForm());
-                    setCreateOpen(true);
-                  }}
-                >
-                  <Plus className="size-4" />
-                  {l("Neuer Lead", "Новый лид", "New lead")}
-                </Button>
-              ) : null}
-            </>
-          }
-        />
+  const paneTabs: Array<{
+    key: LeadPaneTab;
+    label: string;
+  }> = [
+    { key: "overview", label: l("Огляд", "Обзор", "Overview") },
+    { key: "process", label: l("Процес", "Процесс", "Process") },
+    { key: "qualification", label: l("Кваліфікація", "Квалификация", "Qualification") },
+    { key: "details", label: l("Деталі", "Детали", "Details") },
+  ];
 
-        <div className="flex flex-wrap gap-6 rounded-xl border border-border bg-card px-4 py-3">
-          <AdminInlineMetric
-            icon={Users}
-            label={t.leads_title}
-            value={String(stats?.total_this_month ?? 0)}
-            description={`${growthSign}${growthPct}% (${growthSign}${growthAbs})`}
-            tone="sky"
-          />
-          <AdminInlineMetric
-            icon={CheckCircle2}
-            label={t.users_status}
-            value={String(stats?.qualified_this_month ?? 0)}
-            description={statusLabel("qualified")}
-            tone="emerald"
-          />
-          <AdminInlineMetric
-            icon={UserPlus}
-            label={t.leads_convert}
-            value={String(stats?.converted_this_month ?? 0)}
-            description={statusLabel("converted")}
-            tone="amber"
-          />
-          <AdminInlineMetric
-            icon={TrendingUp}
-            label={t.common_active}
-            value={String(stats?.total_all ?? 0)}
-            description={t.common_archive}
-            tone="slate"
-          />
-        </div>
-
-        <div className="grid gap-4 lg:grid-cols-3">
-          <div className="rounded-[1.75rem] border border-border/70 bg-card p-5 shadow-[0_20px_60px_rgba(15,23,42,0.05)] lg:col-span-2">
-            <h2 className="mb-4 text-sm font-semibold text-slate-900">Monthly growth</h2>
-            <div className="flex h-48 items-end gap-2">
-              {monthly.map((item) => {
-                const pct = (item.count / maxMonthly) * 100;
-                const label = item.month.split("-").pop() ?? "";
-                return (
-                  <div key={item.month} className="flex flex-1 flex-col items-center gap-1">
-                    <span className="text-xs font-medium text-slate-600">{item.count}</span>
-                    <div className="w-full rounded-t-md bg-sky-500 transition-all" style={{ height: `${pct}%`, minHeight: 4 }} />
-                    <span className="text-[10px] text-slate-400">{label}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="rounded-[1.75rem] border border-border/70 bg-card p-5 shadow-[0_20px_60px_rgba(15,23,42,0.05)]">
-            <h2 className="mb-2 text-sm font-semibold text-slate-900">By status</h2>
-            <p className="mb-4 text-3xl font-bold text-slate-950">{totalByStatus}</p>
-            <div className="space-y-3">
-              {byStatus.map((item) => {
-                const pct = totalByStatus > 0 ? Math.round((item.count / totalByStatus) * 100) : 0;
-                return (
-                  <div key={item.status} className="space-y-1">
-                    <div className="flex items-center justify-between text-xs text-slate-600">
-                      <span>{item.status}</span>
-                      <span className="font-medium">{item.count}</span>
-                    </div>
-                    <div className="h-2 w-full rounded-full bg-slate-100">
-                      <div className="h-2 rounded-full bg-sky-500 transition-all" style={{ width: `${pct}%` }} />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-
-        {error ? <ShellBanner tone="error">{error}</ShellBanner> : null}
-        {successMessage ? <SuccessBanner>{successMessage}</SuccessBanner> : null}
-
-        <AdminTableCard
-          title={titleWithDot(t.leads_title)}
-          count={filteredLeads.length}
-        >
-          <div className="relative z-30 flex flex-wrap items-center gap-1.5 border-b border-border/70 bg-card px-3 py-2">
-            <div className="relative min-w-[220px] flex-1 sm:max-w-sm">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                className={cn(shellInputClassName, "h-8 rounded-lg bg-background pl-8 text-[13px]")}
-                placeholder={t.common_search}
-                value={filters.search}
-                onChange={(event) =>
-                  setFilters((current) => ({ ...current, search: event.target.value }))
-                }
-                onKeyDown={(event) => {
-                  if (event.key === "Escape") {
-                    setFilters((current) => ({ ...current, search: "" }));
-                    (event.target as HTMLInputElement).blur();
-                  }
-                }}
-              />
-            </div>
-
-            <ShadSelect
-              value={filters.status || "__all__"}
-              onValueChange={(value) => {
-                const status = value && value !== "__all__" ? value : "";
-                setFilters((current) => ({
-                  ...current,
-                  status,
-                  includeArchived: status === "archived" ? "true" : current.includeArchived,
-                }));
-              }}
-            >
-              <SelectTrigger size="sm" className="h-8 w-[190px] bg-background text-[13px]">
-                <Filter className="mr-1 size-3.5 text-muted-foreground" />
-                <SelectValue>
-                  {filters.status ? statusLabel(filters.status) : t.users_status}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all__">{t.providers_all}</SelectItem>
-                {STATUS_OPTIONS.map((status) => (
-                  <SelectItem key={status} value={status}>
-                    {statusLabel(status)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </ShadSelect>
-
-            <ShadSelect
-              value={filters.includeArchived || "false"}
-              onValueChange={(value) => {
-                const includeArchived = value === "true" ? "true" : "false";
-                setFilters((current) => ({
-                  ...current,
-                  includeArchived,
-                  status:
-                    includeArchived === "false" && current.status === "archived"
-                      ? ""
-                      : current.status,
-                }));
-              }}
-            >
-              <SelectTrigger size="sm" className="h-8 w-[170px] bg-background text-[13px]">
-                <SelectValue>{archiveFilterLabel}</SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="false">
-                  {l("Aktive Leads", "Активные лиды", "Active leads")}
-                </SelectItem>
-                <SelectItem value="true">
-                  {l("Mit Archiv", "С архивом", "With archive")}
-                </SelectItem>
-              </SelectContent>
-            </ShadSelect>
-
-            <div className="ml-auto flex items-center gap-1">
-              <Button
+  const detailPaneNode: ReactNode = (
+    <div className="flex h-full flex-col">
+      <div className="shrink-0 border-b border-border px-4 pt-3 pb-2">
+        <h2 className="text-base font-medium text-foreground">
+          {detail ? `${detail.first_name} ${detail.last_name}` : t.leads_title}
+        </h2>
+        <div className="mt-2 flex flex-wrap gap-1">
+          {paneTabs.map((tab) => {
+            const isActive = paneTab === tab.key;
+            return (
+              <button
+                key={tab.key}
                 type="button"
-                variant="outline"
-                size="icon-sm"
-                title={l("Aktualisieren", "Обновить", "Refresh")}
-                aria-label={l("Aktualisieren", "Обновить", "Refresh")}
-                onClick={reload}
+                onClick={() => setPaneTab(tab.key)}
+                className={cn(
+                  "rounded-full px-3 py-1 text-xs font-medium transition-colors",
+                  isActive
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground"
+                )}
+                aria-pressed={isActive}
               >
-                <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
-              </Button>
-              {anyQuickFilterActive ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setFilters(DEFAULT_FILTERS)}
-                >
-                  <X className="size-3.5" />
-                  {t.common_reset}
-                </Button>
-              ) : null}
-            </div>
-          </div>
-
-          <DataTableSurface
-            rows={filteredLeads}
-            columns={leadColumns}
-            rowId={(row) => row.id}
-            defaultDensity="compact"
-            defaultFrozenColumns={LEAD_DEFAULT_FROZEN_COLUMNS}
-            dictionary={t as unknown as Record<string, string>}
-            groupLabels={LEAD_COLUMN_GROUPS}
-            loading={loading}
-            maxFrozenColumns={LEAD_MAX_FROZEN_COLUMNS}
-            toolbarClassName="border-b border-border/70 bg-card px-3 py-2"
-            activeRowId={selectedLeadId || null}
-            onRowClick={(row) => openLeadDetail(row.id)}
-            rowAccent={(row) => leadRowAccent(row.qualification_status)}
-            rowActionsLabel={t.users_actions ?? "Actions"}
-            rowActionsWidth={224}
-            rowActions={(row) => {
-              const canQualify =
-                row.qualification_status === "new" || row.qualification_status === "in_progress";
-              const {
-                canConvertRole,
-                canConvert,
-                disabledReason: convertDisabledReason,
-              } = computeLeadConversionGate(row, {
-                canConvert: permissions.canConvert,
-              });
-              const canResolveFailed =
-                row.qualification_status !== "converted" &&
-                row.failed_outcome?.status !== "delete_anonymized";
-
-              return (
-                <>
-                  {canQualify ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="h-7 rounded-md px-2 text-[11px]"
-                      disabled={Boolean(actionBusy)}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        void updateStatus(row.id, "qualified");
-                      }}
-                    >
-                      {actionBusy === `status:${row.id}:qualified` ? (
-                        <LoaderCircle className="size-3 animate-spin" />
-                      ) : null}
-                      Qualify
-                    </Button>
-                  ) : null}
-                  {canConvertRole ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="h-7 rounded-md px-2 text-[11px]"
-                      disabled={Boolean(actionBusy) || !canConvert}
-                      title={convertDisabledReason ?? undefined}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setPendingConvertLead(row);
-                      }}
-                    >
-                      {actionBusy === `convert:${row.id}` ? (
-                        <LoaderCircle className="size-3 animate-spin" />
-                      ) : null}
-                      Convert
-                    </Button>
-                  ) : null}
-                  {canResolveFailed ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      className="h-7 rounded-md px-2 text-[11px]"
-                      disabled={
-                        Boolean(actionBusy) ||
-                        row.failed_outcome?.status === "delete_anonymized"
-                      }
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        openLeadDetail(row.id);
-                      }}
-                    >
-                      Resolve
-                    </Button>
-                  ) : null}
-                </>
-              );
-            }}
-            emptyState={
-              <div className={cn("rounded-xl px-6 py-10 text-center", tokens.surface.dashed)}>
-                <div className="text-sm font-medium text-foreground">No leads found</div>
-                <p className="mt-2 text-xs text-muted-foreground">
-                  Adjust filters or create a new lead from the right-side flow.
-                </p>
-              </div>
-            }
-          />
-        </AdminTableCard>
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
-
-      <Sheet open={createOpen} onOpenChange={setCreateOpen}>
-        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
-          <form onSubmit={handleCreate} className="flex h-full flex-col">
-            <AdminSheetScaffold
-              title={l("Neuer Lead", "Новый лид", "New lead")}
-              description="Capture intake data and keep qualification flow consistent."
-              footer={(
-                <SheetFormFooter
-                  cancelLabel={l("Abbrechen", "Отмена", "Cancel")}
-                  submitLabel={t.common_save}
-                  submittingLabel={t.patients_creating}
-                  submitting={createBusy}
-                  onCancel={() => setCreateOpen(false)}
-                />
-              )}
-            >
-              {createError ? <ShellBanner tone="error">{createError}</ShellBanner> : null}
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <LeadField label={t.patients_first_name}>
-                  <Input
-                    className={shellInputClassName}
-                    value={createForm.firstName}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({ ...current, firstName: event.target.value }))
-                    }
-                    required
-                  />
-                </LeadField>
-                <LeadField label={t.patients_last_name}>
-                  <Input
-                    className={shellInputClassName}
-                    value={createForm.lastName}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({ ...current, lastName: event.target.value }))
-                    }
-                    required
-                  />
-                </LeadField>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <LeadField label={t.field_phone}>
-                  <Input
-                    className={shellInputClassName}
-                    value={createForm.phone}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({ ...current, phone: event.target.value }))
-                    }
-                  />
-                </LeadField>
-                <LeadField label={t.patients_email}>
-                  <Input
-                    type="email"
-                    className={shellInputClassName}
-                    value={createForm.email}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({ ...current, email: event.target.value }))
-                    }
-                  />
-                </LeadField>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <LeadField label={t.leads_source}>
-                  <Input
-                    className={shellInputClassName}
-                    value={createForm.source}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({ ...current, source: event.target.value }))
-                    }
-                  />
-                </LeadField>
-                <LeadField label={t.providers_country}>
-                  <Input
-                    className={shellInputClassName}
-                    value={createForm.country}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({ ...current, country: event.target.value }))
-                    }
-                  />
-                </LeadField>
-              </div>
-
-              <LeadField label={t.patients_notes}>
-                <textarea
-                  value={createForm.notes}
-                  onChange={(event) =>
-                    setCreateForm((current) => ({ ...current, notes: event.target.value }))
-                  }
-                  className={cn(textareaClassName, "min-h-[104px]")}
-                  rows={4}
-                />
-              </LeadField>
-            </AdminSheetScaffold>
-          </form>
-        </SheetContent>
-      </Sheet>
-
-      <Sheet
-        open={detailOpen}
-        onOpenChange={(open) => {
-          setDetailOpen(open);
-          if (!open) {
-            syncLeadQuery();
-          }
-        }}
-      >
-        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-3xl">
-          <AdminSheetScaffold
-            title={detail ? `${detail.first_name} ${detail.last_name}` : t.leads_title}
-            description="Review intake data, qualification state and patient conversion readiness."
-          >
-            {detailLoading ? (
-              <div className="flex min-h-[320px] items-center justify-center text-sm text-slate-500">
-                <LoaderCircle className="mr-2 size-4 animate-spin" />
-                Loading lead
-              </div>
-            ) : detailError ? (
-              <div className="pt-5">
-                <Banner tone="error">{detailError}</Banner>
-              </div>
-            ) : detail ? (
-              <div className="space-y-6 pt-5">
+      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
+        {detailLoading ? (
+          <div className="flex min-h-[320px] items-center justify-center text-sm text-slate-500">
+            <LoaderCircle className="mr-2 size-4 animate-spin" />
+            Loading lead
+          </div>
+        ) : detailError ? (
+          <div className="pt-1">
+            <Banner tone="error">{detailError}</Banner>
+          </div>
+        ) : detail ? (
+          <div className="space-y-6">
+            {paneTab === "overview" ? (
+              <>
                 <section className={cardClass("p-5")}>
                   <div className="flex flex-wrap items-center gap-2">
                     <StatusBadge tone={leadStatusTone(detail.qualification_status)}>
@@ -1089,6 +719,79 @@ export function LeadsPage() {
                   <p className="mt-2 text-sm text-slate-600">Created {formatDate(detail.created_at)}</p>
                 </section>
 
+                <section className={cardClass("p-5")}>
+                  <SectionTitle>Contact and origin</SectionTitle>
+                  <div className="mt-4 grid gap-4 md:grid-cols-2">
+                    <DetailCard label={t.patients_email} value={detail.email || t.common_not_set} />
+                    <DetailCard label={t.field_phone} value={detail.phone || t.common_not_set} />
+                    <DetailCard label={t.leads_source} value={detail.source || t.common_not_set} />
+                    <DetailCard label={t.providers_country} value={detail.country || t.common_not_set} />
+                  </div>
+                </section>
+
+                {detail.intake_source === "visitor_facade" ? (
+                  <section className={cardClass("p-5")}>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant="outline" className="rounded-full border-sky-200 bg-sky-50 text-sky-700">
+                        From website wizard
+                      </Badge>
+                      {detail.flow ? (
+                        <Badge variant="outline" className="rounded-full">
+                          Flow: {detail.flow}
+                        </Badge>
+                      ) : null}
+                      {detail.locale ? (
+                        <Badge variant="outline" className="rounded-full">
+                          Locale: {detail.locale}
+                        </Badge>
+                      ) : null}
+                      {detail.submitted_at ? (
+                        <span className="text-xs text-slate-500">
+                          Submitted {formatDate(detail.submitted_at)}
+                        </span>
+                      ) : null}
+                    </div>
+                  </section>
+                ) : null}
+
+                <section className={cardClass("p-5")}>
+                  <SectionTitle>Identity</SectionTitle>
+                  <div className="mt-4 grid gap-4 md:grid-cols-2">
+                    <DetailCard
+                      label="Full name"
+                      value={dashOrValue(
+                        [
+                          detail.first_name,
+                          detail.middle_name,
+                          detail.last_name,
+                          detail.suffix,
+                        ]
+                          .filter(Boolean)
+                          .join(" ")
+                      )}
+                    />
+                    <DetailCard label="Date of birth" value={dashOrValue(detail.date_of_birth)} />
+                    <DetailCard label="Legal sex" value={dashOrValue(detail.legal_sex)} />
+                    <DetailCard label="Primary language" value={dashOrValue(detail.primary_language)} />
+                    <DetailCard label="Needs interpreter" value={yesNo(detail.needs_interpreter)} />
+                  </div>
+                </section>
+
+                <section className={cardClass("p-5")}>
+                  <SectionTitle>Address</SectionTitle>
+                  <div className="mt-4 grid gap-4 md:grid-cols-2">
+                    <DetailCard label="Country" value={dashOrValue(detail.country)} />
+                    <DetailCard label="City" value={dashOrValue(detail.city)} />
+                    <DetailCard label="State / region" value={dashOrValue(detail.state)} />
+                    <DetailCard label="Zip code" value={dashOrValue(detail.zip_code)} />
+                    <DetailCard label="Street" value={dashOrValue(detail.street_address)} />
+                  </div>
+                </section>
+              </>
+            ) : null}
+
+            {paneTab === "process" ? (
+              <>
                 <section className={cardClass("p-5")}>
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
@@ -1216,7 +919,11 @@ export function LeadsPage() {
                     ))}
                   </div>
                 </section>
+              </>
+            ) : null}
 
+            {paneTab === "qualification" ? (
+              <>
                 {gateForm && detail.failed_outcome.status === "none" ? (
                   <section className={cardClass("p-5")}>
                     <div className="flex items-center justify-between gap-3">
@@ -1544,76 +1251,11 @@ export function LeadsPage() {
                     ) : null}
                   </section>
                 )}
+              </>
+            ) : null}
 
-                <section className={cardClass("p-5")}>
-                  <SectionTitle>Contact and origin</SectionTitle>
-                  <div className="mt-4 grid gap-4 md:grid-cols-2">
-                    <DetailCard label={t.patients_email} value={detail.email || t.common_not_set} />
-                    <DetailCard label={t.field_phone} value={detail.phone || t.common_not_set} />
-                    <DetailCard label={t.leads_source} value={detail.source || t.common_not_set} />
-                    <DetailCard label={t.providers_country} value={detail.country || t.common_not_set} />
-                  </div>
-                </section>
-
-                {detail.intake_source === "visitor_facade" ? (
-                  <section className={cardClass("p-5")}>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant="outline" className="rounded-full border-sky-200 bg-sky-50 text-sky-700">
-                        From website wizard
-                      </Badge>
-                      {detail.flow ? (
-                        <Badge variant="outline" className="rounded-full">
-                          Flow: {detail.flow}
-                        </Badge>
-                      ) : null}
-                      {detail.locale ? (
-                        <Badge variant="outline" className="rounded-full">
-                          Locale: {detail.locale}
-                        </Badge>
-                      ) : null}
-                      {detail.submitted_at ? (
-                        <span className="text-xs text-slate-500">
-                          Submitted {formatDate(detail.submitted_at)}
-                        </span>
-                      ) : null}
-                    </div>
-                  </section>
-                ) : null}
-
-                <section className={cardClass("p-5")}>
-                  <SectionTitle>Identity</SectionTitle>
-                  <div className="mt-4 grid gap-4 md:grid-cols-2">
-                    <DetailCard
-                      label="Full name"
-                      value={dashOrValue(
-                        [
-                          detail.first_name,
-                          detail.middle_name,
-                          detail.last_name,
-                          detail.suffix,
-                        ]
-                          .filter(Boolean)
-                          .join(" ")
-                      )}
-                    />
-                    <DetailCard label="Date of birth" value={dashOrValue(detail.date_of_birth)} />
-                    <DetailCard label="Legal sex" value={dashOrValue(detail.legal_sex)} />
-                    <DetailCard label="Primary language" value={dashOrValue(detail.primary_language)} />
-                    <DetailCard label="Needs interpreter" value={yesNo(detail.needs_interpreter)} />
-                  </div>
-                </section>
-
-                <section className={cardClass("p-5")}>
-                  <SectionTitle>Address</SectionTitle>
-                  <div className="mt-4 grid gap-4 md:grid-cols-2">
-                    <DetailCard label="Country" value={dashOrValue(detail.country)} />
-                    <DetailCard label="City" value={dashOrValue(detail.city)} />
-                    <DetailCard label="State / region" value={dashOrValue(detail.state)} />
-                    <DetailCard label="Zip code" value={dashOrValue(detail.zip_code)} />
-                    <DetailCard label="Street" value={dashOrValue(detail.street_address)} />
-                  </div>
-                </section>
-
+            {paneTab === "details" ? (
+              <>
                 {(detail.location ||
                   detail.location_detailed ||
                   detail.wants_membership !== null ||
@@ -1761,13 +1403,427 @@ export function LeadsPage() {
                     </div>
                   ) : null}
                 </section>
+              </>
+            ) : null}
+          </div>
+        ) : (
+          <div className="flex min-h-[320px] items-center justify-center text-sm text-slate-500">
+            Select a lead from the queue.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  return (
+    <>
+      <div className="space-y-6">
+        <PageHeader
+          title={t.leads_title}
+          description={t.leads_subtitle}
+          actions={
+            <>
+              {permissions.canCreate ? (
+                <Button
+                  type="button"
+                  className="h-9 rounded-lg px-3.5"
+                  onClick={() => {
+                    setCreateError("");
+                    setCreateForm(blankLeadForm());
+                    setCreateOpen(true);
+                  }}
+                >
+                  <Plus className="size-4" />
+                  {l("Neuer Lead", "Новый лид", "New lead")}
+                </Button>
+              ) : null}
+            </>
+          }
+        />
+
+        <div className="flex flex-wrap gap-6 rounded-xl border border-border bg-card px-4 py-3">
+          <AdminInlineMetric
+            icon={Users}
+            label={t.leads_title}
+            value={String(stats?.total_this_month ?? 0)}
+            description={`${growthSign}${growthPct}% (${growthSign}${growthAbs})`}
+            tone="sky"
+          />
+          <AdminInlineMetric
+            icon={CheckCircle2}
+            label={t.users_status}
+            value={String(stats?.qualified_this_month ?? 0)}
+            description={statusLabel("qualified")}
+            tone="emerald"
+          />
+          <AdminInlineMetric
+            icon={UserPlus}
+            label={t.leads_convert}
+            value={String(stats?.converted_this_month ?? 0)}
+            description={statusLabel("converted")}
+            tone="amber"
+          />
+          <AdminInlineMetric
+            icon={TrendingUp}
+            label={t.common_active}
+            value={String(stats?.total_all ?? 0)}
+            description={t.common_archive}
+            tone="slate"
+          />
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-3">
+          <div className="rounded-[1.75rem] border border-border/70 bg-card p-5 shadow-[0_20px_60px_rgba(15,23,42,0.05)] lg:col-span-2">
+            <h2 className="mb-4 text-sm font-semibold text-slate-900">Monthly growth</h2>
+            <div className="flex h-48 items-end gap-2">
+              {monthly.map((item) => {
+                const pct = (item.count / maxMonthly) * 100;
+                const label = item.month.split("-").pop() ?? "";
+                return (
+                  <div key={item.month} className="flex flex-1 flex-col items-center gap-1">
+                    <span className="text-xs font-medium text-slate-600">{item.count}</span>
+                    <div className="w-full rounded-t-md bg-sky-500 transition-all" style={{ height: `${pct}%`, minHeight: 4 }} />
+                    <span className="text-[10px] text-slate-400">{label}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="rounded-[1.75rem] border border-border/70 bg-card p-5 shadow-[0_20px_60px_rgba(15,23,42,0.05)]">
+            <h2 className="mb-2 text-sm font-semibold text-slate-900">By status</h2>
+            <p className="mb-4 text-3xl font-bold text-slate-950">{totalByStatus}</p>
+            <div className="space-y-3">
+              {byStatus.map((item) => {
+                const pct = totalByStatus > 0 ? Math.round((item.count / totalByStatus) * 100) : 0;
+                return (
+                  <div key={item.status} className="space-y-1">
+                    <div className="flex items-center justify-between text-xs text-slate-600">
+                      <span>{item.status}</span>
+                      <span className="font-medium">{item.count}</span>
+                    </div>
+                    <div className="h-2 w-full rounded-full bg-slate-100">
+                      <div className="h-2 rounded-full bg-sky-500 transition-all" style={{ width: `${pct}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {error ? <ShellBanner tone="error">{error}</ShellBanner> : null}
+        {successMessage ? <SuccessBanner>{successMessage}</SuccessBanner> : null}
+
+        <SplitView
+          active={detailOpen}
+          pane={detailPaneNode}
+          onClose={() => {
+            setDetailOpen(false);
+            syncLeadQuery();
+          }}
+        >
+        <AdminTableCard
+          title={titleWithDot(t.leads_title)}
+          count={filteredLeads.length}
+        >
+          <div className="relative z-30 flex flex-wrap items-center gap-1.5 border-b border-border/70 bg-card px-3 py-2">
+            <div className="relative min-w-[220px] flex-1 sm:max-w-sm">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                className={cn(shellInputClassName, "h-8 rounded-lg bg-background pl-8 text-[13px]")}
+                placeholder={t.common_search}
+                value={filters.search}
+                onChange={(event) =>
+                  setFilters((current) => ({ ...current, search: event.target.value }))
+                }
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    setFilters((current) => ({ ...current, search: "" }));
+                    (event.target as HTMLInputElement).blur();
+                  }
+                }}
+              />
+            </div>
+
+            <ShadSelect
+              value={filters.status || "__all__"}
+              onValueChange={(value) => {
+                const status = value && value !== "__all__" ? value : "";
+                setFilters((current) => ({
+                  ...current,
+                  status,
+                  includeArchived: status === "archived" ? "true" : current.includeArchived,
+                }));
+              }}
+            >
+              <SelectTrigger size="sm" className="h-8 w-[190px] bg-background text-[13px]">
+                <Filter className="mr-1 size-3.5 text-muted-foreground" />
+                <SelectValue>
+                  {filters.status ? statusLabel(filters.status) : t.users_status}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">{t.providers_all}</SelectItem>
+                {STATUS_OPTIONS.map((status) => (
+                  <SelectItem key={status} value={status}>
+                    {statusLabel(status)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </ShadSelect>
+
+            <ShadSelect
+              value={filters.includeArchived || "false"}
+              onValueChange={(value) => {
+                const includeArchived = value === "true" ? "true" : "false";
+                setFilters((current) => ({
+                  ...current,
+                  includeArchived,
+                  status:
+                    includeArchived === "false" && current.status === "archived"
+                      ? ""
+                      : current.status,
+                }));
+              }}
+            >
+              <SelectTrigger size="sm" className="h-8 w-[170px] bg-background text-[13px]">
+                <SelectValue>{archiveFilterLabel}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="false">
+                  {l("Aktive Leads", "Активные лиды", "Active leads")}
+                </SelectItem>
+                <SelectItem value="true">
+                  {l("Mit Archiv", "С архивом", "With archive")}
+                </SelectItem>
+              </SelectContent>
+            </ShadSelect>
+
+            <div className="ml-auto flex items-center gap-1">
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                title={l("Aktualisieren", "Обновить", "Refresh")}
+                aria-label={l("Aktualisieren", "Обновить", "Refresh")}
+                onClick={reload}
+              >
+                <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
+              </Button>
+              {anyQuickFilterActive ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setFilters(DEFAULT_FILTERS)}
+                >
+                  <X className="size-3.5" />
+                  {t.common_reset}
+                </Button>
+              ) : null}
+            </div>
+          </div>
+
+          <DataTableSurface
+            rows={filteredLeads}
+            columns={leadColumns}
+            rowId={(row) => row.id}
+            defaultDensity="compact"
+            defaultFrozenColumns={LEAD_DEFAULT_FROZEN_COLUMNS}
+            dictionary={t as unknown as Record<string, string>}
+            groupLabels={LEAD_COLUMN_GROUPS}
+            loading={loading}
+            maxFrozenColumns={LEAD_MAX_FROZEN_COLUMNS}
+            toolbarClassName="border-b border-border/70 bg-card px-3 py-2"
+            activeRowId={selectedLeadId || null}
+            onRowClick={(row) => openLeadDetail(row.id)}
+            rowAccent={(row) => leadRowAccent(row.qualification_status)}
+            rowActionsLabel={t.users_actions ?? "Actions"}
+            rowActionsWidth={224}
+            rowActions={(row) => {
+              const canQualify =
+                row.qualification_status === "new" || row.qualification_status === "in_progress";
+              const {
+                canConvertRole,
+                canConvert,
+                disabledReason: convertDisabledReason,
+              } = computeLeadConversionGate(row, {
+                canConvert: permissions.canConvert,
+              });
+              const canResolveFailed =
+                row.qualification_status !== "converted" &&
+                row.failed_outcome?.status !== "delete_anonymized";
+
+              return (
+                <>
+                  {canQualify ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-7 rounded-md px-2 text-[11px]"
+                      disabled={Boolean(actionBusy)}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void updateStatus(row.id, "qualified");
+                      }}
+                    >
+                      {actionBusy === `status:${row.id}:qualified` ? (
+                        <LoaderCircle className="size-3 animate-spin" />
+                      ) : null}
+                      Qualify
+                    </Button>
+                  ) : null}
+                  {canConvertRole ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-7 rounded-md px-2 text-[11px]"
+                      disabled={Boolean(actionBusy) || !canConvert}
+                      title={convertDisabledReason ?? undefined}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setPendingConvertLead(row);
+                      }}
+                    >
+                      {actionBusy === `convert:${row.id}` ? (
+                        <LoaderCircle className="size-3 animate-spin" />
+                      ) : null}
+                      Convert
+                    </Button>
+                  ) : null}
+                  {canResolveFailed ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 rounded-md px-2 text-[11px]"
+                      disabled={
+                        Boolean(actionBusy) ||
+                        row.failed_outcome?.status === "delete_anonymized"
+                      }
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openLeadDetail(row.id);
+                      }}
+                    >
+                      Resolve
+                    </Button>
+                  ) : null}
+                </>
+              );
+            }}
+            emptyState={
+              <div className={cn("rounded-xl px-6 py-10 text-center", tokens.surface.dashed)}>
+                <div className="text-sm font-medium text-foreground">No leads found</div>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Adjust filters or create a new lead from the right-side flow.
+                </p>
               </div>
-            ) : (
-              <div className="flex min-h-[320px] items-center justify-center text-sm text-slate-500">
-                Select a lead from the queue.
+            }
+          />
+        </AdminTableCard>
+        </SplitView>
+      </div>
+
+      <Sheet open={createOpen} onOpenChange={setCreateOpen}>
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
+          <form onSubmit={handleCreate} className="flex h-full flex-col">
+            <AdminSheetScaffold
+              title={l("Neuer Lead", "Новый лид", "New lead")}
+              description="Capture intake data and keep qualification flow consistent."
+              footer={(
+                <SheetFormFooter
+                  cancelLabel={l("Abbrechen", "Отмена", "Cancel")}
+                  submitLabel={t.common_save}
+                  submittingLabel={t.patients_creating}
+                  submitting={createBusy}
+                  onCancel={() => setCreateOpen(false)}
+                />
+              )}
+            >
+              {createError ? <ShellBanner tone="error">{createError}</ShellBanner> : null}
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <LeadField label={t.patients_first_name}>
+                  <Input
+                    className={shellInputClassName}
+                    value={createForm.firstName}
+                    onChange={(event) =>
+                      setCreateForm((current) => ({ ...current, firstName: event.target.value }))
+                    }
+                    required
+                  />
+                </LeadField>
+                <LeadField label={t.patients_last_name}>
+                  <Input
+                    className={shellInputClassName}
+                    value={createForm.lastName}
+                    onChange={(event) =>
+                      setCreateForm((current) => ({ ...current, lastName: event.target.value }))
+                    }
+                    required
+                  />
+                </LeadField>
               </div>
-            )}
-          </AdminSheetScaffold>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <LeadField label={t.field_phone}>
+                  <Input
+                    className={shellInputClassName}
+                    value={createForm.phone}
+                    onChange={(event) =>
+                      setCreateForm((current) => ({ ...current, phone: event.target.value }))
+                    }
+                  />
+                </LeadField>
+                <LeadField label={t.patients_email}>
+                  <Input
+                    type="email"
+                    className={shellInputClassName}
+                    value={createForm.email}
+                    onChange={(event) =>
+                      setCreateForm((current) => ({ ...current, email: event.target.value }))
+                    }
+                  />
+                </LeadField>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <LeadField label={t.leads_source}>
+                  <Input
+                    className={shellInputClassName}
+                    value={createForm.source}
+                    onChange={(event) =>
+                      setCreateForm((current) => ({ ...current, source: event.target.value }))
+                    }
+                  />
+                </LeadField>
+                <LeadField label={t.providers_country}>
+                  <Input
+                    className={shellInputClassName}
+                    value={createForm.country}
+                    onChange={(event) =>
+                      setCreateForm((current) => ({ ...current, country: event.target.value }))
+                    }
+                  />
+                </LeadField>
+              </div>
+
+              <LeadField label={t.patients_notes}>
+                <textarea
+                  value={createForm.notes}
+                  onChange={(event) =>
+                    setCreateForm((current) => ({ ...current, notes: event.target.value }))
+                  }
+                  className={cn(textareaClassName, "min-h-[104px]")}
+                  rows={4}
+                />
+              </LeadField>
+            </AdminSheetScaffold>
+          </form>
         </SheetContent>
       </Sheet>
 

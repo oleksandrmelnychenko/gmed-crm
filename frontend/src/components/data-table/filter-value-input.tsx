@@ -1,3 +1,4 @@
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Check, X } from "lucide-react";
 import { useMemo, useState, type ChangeEvent } from "react";
 
@@ -119,7 +120,7 @@ export function FilterValueInput<T>({
     const options = resolveOptions(column, rows);
     const selected = typeof value === "string" ? value : "";
     return (
-      <select
+      <NativeComboboxSelect
         value={selected}
         onChange={(e) => onChange(e.target.value)}
         className="h-7 rounded-md border border-input bg-background px-2 text-xs outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
@@ -130,7 +131,7 @@ export function FilterValueInput<T>({
             {opt.label}
           </option>
         ))}
-      </select>
+      </NativeComboboxSelect>
     );
   }
 

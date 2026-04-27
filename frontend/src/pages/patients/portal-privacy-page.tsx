@@ -1,3 +1,4 @@
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { startTransition, useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { LoaderCircle, RefreshCw, Shield } from "lucide-react";
 
@@ -177,7 +178,7 @@ export function PatientPrivacyPage() {
           <form onSubmit={handleSubmit} className="mt-5 space-y-4">
             <div className="space-y-2">
               <Label htmlFor="privacy-type">{l("Anfragetyp", "Тип запроса", "Request type")}</Label>
-              <select
+              <NativeComboboxSelect
                 id="privacy-type"
                 value={requestType}
                 onChange={(event) => setRequestType(event.target.value as RequestType)}
@@ -186,7 +187,7 @@ export function PatientPrivacyPage() {
                 <option value="restriction">{l("Verarbeitung einschränken", "Ограничить обработку", "Restrict processing")}</option>
                 <option value="erasure">{l("Daten löschen", "Удалить данные", "Erase data")}</option>
                 <option value="third_party_revoke">{l("Weitergabe an Dritte widerrufen", "Отозвать передачу третьим лицам", "Revoke third-party sharing")}</option>
-              </select>
+              </NativeComboboxSelect>
             </div>
             <div className="space-y-2">
               <Label htmlFor="privacy-reason">{l("Begründung", "Причина", "Reason")}</Label>

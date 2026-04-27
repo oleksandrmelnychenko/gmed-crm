@@ -1,3 +1,4 @@
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   startTransition,
   useDeferredValue,
@@ -1622,9 +1623,9 @@ function StaffInvoicesPage() {
                   {statusError ? <ShellBanner tone="error">{statusError}</ShellBanner> : null}
                   <div className="grid gap-4 sm:grid-cols-2">
                     <Field label={t.users_status}>
-                      <select value={statusForm.status} onChange={(event) => setStatusForm((current) => ({ ...current, status: event.target.value as InvoiceStatus }))} className={selectClassName} disabled={!access.canManage}>
+                      <NativeComboboxSelect value={statusForm.status} onChange={(event) => setStatusForm((current) => ({ ...current, status: event.target.value as InvoiceStatus }))} className={selectClassName} disabled={!access.canManage}>
                         {INVOICE_STATUSES.map((status) => <option key={status} value={status}>{invoiceStatusLabel(status)}</option>)}
-                      </select>
+                      </NativeComboboxSelect>
                     </Field>
                     <Field label={t.invoices_due_at}>
                       <Input type="date" className={shellInputClassName} value={statusForm.dueDate} onChange={(event) => setStatusForm((current) => ({ ...current, dueDate: event.target.value }))} disabled={!access.canManage} />

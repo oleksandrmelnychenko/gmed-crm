@@ -1,3 +1,4 @@
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { startTransition, useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { CalendarClock, LoaderCircle, RefreshCw, Send, Stethoscope } from "lucide-react";
 
@@ -439,7 +440,7 @@ export function PatientAppointmentsPage() {
           </div>
           <form className="mt-5 space-y-4" onSubmit={(event) => void handleSubmitRequest(event)}>
             <Field label={l("Typ", "Тип", "Type")}>
-              <select
+              <NativeComboboxSelect
                 value={requestForm.appointmentType}
                 onChange={(event) =>
                   setRequestForm((current) => ({
@@ -453,10 +454,10 @@ export function PatientAppointmentsPage() {
               >
                 <option value="medical">{l("Medizinisch", "Медицинский", "Medical")}</option>
                 <option value="non_medical">{l("Nicht medizinisch", "Немедицинский", "Non-medical")}</option>
-              </select>
+              </NativeComboboxSelect>
             </Field>
             <Field label={l("Versorgungspfad", "Траектория сопровождения", "Care path")}>
-              <select
+              <NativeComboboxSelect
                 value={requestForm.carePathKind}
                 onChange={(event) =>
                   setRequestForm((current) => ({
@@ -471,7 +472,7 @@ export function PatientAppointmentsPage() {
                 <option value="preventive">{l("Präventiv", "Профилактический", "Preventive")}</option>
                 <option value="control">{l("Kontrolle", "Контрольный", "Control")}</option>
                 <option value="followup">{l("Nachsorge", "Последующее наблюдение", "Follow-up")}</option>
-              </select>
+              </NativeComboboxSelect>
             </Field>
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label={l("Bevorzugt ab", "Предпочтительно с", "Preferred from")}>
@@ -492,7 +493,7 @@ export function PatientAppointmentsPage() {
               </Field>
             </div>
             <Field label={l("Zeitfenster", "Временное окно", "Time window")}>
-              <select
+              <NativeComboboxSelect
                 value={requestForm.preferredTimeOfDay}
                 onChange={(event) => setRequestForm((current) => ({ ...current, preferredTimeOfDay: event.target.value }))}
                 className="h-11 w-full rounded-2xl border border-slate-200 bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
@@ -502,7 +503,7 @@ export function PatientAppointmentsPage() {
                 <option value="midday">{l("Mittags", "Днем", "Midday")}</option>
                 <option value="afternoon">{l("Nachmittags", "После обеда", "Afternoon")}</option>
                 <option value="evening">{l("Abends", "Вечером", "Evening")}</option>
-              </select>
+              </NativeComboboxSelect>
             </Field>
             <Field label={l("Fachgebiet oder Thema", "Специальность или тема", "Specialty or topic")}>
               <input

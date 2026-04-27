@@ -23,6 +23,36 @@ describe("resolveWorkspaceRailKind", () => {
     ).toBe("case");
   });
 
+  it("returns patient and case rails for patient-bound case workspace routes", () => {
+    expect(
+      resolveWorkspaceRailKind({
+        pathname: "/cases/case-1",
+        search: "?patient=patient-1",
+        userRole: "doctor",
+      }),
+    ).toBe("patient-case");
+  });
+
+  it("returns the order rail for order workspace routes", () => {
+    expect(
+      resolveWorkspaceRailKind({
+        pathname: "/orders/order-1",
+        search: "",
+        userRole: "doctor",
+      }),
+    ).toBe("order");
+  });
+
+  it("returns patient and order rails for patient-bound order workspace routes", () => {
+    expect(
+      resolveWorkspaceRailKind({
+        pathname: "/orders/order-1",
+        search: "?patient=patient-1",
+        userRole: "doctor",
+      }),
+    ).toBe("patient-order");
+  });
+
   it("returns the appointment rail for staffed appointment workspace routes", () => {
     expect(
       resolveWorkspaceRailKind({

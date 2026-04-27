@@ -87,6 +87,7 @@ type PatientTimelineTabProps = {
   canViewContracts: boolean;
   canViewInvoices: boolean;
   canOpenComplianceWorkspace: boolean;
+  patientId?: string | null;
   onTimelineEntityFilterChange: (value: string) => void;
   onTimelineCategoryFilterChange: (value: string) => void;
   onTimelineSourceFilterChange: (value: string) => void;
@@ -127,6 +128,7 @@ export function PatientTimelineTab({
   canViewContracts,
   canViewInvoices,
   canOpenComplianceWorkspace,
+  patientId,
   onTimelineEntityFilterChange,
   onTimelineCategoryFilterChange,
   onTimelineSourceFilterChange,
@@ -330,6 +332,7 @@ export function PatientTimelineTab({
                       <div className="space-y-0">
                         {group.items.map((item, idx) => {
                           const route = resolvePatientTimelineRoute(item, {
+                            patientId,
                             canOpenDocumentsWorkspace,
                             canViewContracts,
                             canViewInvoices,

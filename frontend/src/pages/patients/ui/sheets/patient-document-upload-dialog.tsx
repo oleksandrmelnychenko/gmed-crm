@@ -1,3 +1,4 @@
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   memo,
   useCallback,
@@ -201,7 +202,7 @@ function PatientDocumentUploadDialog({
             </div>
             <div className="space-y-2">
               <Label htmlFor="document-status">{l("Status", "Статус", "Status")}</Label>
-              <select
+              <NativeComboboxSelect
                 id="document-status"
                 className={selectClass}
                 value={form.status}
@@ -217,13 +218,13 @@ function PatientDocumentUploadDialog({
                     {statusLabel(status)}
                   </option>
                 ))}
-              </select>
+              </NativeComboboxSelect>
             </div>
             <div className="space-y-2">
               <Label htmlFor="document-visibility">
                 {l("Sichtbarkeit", "Видимость", "Visibility")}
               </Label>
-              <select
+              <NativeComboboxSelect
                 id="document-visibility"
                 className={selectClass}
                 value={form.visibility}
@@ -245,11 +246,11 @@ function PatientDocumentUploadDialog({
                           : l("Für Patienten sichtbar", "Видно пациенту", "Patient visible")}
                   </option>
                 ))}
-              </select>
+              </NativeComboboxSelect>
             </div>
             <div className="space-y-2">
               <Label htmlFor="document-order">{l("Auftrag", "Заказ", "Order")}</Label>
-              <select
+              <NativeComboboxSelect
                 id="document-order"
                 className={selectClass}
                 value={form.orderId}
@@ -265,11 +266,11 @@ function PatientDocumentUploadDialog({
                     {order.order_number}
                   </option>
                 ))}
-              </select>
+              </NativeComboboxSelect>
             </div>
             <div className="space-y-2">
               <Label htmlFor="document-appointment">{l("Termin", "Приём", "Appointment")}</Label>
-              <select
+              <NativeComboboxSelect
                 id="document-appointment"
                 className={selectClass}
                 value={form.appointmentId}
@@ -288,7 +289,7 @@ function PatientDocumentUploadDialog({
                     {appointment.title} · {formatDate(appointment.date)}
                   </option>
                 ))}
-              </select>
+              </NativeComboboxSelect>
             </div>
             <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
               <input

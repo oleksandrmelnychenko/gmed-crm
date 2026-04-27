@@ -26,6 +26,28 @@ export type RealtimeEvent = {
 const REALTIME_EVENT_NAME = "gmed:realtime-event";
 const BASE_RECONNECT_DELAY_MS = 1_000;
 const MAX_RECONNECT_DELAY_MS = 30_000;
+const STATS_CACHE_EVENT_PREFIXES = [
+  "appointment.",
+  "appointment_checklist.",
+  "appointment_request.",
+  "case.",
+  "concierge_service.",
+  "consent.",
+  "document.",
+  "feedback.",
+  "framework_contract.",
+  "invoice.",
+  "lead.",
+  "order.",
+  "patient.",
+  "privacy_request.",
+  "provider.",
+  "quote.",
+  "reminder.",
+  "task.",
+  "user.",
+  "workflow_checklist_item.",
+] as const;
 
 type RealtimeCustomEvent = CustomEvent<RealtimeEvent>;
 
@@ -49,6 +71,62 @@ function writeStoredCursor(key: string, seq: number) {
     window.localStorage.setItem(key, String(seq));
   } catch {
     // Realtime still works without durable client-side cursors.
+  }
+}
+
+function invalidateStatsCacheForEvent(event: RealtimeEvent) {
+  if (!STATS_CACHE_EVENT_PREFIXES.some((prefix) => event.type.startsWith(prefix))) {
+    return;
+  }
+
+  clearApiCache("/stats");
+
+  if (event.type.startsWith("patient.")) {
+    clearApiCache("/patients");
+  }
+  if (event.type.startsWith("privacy_request.") || event.type.startsWith("consent.")) {
+    clearApiCache("/admin/compliance");
+    clearApiCache("/me/privacy-requests");
+  }
+  if (event.type.startsWith("lead.")) {
+    clearApiCache("/leads");
+  }
+  if (event.type.startsWith("appointment.")) {
+    clearApiCache("/appointments");
+  }
+  if (
+    event.type.startsWith("appointment_checklist.") ||
+    event.type.startsWith("reminder.") ||
+    event.type.startsWith("task.") ||
+    event.type.startsWith("workflow_checklist_item.")
+  ) {
+    clearApiCache("/appointments");
+    clearApiCache("/tasks");
+  }
+  if (event.type.startsWith("order.")) {
+    clearApiCache("/orders");
+  }
+  if (event.type.startsWith("workflow_checklist_item.")) {
+    clearApiCache("/orders");
+    clearApiCache("/patients");
+  }
+  if (event.type.startsWith("provider.")) {
+    clearApiCache("/providers");
+  }
+  if (event.type.startsWith("invoice.")) {
+    clearApiCache("/invoices");
+    clearApiCache("/me/invoices");
+  }
+  if (event.type.startsWith("document.")) {
+    clearApiCache("/documents");
+    clearApiCache("/me/documents");
+  }
+  if (event.type.startsWith("feedback.")) {
+    clearApiCache("/feedback");
+    clearApiCache("/me/feedback");
+  }
+  if (event.type.startsWith("user.")) {
+    clearApiCache("/users");
   }
 }
 
@@ -111,6 +189,8 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
           rememberCursor(event);
           if (event.type === "realtime.resync_required") {
             clearApiCache();
+          } else {
+            invalidateStatsCacheForEvent(event);
           }
           dispatch(event);
         } catch {

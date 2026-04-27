@@ -628,6 +628,204 @@ pub async fn publish_case_event(
     .await;
 }
 
+pub async fn publish_task_event(
+    state: &AppState,
+    actor_user_id: Option<Uuid>,
+    event_type: &str,
+    task_id: Uuid,
+    payload: Value,
+) {
+    let row = sqlx::query(
+        r#"SELECT assigned_to, assigned_by, patient_id, order_id, appointment_id
+           FROM tasks
+           WHERE id = $1"#,
+    )
+    .bind(task_id)
+    .fetch_optional(&state.db)
+    .await;
+
+    let Some(row) = row.ok().flatten() else {
+        return;
+    };
+
+    let assigned_to: Option<Uuid> = row.try_get("assigned_to").ok();
+    let assigned_by: Option<Uuid> = row.try_get("assigned_by").ok();
+    let patient_id: Option<Uuid> = row.try_get("patient_id").unwrap_or_default();
+    let mut target_user_ids = if let Some(patient_id) = patient_id {
+        load_active_patient_assignment_user_ids(state, patient_id)
+            .await
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    target_user_ids.extend(
+        [actor_user_id, assigned_to, assigned_by]
+            .into_iter()
+            .flatten(),
+    );
+
+    let mut event = RealtimeEvent::new(event_type, "task", task_id)
+        .actor(actor_user_id)
+        .target_users(target_user_ids)
+        .roles(&["ceo"])
+        .payload(payload);
+    if let Some(patient_id) = patient_id {
+        event = event.patient_id(patient_id);
+    }
+
+    publish_event(state, event).await;
+}
+
+pub async fn publish_workflow_checklist_event(
+    state: &AppState,
+    actor_user_id: Option<Uuid>,
+    event_type: &str,
+    item_id: Uuid,
+    payload: Value,
+) {
+    let row = sqlx::query(
+        r#"SELECT patient_id, order_id, scope_type, scope_id, owner_user_id, created_by
+           FROM workflow_checklist_items
+           WHERE id = $1"#,
+    )
+    .bind(item_id)
+    .fetch_optional(&state.db)
+    .await;
+
+    let Some(row) = row.ok().flatten() else {
+        return;
+    };
+
+    let patient_id: Uuid = match row.try_get("patient_id") {
+        Ok(value) => value,
+        Err(_) => return,
+    };
+    let owner_user_id: Option<Uuid> = row.try_get("owner_user_id").unwrap_or_default();
+    let created_by: Option<Uuid> = row.try_get("created_by").ok();
+    let mut target_user_ids = load_active_patient_assignment_user_ids(state, patient_id)
+        .await
+        .unwrap_or_default();
+    target_user_ids.extend(
+        [actor_user_id, owner_user_id, created_by]
+            .into_iter()
+            .flatten(),
+    );
+
+    publish_event(
+        state,
+        RealtimeEvent::new(event_type, "workflow_checklist_item", item_id)
+            .patient_id(patient_id)
+            .actor(actor_user_id)
+            .target_users(target_user_ids)
+            .roles(&["ceo"])
+            .payload(payload),
+    )
+    .await;
+}
+
+pub async fn publish_appointment_checklist_event(
+    state: &AppState,
+    actor_user_id: Option<Uuid>,
+    event_type: &str,
+    item_id: Uuid,
+    payload: Value,
+) {
+    let row = sqlx::query(
+        r#"SELECT ac.appointment_id, a.patient_id, a.owner_user_id, a.interpreter_id
+           FROM appointment_checklists ac
+           JOIN appointments a ON a.id = ac.appointment_id
+           WHERE ac.id = $1"#,
+    )
+    .bind(item_id)
+    .fetch_optional(&state.db)
+    .await;
+
+    let Some(row) = row.ok().flatten() else {
+        return;
+    };
+
+    let patient_id: Uuid = match row.try_get("patient_id") {
+        Ok(value) => value,
+        Err(_) => return,
+    };
+    let owner_user_id: Option<Uuid> = row.try_get("owner_user_id").unwrap_or_default();
+    let interpreter_id: Option<Uuid> = row.try_get("interpreter_id").unwrap_or_default();
+    let mut target_user_ids = load_active_patient_assignment_user_ids(state, patient_id)
+        .await
+        .unwrap_or_default();
+    target_user_ids.extend(
+        [actor_user_id, owner_user_id, interpreter_id]
+            .into_iter()
+            .flatten(),
+    );
+
+    publish_event(
+        state,
+        RealtimeEvent::new(event_type, "appointment_checklist", item_id)
+            .patient_id(patient_id)
+            .actor(actor_user_id)
+            .target_users(target_user_ids)
+            .roles(&["ceo"])
+            .payload(payload),
+    )
+    .await;
+}
+
+pub async fn publish_reminder_event(
+    state: &AppState,
+    actor_user_id: Option<Uuid>,
+    event_type: &str,
+    reminder_id: Uuid,
+    payload: Value,
+) {
+    let row = sqlx::query(
+        r#"SELECT r.appointment_id, r.user_id, a.patient_id, a.owner_user_id, a.interpreter_id
+           FROM reminders r
+           LEFT JOIN appointments a ON a.id = r.appointment_id
+           WHERE r.id = $1"#,
+    )
+    .bind(reminder_id)
+    .fetch_optional(&state.db)
+    .await;
+
+    let Some(row) = row.ok().flatten() else {
+        return;
+    };
+
+    let reminder_user_id: Option<Uuid> = row.try_get("user_id").ok();
+    let patient_id: Option<Uuid> = row.try_get("patient_id").unwrap_or_default();
+    let owner_user_id: Option<Uuid> = row.try_get("owner_user_id").unwrap_or_default();
+    let interpreter_id: Option<Uuid> = row.try_get("interpreter_id").unwrap_or_default();
+    let mut target_user_ids = if let Some(patient_id) = patient_id {
+        load_active_patient_assignment_user_ids(state, patient_id)
+            .await
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    target_user_ids.extend(
+        [
+            actor_user_id,
+            reminder_user_id,
+            owner_user_id,
+            interpreter_id,
+        ]
+        .into_iter()
+        .flatten(),
+    );
+
+    let mut event = RealtimeEvent::new(event_type, "reminder", reminder_id)
+        .actor(actor_user_id)
+        .target_users(target_user_ids)
+        .roles(&["ceo"])
+        .payload(payload);
+    if let Some(patient_id) = patient_id {
+        event = event.patient_id(patient_id);
+    }
+
+    publish_event(state, event).await;
+}
+
 pub async fn publish_provider_event(
     state: &AppState,
     actor_user_id: Option<Uuid>,

@@ -1,3 +1,4 @@
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   memo,
   useCallback,
@@ -302,7 +303,7 @@ function AppointmentDoctorFollowUpSection({
               />
             </Field>
             <Field label={t.patients_assign_owner}>
-              <select
+              <NativeComboboxSelect
                 value={form.assigneeId}
                 onChange={(event) =>
                   setForm((current) => ({
@@ -319,7 +320,7 @@ function AppointmentDoctorFollowUpSection({
                     {member.name} · {roleLabel(member.role)}
                   </option>
                 ))}
-              </select>
+              </NativeComboboxSelect>
             </Field>
             <Field label={tr.invoices_due_at}>
               <Input
@@ -362,7 +363,7 @@ function AppointmentDoctorFollowUpSection({
                 </span>
               </label>
               <Field label={tr.appointments_title_col}>
-                <select
+                <NativeComboboxSelect
                   value={form.taskPriority}
                   onChange={(event) =>
                     setForm((current) => ({
@@ -378,7 +379,7 @@ function AppointmentDoctorFollowUpSection({
                       {taskPriorityLabel(value)}
                     </option>
                   ))}
-                </select>
+                </NativeComboboxSelect>
               </Field>
             </div>
             <div className="flex justify-end">
@@ -601,7 +602,7 @@ function AppointmentPackageEndSection({
               />
             </Field>
             <Field label={t.patients_assign_owner}>
-              <select
+              <NativeComboboxSelect
                 value={form.assigneeId}
                 onChange={(event) =>
                   setForm((current) => ({
@@ -618,7 +619,7 @@ function AppointmentPackageEndSection({
                     {member.name} · {roleLabel(member.role)}
                   </option>
                 ))}
-              </select>
+              </NativeComboboxSelect>
             </Field>
             {scheduledReminder ? (
               <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-700">
@@ -653,7 +654,7 @@ function AppointmentPackageEndSection({
                 <span>{tr.providers_linked_patients}</span>
               </label>
               <Field label={tr.appointments_title_col}>
-                <select
+                <NativeComboboxSelect
                   value={form.taskPriority}
                   onChange={(event) =>
                     setForm((current) => ({
@@ -669,7 +670,7 @@ function AppointmentPackageEndSection({
                       {taskPriorityLabel(value)}
                     </option>
                   ))}
-                </select>
+                </NativeComboboxSelect>
               </Field>
             </div>
             <div className="flex justify-end">

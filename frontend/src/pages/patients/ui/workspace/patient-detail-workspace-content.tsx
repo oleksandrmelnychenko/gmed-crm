@@ -947,6 +947,7 @@ export function PatientDetailWorkspaceContent(props: PatientDetailWorkspaceConte
               canViewContracts={canViewContracts}
               canViewInvoices={canViewInvoices}
               canOpenComplianceWorkspace={canOpenComplianceWorkspace}
+              patientId={id}
               onTimelineEntityFilterChange={onTimelineEntityFilterChange}
               onTimelineCategoryFilterChange={onTimelineCategoryFilterChange}
               onTimelineSourceFilterChange={onTimelineSourceFilterChange}

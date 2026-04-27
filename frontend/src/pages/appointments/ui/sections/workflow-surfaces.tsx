@@ -1,3 +1,4 @@
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   memo,
   useEffect,
@@ -554,7 +555,7 @@ function AppointmentInterpreterSection({
             className="mt-4 grid gap-4 md:grid-cols-[minmax(0,1fr)_auto]"
           >
             <Field label={t.role_interpreter}>
-              <select
+              <NativeComboboxSelect
                 value={assignInterpreterId}
                 onChange={(event) => setAssignInterpreterId(event.target.value)}
                 className={selectClassName}
@@ -565,7 +566,7 @@ function AppointmentInterpreterSection({
                     {member.name} · {roleLabel(member.role)}
                   </option>
                 ))}
-              </select>
+              </NativeComboboxSelect>
             </Field>
             <div className="flex items-end">
               <Button
@@ -752,7 +753,7 @@ function AppointmentChecklistSection({
         className="mt-5 grid gap-4 md:grid-cols-[180px_minmax(0,1fr)_auto]"
       >
         <Field label={t.orders_phase}>
-          <select
+          <NativeComboboxSelect
             value={form.phase}
             onChange={(event) =>
               setForm((current) => ({
@@ -767,7 +768,7 @@ function AppointmentChecklistSection({
                 {phase}
               </option>
             ))}
-          </select>
+          </NativeComboboxSelect>
         </Field>
         <Field label={t.orders_phase}>
           <Input
@@ -948,7 +949,7 @@ function AppointmentRemindersSection({
       {canManageReminders ? (
         <form onSubmit={handleSubmit} className="mt-5 grid gap-4 md:grid-cols-2">
           <Field label={t.patients_assign_owner}>
-            <select
+            <NativeComboboxSelect
               value={form.userId}
               onChange={(event) =>
                 setForm((current) => ({
@@ -965,7 +966,7 @@ function AppointmentRemindersSection({
                   {member.name} · {roleLabel(member.role)}
                 </option>
               ))}
-            </select>
+            </NativeComboboxSelect>
           </Field>
           <Field label={t.appointments_date}>
             <Input
@@ -1303,7 +1304,7 @@ function AppointmentCompletionSection({
       {detail.status !== "completed" && detail.status !== "cancelled" ? (
         <div className="mt-5 space-y-4">
           <Field label={tr.patients_assign_owner}>
-            <select
+            <NativeComboboxSelect
               value={followUpAssigneeId}
               onChange={(event) => setFollowUpAssigneeId(event.target.value)}
               className={selectClassName}
@@ -1314,7 +1315,7 @@ function AppointmentCompletionSection({
                   {peer.name} · {roleLabel(peer.role)}
                 </option>
               ))}
-            </select>
+            </NativeComboboxSelect>
           </Field>
           <div className="flex flex-wrap gap-2">
             {FOLLOW_UP_PRESETS.map((preset) => (
@@ -1462,7 +1463,7 @@ function AppointmentStatusSection({
         {detail.recurrence_frequency ? (
           <div className="w-full md:w-[240px]">
             <Field label={t.appointments_scope_apply_status}>
-              <select
+              <NativeComboboxSelect
                 value={statusRecurrenceScope}
                 onChange={(event) =>
                   setStatusRecurrenceScope(
@@ -1474,7 +1475,7 @@ function AppointmentStatusSection({
                 <option value="single">{t.appointments_scope_single}</option>
                 <option value="following">{t.appointments_scope_following}</option>
                 <option value="series">{t.appointments_scope_series}</option>
-              </select>
+              </NativeComboboxSelect>
             </Field>
           </div>
         ) : null}
@@ -1765,7 +1766,7 @@ function AppointmentTasksSection({
             />
           </Field>
           <Field label={tr.patients_assign_owner}>
-            <select
+            <NativeComboboxSelect
               value={form.assignedTo}
               onChange={(event) =>
                 setForm((current) => ({
@@ -1782,7 +1783,7 @@ function AppointmentTasksSection({
                   {member.name} · {roleLabel(member.role)}
                 </option>
               ))}
-            </select>
+            </NativeComboboxSelect>
           </Field>
           <Field label={tr.invoices_due_at}>
             <Input
@@ -1798,7 +1799,7 @@ function AppointmentTasksSection({
             />
           </Field>
           <Field label={t.users_status}>
-            <select
+            <NativeComboboxSelect
               value={form.priority}
               onChange={(event) =>
                 setForm((current) => ({
@@ -1813,7 +1814,7 @@ function AppointmentTasksSection({
                   {taskPriorityLabel(priority)}
                 </option>
               ))}
-            </select>
+            </NativeComboboxSelect>
           </Field>
           <Field label={t.providers_service_desc}>
             <textarea

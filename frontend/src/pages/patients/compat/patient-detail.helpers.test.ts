@@ -281,6 +281,33 @@ describe("resolvePatientTimelineRoute", () => {
       )
     ).toBe("/admin/compliance");
   });
+
+  it("keeps case and order timeline links inside the patient workspace context", () => {
+    expect(
+      resolvePatientTimelineRoute(
+        { entity_type: "case", entity_id: "case-1" },
+        {
+          patientId: "patient-1",
+          canOpenDocumentsWorkspace: true,
+          canViewContracts: true,
+          canViewInvoices: true,
+          canOpenComplianceWorkspace: true,
+        }
+      )
+    ).toBe("/cases/case-1?patient=patient-1");
+    expect(
+      resolvePatientTimelineRoute(
+        { entity_type: "order", entity_id: "order-1" },
+        {
+          patientId: "patient-1",
+          canOpenDocumentsWorkspace: true,
+          canViewContracts: true,
+          canViewInvoices: true,
+          canOpenComplianceWorkspace: true,
+        }
+      )
+    ).toBe("/orders/order-1?patient=patient-1");
+  });
 });
 
 describe("normalizePatientDetailTab", () => {

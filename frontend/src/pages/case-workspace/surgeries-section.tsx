@@ -1,3 +1,4 @@
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { useLang } from "@/lib/i18n";
@@ -161,7 +162,7 @@ export function SurgeriesSection() {
               "Selecting also fills the free-text field below.",
             )}
           >
-            <select
+            <NativeComboboxSelect
               value={form.arzt_id ?? ""}
               onChange={(event) => {
                 const doctorId = event.target.value;
@@ -181,7 +182,7 @@ export function SurgeriesSection() {
                   {doctorOptionLabel(doctor)}
                 </option>
               ))}
-            </select>
+            </NativeComboboxSelect>
           </Field>
           <Field
             label={tri(lang, "Freitext Arzt", "Наименование врача", "Doctor label")}

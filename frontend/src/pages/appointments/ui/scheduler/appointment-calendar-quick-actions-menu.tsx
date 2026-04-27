@@ -1,3 +1,4 @@
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { LoaderCircle } from "lucide-react";
 import type { RefObject } from "react";
 
@@ -69,7 +70,7 @@ export function AppointmentCalendarQuickActionsMenu({
             <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
               {dictionary.appointments_scope_apply_status}
             </span>
-            <select
+            <NativeComboboxSelect
               value={activeScope}
               onChange={(event) =>
                 onScopeChange(
@@ -83,7 +84,7 @@ export function AppointmentCalendarQuickActionsMenu({
                 {dictionary.appointments_scope_following}
               </option>
               <option value="series">{dictionary.appointments_scope_series}</option>
-            </select>
+            </NativeComboboxSelect>
           </label>
         ) : null}
         <button

@@ -1,3 +1,4 @@
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   startTransition,
   useCallback,
@@ -604,7 +605,7 @@ export function ProviderDetailPage() {
                 </div>
                 <div className="space-y-2">
                   <Label>{l("Arztbindung", "Привязка к врачу", "Doctor binding")}</Label>
-                  <select
+                  <NativeComboboxSelect
                     value={templateForm.doctorId}
                     onChange={(event) =>
                       setTemplateForm((current) => ({
@@ -621,11 +622,11 @@ export function ProviderDetailPage() {
                         {doctor.name}
                       </option>
                     ))}
-                  </select>
+                  </NativeComboboxSelect>
                 </div>
                 <div className="space-y-2">
                   <Label>{l("Status", "Статус", "Status")}</Label>
-                  <select
+                  <NativeComboboxSelect
                     value={templateForm.defaultStatus}
                     onChange={(event) =>
                       setTemplateForm((current) => ({
@@ -640,7 +641,7 @@ export function ProviderDetailPage() {
                     <option value="draft">{l("Entwurf", "Черновик", "Draft")}</option>
                     <option value="active">{l("Aktiv", "Активно", "Active")}</option>
                     <option value="archived">{l("Archiviert", "В архиве", "Archived")}</option>
-                  </select>
+                  </NativeComboboxSelect>
                 </div>
                 <div className="space-y-2">
                   <Label>{l("Dokumentart", "Тип документа", "Document art")}</Label>
@@ -670,7 +671,7 @@ export function ProviderDetailPage() {
                 </div>
                 <div className="space-y-2">
                   <Label>{l("Sichtbarkeit", "Видимость", "Visibility")}</Label>
-                  <select
+                  <NativeComboboxSelect
                     value={templateForm.defaultVisibility}
                     onChange={(event) =>
                       setTemplateForm((current) => ({
@@ -686,7 +687,7 @@ export function ProviderDetailPage() {
                     <option value="internal">{l("Intern", "Внутреннее", "Internal")}</option>
                     <option value="released_internal">{l("Intern freigegeben", "Внутренне опубликовано", "Released internal")}</option>
                     <option value="released_external">{l("Extern freigegeben", "Внешне опубликовано", "Released external")}</option>
-                  </select>
+                  </NativeComboboxSelect>
                 </div>
                 <div className="flex flex-wrap items-center gap-5 md:col-span-2">
                   <label className="inline-flex items-center gap-2 text-sm text-slate-700">

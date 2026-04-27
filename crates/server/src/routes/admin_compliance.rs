@@ -813,9 +813,27 @@ async fn upsert_patient_consent(
             "consent_type": consent_type,
             "note": note,
             "closed_active_rows": closed_active_rows,
-            "expires_at": expires_at.map(|value| value.to_rfc3339()),
+            "expires_at": expires_at.as_ref().map(|value| value.to_rfc3339()),
         }),
     ));
+
+    crate::realtime::publish_patient_event(
+        &state,
+        Some(auth.user_id),
+        if action == "grant" {
+            "consent.granted"
+        } else {
+            "consent.revoked"
+        },
+        patient_id,
+        json!({
+            "consent_type": consent_type,
+            "action": action,
+            "closed_active_rows": closed_active_rows,
+            "expires_at": expires_at.as_ref().map(|value| value.to_rfc3339()),
+        }),
+    )
+    .await;
 
     (
         StatusCode::CREATED,
@@ -2301,6 +2319,22 @@ async fn revoke_third_party_consents(
             "revoked_at": revoked_at.to_rfc3339(),
         }),
     ));
+
+    crate::realtime::publish_patient_event(
+        state,
+        Some(actor_id),
+        "consent.revoked",
+        patient_id,
+        json!({
+            "request_id": request_id,
+            "mode": "third_party_revoke",
+            "consent_type": "third_party_sharing_bundle",
+            "revoked_types": revoked_types,
+            "revoked_count": revoked_count,
+            "revoked_at": revoked_at.to_rfc3339(),
+        }),
+    )
+    .await;
 
     if revoked_document_share_count > 0 {
         state.audit_sender.try_send(audit::domain_event(

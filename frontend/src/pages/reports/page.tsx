@@ -25,9 +25,11 @@ import { StaffLink } from "@/components/staff-link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { clearApiCache } from "@/lib/api";
 import { Banner as ShellBanner, PageHeader, StatusBadge, tokens } from "@/components/ui-shell";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
+import { useRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 import { fetchReportsExport, fetchReportsWorkspace } from "./data/reports-api";
 import {
@@ -295,6 +297,82 @@ type ForecastingPayload = {
     clinics: ForecastClinicCapacityRow[];
   } | null;
 };
+
+const REPORTS_REALTIME_EVENTS = [
+  "patient.created",
+  "patient.updated",
+  "patient.activated",
+  "patient.deactivated",
+  "lead.created",
+  "lead.updated",
+  "lead.status_changed",
+  "lead.converted",
+  "lead.failed_resolved",
+  "appointment.created",
+  "appointment.updated",
+  "appointment.status_changed",
+  "appointment_checklist.created",
+  "appointment_checklist.completed",
+  "appointment_request.created",
+  "appointment_request.converted",
+  "case.created",
+  "case.updated",
+  "order.created",
+  "order.phase_changed",
+  "order.debt_management_updated",
+  "order.followup_flow_updated",
+  "order.external_invoice_created",
+  "order.external_invoice_updated",
+  "order.external_invoice_overdue",
+  "order.leistung_added",
+  "order.leistung_approved",
+  "invoice.created",
+  "invoice.status_changed",
+  "invoice.dunning_created",
+  "invoice.overdue_marked",
+  "document.uploaded",
+  "document.generated",
+  "document.updated",
+  "document.deleted",
+  "document.translation_requested",
+  "document.translation_updated",
+  "feedback.submitted",
+  "feedback.reviewed",
+  "provider.created",
+  "provider.updated",
+  "provider.deleted",
+  "provider.activated",
+  "provider.deactivated",
+  "provider.doctor_created",
+  "provider.doctor_updated",
+  "provider.doctor_deleted",
+  "provider.service_created",
+  "provider.service_updated",
+  "provider.service_deleted",
+  "concierge_service.created",
+  "concierge_service.updated",
+  "concierge_service.cancelled",
+  "concierge_service.billing_ready",
+  "framework_contract.created",
+  "framework_contract.status_changed",
+  "quote.created",
+  "quote.status_changed",
+  "privacy_request.created",
+  "privacy_request.reviewed",
+  "privacy_request.executed",
+  "reminder.created",
+  "reminder.completed",
+  "task.created",
+  "task.status_changed",
+  "consent.granted",
+  "consent.revoked",
+  "workflow_checklist_item.created",
+  "workflow_checklist_item.completed",
+] as const;
+
+function clearReportsStatsCache() {
+  clearApiCache("/stats");
+}
 
 function card(extra?: string) {
   return cn("rounded-xl border border-border bg-card", extra);
@@ -802,6 +880,12 @@ export function ReportsPage() {
   const [selectedClinicId, setSelectedClinicId] = useState<string>("");
   const [exportingSection, setExportingSection] = useState<string>("");
   const [detail, setDetail] = useState<ReportDetailState>(null);
+
+  useRealtimeSubscription(REPORTS_REALTIME_EVENTS, () => {
+    if (!roleCanOpenReports(user?.role)) return;
+    clearReportsStatsCache();
+    setVersion((value) => value + 1);
+  });
 
   useEffect(() => {
     if (!roleCanOpenReports(user?.role)) {

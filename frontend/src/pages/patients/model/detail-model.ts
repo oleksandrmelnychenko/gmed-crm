@@ -52,6 +52,7 @@ export type PatientTimelineRangeFilter = "all" | "30d" | "90d" | "180d" | "365d"
 export const PATIENT_DETAIL_REFRESH_EVENT = "patient-detail-refresh";
 
 type PatientTimelineNavigationAccess = {
+  patientId?: string | null;
   canOpenDocumentsWorkspace: boolean;
   canViewContracts: boolean;
   canViewInvoices: boolean;
@@ -195,8 +196,14 @@ export function resolvePatientTimelineRoute(
 ) {
   switch (item.entity_type) {
     case "case":
+      if (access.patientId) {
+        return `/cases/${item.entity_id}?patient=${access.patientId}`;
+      }
       return `/cases?case=${item.entity_id}`;
     case "order":
+      if (access.patientId) {
+        return `/orders/${item.entity_id}?patient=${access.patientId}`;
+      }
       return `/orders?order=${item.entity_id}`;
     case "appointment":
       return `/appointments?appointment=${item.entity_id}`;

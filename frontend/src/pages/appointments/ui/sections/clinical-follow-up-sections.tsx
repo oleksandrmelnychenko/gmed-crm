@@ -1,3 +1,4 @@
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   memo,
   useCallback,
@@ -559,7 +560,7 @@ function AppointmentIncomingDataSection({
 
         <div className="grid gap-4 md:grid-cols-2">
           <Field label={tr.documents_source}>
-            <select
+            <NativeComboboxSelect
               value={form.source}
               onChange={(event) =>
                 setForm((current) => ({
@@ -575,10 +576,10 @@ function AppointmentIncomingDataSection({
               <option value="interpreter">{tr.role_interpreter}</option>
               <option value="external_lab">{tr.common_provider}</option>
               <option value="other">{tr.common_not_set}</option>
-            </select>
+            </NativeComboboxSelect>
           </Field>
           <Field label={tr.documents_category}>
-            <select
+            <NativeComboboxSelect
               value={form.category}
               onChange={(event) =>
                 setForm((current) => ({
@@ -597,13 +598,13 @@ function AppointmentIncomingDataSection({
               <option value="recommendation">Recommendation</option>
               <option value="risk_flag">{tr.common_error}</option>
               <option value="other">{tr.common_not_set}</option>
-            </select>
+            </NativeComboboxSelect>
           </Field>
         </div>
 
         <div className="grid gap-4 md:grid-cols-2">
           <Field label={t.patients_assign_owner}>
-            <select
+            <NativeComboboxSelect
               value={form.assigneeId}
               onChange={(event) =>
                 setForm((current) => ({
@@ -620,7 +621,7 @@ function AppointmentIncomingDataSection({
                   {member.name} · {roleLabel(member.role)}
                 </option>
               ))}
-            </select>
+            </NativeComboboxSelect>
           </Field>
           <Field label={appointmentText("Fällig am", "Срок", "Due at")}>
             <Input
@@ -710,7 +711,7 @@ function AppointmentIncomingDataSection({
               "Task priority",
             )}
           >
-            <select
+            <NativeComboboxSelect
               value={form.taskPriority}
               onChange={(event) =>
                 setForm((current) => ({
@@ -726,7 +727,7 @@ function AppointmentIncomingDataSection({
                   {taskPriorityLabel(value)}
                 </option>
               ))}
-            </select>
+            </NativeComboboxSelect>
           </Field>
         </div>
 
@@ -1236,7 +1237,7 @@ function AppointmentFindingsSection({
             "Expected document",
           )}
         >
-          <select
+          <NativeComboboxSelect
             value={form.artifact}
             onChange={(event) =>
               setForm((current) => ({
@@ -1249,12 +1250,12 @@ function AppointmentFindingsSection({
             <option value="arztbrief">Arztbrief</option>
             <option value="written_findings">Written findings</option>
             <option value="both">Both</option>
-          </select>
+          </NativeComboboxSelect>
         </Field>
 
         <div className="grid gap-4 md:grid-cols-2">
           <Field label={t.patients_assign_owner}>
-            <select
+            <NativeComboboxSelect
               value={form.assigneeId}
               onChange={(event) =>
                 setForm((current) => ({
@@ -1271,7 +1272,7 @@ function AppointmentFindingsSection({
                   {member.name} · {roleLabel(member.role)}
                 </option>
               ))}
-            </select>
+            </NativeComboboxSelect>
           </Field>
           <Field label={appointmentText("Fällig am", "Срок", "Due at")}>
             <Input
@@ -1361,7 +1362,7 @@ function AppointmentFindingsSection({
               "Task priority",
             )}
           >
-            <select
+            <NativeComboboxSelect
               value={form.taskPriority}
               onChange={(event) =>
                 setForm((current) => ({
@@ -1377,7 +1378,7 @@ function AppointmentFindingsSection({
                   {taskPriorityLabel(value)}
                 </option>
               ))}
-            </select>
+            </NativeComboboxSelect>
           </Field>
         </div>
 

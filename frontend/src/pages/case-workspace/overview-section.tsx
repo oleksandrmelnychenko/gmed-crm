@@ -1,3 +1,4 @@
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { useMemo, useState, type FormEvent } from "react";
 import { LoaderCircle } from "lucide-react";
 
@@ -186,7 +187,7 @@ function OverviewSectionForm({
             />
           </Field>
           <Field label={tri(lang, "Zuweiser", "Направивший врач", "Referrer")}>
-            <select
+            <NativeComboboxSelect
               value={form.zuweiser_doctor_id}
               onChange={(event) => {
                 const doctorId = event.target.value;
@@ -206,7 +207,7 @@ function OverviewSectionForm({
                   {doctorOptionLabel(doctor)}
                 </option>
               ))}
-            </select>
+            </NativeComboboxSelect>
           </Field>
           <Field
             label={tri(

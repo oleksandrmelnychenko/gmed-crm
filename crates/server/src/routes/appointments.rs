@@ -4555,7 +4555,20 @@ async fn add_checklist_item(
         .fetch_one(&state.db).await.unwrap_or(0);
     match sqlx::query!("INSERT INTO appointment_checklists (appointment_id, phase, item_text, sort_order) VALUES ($1, $2, $3, $4) RETURNING id",
         apt_id, body.phase, body.item_text, order).fetch_one(&state.db).await {
-        Ok(r) => (StatusCode::CREATED, Json(serde_json::json!({"id": r.id}))).into_response(),
+        Ok(r) => {
+            crate::realtime::publish_appointment_checklist_event(
+                &state,
+                Some(auth.user_id),
+                "appointment_checklist.created",
+                r.id,
+                serde_json::json!({
+                    "appointment_id": apt_id,
+                    "phase": body.phase,
+                }),
+            )
+            .await;
+            (StatusCode::CREATED, Json(serde_json::json!({"id": r.id}))).into_response()
+        },
         Err(e) => { tracing::error!(error = %e, "add checklist"); err(StatusCode::INTERNAL_SERVER_ERROR, "Failed") }
     }
 }
@@ -4578,7 +4591,19 @@ async fn complete_checklist(
     }
     match sqlx::query!("UPDATE appointment_checklists SET is_completed = true, completed_by = $3, completed_at = now() WHERE id = $2 AND appointment_id = $1",
         apt_id, item_id, auth.user_id).execute(&state.db).await {
-        Ok(r) if r.rows_affected() > 0 => Json(serde_json::json!({"ok": true})).into_response(),
+        Ok(r) if r.rows_affected() > 0 => {
+            crate::realtime::publish_appointment_checklist_event(
+                &state,
+                Some(auth.user_id),
+                "appointment_checklist.completed",
+                item_id,
+                serde_json::json!({
+                    "appointment_id": apt_id,
+                }),
+            )
+            .await;
+            Json(serde_json::json!({"ok": true})).into_response()
+        },
         Ok(_) => err(StatusCode::NOT_FOUND, "Not found"),
         Err(e) => { tracing::error!(error = %e, "complete checklist"); err(StatusCode::INTERNAL_SERVER_ERROR, "Failed") }
     }
@@ -4693,7 +4718,20 @@ async fn add_reminder(
     .await
     {
         Ok(reminder_id) => (
-            StatusCode::CREATED,
+            {
+                crate::realtime::publish_reminder_event(
+                    &state,
+                    Some(auth.user_id),
+                    "reminder.created",
+                    reminder_id,
+                    serde_json::json!({
+                        "appointment_id": apt_id,
+                        "user_id": body.user_id,
+                    }),
+                )
+                .await;
+                StatusCode::CREATED
+            },
             Json(serde_json::json!({ "id": reminder_id })),
         )
             .into_response(),
@@ -4737,7 +4775,19 @@ async fn complete_reminder(
     .await;
 
     match result {
-        Ok(r) if r.rows_affected() > 0 => Json(serde_json::json!({"ok": true})).into_response(),
+        Ok(r) if r.rows_affected() > 0 => {
+            crate::realtime::publish_reminder_event(
+                &state,
+                Some(auth.user_id),
+                "reminder.completed",
+                reminder_id,
+                serde_json::json!({
+                    "appointment_id": apt_id,
+                }),
+            )
+            .await;
+            Json(serde_json::json!({"ok": true})).into_response()
+        }
         Ok(_) => err(StatusCode::NOT_FOUND, "Reminder not found"),
         Err(e) => {
             tracing::error!(error = %e, reminder_id = %reminder_id, appointment_id = %apt_id, "complete reminder");

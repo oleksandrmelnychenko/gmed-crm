@@ -1,10 +1,18 @@
 import { matchPath } from "react-router-dom";
 
 import { CaseWorkspaceNav } from "../case-workspace-nav";
+import { OrderWorkspaceNav } from "../order-workspace-nav";
 import { AppointmentWorkspaceNav } from "@/pages/appointments/ui/appointment-workspace-nav";
 import { PatientWorkspaceNav } from "@/pages/patients/ui/patient-workspace-nav";
 
-export type WorkspaceRailKind = "patient" | "case" | "patient-case" | "appointment" | null;
+export type WorkspaceRailKind =
+  | "patient"
+  | "case"
+  | "patient-case"
+  | "order"
+  | "patient-order"
+  | "appointment"
+  | null;
 
 type ResolveWorkspaceRailKindOptions = {
   pathname: string;
@@ -24,6 +32,11 @@ export function resolveWorkspaceRailKind({
   if (matchPath("/cases/:caseId", pathname)) {
     const caseParams = new URLSearchParams(search);
     return caseParams.get("patient") ? "patient-case" : "case";
+  }
+
+  if (matchPath("/orders/:orderId", pathname)) {
+    const orderParams = new URLSearchParams(search);
+    return orderParams.get("patient") ? "patient-order" : "order";
   }
 
   const appointmentParams = new URLSearchParams(search);
@@ -54,6 +67,15 @@ export function WorkspaceRailResolver({ workspaceRailKind }: WorkspaceRailResolv
         <>
           <PatientWorkspaceNav />
           <CaseWorkspaceNav />
+        </>
+      );
+    case "order":
+      return <OrderWorkspaceNav />;
+    case "patient-order":
+      return (
+        <>
+          <PatientWorkspaceNav />
+          <OrderWorkspaceNav />
         </>
       );
     case "appointment":

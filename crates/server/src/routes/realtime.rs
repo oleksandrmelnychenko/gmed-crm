@@ -244,7 +244,14 @@ async fn can_receive_event(
                 can_receive_concierge_service_event(state, auth, event.entity_id).await
             }
         }
-        "document" | "invoice" | "privacy_request" | "feedback" => {
+        "document"
+        | "invoice"
+        | "privacy_request"
+        | "feedback"
+        | "task"
+        | "workflow_checklist_item"
+        | "appointment_checklist"
+        | "reminder" => {
             if let Some(patient_id) = event.patient_id {
                 can_receive_patient_event(state, auth, patient_id).await
             } else {

@@ -165,6 +165,8 @@ const COMPLIANCE_REALTIME_EVENTS = [
   "privacy_request.created",
   "privacy_request.reviewed",
   "privacy_request.executed",
+  "consent.granted",
+  "consent.revoked",
 ] as const;
 
 function compactDt(dt: string | null | undefined): string {

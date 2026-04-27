@@ -1,3 +1,4 @@
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   Suspense,
   lazy,
@@ -6,12 +7,14 @@ import {
   useEffect,
   useMemo,
   useState,
+  type FormEvent,
 } from "react";
-import { LoaderCircle, RefreshCw, Search } from "lucide-react";
+import { LoaderCircle, Plus, RefreshCw, Search } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { ColumnVisibilityMenu } from "@/components/data-table/column-visibility-menu";
 import { DataTable } from "@/components/data-table/data-table";
 import { DensityToggle } from "@/components/data-table/density-toggle";
@@ -30,10 +33,12 @@ import {
   PageHeader,
   StatCard,
 } from "@/components/ui-shell";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
+import { useRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
+import { toRfc3339 } from "@/pages/appointments/model/workflow-helpers";
 import {
   conciergeServiceKindLabel,
   conciergeServiceSourceLabel,
@@ -81,11 +86,100 @@ type StaffConciergeService = {
   updated_at: string;
 };
 
+type PatientOption = {
+  id: string;
+  patient_id: string;
+  first_name?: string | null;
+  last_name?: string | null;
+};
+
+type ProviderOption = {
+  id: string;
+  name: string;
+  provider_type: string;
+};
+
+type StaffOption = {
+  id: string;
+  name: string;
+  role: string;
+};
+
+type CreateServiceFormState = {
+  patientId: string;
+  providerId: string;
+  assignedConciergeId: string;
+  serviceKind: string;
+  title: string;
+  bookingReference: string;
+  vendorName: string;
+  vendorContact: string;
+  startsAt: string;
+  endsAt: string;
+  costEstimate: string;
+  actualCost: string;
+  currency: string;
+  serviceNotes: string;
+  billingNotes: string;
+};
+
 const STAFF_SERVICES_CACHE_TTL_MS = 10_000;
+const SERVICE_LOOKUPS_CACHE_TTL_MS = 30_000;
 const ACTIVE_SERVICE_STATUSES = new Set(["planned", "booked", "confirmed", "in_service"]);
 const BILLING_READY_STATUSES = new Set(["ready", "billed"]);
 const DEFAULT_FROZEN_COLUMNS = ["title"];
 const MAX_FROZEN_COLUMNS = 3;
+const STAFF_SERVICES_REALTIME_EVENTS = [
+  "concierge_service.created",
+  "concierge_service.updated",
+  "concierge_service.cancelled",
+  "concierge_service.billing_ready",
+] as const;
+const formInputClassName =
+  "h-9 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground shadow-xs outline-none transition focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50";
+const formTextareaClassName =
+  "min-h-24 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground shadow-xs outline-none transition focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50";
+const SERVICE_KIND_OPTIONS = [
+  "hotel",
+  "transfer",
+  "vip_terminal",
+  "flight",
+  "chauffeur",
+  "translation_support",
+  "other",
+];
+
+function blankCreateServiceForm(defaultConciergeId = ""): CreateServiceFormState {
+  return {
+    patientId: "",
+    providerId: "",
+    assignedConciergeId: defaultConciergeId,
+    serviceKind: "other",
+    title: "",
+    bookingReference: "",
+    vendorName: "",
+    vendorContact: "",
+    startsAt: "",
+    endsAt: "",
+    costEstimate: "",
+    actualCost: "",
+    currency: "EUR",
+    serviceNotes: "",
+    billingNotes: "",
+  };
+}
+
+function patientOptionLabel(patient: PatientOption) {
+  const name = [patient.first_name, patient.last_name].filter(Boolean).join(" ");
+  return name ? `${patient.patient_id} | ${name}` : patient.patient_id;
+}
+
+function optionalMoney(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : Number.NaN;
+}
 
 function buildServicesPath(filters: { search: string; mineOnly: boolean }) {
   const params = new URLSearchParams();
@@ -282,6 +376,7 @@ function buildServiceColumns(l: ServicesText): ColumnDef<StaffConciergeService>[
 
 function StaffServicesPage() {
   const { lang } = useLang();
+  const { user } = useAuth();
   const [items, setItems] = useState<StaffConciergeService[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -295,12 +390,32 @@ function StaffServicesPage() {
   const [density, setDensity] = useState<DensityLevel>("compact");
   const [hiddenColumns, setHiddenColumns] = useState<string[]>([]);
   const [frozenColumns, setFrozenColumns] = useState<string[]>(DEFAULT_FROZEN_COLUMNS);
+  const [patients, setPatients] = useState<PatientOption[]>([]);
+  const [providers, setProviders] = useState<ProviderOption[]>([]);
+  const [conciergeStaff, setConciergeStaff] = useState<StaffOption[]>([]);
+  const [lookupError, setLookupError] = useState("");
+  const [lookupsLoading, setLookupsLoading] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createBusy, setCreateBusy] = useState(false);
+  const [createError, setCreateError] = useState("");
+  const [createForm, setCreateForm] = useState<CreateServiceFormState>(() =>
+    blankCreateServiceForm(),
+  );
 
   const l = useCallback(
     (de: string, ru: string, en: string) =>
       lang === "de" ? de : lang === "ru" ? ru : en,
     [lang],
   );
+  const canCreateService =
+    user?.role === "ceo" ||
+    user?.role === "patient_manager" ||
+    user?.role === "concierge";
+
+  useRealtimeSubscription(STAFF_SERVICES_REALTIME_EVENTS, () => {
+    clearApiCache("/concierge-services");
+    setVersion((value) => value + 1);
+  });
 
   const baseColumns = useMemo(() => buildServiceColumns(l), [l]);
   const columns = useMemo<ColumnDef<StaffConciergeService>[]>(() => {
@@ -322,6 +437,29 @@ function StaffServicesPage() {
     return applySort(filtered, sortStack, { accessors });
   }, [accessors, filterPredicates, items, sortStack]);
 
+  const defaultConciergeId = useMemo(() => {
+    if (user?.role === "concierge") return user.id;
+    return conciergeStaff[0]?.id ?? "";
+  }, [conciergeStaff, user?.id, user?.role]);
+
+  const selectedPatient = useMemo(
+    () => patients.find((patient) => patient.id === createForm.patientId) ?? null,
+    [createForm.patientId, patients],
+  );
+
+  const openCreateSheet = useCallback(() => {
+    setCreateError("");
+    setCreateForm(blankCreateServiceForm(defaultConciergeId));
+    setCreateOpen(true);
+  }, [defaultConciergeId]);
+
+  const closeCreateSheet = useCallback(() => {
+    setCreateOpen(false);
+    setCreateError("");
+    setCreateBusy(false);
+    setCreateForm(blankCreateServiceForm(defaultConciergeId));
+  }, [defaultConciergeId]);
+
   const handleColumnFreezeChange = useCallback((columnId: string, frozen: boolean) => {
     if (frozen) {
       setFrozenColumns((current) =>
@@ -333,6 +471,51 @@ function StaffServicesPage() {
       setFrozenColumns((current) => current.filter((id) => id !== columnId));
     }
   }, []);
+
+  useEffect(() => {
+    if (!canCreateService) return;
+    let cancelled = false;
+
+    async function loadLookups() {
+      setLookupsLoading(true);
+      try {
+        const [patientRows, providerRows, staffRows] = await Promise.all([
+          apiFetch<PatientOption[]>("/patients?active_only=true", {
+            cacheTtlMs: SERVICE_LOOKUPS_CACHE_TTL_MS,
+          }),
+          apiFetch<ProviderOption[]>("/providers?provider_type=non_medical&active_only=true", {
+            cacheTtlMs: SERVICE_LOOKUPS_CACHE_TTL_MS,
+          }),
+          apiFetch<StaffOption[]>("/appointments/meta/staff", {
+            cacheTtlMs: SERVICE_LOOKUPS_CACHE_TTL_MS,
+          }),
+        ]);
+        if (cancelled) return;
+        setPatients(patientRows);
+        setProviders(providerRows.filter((provider) => provider.provider_type === "non_medical"));
+        setConciergeStaff(staffRows.filter((member) => member.role === "concierge"));
+        setLookupError("");
+      } catch (err) {
+        if (cancelled) return;
+        setLookupError(
+          err instanceof Error
+            ? err.message
+            : l(
+                "Stammdaten konnten nicht geladen werden.",
+                "Не удалось загрузить справочники.",
+                "Failed to load lookup data.",
+              ),
+        );
+      } finally {
+        if (!cancelled) setLookupsLoading(false);
+      }
+    }
+
+    void loadLookups();
+    return () => {
+      cancelled = true;
+    };
+  }, [canCreateService, l]);
 
   useEffect(() => {
     let cancelled = false;
@@ -378,6 +561,87 @@ function StaffServicesPage() {
       cancelled = true;
     };
   }, [l, loading, mineOnly, search, version]);
+
+  async function handleCreateService(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setCreateError("");
+
+    const title = createForm.title.trim();
+    if (!createForm.patientId) {
+      setCreateError(l("Patient ist erforderlich.", "Пациент обязателен.", "Patient is required."));
+      return;
+    }
+    if (!title) {
+      setCreateError(l("Titel ist erforderlich.", "Название обязательно.", "Title is required."));
+      return;
+    }
+
+    const costEstimate = optionalMoney(createForm.costEstimate);
+    const actualCost = optionalMoney(createForm.actualCost);
+    if (Number.isNaN(costEstimate) || Number.isNaN(actualCost)) {
+      setCreateError(
+        l(
+          "Kostenfelder müssen gültige Zahlen sein.",
+          "Поля стоимости должны быть корректными числами.",
+          "Cost fields must be valid numbers.",
+        ),
+      );
+      return;
+    }
+
+    const currency = createForm.currency.trim().toUpperCase() || "EUR";
+    if (currency.length !== 3) {
+      setCreateError(
+        l(
+          "Währung muss aus 3 Buchstaben bestehen.",
+          "Валюта должна состоять из 3 букв.",
+          "Currency must be 3 letters.",
+        ),
+      );
+      return;
+    }
+
+    setCreateBusy(true);
+    try {
+      const created = await apiFetch<StaffConciergeService>("/concierge-services", {
+        method: "POST",
+        body: JSON.stringify({
+          patient_id: createForm.patientId,
+          provider_id: createForm.providerId || null,
+          assigned_concierge_id: createForm.assignedConciergeId || null,
+          service_kind: createForm.serviceKind,
+          title,
+          booking_reference: createForm.bookingReference.trim() || null,
+          vendor_name: createForm.vendorName.trim() || null,
+          vendor_contact: createForm.vendorContact.trim() || null,
+          starts_at: createForm.startsAt ? toRfc3339(createForm.startsAt) : null,
+          ends_at: createForm.endsAt ? toRfc3339(createForm.endsAt) : null,
+          cost_estimate: costEstimate,
+          actual_cost: actualCost,
+          currency,
+          service_notes: createForm.serviceNotes.trim() || null,
+          billing_notes: createForm.billingNotes.trim() || null,
+        }),
+      });
+      clearApiCache("/concierge-services");
+      setItems((current) => [created, ...current.filter((item) => item.id !== created.id)]);
+      setCreateForm(blankCreateServiceForm(defaultConciergeId));
+      setCreateOpen(false);
+      setVersion((value) => value + 1);
+    } catch (err) {
+      setCreateError(
+        err instanceof Error
+          ? err.message
+          : l(
+              "Concierge-Service konnte nicht erstellt werden.",
+              "Не удалось создать concierge-сервис.",
+              "Failed to create concierge service.",
+            ),
+      );
+    } finally {
+      setCreateBusy(false);
+    }
+  }
 
   const activeCount = useMemo(
     () => items.filter((item) => ACTIVE_SERVICE_STATUSES.has(item.status)).length,
@@ -427,11 +691,31 @@ function StaffServicesPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title={l("Concierge-Services", "Concierge-сервисы", "Concierge services")} />
+      <PageHeader
+        title={l("Concierge-Services", "Concierge-сервисы", "Concierge services")}
+        actions={
+          canCreateService ? (
+            <Button
+              type="button"
+              size="sm"
+              onClick={openCreateSheet}
+              disabled={lookupsLoading && patients.length === 0}
+            >
+              <Plus className="size-3.5" />
+              {l("Service hinzufügen", "Добавить сервис", "Add service")}
+            </Button>
+          ) : null
+        }
+      />
 
       {error ? (
         <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
           {error}
+        </div>
+      ) : null}
+      {lookupError ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          {lookupError}
         </div>
       ) : null}
 
@@ -578,6 +862,293 @@ function StaffServicesPage() {
           className="min-h-[480px]"
         />
       )}
+
+      <Sheet open={createOpen} onOpenChange={(open) => (open ? setCreateOpen(true) : closeCreateSheet())}>
+        <SheetContent side="right" className="w-full overflow-y-auto border-l border-border p-0 sm:max-w-[760px]">
+          <form onSubmit={handleCreateService} className="flex min-h-full flex-col">
+            <div className="border-b border-border px-5 py-4">
+              <h2 className="text-base font-semibold text-foreground">
+                {l("Concierge-Service hinzufügen", "Добавить concierge-сервис", "Add concierge service")}
+              </h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {selectedPatient
+                  ? patientOptionLabel(selectedPatient)
+                  : l(
+                      "Patient, Serviceart und Zeitfenster festlegen.",
+                      "Выберите пациента, тип сервиса и временное окно.",
+                      "Set patient, service kind, and schedule window.",
+                    )}
+              </p>
+            </div>
+
+            <div className="flex-1 space-y-4 px-5 py-4">
+              {createError ? (
+                <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                  {createError}
+                </div>
+              ) : null}
+
+              <section className="space-y-3">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="space-y-1.5 text-sm">
+                    <span className="text-xs font-medium text-muted-foreground">
+                      {l("Patient", "Пациент", "Patient")}
+                    </span>
+                    <NativeComboboxSelect
+                      required
+                      value={createForm.patientId}
+                      onChange={(event) =>
+                        setCreateForm((current) => ({ ...current, patientId: event.target.value }))
+                      }
+                      className={formInputClassName}
+                    >
+                      <option value="">{l("Auswählen", "Выбрать", "Select")}</option>
+                      {patients.map((patient) => (
+                        <option key={patient.id} value={patient.id}>
+                          {patientOptionLabel(patient)}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                  </label>
+
+                  <label className="space-y-1.5 text-sm">
+                    <span className="text-xs font-medium text-muted-foreground">
+                      {l("Serviceart", "Тип сервиса", "Service kind")}
+                    </span>
+                    <NativeComboboxSelect
+                      value={createForm.serviceKind}
+                      onChange={(event) =>
+                        setCreateForm((current) => ({ ...current, serviceKind: event.target.value }))
+                      }
+                      className={formInputClassName}
+                    >
+                      {SERVICE_KIND_OPTIONS.map((kind) => (
+                        <option key={kind} value={kind}>
+                          {conciergeServiceKindLabel(kind)}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                  </label>
+                </div>
+
+                <label className="block space-y-1.5 text-sm">
+                  <span className="text-xs font-medium text-muted-foreground">
+                    {l("Titel", "Название", "Title")}
+                  </span>
+                  <Input
+                    required
+                    value={createForm.title}
+                    onChange={(event) =>
+                      setCreateForm((current) => ({ ...current, title: event.target.value }))
+                    }
+                    className="h-9 rounded-lg bg-background"
+                  />
+                </label>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="space-y-1.5 text-sm">
+                    <span className="text-xs font-medium text-muted-foreground">
+                      {l("Provider", "Провайдер", "Provider")}
+                    </span>
+                    <NativeComboboxSelect
+                      value={createForm.providerId}
+                      onChange={(event) =>
+                        setCreateForm((current) => ({ ...current, providerId: event.target.value }))
+                      }
+                      className={formInputClassName}
+                    >
+                      <option value="">{l("Optional", "Опционально", "Optional")}</option>
+                      {providers.map((provider) => (
+                        <option key={provider.id} value={provider.id}>
+                          {provider.name}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                  </label>
+
+                  <label className="space-y-1.5 text-sm">
+                    <span className="text-xs font-medium text-muted-foreground">
+                      {l("Concierge", "Консьерж", "Concierge")}
+                    </span>
+                    <NativeComboboxSelect
+                      value={createForm.assignedConciergeId}
+                      onChange={(event) =>
+                        setCreateForm((current) => ({
+                          ...current,
+                          assignedConciergeId: event.target.value,
+                        }))
+                      }
+                      className={formInputClassName}
+                    >
+                      <option value="">{l("Nicht zugewiesen", "Не назначен", "Unassigned")}</option>
+                      {conciergeStaff.map((member) => (
+                        <option key={member.id} value={member.id}>
+                          {member.name}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                  </label>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="space-y-1.5 text-sm">
+                    <span className="text-xs font-medium text-muted-foreground">
+                      {l("Start", "Начало", "Start")}
+                    </span>
+                    <Input
+                      type="datetime-local"
+                      value={createForm.startsAt}
+                      onChange={(event) =>
+                        setCreateForm((current) => ({ ...current, startsAt: event.target.value }))
+                      }
+                      className="h-9 rounded-lg bg-background"
+                    />
+                  </label>
+                  <label className="space-y-1.5 text-sm">
+                    <span className="text-xs font-medium text-muted-foreground">
+                      {l("Ende", "Конец", "End")}
+                    </span>
+                    <Input
+                      type="datetime-local"
+                      value={createForm.endsAt}
+                      onChange={(event) =>
+                        setCreateForm((current) => ({ ...current, endsAt: event.target.value }))
+                      }
+                      className="h-9 rounded-lg bg-background"
+                    />
+                  </label>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <label className="space-y-1.5 text-sm">
+                    <span className="text-xs font-medium text-muted-foreground">
+                      {l("Kostenschätzung", "Оценка стоимости", "Cost estimate")}
+                    </span>
+                    <Input
+                      inputMode="decimal"
+                      value={createForm.costEstimate}
+                      onChange={(event) =>
+                        setCreateForm((current) => ({
+                          ...current,
+                          costEstimate: event.target.value,
+                        }))
+                      }
+                      className="h-9 rounded-lg bg-background"
+                    />
+                  </label>
+                  <label className="space-y-1.5 text-sm">
+                    <span className="text-xs font-medium text-muted-foreground">
+                      {l("Ist-Kosten", "Фактическая стоимость", "Actual cost")}
+                    </span>
+                    <Input
+                      inputMode="decimal"
+                      value={createForm.actualCost}
+                      onChange={(event) =>
+                        setCreateForm((current) => ({ ...current, actualCost: event.target.value }))
+                      }
+                      className="h-9 rounded-lg bg-background"
+                    />
+                  </label>
+                  <label className="space-y-1.5 text-sm">
+                    <span className="text-xs font-medium text-muted-foreground">
+                      {l("Währung", "Валюта", "Currency")}
+                    </span>
+                    <Input
+                      value={createForm.currency}
+                      maxLength={3}
+                      onChange={(event) =>
+                        setCreateForm((current) => ({ ...current, currency: event.target.value }))
+                      }
+                      className="h-9 rounded-lg bg-background uppercase"
+                    />
+                  </label>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="space-y-1.5 text-sm">
+                    <span className="text-xs font-medium text-muted-foreground">
+                      {l("Buchungsreferenz", "Номер брони", "Booking reference")}
+                    </span>
+                    <Input
+                      value={createForm.bookingReference}
+                      onChange={(event) =>
+                        setCreateForm((current) => ({
+                          ...current,
+                          bookingReference: event.target.value,
+                        }))
+                      }
+                      className="h-9 rounded-lg bg-background"
+                    />
+                  </label>
+                  <label className="space-y-1.5 text-sm">
+                    <span className="text-xs font-medium text-muted-foreground">
+                      {l("Vendor", "Поставщик", "Vendor")}
+                    </span>
+                    <Input
+                      value={createForm.vendorName}
+                      onChange={(event) =>
+                        setCreateForm((current) => ({ ...current, vendorName: event.target.value }))
+                      }
+                      className="h-9 rounded-lg bg-background"
+                    />
+                  </label>
+                </div>
+
+                <label className="block space-y-1.5 text-sm">
+                  <span className="text-xs font-medium text-muted-foreground">
+                    {l("Vendor-Kontakt", "Контакт поставщика", "Vendor contact")}
+                  </span>
+                  <Input
+                    value={createForm.vendorContact}
+                    onChange={(event) =>
+                      setCreateForm((current) => ({ ...current, vendorContact: event.target.value }))
+                    }
+                    className="h-9 rounded-lg bg-background"
+                  />
+                </label>
+
+                <label className="block space-y-1.5 text-sm">
+                  <span className="text-xs font-medium text-muted-foreground">
+                    {l("Service-Notizen", "Заметки по сервису", "Service notes")}
+                  </span>
+                  <textarea
+                    value={createForm.serviceNotes}
+                    onChange={(event) =>
+                      setCreateForm((current) => ({ ...current, serviceNotes: event.target.value }))
+                    }
+                    className={formTextareaClassName}
+                    rows={4}
+                  />
+                </label>
+
+                <label className="block space-y-1.5 text-sm">
+                  <span className="text-xs font-medium text-muted-foreground">
+                    {l("Billing-Notizen", "Заметки по биллингу", "Billing notes")}
+                  </span>
+                  <textarea
+                    value={createForm.billingNotes}
+                    onChange={(event) =>
+                      setCreateForm((current) => ({ ...current, billingNotes: event.target.value }))
+                    }
+                    className={formTextareaClassName}
+                    rows={3}
+                  />
+                </label>
+              </section>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-3">
+              <Button type="button" variant="outline" onClick={closeCreateSheet} disabled={createBusy}>
+                {l("Abbrechen", "Отмена", "Cancel")}
+              </Button>
+              <Button type="submit" disabled={createBusy || lookupsLoading}>
+                {createBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                {l("Speichern", "Сохранить", "Save")}
+              </Button>
+            </div>
+          </form>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

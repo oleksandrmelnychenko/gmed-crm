@@ -881,6 +881,8 @@ const PATIENT_DETAIL_REALTIME_EVENTS = [
   "appointment.created",
   "appointment.updated",
   "appointment.status_changed",
+  "appointment_checklist.created",
+  "appointment_checklist.completed",
   "appointment_request.created",
   "appointment_request.reviewed",
   "appointment_request.converted",
@@ -905,6 +907,12 @@ const PATIENT_DETAIL_REALTIME_EVENTS = [
   "privacy_request.created",
   "privacy_request.reviewed",
   "privacy_request.executed",
+  "consent.granted",
+  "consent.revoked",
+  "reminder.created",
+  "reminder.completed",
+  "task.created",
+  "task.status_changed",
   "feedback.submitted",
   "feedback.reviewed",
   "order.created",
@@ -927,6 +935,8 @@ const PATIENT_DETAIL_REALTIME_EVENTS = [
   "case.updated",
   "case.medication_expiry_confirmed",
   "case.medication_expiry_flagged",
+  "workflow_checklist_item.created",
+  "workflow_checklist_item.completed",
 ] as const;
 
 export function PatientDetailPage() {
@@ -1384,6 +1394,7 @@ export function PatientDetailPage() {
     clearApiCache(`/patients/${id}/framework-contracts`);
     clearApiCache(`/patients/${id}/invoices`);
     clearApiCache(`/patients/${id}/timeline`);
+    clearApiCache(`/patients/${id}/workflow-checklist`);
     reload();
   });
 
@@ -2013,7 +2024,7 @@ export function PatientDetailPage() {
         onOpenCase={openCaseWorkspace}
         onOpenContract={(contractId) => { staffGo(`/contracts?contract=${contractId}`); }}
         onOpenInvoice={(invoiceId) => { staffGo(`/invoices?invoice=${invoiceId}`); }}
-        onOpenOrder={(orderId) => { staffGo(`/orders?order=${orderId}`); }}
+        onOpenOrder={(orderId) => { staffGo(`/orders/${orderId}?patient=${id}`); }}
         onOpenPatient={(patientId) => { staffGo(`/patients/${patientId}`); }}
         onOpenProfileEditor={openProfileEditor}
         onOpenUpload={openDocumentUpload}

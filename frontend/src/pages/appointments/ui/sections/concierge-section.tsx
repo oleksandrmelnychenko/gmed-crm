@@ -1,3 +1,4 @@
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   memo,
   useCallback,
@@ -309,7 +310,7 @@ function AppointmentConciergeSection({
                           />
                         </Field>
                         <Field label={t.common_provider}>
-                          <select
+                          <NativeComboboxSelect
                             value={draft.providerId}
                             onChange={(event) =>
                               updateDraft(service.id, {
@@ -330,10 +331,10 @@ function AppointmentConciergeSection({
                                 {provider.name}
                               </option>
                             ))}
-                          </select>
+                          </NativeComboboxSelect>
                         </Field>
                         <Field label={tr.role_concierge}>
-                          <select
+                          <NativeComboboxSelect
                             value={draft.assignedConciergeId}
                             onChange={(event) =>
                               updateDraft(service.id, {
@@ -354,12 +355,12 @@ function AppointmentConciergeSection({
                                 {member.name}
                               </option>
                             ))}
-                          </select>
+                          </NativeComboboxSelect>
                         </Field>
                       </>
                     ) : null}
                     <Field label={tr.users_status}>
-                      <select
+                      <NativeComboboxSelect
                         value={draft.status}
                         onChange={(event) =>
                           updateDraft(service.id, { status: event.target.value })
@@ -371,7 +372,7 @@ function AppointmentConciergeSection({
                             {taskStatusLabel(status)}
                           </option>
                         ))}
-                      </select>
+                      </NativeComboboxSelect>
                     </Field>
                     <Field label={tr.appointments_title_col}>
                       <Input
@@ -439,7 +440,7 @@ function AppointmentConciergeSection({
                     {canManageConciergeBilling ? (
                       <>
                         <Field label={tr.users_status}>
-                          <select
+                          <NativeComboboxSelect
                             value={draft.billingStatus}
                             onChange={(event) =>
                               updateDraft(service.id, {
@@ -453,7 +454,7 @@ function AppointmentConciergeSection({
                                 {billingStatusLabel(status)}
                               </option>
                             ))}
-                          </select>
+                          </NativeComboboxSelect>
                         </Field>
                         <Field label={tr.contracts_total}>
                           <Input
@@ -518,7 +519,7 @@ function AppointmentConciergeSection({
       {canManageConciergeServices ? (
         <form onSubmit={handleServiceSubmit} className="mt-5 grid gap-4 md:grid-cols-2">
           <Field label={tr.documents_category}>
-            <select
+            <NativeComboboxSelect
               value={form.serviceKind}
               onChange={(event) =>
                 setForm((current) => ({
@@ -533,7 +534,7 @@ function AppointmentConciergeSection({
                   {serviceKindLabel(kind)}
                 </option>
               ))}
-            </select>
+            </NativeComboboxSelect>
           </Field>
           <Field label={tr.appointments_title_col}>
             <Input
@@ -549,7 +550,7 @@ function AppointmentConciergeSection({
             />
           </Field>
           <Field label={t.common_provider}>
-            <select
+            <NativeComboboxSelect
               value={form.providerId}
               onChange={(event) =>
                 setForm((current) => ({
@@ -571,10 +572,10 @@ function AppointmentConciergeSection({
                   {provider.name}
                 </option>
               ))}
-            </select>
+            </NativeComboboxSelect>
           </Field>
           <Field label={tr.role_concierge}>
-            <select
+            <NativeComboboxSelect
               value={form.assignedConciergeId}
               onChange={(event) =>
                 setForm((current) => ({
@@ -596,7 +597,7 @@ function AppointmentConciergeSection({
                   {member.name}
                 </option>
               ))}
-            </select>
+            </NativeComboboxSelect>
           </Field>
           <Field label={tr.providers_service_valid_from}>
             <Input

@@ -1,5 +1,5 @@
 import { ArrowLeft, BadgeCheck, CalendarClock, ClipboardList, FileHeart, FileSignature, FolderOpen, History, ReceiptText, ShieldCheck, type LucideIcon, UserRound, UsersRound } from "lucide-react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useLocation, useParams, useSearchParams } from "react-router-dom";
 
 import { StaffLink } from "@/components/staff-link";
 import { useAuth } from "@/lib/auth";
@@ -21,6 +21,7 @@ type WorkspaceItem = {
 
 export function PatientWorkspaceNav() {
   const { id: routeId } = useParams<{ id: string }>();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const id = routeId ?? searchParams.get("patient") ?? undefined;
   const { user } = useAuth();
@@ -32,6 +33,11 @@ export function PatientWorkspaceNav() {
   const canViewDocuments = canViewPatientDocumentsSurface(user?.role);
   const canViewContracts = canViewPatientContractsSurface(user?.role);
   const canViewInvoices = canViewPatientInvoicesSurface(user?.role);
+  const contextualTab = location.pathname.startsWith("/orders/")
+    ? "orders"
+    : location.pathname.startsWith("/cases/")
+      ? "cases"
+      : searchParams.get("tab");
   const currentTab = routeId
     ? normalizePatientDetailTab(searchParams.get("tab"), {
         canViewOperationalSurface,
@@ -40,7 +46,12 @@ export function PatientWorkspaceNav() {
         canViewInvoices,
       })
     : id
-      ? "cases"
+      ? normalizePatientDetailTab(contextualTab, {
+          canViewOperationalSurface,
+          canViewDocuments,
+          canViewContracts,
+          canViewInvoices,
+        })
       : null;
 
   const items: WorkspaceItem[] = [

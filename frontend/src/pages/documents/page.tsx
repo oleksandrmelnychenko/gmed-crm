@@ -1,3 +1,4 @@
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   cloneElement,
   isValidElement,
@@ -1764,7 +1765,7 @@ function StaffDocumentsPage() {
                 placeholder={t.common_search}
               />
             </div>
-            <select
+            <NativeComboboxSelect
               value={filters.patientId}
               onChange={(event) =>
                 setFilters((current) => ({
@@ -1782,8 +1783,8 @@ function StaffDocumentsPage() {
                   {patientOptionLabel(patient)}
                 </option>
               ))}
-            </select>
-            <select
+            </NativeComboboxSelect>
+            <NativeComboboxSelect
               value={filters.status}
               onChange={(event) =>
                 setFilters((current) => ({
@@ -1799,8 +1800,8 @@ function StaffDocumentsPage() {
                   {formatDocumentStatusLabel(status, t)}
                 </option>
               ))}
-            </select>
-            <select
+            </NativeComboboxSelect>
+            <NativeComboboxSelect
               value={filters.visibility}
               onChange={(event) =>
                 setFilters((current) => ({
@@ -1816,7 +1817,7 @@ function StaffDocumentsPage() {
                   {formatVisibilityLabel(value, t)}
                 </option>
               ))}
-            </select>
+            </NativeComboboxSelect>
             <Input
               value={filters.art}
               onChange={(event) =>
@@ -1876,7 +1877,7 @@ function StaffDocumentsPage() {
             />
           </div>
           <div className="grid gap-1.5 md:grid-cols-2 xl:grid-cols-4">
-            <select
+            <NativeComboboxSelect
               value={filters.category}
               onChange={(event) =>
                 setFilters((current) => ({
@@ -1892,7 +1893,7 @@ function StaffDocumentsPage() {
                   {category.label}
                 </option>
               ))}
-            </select>
+            </NativeComboboxSelect>
             <Input
               value={filters.klinik}
               onChange={(event) =>
@@ -2053,7 +2054,7 @@ function StaffDocumentsPage() {
             ) : null}
             <div className="grid gap-4 md:grid-cols-2">
               <Field label={t.documents_category} required>
-                <select
+                <NativeComboboxSelect
                   value={generateForm.templateId}
                   onChange={(event) =>
                     applyGenerateTemplate(event.target.value)
@@ -2068,10 +2069,10 @@ function StaffDocumentsPage() {
                         : template.label}
                     </option>
                   ))}
-                </select>
+                </NativeComboboxSelect>
               </Field>
               <Field label={t.patients_languages} required>
-                <select
+                <NativeComboboxSelect
                   value={generateForm.language}
                   onChange={(event) =>
                     setGenerateForm((current) => ({
@@ -2089,7 +2090,7 @@ function StaffDocumentsPage() {
                       </option>
                     ),
                   )}
-                </select>
+                </NativeComboboxSelect>
               </Field>
               <Field label={t.documents_filename}>
                 <Input
@@ -2104,7 +2105,7 @@ function StaffDocumentsPage() {
                 />
               </Field>
               <Field label={t.orders_patient} required>
-                <select
+                <NativeComboboxSelect
                   value={generateForm.patientId}
                   onChange={(event) => {
                     const patientId = event.target.value;
@@ -2129,10 +2130,10 @@ function StaffDocumentsPage() {
                       {patientOptionLabel(patient)}
                     </option>
                   ))}
-                </select>
+                </NativeComboboxSelect>
               </Field>
               <Field label={t.orders_title}>
-                <select
+                <NativeComboboxSelect
                   value={generateForm.orderId}
                   onChange={(event) =>
                     setGenerateForm((current) => ({
@@ -2149,10 +2150,10 @@ function StaffDocumentsPage() {
                       {order.order_number} · {order.patient_pid}
                     </option>
                   ))}
-                </select>
+                </NativeComboboxSelect>
               </Field>
               <Field label={t.appointments_title}>
-                <select
+                <NativeComboboxSelect
                   value={generateForm.appointmentId}
                   onChange={(event) =>
                     setGenerateForm((current) => ({
@@ -2172,10 +2173,10 @@ function StaffDocumentsPage() {
                         : ""}
                     </option>
                   ))}
-                </select>
+                </NativeComboboxSelect>
               </Field>
               <Field label={t.users_status}>
-                <select
+                <NativeComboboxSelect
                   value={generateForm.status}
                   onChange={(event) =>
                     setGenerateForm((current) => ({
@@ -2190,10 +2191,10 @@ function StaffDocumentsPage() {
                       {formatDocumentStatusLabel(status, t)}
                     </option>
                   ))}
-                </select>
+                </NativeComboboxSelect>
               </Field>
               <Field label={t.users_status}>
-                <select
+                <NativeComboboxSelect
                   value={generateForm.visibility}
                   onChange={(event) =>
                     setGenerateForm((current) => ({
@@ -2208,7 +2209,7 @@ function StaffDocumentsPage() {
                       {formatVisibilityLabel(value, t)}
                     </option>
                   ))}
-                </select>
+                </NativeComboboxSelect>
               </Field>
               <Field label={t.documents_filename}>
                 <Input
@@ -2393,7 +2394,7 @@ function StaffDocumentsPage() {
                 />
               </Field>
               <Field label={t.orders_patient}>
-                <select
+                <NativeComboboxSelect
                   value={uploadForm.patientId}
                   onChange={(event) =>
                     setUploadForm((current) => ({
@@ -2411,10 +2412,10 @@ function StaffDocumentsPage() {
                       {patientOptionLabel(patient)}
                     </option>
                   ))}
-                </select>
+                </NativeComboboxSelect>
               </Field>
               <Field label={t.orders_title}>
-                <select
+                <NativeComboboxSelect
                   value={uploadForm.orderId}
                   onChange={(event) =>
                     setUploadForm((current) => ({
@@ -2431,10 +2432,10 @@ function StaffDocumentsPage() {
                       {order.order_number} · {order.patient_pid}
                     </option>
                   ))}
-                </select>
+                </NativeComboboxSelect>
               </Field>
               <Field label={t.appointments_title}>
-                <select
+                <NativeComboboxSelect
                   value={uploadForm.appointmentId}
                   onChange={(event) =>
                     setUploadForm((current) => ({
@@ -2454,7 +2455,7 @@ function StaffDocumentsPage() {
                         : ""}
                     </option>
                   ))}
-                </select>
+                </NativeComboboxSelect>
               </Field>
               <Field label={t.documents_category}>
                 <Input
@@ -2471,7 +2472,7 @@ function StaffDocumentsPage() {
                 />
               </Field>
               <Field label={t.documents_category}>
-                <select
+                <NativeComboboxSelect
                   value={uploadForm.category}
                   onChange={(event) =>
                     setUploadForm((current) => ({
@@ -2487,11 +2488,11 @@ function StaffDocumentsPage() {
                       {category.label}
                     </option>
                   ))}
-                </select>
+                </NativeComboboxSelect>
               </Field>
               {canManage ? (
                 <Field label={t.users_status}>
-                  <select
+                  <NativeComboboxSelect
                     value={uploadForm.status}
                     onChange={(event) =>
                       setUploadForm((current) => ({
@@ -2506,12 +2507,12 @@ function StaffDocumentsPage() {
                         {formatDocumentStatusLabel(status, t)}
                       </option>
                     ))}
-                  </select>
+                  </NativeComboboxSelect>
                 </Field>
               ) : null}
               {canManage ? (
                 <Field label={t.users_status}>
-                  <select
+                  <NativeComboboxSelect
                     value={uploadForm.visibility}
                     onChange={(event) =>
                       setUploadForm((current) => ({
@@ -2526,7 +2527,7 @@ function StaffDocumentsPage() {
                         {formatVisibilityLabel(value, t)}
                       </option>
                     ))}
-                  </select>
+                  </NativeComboboxSelect>
                 </Field>
               ) : null}
               <Field label={t.common_provider}>
@@ -3030,7 +3031,7 @@ function StaffDocumentsPage() {
                       >
                         <div className="grid gap-4 md:grid-cols-2">
                           <Field label={t.patients_languages} required>
-                            <select
+                            <NativeComboboxSelect
                               value={translationForm.requestedLanguage}
                               onChange={(event) =>
                                 setTranslationForm((current) => ({
@@ -3043,7 +3044,7 @@ function StaffDocumentsPage() {
                               <option value="de">{formatLanguageLabel("de")}</option>
                               <option value="en">{formatLanguageLabel("en")}</option>
                               <option value="uk">{formatLanguageLabel("uk")}</option>
-                            </select>
+                            </NativeComboboxSelect>
                           </Field>
                           <div className="flex items-end">
                             <Button
@@ -3191,7 +3192,7 @@ function StaffDocumentsPage() {
                                 <div className="mt-4 space-y-4">
                                   <div className="grid gap-4 md:grid-cols-2">
                                     <Field label={t.documents_source_language}>
-                                      <select
+                                      <NativeComboboxSelect
                                         value={draft.sourceLanguage}
                                         onChange={(event) =>
                                           updateTranslationDraft(request.id, {
@@ -3204,7 +3205,7 @@ function StaffDocumentsPage() {
                                         <option value="de">{formatLanguageLabel("de")}</option>
                                         <option value="en">{formatLanguageLabel("en")}</option>
                                         <option value="uk">{formatLanguageLabel("uk")}</option>
-                                      </select>
+                                      </NativeComboboxSelect>
                                     </Field>
                                     <div className="flex flex-wrap items-end gap-2">
                                       {textExtraction?.extracted_text ? (
@@ -3345,7 +3346,7 @@ function StaffDocumentsPage() {
                           />
                         </Field>
                         <Field label={t.documents_taxonomy_category}>
-                          <select
+                          <NativeComboboxSelect
                             value={editForm.category}
                             onChange={(event) =>
                               setEditForm((current) =>
@@ -3362,7 +3363,7 @@ function StaffDocumentsPage() {
                                 {category.label}
                               </option>
                             ))}
-                          </select>
+                          </NativeComboboxSelect>
                         </Field>
                       </div>
                       <label className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-muted/25 px-3 py-2 text-sm text-foreground">
@@ -3424,7 +3425,7 @@ function StaffDocumentsPage() {
                     <form onSubmit={handleSave} className="space-y-4">
                       <div className="grid gap-4 md:grid-cols-2">
                         <Field label={t.orders_patient}>
-                          <select
+                          <NativeComboboxSelect
                             value={editForm.patientId}
                             onChange={(event) =>
                               setEditForm((current) =>
@@ -3446,10 +3447,10 @@ function StaffDocumentsPage() {
                                 {patientOptionLabel(patient)}
                               </option>
                             ))}
-                          </select>
+                          </NativeComboboxSelect>
                         </Field>
                         <Field label={t.orders_title}>
-                          <select
+                          <NativeComboboxSelect
                             value={editForm.orderId}
                             onChange={(event) =>
                               setEditForm((current) =>
@@ -3467,10 +3468,10 @@ function StaffDocumentsPage() {
                                 {order.order_number} · {order.patient_pid}
                               </option>
                             ))}
-                          </select>
+                          </NativeComboboxSelect>
                         </Field>
                         <Field label={t.appointments_title}>
-                          <select
+                          <NativeComboboxSelect
                             value={editForm.appointmentId}
                             onChange={(event) =>
                               setEditForm((current) =>
@@ -3495,7 +3496,7 @@ function StaffDocumentsPage() {
                                 {formatDate(appointment.date)}
                               </option>
                             ))}
-                          </select>
+                          </NativeComboboxSelect>
                         </Field>
                         <Field label={t.documents_filename} required>
                           <Input
@@ -3525,7 +3526,7 @@ function StaffDocumentsPage() {
                           />
                         </Field>
                         <Field label={t.documents_category}>
-                          <select
+                          <NativeComboboxSelect
                             value={editForm.category}
                             onChange={(event) =>
                               setEditForm((current) =>
@@ -3542,10 +3543,10 @@ function StaffDocumentsPage() {
                                 {category.label}
                               </option>
                             ))}
-                          </select>
+                          </NativeComboboxSelect>
                         </Field>
                         <Field label={t.users_status}>
-                          <select
+                          <NativeComboboxSelect
                             value={editForm.status}
                             onChange={(event) =>
                               setEditForm((current) =>
@@ -3565,10 +3566,10 @@ function StaffDocumentsPage() {
                                 {formatDocumentStatusLabel(status, t)}
                               </option>
                             ))}
-                          </select>
+                          </NativeComboboxSelect>
                         </Field>
                         <Field label={t.users_status}>
-                          <select
+                          <NativeComboboxSelect
                             value={editForm.visibility}
                             onChange={(event) =>
                               setEditForm((current) =>
@@ -3588,7 +3589,7 @@ function StaffDocumentsPage() {
                                 {formatVisibilityLabel(value, t)}
                               </option>
                             ))}
-                          </select>
+                          </NativeComboboxSelect>
                         </Field>
                         <Field label={t.common_provider}>
                           <Input
@@ -3959,7 +3960,7 @@ function StaffDocumentsPage() {
                       <div className="grid gap-4 md:grid-cols-2">
                         {shareForm.targetType === "user" ? (
                           <Field label={t.patients_assign_owner} required>
-                            <select
+                            <NativeComboboxSelect
                               value={shareForm.userId}
                               onChange={(event) =>
                                 setShareForm((current) => ({
@@ -3975,11 +3976,11 @@ function StaffDocumentsPage() {
                                   {item.name} · {formatRoleLabel(item.role)}
                                 </option>
                               ))}
-                            </select>
+                            </NativeComboboxSelect>
                           </Field>
                         ) : (
                           <Field label={t.common_provider} required>
-                            <select
+                            <NativeComboboxSelect
                               value={shareForm.providerId}
                               onChange={(event) =>
                                 setShareForm((current) => ({
@@ -3996,7 +3997,7 @@ function StaffDocumentsPage() {
                                   {item.address_city || t.documents_no_city}
                                 </option>
                               ))}
-                            </select>
+                            </NativeComboboxSelect>
                           </Field>
                         )}
                         <Field label={t.documents_source}>

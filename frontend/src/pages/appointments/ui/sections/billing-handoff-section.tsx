@@ -1,3 +1,4 @@
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   memo,
   useCallback,
@@ -432,7 +433,7 @@ function AppointmentBillingHandoffSection({
       {canManageConciergeBilling ? (
         <form onSubmit={handleSubmit} className="mt-5 grid gap-4 md:grid-cols-2">
           <Field label={tr.role_billing}>
-            <select
+            <NativeComboboxSelect
               value={form.kind}
               onChange={(event) =>
                 setForm((current) => ({
@@ -456,10 +457,10 @@ function AppointmentBillingHandoffSection({
                   {billingHandoffKindLabel(kind)}
                 </option>
               ))}
-            </select>
+            </NativeComboboxSelect>
           </Field>
           <Field label={tr.role_billing}>
-            <select
+            <NativeComboboxSelect
               value={form.assigneeId}
               onChange={(event) =>
                 setForm((current) => ({
@@ -482,7 +483,7 @@ function AppointmentBillingHandoffSection({
                   {member.name} · {roleLabel(member.role)}
                 </option>
               ))}
-            </select>
+            </NativeComboboxSelect>
           </Field>
           <Field label={tr.invoices_due_at}>
             <Input
@@ -499,7 +500,7 @@ function AppointmentBillingHandoffSection({
             />
           </Field>
           <Field label={tr.appointments_title_col}>
-            <select
+            <NativeComboboxSelect
               value={form.taskPriority}
               onChange={(event) =>
                 setForm((current) => ({
@@ -514,7 +515,7 @@ function AppointmentBillingHandoffSection({
                   {taskPriorityLabel(priority)}
                 </option>
               ))}
-            </select>
+            </NativeComboboxSelect>
           </Field>
           <Field label={tr.appointments_title_col}>
             <Input

@@ -1,3 +1,4 @@
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { ChevronDown, Plus, Search, X } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 
@@ -319,7 +320,7 @@ function FilterChip<T>({
           data-table-filter-editor
           className="absolute left-0 top-full z-[120] mt-1 flex items-center gap-1.5 rounded-lg border border-border bg-popover p-1.5 text-popover-foreground shadow-xl"
         >
-          <select
+          <NativeComboboxSelect
             value={predicate.operator}
             onChange={(e) => changeOperator(e.target.value as FilterOperator)}
             className="h-7 rounded-md border border-input bg-background px-2 text-xs outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
@@ -329,7 +330,7 @@ function FilterChip<T>({
                 {labelForOperator(op, translations?.operatorLabels)}
               </option>
             ))}
-          </select>
+          </NativeComboboxSelect>
           <FilterValueInput
             column={column}
             rows={rows}

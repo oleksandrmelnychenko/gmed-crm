@@ -1,3 +1,4 @@
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   memo,
   useEffect,
@@ -376,7 +377,7 @@ function AppointmentFollowUpVisitSection({
         </div>
         <div className="grid gap-4 md:grid-cols-2">
           <Field label={t.common_provider}>
-            <select
+            <NativeComboboxSelect
               value={form.providerId}
               onChange={(event) =>
                 setForm((current) => ({
@@ -394,10 +395,10 @@ function AppointmentFollowUpVisitSection({
                   {provider.name}
                 </option>
               ))}
-            </select>
+            </NativeComboboxSelect>
           </Field>
           <Field label={t.common_doctor}>
-            <select
+            <NativeComboboxSelect
               value={form.doctorId}
               onChange={(event) =>
                 setForm((current) => ({
@@ -414,12 +415,12 @@ function AppointmentFollowUpVisitSection({
                   {doctorLabel(doctor)}
                 </option>
               ))}
-            </select>
+            </NativeComboboxSelect>
           </Field>
         </div>
         <div className="grid gap-4 md:grid-cols-2">
           <Field label={t.patients_assign_owner}>
-            <select
+            <NativeComboboxSelect
               value={form.ownerUserId}
               onChange={(event) =>
                 setForm((current) => ({
@@ -435,10 +436,10 @@ function AppointmentFollowUpVisitSection({
                   {member.name} · {roleLabel(member.role)}
                 </option>
               ))}
-            </select>
+            </NativeComboboxSelect>
           </Field>
           <Field label={interpreterFieldLabel}>
-            <select
+            <NativeComboboxSelect
               value={form.interpreterId}
               onChange={(event) =>
                 setForm((current) => ({
@@ -454,7 +455,7 @@ function AppointmentFollowUpVisitSection({
                   {member.name} · {roleLabel(member.role)}
                 </option>
               ))}
-            </select>
+            </NativeComboboxSelect>
           </Field>
         </div>
         <div className="grid gap-4 md:grid-cols-2">
@@ -465,7 +466,7 @@ function AppointmentFollowUpVisitSection({
               "Care path",
             )}
           >
-            <select
+            <NativeComboboxSelect
               value={form.carePathKind}
               onChange={(event) =>
                 setForm((current) => ({
@@ -481,7 +482,7 @@ function AppointmentFollowUpVisitSection({
                   {carePathKindLabel(value)}
                 </option>
               ))}
-            </select>
+            </NativeComboboxSelect>
           </Field>
           <Field label={t.appointments_location}>
             <Input
@@ -551,7 +552,7 @@ function AppointmentFollowUpVisitSection({
             <span>Create a preparation reminder on the new follow-up visit.</span>
           </label>
           <Field label={tr.patients_assign_owner}>
-            <select
+            <NativeComboboxSelect
               value={form.reminderUserId}
               onChange={(event) =>
                 setForm((current) => ({
@@ -568,7 +569,7 @@ function AppointmentFollowUpVisitSection({
                   {member.name} · {roleLabel(member.role)}
                 </option>
               ))}
-            </select>
+            </NativeComboboxSelect>
           </Field>
         </div>
         {form.createReminder ? (

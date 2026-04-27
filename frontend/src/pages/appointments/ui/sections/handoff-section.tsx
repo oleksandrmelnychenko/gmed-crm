@@ -1,3 +1,4 @@
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   memo,
   useEffect,
@@ -166,7 +167,7 @@ function AppointmentHandoffSection({
       {canManageReminders ? (
         <div className="mt-5 grid gap-4 md:grid-cols-[minmax(0,1fr)_auto]">
           <Field label={tr.patients_assign_owner}>
-            <select
+            <NativeComboboxSelect
               value={followUpAssigneeId}
               onChange={(event) => setFollowUpAssigneeId(event.target.value)}
               className={selectClassName}
@@ -177,7 +178,7 @@ function AppointmentHandoffSection({
                   {peer.name} · {roleLabel(peer.role)}
                 </option>
               ))}
-            </select>
+            </NativeComboboxSelect>
           </Field>
           <div className="flex flex-wrap items-end gap-2">
             {FOLLOW_UP_PRESETS.map((preset) => (

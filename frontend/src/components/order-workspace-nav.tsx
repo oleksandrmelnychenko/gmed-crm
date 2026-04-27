@@ -5,45 +5,55 @@ import { StaffLink } from "@/components/staff-link";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import {
-  CASE_WORKSPACE_SECTIONS,
-  type CaseSectionGroup,
-  caseSectionGroupLabel,
-  caseSectionLabel,
-  normalizeCaseSectionKey,
-} from "@/pages/case-workspace/sections";
+  ORDER_WORKSPACE_SECTIONS,
+  type OrderSectionGroup,
+  orderSectionGroupLabel,
+  orderSectionLabel,
+  normalizeOrderSectionKey,
+} from "@/pages/orders/sections";
 
-const GROUP_ORDER: readonly CaseSectionGroup[] = ["clinical", "specialty", "meta"];
+const GROUP_ORDER: readonly OrderSectionGroup[] = [
+  "context",
+  "workflow",
+  "commercial",
+];
 
-export function CaseWorkspaceNav() {
-  const { caseId } = useParams<{ caseId: string }>();
+export function OrderWorkspaceNav() {
+  const { orderId } = useParams<{ orderId: string }>();
   const [searchParams] = useSearchParams();
   const { t, lang } = useLang();
-  const currentSection = normalizeCaseSectionKey(searchParams.get("section"));
+  const currentSection = normalizeOrderSectionKey(searchParams.get("section"));
   const patientContext = searchParams.get("patient");
+  const providerContext = searchParams.get("provider");
+  const doctorContext = searchParams.get("doctor");
 
-  if (!caseId) return null;
+  if (!orderId) return null;
 
   function buildSectionLink(sectionKey: string) {
     const params = new URLSearchParams();
     if (patientContext) params.set("patient", patientContext);
+    if (providerContext) params.set("provider", providerContext);
+    if (doctorContext) params.set("doctor", doctorContext);
     if (sectionKey !== "overview") params.set("section", sectionKey);
     const query = params.toString();
-    return query ? `/cases/${caseId}?${query}` : `/cases/${caseId}`;
+    return query ? `/orders/${orderId}?${query}` : `/orders/${orderId}`;
   }
 
-  const backHref = patientContext ? `/patients/${patientContext}?tab=cases` : "/cases";
+  const backHref = patientContext ? `/patients/${patientContext}?tab=orders` : "/orders";
   const backLabel = patientContext
-    ? (lang === "de" ? "Patient" : lang === "ru" ? "Пациент" : "Patient")
-    : t.cases_title;
+    ? lang === "de"
+      ? "Patient"
+      : "Пациент"
+    : t.orders_title;
 
   const groupedSections = GROUP_ORDER.map((group) => ({
     group,
-    items: CASE_WORKSPACE_SECTIONS.filter((item) => item.group === group),
+    items: ORDER_WORKSPACE_SECTIONS.filter((item) => item.group === group),
   })).filter((entry) => entry.items.length > 0);
 
   return (
     <aside
-      data-workspace-rail="case"
+      data-workspace-rail="order"
       className="hidden lg:flex lg:w-64 xl:w-72 shrink-0 flex-col overflow-hidden rounded-xl border border-border/70 bg-card shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
     >
       <div className="px-4 pt-4">
@@ -64,7 +74,7 @@ export function CaseWorkspaceNav() {
             ) : null}
             <div className="px-3 pb-1.5">
               <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70">
-                {caseSectionGroupLabel(group, lang)}
+                {orderSectionGroupLabel(group, lang)}
               </span>
             </div>
             <div className="space-y-1">
@@ -95,7 +105,7 @@ export function CaseWorkspaceNav() {
                       strokeWidth={isActive ? 1.85 : 1.7}
                     />
                     <span className="truncate font-medium leading-5">
-                      {caseSectionLabel(item, lang)}
+                      {orderSectionLabel(item, lang)}
                     </span>
                   </StaffLink>
                 );

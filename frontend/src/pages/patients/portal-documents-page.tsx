@@ -1,3 +1,4 @@
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { startTransition, useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { Download, LoaderCircle, RefreshCw, ShieldCheck, Upload } from "lucide-react";
 
@@ -399,7 +400,7 @@ export function PatientDocumentsPage() {
             </div>
             <form className="mt-5 space-y-4" onSubmit={(event) => void handleUpload(event)}>
               <Field label={l("Upload-Typ", "Тип загрузки", "Upload type")}>
-                <select
+                <NativeComboboxSelect
                   value={uploadKind}
                   onChange={(event) => setUploadKind(event.target.value)}
                   className="h-11 w-full rounded-2xl border border-slate-200 bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
@@ -407,7 +408,7 @@ export function PatientDocumentsPage() {
                   <option value="general">{l("Allgemein", "Общий", "General")}</option>
                   <option value="medical_record">{l("Medizinischer Befund", "Медицинский документ", "Medical record")}</option>
                   <option value="insurance_document">{l("Versicherungsdokument", "Страховой документ", "Insurance document")}</option>
-                </select>
+                </NativeComboboxSelect>
               </Field>
               <Field label={l("Titel", "Название", "Title")}>
                 <input
