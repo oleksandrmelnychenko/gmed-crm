@@ -1,7 +1,6 @@
 import {
   startTransition,
   useCallback,
-  useDeferredValue,
   useEffect,
   useMemo,
   useState,
@@ -16,7 +15,6 @@ import {
   LoaderCircle,
   MessageSquare,
   RefreshCw,
-  Search,
   Send,
   Star,
   Users,
@@ -26,14 +24,20 @@ import {
   AdminInlineMetric,
   AdminSheetScaffold,
   AdminTableCard,
-  AdminToolbar,
   SheetFormFooter,
 } from "@/components/admin-page-patterns";
 import { DataTable } from "@/components/data-table/data-table";
+import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import {
+  Select as ShadSelect,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Sheet,
   SheetContent,
@@ -43,7 +47,6 @@ import {
   PageHeader,
   StatusBadge,
   SuccessBanner,
-  inputClass as shellInputClassName,
   selectClass as shellSelectClassName,
   textareaClass as shellTextareaClass,
   tokens,
@@ -79,7 +82,6 @@ import {
 } from "./data/feedback-api";
 import {
   blankFeedbackForm,
-  buildFeedbackQuery,
   canViewStaffFeedback,
   feedbackText,
   npsOptions,
@@ -95,6 +97,16 @@ import type {
 
 const selectClassName = shellSelectClassName;
 const textareaClassName = shellTextareaClass;
+const FEEDBACK_DEFAULT_FROZEN_COLUMNS = ["patient"];
+const FEEDBACK_DEFAULT_HIDDEN_COLUMNS = [
+  "comments",
+  "improvement_notes",
+  "internal_note",
+  "review_note",
+];
+const FEEDBACK_MAX_FROZEN_COLUMNS = 2;
+const FEEDBACK_STATUSES = ["submitted", "reviewed", "archived"];
+const FEEDBACK_SOURCES = ["patient_portal", "staff_capture"];
 
 type Localize = (de: string, ru: string, en: string) => string;
 type SetFeedbackForm = Dispatch<SetStateAction<FeedbackFormState>>;
@@ -106,6 +118,13 @@ function titleWithDot(title: ReactNode) {
       <span>{title}</span>
     </span>
   );
+}
+
+function feedbackReviewStatusLabel(status: string, l: Localize) {
+  if (status === "submitted") return l("Eingereicht", "Отправлено", "Submitted");
+  if (status === "reviewed") return l("Geprüft", "Проверено", "Reviewed");
+  if (status === "archived") return l("Archiviert", "В архиве", "Archived");
+  return portalStatusLabel(status);
 }
 
 const FEEDBACK_REALTIME_EVENTS = [
@@ -183,6 +202,12 @@ function treatmentSuccessLabel(value?: string | null) {
   return portalNotSetLabel();
 }
 
+function appointmentOptionLabel(item: PatientAppointmentOption) {
+  return [formatPortalDate(item.date), item.title, item.provider_name, item.doctor_name]
+    .filter(Boolean)
+    .join(" · ");
+}
+
 function scoreField(
   label: string,
   value: string,
@@ -191,17 +216,21 @@ function scoreField(
 ) {
   return (
     <Field label={label}>
-      <select
+      <ShadSelect
         value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className={selectClassName}
+        onValueChange={(nextValue) => onChange(nextValue ?? value)}
       >
-        {options.map((option) => (
-          <option key={option} value={option}>
-            {option}
-          </option>
-        ))}
-      </select>
+        <SelectTrigger className={selectClassName}>
+          <SelectValue>{value}</SelectValue>
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((option) => (
+            <SelectItem key={option} value={option}>
+              {option}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </ShadSelect>
     </Field>
   );
 }
@@ -274,17 +303,21 @@ function ScoreGrid({
         scoreOptions,
       )}
       <Field label={l("Behandlungserfolg", "Успех лечения", "Treatment success")}>
-        <select
+        <ShadSelect
           value={form.treatmentSuccess}
-          onChange={(event) =>
-            setForm((current) => ({ ...current, treatmentSuccess: event.target.value }))
+          onValueChange={(value) =>
+            setForm((current) => ({ ...current, treatmentSuccess: value ?? current.treatmentSuccess }))
           }
-          className={selectClassName}
         >
-          <option value="yes">{l("Ja", "Да", "Yes")}</option>
-          <option value="partial">{l("Teilweise", "Частично", "Partial")}</option>
-          <option value="no">{l("Nein", "Нет", "No")}</option>
-        </select>
+          <SelectTrigger className={selectClassName}>
+            <SelectValue>{treatmentSuccessLabel(form.treatmentSuccess)}</SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="yes">{l("Ja", "Да", "Yes")}</SelectItem>
+            <SelectItem value="partial">{l("Teilweise", "Частично", "Partial")}</SelectItem>
+            <SelectItem value="no">{l("Nein", "Нет", "No")}</SelectItem>
+          </SelectContent>
+        </ShadSelect>
       </Field>
       <label className={cn("flex items-center gap-3 rounded-lg px-3 py-2", tokens.surface.mutedCard)}>
         <input
@@ -758,22 +791,36 @@ function PatientFeedbackWorkspace() {
         >
           <form className="space-y-3 p-4" onSubmit={(event) => void handleSubmit(event)}>
             <Field label={l("Termin", "Визит", "Appointment")}>
-              <select
-                value={form.appointmentId}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, appointmentId: event.target.value }))
+              <ShadSelect
+                value={form.appointmentId || "__general__"}
+                onValueChange={(value) =>
+                  setForm((current) => ({
+                    ...current,
+                    appointmentId: value === "__general__" || !value ? "" : value,
+                  }))
                 }
-                className={selectClassName}
               >
-                <option value="">{l("Allgemeines Feedback", "Общий отзыв", "General feedback")}</option>
-                {availableAppointments.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {[formatPortalDate(item.date), item.title, item.provider_name, item.doctor_name]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger className={selectClassName}>
+                  <SelectValue>
+                    {form.appointmentId
+                      ? (() => {
+                          const appointment = availableAppointments.find((item) => item.id === form.appointmentId);
+                          return appointment ? appointmentOptionLabel(appointment) : form.appointmentId;
+                        })()
+                      : l("Allgemeines Feedback", "Общий отзыв", "General feedback")}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__general__">
+                    {l("Allgemeines Feedback", "Общий отзыв", "General feedback")}
+                  </SelectItem>
+                  {availableAppointments.map((item) => (
+                    <SelectItem key={item.id} value={item.id}>
+                      {appointmentOptionLabel(item)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </ShadSelect>
             </Field>
 
             <ScoreGrid l={l} form={form} setForm={setForm} />
@@ -853,11 +900,6 @@ function StaffFeedbackWorkspace() {
   const [form, setForm] = useState<FeedbackFormState>(blankFeedbackForm());
   const [selectedPatientId, setSelectedPatientId] = useState("");
 
-  const [search, setSearch] = useState("");
-  const deferredSearch = useDeferredValue(search);
-  const [statusFilter, setStatusFilter] = useState("");
-  const [sourceFilter, setSourceFilter] = useState("");
-
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -870,11 +912,6 @@ function StaffFeedbackWorkspace() {
   const [reviewStatus, setReviewStatus] = useState("reviewed");
   const [reviewNote, setReviewNote] = useState("");
   const [captureOpen, setCaptureOpen] = useState(false);
-
-  const queryString = useMemo(
-    () => buildFeedbackQuery(deferredSearch, statusFilter, sourceFilter),
-    [deferredSearch, statusFilter, sourceFilter],
-  );
 
   useRealtimeSubscription(FEEDBACK_REALTIME_EVENTS, () => {
     if (!canViewWorkspace) return;
@@ -903,7 +940,7 @@ function StaffFeedbackWorkspace() {
         const {
           feedback: feedbackRows,
           summary: summaryData,
-        } = await fetchStaffFeedbackWorkspace(queryString);
+        } = await fetchStaffFeedbackWorkspace("");
         if (cancelled) return;
         startTransition(() => {
           setFeedback(feedbackRows);
@@ -933,7 +970,7 @@ function StaffFeedbackWorkspace() {
     return () => {
       cancelled = true;
     };
-  }, [canViewWorkspace, loading, queryString, version, l]);
+  }, [canViewWorkspace, loading, version, l]);
 
   useEffect(() => {
     if (!canViewWorkspace || !canCapture) return;
@@ -977,12 +1014,74 @@ function StaffFeedbackWorkspace() {
     };
   }, [canCapture, canViewWorkspace, selectedPatientId]);
 
+  const feedbackTableDictionary = useMemo(
+    () => ({
+      table_filter: l("Filter", "Фильтр", "Filter"),
+      table_filter_search_fields: l("Feld suchen", "Найти поле", "Search fields"),
+      table_filter_no_fields: l("Keine Felder", "Нет полей", "No fields"),
+      table_filter_remove: l("Entfernen", "Убрать", "Remove"),
+      table_filter_value: l("Wert", "Значение", "Value"),
+      table_sort_add: l("Sortierung", "Сортировка", "Sort"),
+      table_sort_clear: l("Zurücksetzen", "Сбросить", "Clear"),
+      table_sort_ascending: l("Aufsteigend", "По возрастанию", "Ascending"),
+      table_sort_descending: l("Absteigend", "По убыванию", "Descending"),
+      table_sort_move_up: l("Nach oben", "Выше", "Move up"),
+      table_sort_move_down: l("Nach unten", "Ниже", "Move down"),
+      table_columns: l("Spalten", "Колонки", "Columns"),
+      table_columns_search: l("Spalte suchen", "Найти колонку", "Search columns"),
+      table_columns_show_all: l("Alle anzeigen", "Показать все", "Show all"),
+      table_columns_hide_all: l("Alle ausblenden", "Скрыть все", "Hide all"),
+      table_columns_required: l("Pflicht", "Обязательная", "Required"),
+      table_columns_freeze: l("Fixieren", "Закрепить", "Freeze"),
+      table_columns_unfreeze: l("Lösen", "Открепить", "Unfreeze"),
+      table_columns_frozen: l("Fixiert", "Закреплена", "Frozen"),
+      table_columns_freeze_limit: l("Limit erreicht", "Достигнут лимит", "Freeze limit reached"),
+      table_density: l("Dichte", "Плотность", "Density"),
+      table_density_comfortable: l("Komfort", "Комфортная", "Comfortable"),
+      table_density_compact: l("Kompakt", "Компактная", "Compact"),
+      table_density_condensed: l("Dicht", "Плотная", "Condensed"),
+      table_actions: l("Aktionen", "Действия", "Actions"),
+      common_reset: l("Zurücksetzen", "Сбросить", "Reset"),
+      common_remove: l("Entfernen", "Убрать", "Remove"),
+      common_clear_all: l("Zurücksetzen", "Сбросить", "Clear"),
+      common_yes: l("Ja", "Да", "Yes"),
+      common_no: l("Nein", "Нет", "No"),
+      filter_op_contains: l("enthält", "содержит", "contains"),
+      filter_op_does_not_contain: l("enthält nicht", "не содержит", "does not contain"),
+      filter_op_is_empty: l("ist leer", "пусто", "is empty"),
+      filter_op_is_not_empty: l("ist nicht leer", "не пусто", "is not empty"),
+      filter_op_is: l("ist", "равно", "is"),
+      filter_op_is_not: l("ist nicht", "не равно", "is not"),
+      filter_op_is_any_of: l("ist eines von", "одно из", "is any of"),
+      filter_op_is_none_of: l("ist keines von", "ни одно из", "is none of"),
+      filter_op_before: l("vor", "до", "before"),
+      filter_op_after: l("nach", "после", "after"),
+      filter_op_between: l("zwischen", "между", "between"),
+      filter_op_last_n_days: l("letzte N Tage", "последние N дней", "last N days"),
+      filter_op_equals: l("gleich", "равно", "equals"),
+    }),
+    [l],
+  );
+
+  const feedbackColumnGroups = useMemo(
+    () => ({
+      identity: l("Identität", "Идентификация", "Identity"),
+      feedback: l("Feedback", "Отзыв", "Feedback"),
+      treatment: l("Behandlung", "Лечение", "Treatment"),
+      scores: l("Scores", "Оценки", "Scores"),
+      audit: l("Audit", "Аудит", "Audit"),
+    }),
+    [l],
+  );
+
   const feedbackColumns = useMemo<ColumnDef<PortalFeedbackItem>[]>(
     () => [
       {
         id: "submitted",
         label: l("Datum", "Дата", "Date"),
         accessor: (row) => row.submitted_at,
+        filterType: "date",
+        group: "audit",
         sortable: true,
         width: 170,
         render: (row) => (
@@ -993,6 +1092,9 @@ function StaffFeedbackWorkspace() {
         id: "patient",
         label: l("Patient", "Пациент", "Patient"),
         accessor: (row) => row.patient_name ?? "",
+        filterType: "text",
+        group: "identity",
+        searchable: true,
         sortable: true,
         width: 220,
         pinned: "left",
@@ -1006,6 +1108,9 @@ function StaffFeedbackWorkspace() {
         id: "patient_pid",
         label: "PID",
         accessor: (row) => row.patient_pid ?? "",
+        filterType: "text",
+        group: "identity",
+        searchable: true,
         width: 130,
         render: (row) => (
           <span className="text-xs text-foreground">{row.patient_pid || portalNotSetLabel()}</span>
@@ -1015,6 +1120,13 @@ function StaffFeedbackWorkspace() {
         id: "source",
         label: l("Quelle", "Источник", "Source"),
         accessor: (row) => row.source,
+        filterType: "enum",
+        filterOptions: FEEDBACK_SOURCES.map((source) => ({
+          value: source,
+          label: feedbackSourceLabel(source),
+        })),
+        group: "feedback",
+        sortable: true,
         width: 160,
         render: (row) => <span className="text-xs text-foreground">{feedbackSourceLabel(row.source)}</span>,
       },
@@ -1022,16 +1134,26 @@ function StaffFeedbackWorkspace() {
         id: "status",
         label: l("Status", "Статус", "Status"),
         accessor: (row) => row.status,
+        filterType: "enum",
+        filterOptions: FEEDBACK_STATUSES.map((status) => ({
+          value: status,
+          label: feedbackReviewStatusLabel(status, l),
+        })),
+        group: "feedback",
         sortable: true,
         width: 140,
         render: (row) => (
-          <StatusBadge tone={toneForStatus(row.status)}>{portalStatusLabel(row.status)}</StatusBadge>
+          <StatusBadge tone={toneForStatus(row.status)}>
+            {feedbackReviewStatusLabel(row.status, l)}
+          </StatusBadge>
         ),
       },
       {
         id: "nps",
         label: "NPS",
         accessor: (row) => row.nps_score,
+        filterType: "number",
+        group: "scores",
         sortable: true,
         width: 120,
         render: (row) => <span className="text-xs text-foreground">{row.nps_score}</span>,
@@ -1040,6 +1162,9 @@ function StaffFeedbackWorkspace() {
         id: "provider",
         label: l("Provider", "Провайдер", "Provider"),
         accessor: (row) => row.provider_name ?? "",
+        filterType: "text",
+        group: "treatment",
+        searchable: true,
         width: 220,
         render: (row) => (
           <span className="text-xs text-foreground">{row.provider_name || portalNotSetLabel()}</span>
@@ -1049,9 +1174,68 @@ function StaffFeedbackWorkspace() {
         id: "doctor",
         label: l("Arzt", "Врач", "Doctor"),
         accessor: (row) => row.doctor_name ?? "",
+        filterType: "text",
+        group: "treatment",
+        searchable: true,
         width: 220,
         render: (row) => (
           <span className="text-xs text-foreground">{row.doctor_name || portalNotSetLabel()}</span>
+        ),
+      },
+      {
+        id: "comments",
+        label: l("Kommentar", "Комментарий", "Comment"),
+        accessor: (row) => row.comments ?? "",
+        filterType: "text",
+        group: "feedback",
+        searchable: true,
+        width: 260,
+        render: (row) => (
+          <span className="line-clamp-2 text-xs text-foreground">
+            {row.comments || portalNotSetLabel()}
+          </span>
+        ),
+      },
+      {
+        id: "improvement_notes",
+        label: l("Hinweise", "Замечания", "Notes"),
+        accessor: (row) => row.improvement_notes ?? "",
+        filterType: "text",
+        group: "feedback",
+        searchable: true,
+        width: 260,
+        render: (row) => (
+          <span className="line-clamp-2 text-xs text-foreground">
+            {row.improvement_notes || portalNotSetLabel()}
+          </span>
+        ),
+      },
+      {
+        id: "internal_note",
+        label: l("Interne Notiz", "Внутренняя заметка", "Internal note"),
+        accessor: (row) => row.internal_note ?? "",
+        filterType: "text",
+        group: "audit",
+        searchable: true,
+        width: 260,
+        render: (row) => (
+          <span className="line-clamp-2 text-xs text-foreground">
+            {row.internal_note || portalNotSetLabel()}
+          </span>
+        ),
+      },
+      {
+        id: "review_note",
+        label: l("Prüfnotiz", "Заметка проверки", "Review note"),
+        accessor: (row) => row.review_note ?? "",
+        filterType: "text",
+        group: "audit",
+        searchable: true,
+        width: 260,
+        render: (row) => (
+          <span className="line-clamp-2 text-xs text-foreground">
+            {row.review_note || portalNotSetLabel()}
+          </span>
         ),
       },
     ],
@@ -1256,68 +1440,57 @@ function StaffFeedbackWorkspace() {
               "Search by patient, clinic, doctor or notes.",
             )}
             count={feedback.length}
-            accessory={
-              <AdminToolbar>
-                <div className="relative">
-                  <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    value={search}
-                    onChange={(event) => setSearch(event.target.value)}
-                    placeholder={l(
-                      "Patient, Klinik, Arzt oder Notiz",
-                      "Пациент, клиника, врач или заметка",
-                      "Patient, clinic, doctor or note",
-                    )}
-                    className={cn(shellInputClassName, "w-72 pl-8")}
-                  />
-                </div>
-                <select
-                  value={statusFilter}
-                  onChange={(event) => setStatusFilter(event.target.value)}
-                  className={selectClassName}
-                >
-                  <option value="">{l("Alle Status", "Все статусы", "All statuses")}</option>
-                  <option value="submitted">{l("Eingereicht", "Отправлено", "Submitted")}</option>
-                  <option value="reviewed">{l("Geprüft", "Проверено", "Reviewed")}</option>
-                  <option value="archived">{l("Archiviert", "В архиве", "Archived")}</option>
-                </select>
-                <select
-                  value={sourceFilter}
-                  onChange={(event) => setSourceFilter(event.target.value)}
-                  className={selectClassName}
-                >
-                  <option value="">{l("Alle Quellen", "Все источники", "All sources")}</option>
-                  <option value="patient_portal">{l("Patientenportal", "Портал пациента", "Patient portal")}</option>
-                  <option value="staff_capture">{l("Erfassung durch Team", "Фиксация сотрудником", "Staff capture")}</option>
-                </select>
-              </AdminToolbar>
-            }
           >
-            <div className="p-3">
-              <DataTable
-                rows={feedback}
-                columns={feedbackColumns}
-                rowId={(row) => row.id}
-                activeRowId={activeReview?.id ?? null}
-                onRowClick={(row) => openReview(row)}
-                rowActions={(row) => (
-                  <Button type="button" variant="outline" className="h-8 rounded-lg" onClick={() => openReview(row)}>
-                    <ClipboardPen className="size-3.5" />
-                    {l("Prüfen", "Проверить", "Review")}
-                  </Button>
-                )}
-                emptyState={
-                  <EmptyState
-                    title={l("Keine Feedback-Einträge", "Нет записей отзывов", "No feedback entries")}
-                    description={l(
-                      "Die aktuellen Filter liefern keine Datensätze.",
-                      "Текущие фильтры не возвращают записи.",
-                      "Current filters do not return records.",
-                    )}
-                  />
-                }
-              />
-            </div>
+            <DataTableSurface
+              rows={feedback}
+              columns={feedbackColumns}
+              rowId={(row) => row.id}
+              defaultDensity="compact"
+              defaultFrozenColumns={FEEDBACK_DEFAULT_FROZEN_COLUMNS}
+              defaultHiddenColumns={FEEDBACK_DEFAULT_HIDDEN_COLUMNS}
+              dictionary={feedbackTableDictionary}
+              groupLabels={feedbackColumnGroups}
+              loading={refreshing}
+              maxFrozenColumns={FEEDBACK_MAX_FROZEN_COLUMNS}
+              tableClassName="min-h-[560px] xl:min-h-[640px]"
+              toolbarClassName="border-b border-border/70 bg-card px-3 py-2"
+              activeRowId={activeReview?.id ?? null}
+              onRowClick={(row) => openReview(row)}
+              rowAccent={(row) => {
+                if (row.id === activeReview?.id) return "bg-sky-500";
+                if (row.status === "submitted") return "bg-amber-500";
+                if (row.status === "reviewed") return "bg-emerald-500";
+                if (row.status === "archived") return "bg-slate-400";
+                return null;
+              }}
+              rowActionsLabel={feedbackTableDictionary.table_actions}
+              rowActionsWidth={150}
+              rowActions={(row) => (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 rounded-md px-2 text-[11px]"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    openReview(row);
+                  }}
+                >
+                  <ClipboardPen className="size-3.5" />
+                  {l("Prüfen", "Открыть", "Review")}
+                </Button>
+              )}
+              emptyState={
+                <EmptyState
+                  title={l("Keine Feedback-Einträge", "Нет записей отзывов", "No feedback entries")}
+                  description={l(
+                    "Die aktuellen Filter liefern keine Datensätze.",
+                    "Текущие фильтры не возвращают записи.",
+                    "Current filters do not return records.",
+                  )}
+                />
+              }
+            />
           </AdminTableCard>
         </div>
 
@@ -1425,38 +1598,69 @@ function StaffFeedbackWorkspace() {
               }
             >
               <Field label={l("Patient", "Пациент", "Patient")}>
-                <select
-                  value={selectedPatientId}
-                  onChange={(event) => setSelectedPatientId(event.target.value)}
-                  className={selectClassName}
+                <ShadSelect
+                  value={selectedPatientId || "__empty__"}
+                  onValueChange={(value) => setSelectedPatientId(value === "__empty__" || !value ? "" : value)}
                 >
-                  <option value="">{l("Patient auswählen", "Выберите пациента", "Select patient")}</option>
-                  {patients.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {patientLabel(item)}
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger className={selectClassName}>
+                    <SelectValue>
+                      {selectedPatientId
+                        ? patientLabel(
+                            patients.find((item) => item.id === selectedPatientId) ?? {
+                              id: selectedPatientId,
+                              patient_id: selectedPatientId,
+                              first_name: "",
+                              last_name: "",
+                            },
+                          )
+                        : l("Patient auswählen", "Выберите пациента", "Select patient")}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__empty__">
+                      {l("Patient auswählen", "Выберите пациента", "Select patient")}
+                    </SelectItem>
+                    {patients.map((item) => (
+                      <SelectItem key={item.id} value={item.id}>
+                        {patientLabel(item)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </ShadSelect>
               </Field>
 
               <Field label={l("Termin", "Визит", "Appointment")}>
-                <select
-                  value={form.appointmentId}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, appointmentId: event.target.value }))
+                <ShadSelect
+                  value={form.appointmentId || "__general__"}
+                  onValueChange={(value) =>
+                    setForm((current) => ({
+                      ...current,
+                      appointmentId: value === "__general__" || !value ? "" : value,
+                    }))
                   }
-                  className={selectClassName}
                   disabled={!selectedPatientId}
                 >
-                  <option value="">{l("Allgemeines Feedback", "Общий отзыв", "General feedback")}</option>
-                  {patientAppointments.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {[formatPortalDate(item.date), item.title, item.provider_name, item.doctor_name]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger className={selectClassName}>
+                    <SelectValue>
+                      {form.appointmentId
+                        ? (() => {
+                            const appointment = patientAppointments.find((item) => item.id === form.appointmentId);
+                            return appointment ? appointmentOptionLabel(appointment) : form.appointmentId;
+                          })()
+                        : l("Allgemeines Feedback", "Общий отзыв", "General feedback")}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__general__">
+                      {l("Allgemeines Feedback", "Общий отзыв", "General feedback")}
+                    </SelectItem>
+                    {patientAppointments.map((item) => (
+                      <SelectItem key={item.id} value={item.id}>
+                        {appointmentOptionLabel(item)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </ShadSelect>
               </Field>
 
               <ScoreGrid l={l} form={form} setForm={setForm} />
@@ -1492,14 +1696,18 @@ function StaffFeedbackWorkspace() {
                 <AdminTableCard title={titleWithDot(l("Review actions", "Действия проверки", "Review actions"))}>
                   <div className="space-y-3 p-3">
                     <Field label={l("Prüfstatus", "Статус проверки", "Review status")}>
-                      <select
+                      <ShadSelect
                         value={reviewStatus}
-                        onChange={(event) => setReviewStatus(event.target.value)}
-                        className={selectClassName}
+                        onValueChange={(value) => setReviewStatus(value ?? reviewStatus)}
                       >
-                        <option value="reviewed">{l("Geprüft", "Проверено", "Reviewed")}</option>
-                        <option value="archived">{l("Archiviert", "В архиве", "Archived")}</option>
-                      </select>
+                        <SelectTrigger className={selectClassName}>
+                          <SelectValue>{feedbackReviewStatusLabel(reviewStatus, l)}</SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="reviewed">{l("Geprüft", "Проверено", "Reviewed")}</SelectItem>
+                          <SelectItem value="archived">{l("Archiviert", "В архиве", "Archived")}</SelectItem>
+                        </SelectContent>
+                      </ShadSelect>
                     </Field>
                     <Field label={l("Prüfnotiz", "Заметка по проверке", "Review note")}>
                       <textarea
