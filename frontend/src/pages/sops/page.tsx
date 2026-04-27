@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useState, type ElementType, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 import {
   BookOpen,
   CheckCheck,
@@ -7,21 +14,36 @@ import {
   Plus,
   RefreshCw,
   ShieldCheck,
-  Users,
 } from "lucide-react";
 
+import {
+  AdminInlineMetric,
+  AdminSheetScaffold,
+  AdminTableCard,
+  AdminToolbar,
+  SheetFormFooter,
+} from "@/components/admin-page-patterns";
+import { DataTable } from "@/components/data-table/data-table";
+import type { ColumnDef } from "@/components/data-table/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import {
+  Select as ShadSelect,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
+import {
+  Banner as ShellBanner,
+  PageHeader,
+  SuccessBanner,
+  inputClass as shellInputClassName,
+  textareaClass as shellTextareaClass,
+  tokens,
+} from "@/components/ui-shell";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -34,8 +56,6 @@ import {
   saveSopContent,
 } from "./data/sops-api";
 import {
-  approvalRoleLabel,
-  categoryLabel,
   emptyForm,
   formDescription,
   formatDate,
@@ -46,32 +66,351 @@ import {
 } from "./model/sops-model";
 import type { EligibleUser, SopFormState, SopItem } from "./model/types";
 
-function card(extra?: string) {
-  return cn(
-    "rounded-[1.75rem] border border-border/70 bg-card shadow-[0_20px_60px_rgba(15,23,42,0.05)]",
-    extra,
+const selectTriggerClassName = cn(
+  "w-full justify-between",
+  shellInputClassName,
+);
+const textareaClassName = shellTextareaClass;
+
+function titleWithDot(title: ReactNode) {
+  return (
+    <span className="inline-flex items-center gap-2">
+      <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
+      <span>{title}</span>
+    </span>
   );
 }
 
-function metricCard(label: string, value: string | number, icon: ElementType) {
-  const Icon = icon;
+function EmptyState({
+  title,
+  description,
+  action,
+}: {
+  title: string;
+  description: string;
+  action?: ReactNode;
+}) {
   return (
-    <article className="rounded-[1.5rem] border border-white/90 bg-white/88 p-4 shadow-sm backdrop-blur">
-      <div className="flex items-center justify-between">
-        <p className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">{label}</p>
-        <span className="rounded-2xl bg-slate-100 p-2 text-slate-700">
-          <Icon className="size-4" />
-        </span>
-      </div>
-      <p className="mt-4 text-3xl font-semibold tracking-tight text-slate-950">{value}</p>
-    </article>
+    <div className={cn("rounded-xl px-6 py-10 text-center", tokens.surface.dashed)}>
+      <h3 className="text-lg font-semibold text-foreground">{title}</h3>
+      <p className="mx-auto mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
+        {description}
+      </p>
+      {action ? <div className="mt-5 flex justify-center">{action}</div> : null}
+    </div>
+  );
+}
+
+function LoadingState({ label }: { label: string }) {
+  return (
+    <div
+      className={cn(
+        "rounded-xl px-6 py-12 text-center text-sm text-muted-foreground",
+        tokens.surface.card,
+      )}
+    >
+      <LoaderCircle className="mx-auto mb-3 size-5 animate-spin" />
+      {label}
+    </div>
+  );
+}
+
+function DetailField({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className={cn("rounded-xl p-3", tokens.surface.mutedCard)}>
+      <div className={tokens.text.eyebrow}>{label}</div>
+      <div className="mt-2 text-sm text-foreground">{value}</div>
+    </div>
+  );
+}
+
+function Field({
+  label,
+  className,
+  children,
+}: {
+  label: string;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <label className={cn("flex flex-col gap-1.5", className)}>
+      <span className={tokens.text.label}>{label}</span>
+      {children}
+    </label>
   );
 }
 
 export function SopsPage() {
   const { user } = useAuth();
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
+  const l = useCallback(
+    (de: string, ru: string, en: string) =>
+      lang === "de" ? de : lang === "ru" ? ru : en,
+    [lang],
+  );
+
+  const text = useMemo(
+    () => ({
+      accessDenied: l(
+        "Dieser Bereich steht nur internen Rollen zur Verfügung.",
+        "Этот раздел доступен только внутренним ролям.",
+        "This section is available only for internal roles.",
+      ),
+      loadingWorkspace: l(
+        "SOP-Arbeitsbereich wird geladen...",
+        "Загрузка раздела SOP...",
+        "Loading SOP workspace...",
+      ),
+      title: l("SOP и обучение", "SOP и обучение", "SOP and learning"),
+      subtitle: l(
+        "Библиотека SOP, handbook и training с маршрутами согласования и подтверждением ознакомления.",
+        "Библиотека SOP, handbook и training с маршрутами согласования и подтверждением ознакомления.",
+        "SOP, handbook and training library with approval routing and acknowledgement tracking.",
+      ),
+      refresh: l("Aktualisieren", "Обновить", "Refresh"),
+      newContent: l("Neuer контент", "Новый контент", "New content"),
+      noticesSavedCreate: l(
+        "Контент создан.",
+        "Контент создан.",
+        "Content created.",
+      ),
+      noticesSavedUpdate: l(
+        "Контент обновлен.",
+        "Контент обновлен.",
+        "Content updated.",
+      ),
+      noticesAckRequested: l(
+        "Запрос на подтверждение отправлен.",
+        "Запрос на подтверждение отправлен.",
+        "Acknowledgement request sent.",
+      ),
+      noticesAckDone: l(
+        "Подтверждение зафиксировано.",
+        "Подтверждение зафиксировано.",
+        "Acknowledgement recorded.",
+      ),
+      noticesReviewSaved: l(
+        "Решение ревью сохранено.",
+        "Решение ревью сохранено.",
+        "Review decision saved.",
+      ),
+      failLoad: l(
+        "Не удалось загрузить раздел SOP.",
+        "Не удалось загрузить раздел SOP.",
+        "Failed to load SOP workspace.",
+      ),
+      failSave: l(
+        "Не удалось сохранить контент.",
+        "Не удалось сохранить контент.",
+        "Failed to save content.",
+      ),
+      failAckRequest: l(
+        "Не удалось отправить запрос подтверждения.",
+        "Не удалось отправить запрос подтверждения.",
+        "Failed to request acknowledgement.",
+      ),
+      failAck: l(
+        "Не удалось зафиксировать подтверждение.",
+        "Не удалось зафиксировать подтверждение.",
+        "Failed to acknowledge content.",
+      ),
+      failReview: l(
+        "Не удалось сохранить ревью.",
+        "Не удалось сохранить ревью.",
+        "Failed to review content.",
+      ),
+      metricsVisible: l(
+        "Visible content",
+        "Видимый контент",
+        "Visible content",
+      ),
+      metricsApproved: l("Approved", "Подтверждено", "Approved"),
+      metricsPendingAck: l(
+        "Pending acknowledgement",
+        "Ожидает подтверждения",
+        "Pending acknowledgement",
+      ),
+      queueTitle: l(
+        "Очередь согласования",
+        "Очередь согласования",
+        "Approval queue",
+      ),
+      queueDescription: l(
+        "Элементы, ожидающие решения текущей роли.",
+        "Элементы, ожидающие решения текущей роли.",
+        "Items waiting for decision by current role.",
+      ),
+      queueEmptyTitle: l(
+        "Очередь пустая",
+        "Очередь пустая",
+        "Queue is empty",
+      ),
+      queueEmptyDescription: l(
+        "Сейчас нет SOP в статусе ожидания согласования.",
+        "Сейчас нет SOP в статусе ожидания согласования.",
+        "There are no SOP items waiting for approval.",
+      ),
+      libraryTitle: l("Бухгалтерский реестр SOP", "Реестр SOP", "SOP registry"),
+      libraryDescription: l(
+        "Единый список видимого контента с фильтрацией, статусами и действиями.",
+        "Единый список видимого контента с фильтрацией, статусами и действиями.",
+        "Unified content list with filters, statuses and actions.",
+      ),
+      librarySearchPlaceholder: l(
+        "Поиск по title, summary или роли",
+        "Поиск по title, summary или роли",
+        "Search by title, summary or role",
+      ),
+      libraryEmptyTitle: l(
+        "Контент отсутствует",
+        "Контент отсутствует",
+        "No learning content",
+      ),
+      libraryEmptyDescription: l(
+        "После публикации или назначения контент появится в реестре.",
+        "После публикации или назначения контент появится в реестре.",
+        "Content will appear once approved or assigned.",
+      ),
+      detailTitle: l("Карточка SOP", "Карточка SOP", "SOP detail"),
+      detailDescription: l(
+        "Статус, таргетинг, текст контента и операционные действия.",
+        "Статус, таргетинг, текст контента и операционные действия.",
+        "Status, targeting, content body and operational actions.",
+      ),
+      detailOverview: l("Обзор", "Обзор", "Overview"),
+      detailTargeting: l("Таргетинг", "Таргетинг", "Targeting"),
+      detailBody: l("Контент", "Контент", "Content"),
+      detailActions: l("Действия", "Действия", "Actions"),
+      noSelectionTitle: l(
+        "Запись не выбрана",
+        "Запись не выбрана",
+        "No item selected",
+      ),
+      noSelectionDescription: l(
+        "Выберите запись в таблице, чтобы открыть right view.",
+        "Выберите запись в таблице, чтобы открыть right view.",
+        "Select an item in the table to open right view.",
+      ),
+      targetingModelTitle: l(
+        "Модель таргетинга",
+        "Модель таргетинга",
+        "Targeting model",
+      ),
+      targetingModelDescription: l(
+        "Доступ определяется ролями и прямыми назначениями пользователей.",
+        "Доступ определяется ролями и прямыми назначениями пользователей.",
+        "Visibility is defined by target roles and direct user assignments.",
+      ),
+      scopeTitle: l("Scope", "Scope", "Scope"),
+      scopeDescription: l(
+        "Срез покрывает библиотеку SOP, маршруты approval и подтверждение ознакомления.",
+        "Срез покрывает библиотеку SOP, маршруты approval и подтверждение ознакомления.",
+        "Current slice covers SOP library, approval routing and acknowledgements.",
+      ),
+      formCreateTitle: l(
+        "Новый контент",
+        "Новый контент",
+        "New content",
+      ),
+      formEditTitle: l(
+        "Редактирование контента",
+        "Редактирование контента",
+        "Edit content",
+      ),
+      formTitle: l("Заголовок", "Заголовок", "Title"),
+      formCategory: l("Категория", "Категория", "Category"),
+      formSummary: l("Краткое описание", "Краткое описание", "Summary"),
+      formBody: l("Текст", "Текст", "Body"),
+      formTargetRoles: l("Целевые роли", "Целевые роли", "Target roles"),
+      formDirectUsers: l(
+        "Прямые назначения",
+        "Прямые назначения",
+        "Direct users",
+      ),
+      formRequiresAck: l(
+        "Требуется подтверждение ознакомления",
+        "Требуется подтверждение ознакомления",
+        "Acknowledgement required",
+      ),
+      formCancel: l("Отмена", "Отмена", "Cancel"),
+      formCreate: l("Создать", "Создать", "Create"),
+      formSave: l("Сохранить", "Сохранить", "Save"),
+      reviewTitle: l("Ревью контента", "Ревью контента", "Review content"),
+      reviewDescription: l(
+        "Подтвердите SOP или верните на доработку с заметкой.",
+        "Подтвердите SOP или верните на доработку с заметкой.",
+        "Approve SOP or return it with a review note.",
+      ),
+      reviewDecision: l("Решение", "Решение", "Decision"),
+      reviewNote: l("Заметка ревью", "Заметка ревью", "Review note"),
+      reviewApprove: l("Подтвердить", "Подтвердить", "Approve"),
+      reviewReject: l(
+        "Отклонить / доработка",
+        "Отклонить / доработка",
+        "Reject / changes requested",
+      ),
+      reviewSave: l("Сохранить ревью", "Сохранить ревью", "Save review"),
+      actionOpenReview: l(
+        "Открыть ревью",
+        "Открыть ревью",
+        "Open review",
+      ),
+      actionEdit: l("Редактировать", "Редактировать", "Edit"),
+      actionRequestAck: l(
+        "Запросить ack",
+        "Запросить ack",
+        "Request ack",
+      ),
+      actionAcknowledge: l(
+        "Подтвердить",
+        "Подтвердить",
+        "Acknowledge",
+      ),
+      statusNotSet: l("Не задано", "Не задано", "Not set"),
+      columns: {
+        title: l("Название", "Название", "Title"),
+        summary: l("Описание", "Описание", "Summary"),
+        status: l("Статус", "Статус", "Status"),
+        category: l("Категория", "Категория", "Category"),
+        revision: l("Ревизия", "Ревизия", "Revision"),
+        updated: l("Обновлено", "Обновлено", "Updated"),
+        author: l("Автор", "Автор", "Author"),
+        ack: l("Ack", "Ack", "Ack"),
+        approval: l("Маршрут approval", "Маршрут approval", "Approval route"),
+      },
+      categoryLabels: {
+        sop: "SOP",
+        handbook: l("Справочник", "Справочник", "Handbook"),
+        training: l("Обучение", "Обучение", "Training"),
+      },
+      statusLabels: {
+        approved: l("Подтверждено", "Подтверждено", "Approved"),
+        pending_approval: l("Ожидает approval", "Ожидает approval", "Pending approval"),
+        rejected: l("Отклонено", "Отклонено", "Rejected"),
+        archived: l("Архив", "Архив", "Archived"),
+        draft: l("Черновик", "Черновик", "Draft"),
+      },
+      ackLabels: {
+        pending: l("Ожидает", "Ожидает", "Pending"),
+        acknowledged: l("Подтверждено", "Подтверждено", "Acknowledged"),
+        requested: l("Запрошено", "Запрошено", "Requested"),
+      },
+      directUsers: l("Прямые пользователи", "Прямые пользователи", "Direct users"),
+      pendingAck: l("Ожидает ack", "Ожидает ack", "Pending ack"),
+      acknowledged: l("Подтвердили", "Подтвердили", "Acknowledged"),
+      myStatus: l("Мой статус", "Мой статус", "My status"),
+      approvalRoleCeo: l("CEO approval", "CEO approval", "CEO approval"),
+      approvalRolePm: l(
+        "Patient-manager approval",
+        "Patient-manager approval",
+        "Patient-manager approval",
+      ),
+    }),
+    [l],
+  );
+
   const [items, setItems] = useState<SopItem[]>([]);
   const [reviewQueue, setReviewQueue] = useState<SopItem[]>([]);
   const [eligibleUsers, setEligibleUsers] = useState<EligibleUser[]>([]);
@@ -85,28 +424,60 @@ export function SopsPage() {
   const [reviewOpen, setReviewOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [reviewBusy, setReviewBusy] = useState(false);
+  const [formError, setFormError] = useState("");
+  const [reviewError, setReviewError] = useState("");
   const [editing, setEditing] = useState<SopItem | null>(null);
   const [reviewItem, setReviewItem] = useState<SopItem | null>(null);
+  const [selectedItemId, setSelectedItemId] = useState("");
   const [reviewDecision, setReviewDecision] = useState("approve");
   const [reviewNote, setReviewNote] = useState("");
+  const [actionBusyId, setActionBusyId] = useState<string | null>(null);
   const [form, setForm] = useState<SopFormState>(emptyForm());
+  const [librarySearch, setLibrarySearch] = useState("");
+  const [queueSearch, setQueueSearch] = useState("");
 
   const canCreate = roleCanCreate(user?.role);
   const canReviewQueue = roleCanReview(user?.role);
+  const canOpenPage = roleCanOpenLearning(user?.role);
   const queueCopy = useMemo(() => reviewQueueCopy(user?.role), [user?.role]);
 
+  const roleLabel = useCallback((role: string) => tr[`role_${role}`] ?? role, [tr]);
+  const statusLabel = useCallback(
+    (status: string) =>
+      text.statusLabels[status as keyof typeof text.statusLabels] ?? status,
+    [text],
+  );
+  const categoryLabel = useCallback(
+    (category: string) =>
+      text.categoryLabels[category as keyof typeof text.categoryLabels] ?? category,
+    [text],
+  );
+  const ackLabel = useCallback(
+    (ackStatus?: string | null) =>
+      text.ackLabels[ackStatus as keyof typeof text.ackLabels] ??
+      ackStatus ??
+      text.statusNotSet,
+    [text],
+  );
+  const approvalRoleLabel = useCallback(
+    (value?: string | null) => {
+      if (value === "ceo") return text.approvalRoleCeo;
+      if (value === "patient_manager") return text.approvalRolePm;
+      return text.statusNotSet;
+    },
+    [text],
+  );
+
   useEffect(() => {
-    if (!roleCanOpenLearning(user?.role)) {
+    if (!canOpenPage) {
       setLoading(false);
       return;
     }
 
     let cancelled = false;
+    setRefreshing(!loading);
 
     async function load() {
-      if (loading) setRefreshing(false);
-      else setRefreshing(true);
-
       try {
         const { library, eligible, queue } = await fetchSopsWorkspace(
           canCreate,
@@ -114,14 +485,15 @@ export function SopsPage() {
         );
 
         if (cancelled) return;
+
         setItems(library);
+        setReviewQueue(queue);
         setEligibleUsers(eligible?.eligible_users ?? []);
         setAllowedTargetRoles(eligible?.allowed_target_roles ?? []);
-        setReviewQueue(queue);
         setError("");
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Failed to load SOP workspace.");
+          setError(err instanceof Error ? err.message : text.failLoad);
         }
       } finally {
         if (!cancelled) {
@@ -132,10 +504,11 @@ export function SopsPage() {
     }
 
     void load();
+
     return () => {
       cancelled = true;
     };
-  }, [canCreate, canReviewQueue, loading, user?.role, version]);
+  }, [canCreate, canOpenPage, canReviewQueue, loading, text.failLoad, version]);
 
   const visibleMetrics = useMemo(() => {
     const approved = items.filter((item) => item.status === "approved").length;
@@ -151,9 +524,178 @@ export function SopsPage() {
     );
   }, [eligibleUsers, form.targetRoles, form.targetUserIds]);
 
+  const visibleItems = useMemo(() => {
+    const term = librarySearch.trim().toLowerCase();
+    if (!term) return items;
+    return items.filter((item) =>
+      [
+        item.title,
+        item.summary ?? "",
+        item.created_by_name ?? "",
+        item.created_by_role,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(term),
+    );
+  }, [items, librarySearch]);
+
+  const visibleQueue = useMemo(() => {
+    const term = queueSearch.trim().toLowerCase();
+    if (!term) return reviewQueue;
+    return reviewQueue.filter((item) =>
+      [item.title, item.summary ?? "", item.created_by_name ?? "", item.created_by_role]
+        .join(" ")
+        .toLowerCase()
+        .includes(term),
+    );
+  }, [queueSearch, reviewQueue]);
+
+  const selectedItem = useMemo(
+    () => items.find((item) => item.id === selectedItemId) ?? null,
+    [items, selectedItemId],
+  );
+
+  const queueColumns = useMemo<ColumnDef<SopItem>[]>(
+    () => [
+      {
+        id: "title",
+        label: text.columns.title,
+        accessor: (row) => row.title,
+        sortable: true,
+        required: true,
+        width: 260,
+        render: (row) => <span className="text-sm font-medium text-foreground">{row.title}</span>,
+      },
+      {
+        id: "summary",
+        label: text.columns.summary,
+        accessor: (row) => row.summary ?? "",
+        width: 300,
+        render: (row) => <span className="text-xs text-foreground">{row.summary || text.statusNotSet}</span>,
+      },
+      {
+        id: "status",
+        label: text.columns.status,
+        accessor: (row) => row.status,
+        sortable: true,
+        width: 180,
+        render: (row) => (
+          <Badge variant="outline" className={cn("rounded-full", statusTone(row.status))}>
+            {statusLabel(row.status)}
+          </Badge>
+        ),
+      },
+      {
+        id: "category",
+        label: text.columns.category,
+        accessor: (row) => row.category,
+        sortable: true,
+        width: 150,
+        render: (row) => categoryLabel(row.category),
+      },
+      {
+        id: "approval",
+        label: text.columns.approval,
+        accessor: (row) => row.approval_required_role ?? "",
+        width: 220,
+        render: (row) => approvalRoleLabel(row.approval_required_role),
+      },
+      {
+        id: "updated",
+        label: text.columns.updated,
+        accessor: (row) => row.updated_at,
+        sortable: true,
+        width: 170,
+        render: (row) => formatDate(row.updated_at),
+      },
+      {
+        id: "author",
+        label: text.columns.author,
+        accessor: (row) => row.created_by_name ?? row.created_by_role,
+        width: 190,
+        render: (row) => row.created_by_name || roleLabel(row.created_by_role),
+      },
+    ],
+    [approvalRoleLabel, categoryLabel, roleLabel, statusLabel, text],
+  );
+
+  const libraryColumns = useMemo<ColumnDef<SopItem>[]>(
+    () => [
+      {
+        id: "title",
+        label: text.columns.title,
+        accessor: (row) => row.title,
+        sortable: true,
+        required: true,
+        width: 260,
+        pinned: "left",
+        render: (row) => <span className="text-sm font-medium text-foreground">{row.title}</span>,
+      },
+      {
+        id: "summary",
+        label: text.columns.summary,
+        accessor: (row) => row.summary ?? "",
+        width: 300,
+        render: (row) => <span className="text-xs text-foreground">{row.summary || text.statusNotSet}</span>,
+      },
+      {
+        id: "status",
+        label: text.columns.status,
+        accessor: (row) => row.status,
+        sortable: true,
+        width: 170,
+        render: (row) => (
+          <Badge variant="outline" className={cn("rounded-full", statusTone(row.status))}>
+            {statusLabel(row.status)}
+          </Badge>
+        ),
+      },
+      {
+        id: "category",
+        label: text.columns.category,
+        accessor: (row) => row.category,
+        sortable: true,
+        width: 140,
+        render: (row) => categoryLabel(row.category),
+      },
+      {
+        id: "revision",
+        label: text.columns.revision,
+        accessor: (row) => row.revision_no,
+        sortable: true,
+        width: 120,
+      },
+      {
+        id: "ack",
+        label: text.columns.ack,
+        accessor: (row) => row.my_ack_status ?? "",
+        width: 180,
+        render: (row) => ackLabel(row.my_ack_status),
+      },
+      {
+        id: "updated",
+        label: text.columns.updated,
+        accessor: (row) => row.updated_at,
+        sortable: true,
+        width: 170,
+        render: (row) => formatDate(row.updated_at),
+      },
+      {
+        id: "author",
+        label: text.columns.author,
+        accessor: (row) => row.created_by_name ?? row.created_by_role,
+        width: 190,
+        render: (row) => row.created_by_name || roleLabel(row.created_by_role),
+      },
+    ],
+    [ackLabel, categoryLabel, roleLabel, statusLabel, text],
+  );
+
   function resetForm() {
     setEditing(null);
     setForm(emptyForm());
+    setFormError("");
   }
 
   function openCreate() {
@@ -172,12 +714,22 @@ export function SopsPage() {
       targetRoles: item.target_roles,
       targetUserIds: item.target_user_ids,
     });
+    setFormError("");
     setFormOpen(true);
+  }
+
+  function openReview(item: SopItem) {
+    setReviewItem(item);
+    setReviewDecision("approve");
+    setReviewNote(item.review_note ?? "");
+    setReviewError("");
+    setReviewOpen(true);
   }
 
   async function submitForm(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSaving(true);
+    setFormError("");
     setError("");
     setNotice("");
 
@@ -193,32 +745,42 @@ export function SopsPage() {
       });
       setFormOpen(false);
       resetForm();
-      setNotice(editing ? "Learning content updated." : "Learning content created.");
+      setNotice(editing ? text.noticesSavedUpdate : text.noticesSavedCreate);
       setVersion((value) => value + 1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save learning content.");
+      setFormError(err instanceof Error ? err.message : text.failSave);
     } finally {
       setSaving(false);
     }
   }
 
   async function requestAck(item: SopItem) {
+    setActionBusyId(`request-ack:${item.id}`);
+    setError("");
+    setNotice("");
     try {
       await requestSopAcknowledgement(item.id);
-      setNotice("Acknowledgement request sent.");
+      setNotice(text.noticesAckRequested);
       setVersion((value) => value + 1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to request acknowledgement.");
+      setError(err instanceof Error ? err.message : text.failAckRequest);
+    } finally {
+      setActionBusyId(null);
     }
   }
 
   async function acknowledge(item: SopItem) {
+    setActionBusyId(`ack:${item.id}`);
+    setError("");
+    setNotice("");
     try {
       await acknowledgeSop(item.id);
-      setNotice("Acknowledgement recorded.");
+      setNotice(text.noticesAckDone);
       setVersion((value) => value + 1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to acknowledge content.");
+      setError(err instanceof Error ? err.message : text.failAck);
+    } finally {
+      setActionBusyId(null);
     }
   }
 
@@ -227,6 +789,7 @@ export function SopsPage() {
     if (!reviewItem) return;
 
     setReviewBusy(true);
+    setReviewError("");
     setError("");
     setNotice("");
 
@@ -238,400 +801,614 @@ export function SopsPage() {
       setReviewOpen(false);
       setReviewItem(null);
       setReviewNote("");
-      setNotice("Review decision saved.");
+      setNotice(text.noticesReviewSaved);
       setVersion((value) => value + 1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to review content.");
+      setReviewError(err instanceof Error ? err.message : text.failReview);
     } finally {
       setReviewBusy(false);
     }
   }
 
-  if (!roleCanOpenLearning(user?.role)) {
+  if (!canOpenPage) {
     return (
-      <section className={card("px-6 py-10 text-center")}>
-        <h1 className="text-2xl font-semibold text-slate-950">SOP & learning</h1>
-        <p className="mt-3 text-sm text-slate-500">This workspace is available only for staff roles.</p>
-      </section>
+      <ShellBanner tone="warning" withIcon>
+        {text.accessDenied}
+      </ShellBanner>
     );
   }
 
   if (loading) {
-    return (
-      <div className="flex min-h-[60vh] items-center justify-center">
-        <div className="flex items-center gap-3 rounded-full border border-slate-200 bg-white px-5 py-3 text-sm text-slate-500 shadow-sm">
-          <LoaderCircle className="size-4 animate-spin" />
-          Loading SOP workspace...
-        </div>
-      </div>
-    );
+    return <LoadingState label={text.loadingWorkspace} />;
   }
 
   return (
-    <div className="space-y-6">
-      <section className={card("bg-[radial-gradient(circle_at_top_left,_rgba(14,165,233,0.14),_transparent_34%),linear-gradient(135deg,#0f172a_0%,#111827_54%,#334155_100%)] px-6 py-6 text-white")}>
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-          <div className="max-w-3xl">
-            <p className="text-sm uppercase tracking-[0.18em] text-white/60">Learning</p>
-            <h1 className="mt-3 text-3xl font-semibold tracking-tight">SOP & learning library</h1>
-            <p className="mt-3 text-sm leading-7 text-white/75">
-              Role-scoped SOPs, handbooks and trainings with multi-step approval routing and acknowledgement tracking.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {canCreate ? (
+    <>
+      <div className="space-y-6">
+        <PageHeader
+          title={text.title}
+          description={text.subtitle}
+          actions={
+            <AdminToolbar>
               <Button
+                type="button"
                 variant="outline"
-                className="border-white/15 bg-white/8 text-white hover:bg-white/12 hover:text-white"
-                onClick={openCreate}
+                className="h-9 rounded-lg px-3.5"
+                onClick={() => setVersion((value) => value + 1)}
               >
-                <Plus className="size-4" />
-                New content
+                {refreshing ? (
+                  <LoaderCircle className="size-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="size-4" />
+                )}
+                {text.refresh}
               </Button>
-            ) : null}
-            <Button
-              variant="outline"
-              className="border-white/15 bg-white/8 text-white hover:bg-white/12 hover:text-white"
-              onClick={() => setVersion((value) => value + 1)}
-            >
-              {refreshing ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
-              Refresh
-            </Button>
-          </div>
+              {canCreate ? (
+                <Button
+                  type="button"
+                  className="h-9 rounded-lg px-3.5"
+                  onClick={openCreate}
+                >
+                  <Plus className="size-4" />
+                  {text.newContent}
+                </Button>
+              ) : null}
+            </AdminToolbar>
+          }
+        />
+
+        {notice ? <SuccessBanner>{notice}</SuccessBanner> : null}
+        {error ? <ShellBanner tone="error">{error}</ShellBanner> : null}
+
+        <div className="flex flex-wrap gap-6 rounded-xl border border-border bg-card px-4 py-3">
+          <AdminInlineMetric
+            icon={BookOpen}
+            label={text.metricsVisible}
+            value={String(items.length)}
+            tone="sky"
+          />
+          <AdminInlineMetric
+            icon={FileCheck2}
+            label={text.metricsApproved}
+            value={String(visibleMetrics.approved)}
+            tone="emerald"
+          />
+          <AdminInlineMetric
+            icon={CheckCheck}
+            label={text.metricsPendingAck}
+            value={String(visibleMetrics.pendingAck)}
+            tone="amber"
+          />
+          <AdminInlineMetric
+            icon={ShieldCheck}
+            label={queueCopy.metric}
+            value={String(reviewQueue.length)}
+            tone="slate"
+          />
         </div>
-      </section>
 
-      {notice ? <section className={card("border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-700")}>{notice}</section> : null}
-      {error ? <section className={card("border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700")}>{error}</section> : null}
+        {canReviewQueue ? (
+          <AdminTableCard
+            title={titleWithDot(text.queueTitle)}
+            description={text.queueDescription}
+            count={visibleQueue.length}
+            accessory={
+              <div className="flex min-w-[220px] items-center gap-2">
+                <Input
+                  value={queueSearch}
+                  onChange={(event) => setQueueSearch(event.target.value)}
+                  className={shellInputClassName}
+                  placeholder={text.librarySearchPlaceholder}
+                />
+              </div>
+            }
+          >
+            <DataTable
+              rows={visibleQueue}
+              columns={queueColumns}
+              rowId={(row) => row.id}
+              density="compact"
+              onRowClick={(row) => openReview(row)}
+              rowActions={(row) => (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 rounded-lg px-2.5"
+                  onClick={() => openReview(row)}
+                >
+                  {text.actionOpenReview}
+                </Button>
+              )}
+              emptyState={
+                <EmptyState
+                  title={text.queueEmptyTitle}
+                  description={text.queueEmptyDescription}
+                />
+              }
+            />
+          </AdminTableCard>
+        ) : null}
 
-      <section className="grid gap-4 md:grid-cols-4">
-        {metricCard("Visible items", items.length, BookOpen)}
-        {metricCard("Approved", visibleMetrics.approved, FileCheck2)}
-        {metricCard("Pending acknowledgement", visibleMetrics.pendingAck, CheckCheck)}
-        {metricCard(queueCopy.metric, reviewQueue.length, ShieldCheck)}
-      </section>
-
-      {canReviewQueue && reviewQueue.length > 0 ? (
-        <section className={card("p-6")}>
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h2 className="text-base font-semibold text-slate-950">{queueCopy.title}</h2>
-              <p className="mt-1 text-sm text-slate-500">
-                {queueCopy.description}
-              </p>
-            </div>
-            <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100">{reviewQueue.length}</Badge>
-          </div>
-          <div className="mt-5 space-y-3">
-            {reviewQueue.map((item) => (
-              <article key={item.id} className="rounded-[1.5rem] border border-slate-200 bg-white px-4 py-4 shadow-sm">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="text-sm font-semibold text-slate-950">{item.title}</p>
-                      <Badge className={statusTone(item.status)}>{item.status.replaceAll("_", " ")}</Badge>
-                      <Badge className="bg-slate-100 text-slate-700 hover:bg-slate-100">{categoryLabel(item.category)}</Badge>
-                      {item.approval_required_role ? (
-                        <Badge className="bg-sky-100 text-sky-700 hover:bg-sky-100">
-                          {approvalRoleLabel(item.approval_required_role)}
-                        </Badge>
+        <section className="grid gap-6 xl:grid-cols-[1.3fr_0.7fr]">
+          <AdminTableCard
+            title={titleWithDot(text.libraryTitle)}
+            description={text.libraryDescription}
+            count={visibleItems.length}
+            accessory={
+              <div className="flex min-w-[240px] items-center gap-2">
+                <Input
+                  value={librarySearch}
+                  onChange={(event) => setLibrarySearch(event.target.value)}
+                  className={shellInputClassName}
+                  placeholder={text.librarySearchPlaceholder}
+                />
+              </div>
+            }
+          >
+            <DataTable
+              rows={visibleItems}
+              columns={libraryColumns}
+              rowId={(row) => row.id}
+              density="compact"
+              activeRowId={selectedItemId || null}
+              onRowClick={(row) => setSelectedItemId(row.id)}
+              rowActions={(row) => (
+                <div className="flex items-center gap-1">
+                  {row.can_edit ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 rounded-lg px-2.5"
+                      onClick={() => openEdit(row)}
+                    >
+                      {text.actionEdit}
+                    </Button>
+                  ) : null}
+                  {row.can_request_ack ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 rounded-lg px-2.5"
+                      disabled={actionBusyId === `request-ack:${row.id}`}
+                      onClick={() => void requestAck(row)}
+                    >
+                      {actionBusyId === `request-ack:${row.id}` ? (
+                        <LoaderCircle className="size-3.5 animate-spin" />
                       ) : null}
-                    </div>
-                    <p className="mt-2 text-sm text-slate-500">
-                      Created by {item.created_by_name || item.created_by_role} · {formatDate(item.updated_at)}
-                    </p>
-                  </div>
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setReviewItem(item);
-                      setReviewDecision("approve");
-                      setReviewNote(item.review_note ?? "");
-                      setReviewOpen(true);
-                    }}
-                  >
-                    Review
-                  </Button>
-                </div>
-              </article>
-            ))}
-          </div>
-        </section>
-      ) : null}
-
-      <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
-        <section className="space-y-4">
-          {items.length === 0 ? (
-            <section className={card("border-dashed px-6 py-12 text-center")}>
-              <p className="text-base font-semibold text-slate-950">No SOP content visible yet</p>
-              <p className="mt-2 text-sm text-slate-500">
-                Once content is approved for your role or assigned directly, it will appear here.
-              </p>
-            </section>
-          ) : (
-            items.map((item) => (
-              <article key={item.id} className={card("p-5")}>
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <div className="flex flex-wrap gap-2">
-                      <Badge className={statusTone(item.status)}>{item.status.replaceAll("_", " ")}</Badge>
-                      <Badge className="bg-slate-100 text-slate-700 hover:bg-slate-100">{categoryLabel(item.category)}</Badge>
-                      {item.status === "pending_approval" && item.approval_required_role ? (
-                        <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100">
-                          {approvalRoleLabel(item.approval_required_role)}
-                        </Badge>
+                      {text.actionRequestAck}
+                    </Button>
+                  ) : null}
+                  {row.can_acknowledge ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="h-8 rounded-lg px-2.5"
+                      disabled={actionBusyId === `ack:${row.id}`}
+                      onClick={() => void acknowledge(row)}
+                    >
+                      {actionBusyId === `ack:${row.id}` ? (
+                        <LoaderCircle className="size-3.5 animate-spin" />
                       ) : null}
-                      {item.requires_ack ? (
-                        <Badge className="bg-violet-100 text-violet-700 hover:bg-violet-100">Ack required</Badge>
-                      ) : null}
-                    </div>
-                    <h2 className="mt-3 text-lg font-semibold text-slate-950">{item.title}</h2>
-                    <p className="mt-2 text-sm text-slate-500">
-                      Revision {item.revision_no} · Created by {item.created_by_name || tr[`role_${item.created_by_role}`] || item.created_by_role}
-                      {item.approved_by_name ? ` · Approved by ${item.approved_by_name}` : ""}
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {item.can_edit ? (
-                      <Button variant="outline" onClick={() => openEdit(item)}>
-                        Edit
-                      </Button>
-                    ) : null}
-                    {item.can_request_ack ? (
-                      <Button variant="outline" onClick={() => void requestAck(item)}>
-                        Request ack
-                      </Button>
-                    ) : null}
-                    {item.can_acknowledge ? (
-                      <Button onClick={() => void acknowledge(item)}>Acknowledge</Button>
-                    ) : null}
-                  </div>
-                </div>
-
-                {item.summary ? <p className="mt-4 text-sm leading-6 text-slate-600">{item.summary}</p> : null}
-
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {item.target_roles.map((role) => (
-                    <Badge key={`${item.id}-${role}`} className="bg-sky-100 text-sky-700 hover:bg-sky-100">
-                      {tr[`role_${role}`] ?? role}
-                    </Badge>
-                  ))}
-                  {item.assigned_user_count > 0 ? (
-                    <Badge className="bg-slate-100 text-slate-700 hover:bg-slate-100">
-                      {item.assigned_user_count} direct users
-                    </Badge>
+                      {text.actionAcknowledge}
+                    </Button>
+                  ) : null}
+                  {row.can_review ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 rounded-lg px-2.5"
+                      onClick={() => openReview(row)}
+                    >
+                      {text.actionOpenReview}
+                    </Button>
                   ) : null}
                 </div>
-
-                <div className="mt-4 rounded-[1.25rem] border border-slate-200 bg-slate-50/70 px-4 py-4">
-                  <pre className="whitespace-pre-wrap text-sm leading-6 text-slate-700">{item.body_markdown}</pre>
-                </div>
-
-                <div className="mt-4 flex flex-wrap gap-4 text-xs text-slate-500">
-                  <span>{item.pending_ack_count} pending acknowledgements</span>
-                  <span>{item.acknowledged_count} acknowledged</span>
-                  {item.my_ack_status ? <span>My status: {item.my_ack_status.replaceAll("_", " ")}</span> : null}
-                  {item.review_note ? <span>Review note: {item.review_note}</span> : null}
-                </div>
-              </article>
-            ))
-          )}
-        </section>
-
-        <section className="space-y-6">
-          <section className={card("p-6")}>
-            <div className="flex items-center gap-3">
-              <div className="rounded-2xl bg-slate-100 p-3 text-slate-700">
-                <Users className="size-5" />
-              </div>
-              <div>
-                <h2 className="text-base font-semibold text-slate-950">Targeting model</h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  Content visibility is driven by target roles and optional direct user assignment.
-                </p>
-              </div>
-            </div>
-            <div className="mt-5 flex flex-wrap gap-2">
-              {allowedTargetRoles.length > 0 ? allowedTargetRoles.map((role) => (
-                <Badge key={role} className="bg-slate-100 text-slate-700 hover:bg-slate-100">
-                  {tr[`role_${role}`] ?? role}
-                </Badge>
-              )) : (
-                <span className="text-sm text-slate-500">Creation is not available for your role.</span>
               )}
-            </div>
-          </section>
+              emptyState={
+                <EmptyState
+                  title={text.libraryEmptyTitle}
+                  description={text.libraryEmptyDescription}
+                />
+              }
+            />
+          </AdminTableCard>
 
-          <section className={card("p-6")}>
-            <h2 className="text-base font-semibold text-slate-950">Current-state scope</h2>
-            <p className="mt-2 text-sm leading-6 text-slate-600">
-              This slice covers SOP library retrieval, CEO or patient-manager approval routing, acknowledgement tracking and scoped distribution for operational teams.
-            </p>
-          </section>
+          <div className="space-y-6">
+            <AdminTableCard
+              title={titleWithDot(text.targetingModelTitle)}
+              description={text.targetingModelDescription}
+            >
+              <div className="flex flex-wrap gap-2 p-4">
+                {allowedTargetRoles.length > 0 ? (
+                  allowedTargetRoles.map((role) => (
+                    <Badge key={role} variant="outline" className="rounded-full">
+                      {roleLabel(role)}
+                    </Badge>
+                  ))
+                ) : (
+                  <span className="text-sm text-muted-foreground">{text.statusNotSet}</span>
+                )}
+              </div>
+            </AdminTableCard>
+
+            <AdminTableCard
+              title={titleWithDot(text.scopeTitle)}
+              description={text.scopeDescription}
+            >
+              <div className="p-4 text-sm text-muted-foreground">
+                {text.scopeDescription}
+              </div>
+            </AdminTableCard>
+          </div>
         </section>
-      </section>
+      </div>
 
-      <Dialog open={formOpen} onOpenChange={setFormOpen}>
-        <DialogContent className="sm:max-w-4xl">
-          <DialogHeader>
-            <DialogTitle>{editing ? "Edit learning content" : "New learning content"}</DialogTitle>
-            <DialogDescription>
-              {formDescription(user?.role)}
-            </DialogDescription>
-          </DialogHeader>
-          <form className="grid gap-5" onSubmit={(event) => void submitForm(event)}>
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label>Title</Label>
-                <Input value={form.title} onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))} />
-              </div>
-              <div className="space-y-2">
-                <Label>Category</Label>
-                <select
-                  value={form.category}
-                  onChange={(event) => setForm((current) => ({ ...current, category: event.target.value }))}
-                  className="h-11 w-full rounded-2xl border border-slate-200 bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
+      <Sheet
+        open={Boolean(selectedItemId)}
+        onOpenChange={(open) => {
+          if (!open) setSelectedItemId("");
+        }}
+      >
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-3xl">
+          <AdminSheetScaffold
+            title={selectedItem ? selectedItem.title : text.detailTitle}
+            description={text.detailDescription}
+          >
+            {!selectedItem ? (
+              <EmptyState
+                title={text.noSelectionTitle}
+                description={text.noSelectionDescription}
+              />
+            ) : (
+              <>
+                <AdminTableCard
+                  title={titleWithDot(text.detailOverview)}
+                  accessory={
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant="outline" className={cn("rounded-full", statusTone(selectedItem.status))}>
+                        {statusLabel(selectedItem.status)}
+                      </Badge>
+                      <Badge variant="outline" className="rounded-full">
+                        {categoryLabel(selectedItem.category)}
+                      </Badge>
+                    </div>
+                  }
                 >
-                  <option value="sop">SOP</option>
-                  <option value="handbook">Handbook</option>
-                  <option value="training">Training</option>
-                </select>
+                  <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-4">
+                    <DetailField label={text.columns.revision} value={selectedItem.revision_no} />
+                    <DetailField
+                      label={text.columns.updated}
+                      value={formatDate(selectedItem.updated_at)}
+                    />
+                    <DetailField
+                      label={text.columns.author}
+                      value={selectedItem.created_by_name || roleLabel(selectedItem.created_by_role)}
+                    />
+                    <DetailField
+                      label={text.columns.ack}
+                      value={ackLabel(selectedItem.my_ack_status)}
+                    />
+                    <DetailField label={text.pendingAck} value={selectedItem.pending_ack_count} />
+                    <DetailField
+                      label={text.acknowledged}
+                      value={selectedItem.acknowledged_count}
+                    />
+                    <DetailField
+                      label={text.columns.approval}
+                      value={approvalRoleLabel(selectedItem.approval_required_role)}
+                    />
+                    <DetailField
+                      label={text.myStatus}
+                      value={ackLabel(selectedItem.my_ack_status)}
+                    />
+                  </div>
+                </AdminTableCard>
+
+                <AdminTableCard title={titleWithDot(text.detailTargeting)}>
+                  <div className="space-y-3 p-4">
+                    <div className="flex flex-wrap gap-2">
+                      {selectedItem.target_roles.length > 0 ? (
+                        selectedItem.target_roles.map((role) => (
+                          <Badge key={`${selectedItem.id}-${role}`} variant="outline" className="rounded-full">
+                            {roleLabel(role)}
+                          </Badge>
+                        ))
+                      ) : (
+                        <span className="text-sm text-muted-foreground">{text.statusNotSet}</span>
+                      )}
+                    </div>
+                    <div className="text-sm text-muted-foreground">
+                      {text.directUsers}: {selectedItem.assigned_user_count}
+                    </div>
+                  </div>
+                </AdminTableCard>
+
+                <AdminTableCard title={titleWithDot(text.detailBody)}>
+                  <div className="p-4">
+                    {selectedItem.summary ? (
+                      <p className="mb-4 text-sm text-muted-foreground">{selectedItem.summary}</p>
+                    ) : null}
+                    <pre
+                      className={cn(
+                        "whitespace-pre-wrap break-words rounded-xl p-4 text-sm text-foreground",
+                        tokens.surface.mutedCard,
+                      )}
+                    >
+                      {selectedItem.body_markdown}
+                    </pre>
+                  </div>
+                </AdminTableCard>
+
+                <AdminTableCard title={titleWithDot(text.detailActions)}>
+                  <div className="flex flex-wrap gap-2 p-4">
+                    {selectedItem.can_edit ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-9 rounded-lg px-3.5"
+                        onClick={() => openEdit(selectedItem)}
+                      >
+                        {text.actionEdit}
+                      </Button>
+                    ) : null}
+                    {selectedItem.can_request_ack ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-9 rounded-lg px-3.5"
+                        disabled={actionBusyId === `request-ack:${selectedItem.id}`}
+                        onClick={() => void requestAck(selectedItem)}
+                      >
+                        {actionBusyId === `request-ack:${selectedItem.id}` ? (
+                          <LoaderCircle className="size-4 animate-spin" />
+                        ) : null}
+                        {text.actionRequestAck}
+                      </Button>
+                    ) : null}
+                    {selectedItem.can_acknowledge ? (
+                      <Button
+                        type="button"
+                        className="h-9 rounded-lg px-3.5"
+                        disabled={actionBusyId === `ack:${selectedItem.id}`}
+                        onClick={() => void acknowledge(selectedItem)}
+                      >
+                        {actionBusyId === `ack:${selectedItem.id}` ? (
+                          <LoaderCircle className="size-4 animate-spin" />
+                        ) : null}
+                        {text.actionAcknowledge}
+                      </Button>
+                    ) : null}
+                    {selectedItem.can_review ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-9 rounded-lg px-3.5"
+                        onClick={() => openReview(selectedItem)}
+                      >
+                        {text.actionOpenReview}
+                      </Button>
+                    ) : null}
+                  </div>
+                </AdminTableCard>
+              </>
+            )}
+          </AdminSheetScaffold>
+        </SheetContent>
+      </Sheet>
+
+      <Sheet open={formOpen} onOpenChange={setFormOpen}>
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-3xl">
+          <form className="flex h-full min-h-0 flex-col" onSubmit={(event) => void submitForm(event)}>
+            <AdminSheetScaffold
+              title={editing ? text.formEditTitle : text.formCreateTitle}
+              description={formDescription(user?.role)}
+              footer={
+                <SheetFormFooter
+                  cancelLabel={text.formCancel}
+                  submitLabel={editing ? text.formSave : text.formCreate}
+                  submittingLabel={editing ? text.formSave : text.formCreate}
+                  submitting={saving}
+                  onCancel={() => setFormOpen(false)}
+                />
+              }
+            >
+              {formError ? <ShellBanner tone="error">{formError}</ShellBanner> : null}
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label={text.formTitle}>
+                  <Input
+                    value={form.title}
+                    onChange={(event) =>
+                      setForm((current) => ({ ...current, title: event.target.value }))
+                    }
+                    className={shellInputClassName}
+                    required
+                  />
+                </Field>
+                <Field label={text.formCategory}>
+                  <ShadSelect
+                    value={form.category}
+                    onValueChange={(value) =>
+                      setForm((current) => ({ ...current, category: value ?? "sop" }))
+                    }
+                  >
+                    <SelectTrigger className={selectTriggerClassName}>
+                      <SelectValue>{categoryLabel(form.category)}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="sop">{categoryLabel("sop")}</SelectItem>
+                      <SelectItem value="handbook">{categoryLabel("handbook")}</SelectItem>
+                      <SelectItem value="training">{categoryLabel("training")}</SelectItem>
+                    </SelectContent>
+                  </ShadSelect>
+                </Field>
+                <Field label={text.formSummary} className="sm:col-span-2">
+                  <Input
+                    value={form.summary}
+                    onChange={(event) =>
+                      setForm((current) => ({ ...current, summary: event.target.value }))
+                    }
+                    className={shellInputClassName}
+                  />
+                </Field>
+                <Field label={text.formBody} className="sm:col-span-2">
+                  <textarea
+                    value={form.bodyMarkdown}
+                    onChange={(event) =>
+                      setForm((current) => ({ ...current, bodyMarkdown: event.target.value }))
+                    }
+                    className={cn(textareaClassName, "min-h-[220px]")}
+                    required
+                  />
+                </Field>
               </div>
-            </div>
 
-            <div className="space-y-2">
-              <Label>Summary</Label>
-              <Input value={form.summary} onChange={(event) => setForm((current) => ({ ...current, summary: event.target.value }))} />
-            </div>
+              <div className="grid gap-5 lg:grid-cols-2">
+                <Field label={text.formTargetRoles}>
+                  <div
+                    className={cn(
+                      "max-h-72 space-y-2 overflow-y-auto rounded-xl p-3",
+                      tokens.surface.mutedCard,
+                    )}
+                  >
+                    {allowedTargetRoles.length > 0 ? (
+                      allowedTargetRoles.map((role) => (
+                        <label
+                          key={role}
+                          className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={form.targetRoles.includes(role)}
+                            onChange={(event) =>
+                              setForm((current) => ({
+                                ...current,
+                                targetRoles: event.target.checked
+                                  ? [...current.targetRoles, role]
+                                  : current.targetRoles.filter((value) => value !== role),
+                              }))
+                            }
+                          />
+                          <span>{roleLabel(role)}</span>
+                        </label>
+                      ))
+                    ) : (
+                      <span className="text-sm text-muted-foreground">{text.statusNotSet}</span>
+                    )}
+                  </div>
+                </Field>
 
-            <div className="space-y-2">
-              <Label>Body</Label>
-              <textarea
-                value={form.bodyMarkdown}
-                onChange={(event) => setForm((current) => ({ ...current, bodyMarkdown: event.target.value }))}
-                className="min-h-[220px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-900 outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
-              />
-            </div>
-
-            <div className="grid gap-5 lg:grid-cols-2">
-              <div className="space-y-3">
-                <Label>Target roles</Label>
-                <div className="grid gap-2">
-                  {allowedTargetRoles.map((role) => (
-                    <label key={role} className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700">
-                      <input
-                        type="checkbox"
-                        checked={form.targetRoles.includes(role)}
-                        onChange={(event) => {
-                          setForm((current) => ({
-                            ...current,
-                            targetRoles: event.target.checked
-                              ? [...current.targetRoles, role]
-                              : current.targetRoles.filter((item) => item !== role),
-                          }));
-                        }}
-                      />
-                      <span>{tr[`role_${role}`] ?? role}</span>
-                    </label>
-                  ))}
-                </div>
+                <Field label={text.formDirectUsers}>
+                  <div
+                    className={cn(
+                      "max-h-72 space-y-2 overflow-y-auto rounded-xl p-3",
+                      tokens.surface.mutedCard,
+                    )}
+                  >
+                    {(filteredUsers.length > 0 ? filteredUsers : eligibleUsers).map((item) => (
+                      <label
+                        key={item.id}
+                        className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={form.targetUserIds.includes(item.id)}
+                          onChange={(event) =>
+                            setForm((current) => ({
+                              ...current,
+                              targetUserIds: event.target.checked
+                                ? [...current.targetUserIds, item.id]
+                                : current.targetUserIds.filter((value) => value !== item.id),
+                            }))
+                          }
+                        />
+                        <div>
+                          <p className="font-medium text-foreground">{item.name}</p>
+                          <p className="text-xs text-muted-foreground">{roleLabel(item.role)}</p>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                </Field>
               </div>
-              <div className="space-y-3">
-                <Label>Direct users</Label>
-                <div className="max-h-64 space-y-2 overflow-y-auto rounded-[1.25rem] border border-slate-200 bg-slate-50/70 p-3">
-                  {(filteredUsers.length > 0 ? filteredUsers : eligibleUsers).map((item) => (
-                    <label key={item.id} className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700">
-                      <input
-                        type="checkbox"
-                        checked={form.targetUserIds.includes(item.id)}
-                        onChange={(event) => {
-                          setForm((current) => ({
-                            ...current,
-                            targetUserIds: event.target.checked
-                              ? [...current.targetUserIds, item.id]
-                              : current.targetUserIds.filter((value) => value !== item.id),
-                          }));
-                        }}
-                      />
-                      <div>
-                        <p className="font-medium text-slate-900">{item.name}</p>
-                        <p className="text-xs text-slate-500">{tr[`role_${item.role}`] ?? item.role}</p>
-                      </div>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            </div>
 
-            <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={form.requiresAck}
-                onChange={(event) => setForm((current) => ({ ...current, requiresAck: event.target.checked }))}
-              />
-              <span>Mark as acknowledgement-relevant</span>
-            </label>
-
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setFormOpen(false)}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={saving}>
-                {saving ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                {editing ? "Save changes" : "Create"}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={reviewOpen} onOpenChange={setReviewOpen}>
-        <DialogContent className="sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Review learning content</DialogTitle>
-            <DialogDescription>Approve the SOP or send it back with a concrete note.</DialogDescription>
-          </DialogHeader>
-          <form className="space-y-4" onSubmit={(event) => void submitReview(event)}>
-            <div className="rounded-[1.25rem] border border-slate-200 bg-slate-50/70 px-4 py-4">
-              <p className="text-sm font-semibold text-slate-950">{reviewItem?.title}</p>
-              <p className="mt-2 text-sm text-slate-500">
-                {reviewItem?.created_by_name || "Author"} · {reviewItem ? formatDate(reviewItem.updated_at) : ""}
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Decision</Label>
-              <select
-                value={reviewDecision}
-                onChange={(event) => setReviewDecision(event.target.value)}
-                className="h-11 w-full rounded-2xl border border-slate-200 bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
+              <label
+                className={cn(
+                  "flex items-center gap-3 rounded-xl px-3 py-3 text-sm text-foreground",
+                  tokens.surface.mutedCard,
+                )}
               >
-                <option value="approve">Approve</option>
-                <option value="reject">Reject / changes requested</option>
-              </select>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Review note</Label>
-              <textarea
-                value={reviewNote}
-                onChange={(event) => setReviewNote(event.target.value)}
-                className="min-h-[160px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-900 outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
-              />
-            </div>
-
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setReviewOpen(false)}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={reviewBusy}>
-                {reviewBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                Save review
-              </Button>
-            </DialogFooter>
+                <input
+                  type="checkbox"
+                  checked={form.requiresAck}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      requiresAck: event.target.checked,
+                    }))
+                  }
+                />
+                <span>{text.formRequiresAck}</span>
+              </label>
+            </AdminSheetScaffold>
           </form>
-        </DialogContent>
-      </Dialog>
-    </div>
+        </SheetContent>
+      </Sheet>
+
+      <Sheet open={reviewOpen} onOpenChange={setReviewOpen}>
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
+          <form className="flex h-full min-h-0 flex-col" onSubmit={(event) => void submitReview(event)}>
+            <AdminSheetScaffold
+              title={text.reviewTitle}
+              description={text.reviewDescription}
+              footer={
+                <SheetFormFooter
+                  cancelLabel={text.formCancel}
+                  submitLabel={text.reviewSave}
+                  submittingLabel={text.reviewSave}
+                  submitting={reviewBusy}
+                  onCancel={() => setReviewOpen(false)}
+                />
+              }
+            >
+              {reviewError ? <ShellBanner tone="error">{reviewError}</ShellBanner> : null}
+              {reviewItem ? (
+                <AdminTableCard title={titleWithDot(text.detailOverview)}>
+                  <div className="grid gap-3 p-4">
+                    <DetailField label={text.columns.title} value={reviewItem.title} />
+                    <DetailField label={text.columns.author} value={reviewItem.created_by_name || roleLabel(reviewItem.created_by_role)} />
+                    <DetailField label={text.columns.updated} value={formatDate(reviewItem.updated_at)} />
+                  </div>
+                </AdminTableCard>
+              ) : null}
+              <Field label={text.reviewDecision}>
+                <ShadSelect
+                  value={reviewDecision}
+                  onValueChange={(value) => setReviewDecision(value ?? "approve")}
+                >
+                  <SelectTrigger className={selectTriggerClassName}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="approve">{text.reviewApprove}</SelectItem>
+                    <SelectItem value="reject">{text.reviewReject}</SelectItem>
+                  </SelectContent>
+                </ShadSelect>
+              </Field>
+              <Field label={text.reviewNote}>
+                <textarea
+                  value={reviewNote}
+                  onChange={(event) => setReviewNote(event.target.value)}
+                  className={cn(textareaClassName, "min-h-[160px]")}
+                />
+              </Field>
+            </AdminSheetScaffold>
+          </form>
+        </SheetContent>
+      </Sheet>
+    </>
   );
 }

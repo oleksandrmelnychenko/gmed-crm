@@ -446,12 +446,15 @@ function StaffInvoicesPage() {
         required: true,
         pinned: "left",
         width: 220,
-        render: (row) => (
-          <div>
-            <div className="text-sm font-medium text-foreground">{row.patient_name}</div>
-            <div className="mt-1 text-[11px] text-muted-foreground">{row.patient_pid}</div>
-          </div>
-        ),
+        render: (row) => <span className="text-sm font-medium text-foreground">{row.patient_name}</span>,
+      },
+      {
+        id: "patient_pid",
+        label: "PID",
+        accessor: (row) => row.patient_pid,
+        sortable: true,
+        width: 130,
+        render: (row) => <span className="text-xs text-foreground">{row.patient_pid}</span>,
       },
       {
         id: "order_number",
@@ -652,8 +655,18 @@ function StaffInvoicesPage() {
       sortable: true,
       searchable: true,
       width: 210,
-      render: (row) =>
-        row.patient_name ? `${row.patient_name}${row.patient_pid ? ` (${row.patient_pid})` : ""}` : text.noPatient,
+      render: (row) => row.patient_name || text.noPatient,
+    },
+    {
+      id: "patient_pid",
+      label: "PID",
+      accessor: (row) => row.patient_pid ?? "",
+      filterType: "text",
+      group: "context",
+      sortable: true,
+      searchable: true,
+      width: 120,
+      render: (row) => row.patient_pid || t.common_not_set,
     },
     {
       id: "amount_net",

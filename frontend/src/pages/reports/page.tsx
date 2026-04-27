@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ElementType } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
   BarChart3,
@@ -10,11 +10,22 @@ import {
   RefreshCw,
   Rows3,
   Wallet,
+  type LucideIcon,
 } from "lucide-react";
 
+import {
+  AdminSheetScaffold,
+  AdminInlineMetric,
+  AdminTableCard,
+  AdminToolbar,
+} from "@/components/admin-page-patterns";
+import { DataTable } from "@/components/data-table/data-table";
+import type { ColumnDef } from "@/components/data-table/types";
 import { StaffLink } from "@/components/staff-link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { Banner as ShellBanner, PageHeader, StatusBadge, tokens } from "@/components/ui-shell";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -286,23 +297,37 @@ type ForecastingPayload = {
 };
 
 function card(extra?: string) {
-  return cn(
-    "rounded-[1.75rem] border border-border/70 bg-card shadow-[0_20px_60px_rgba(15,23,42,0.05)]",
-    extra,
+  return cn("rounded-xl border border-border bg-card", extra);
+}
+
+function titleWithDot(title: string) {
+  return (
+    <span className="inline-flex items-center gap-2">
+      <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
+      <span>{title}</span>
+    </span>
   );
 }
 
-function metricCard(label: string, value: string | number, icon: ElementType) {
+function tableEmpty(message: string) {
+  return (
+    <div className="rounded-xl border border-dashed border-border bg-muted/20 px-4 py-8 text-center text-sm text-muted-foreground">
+      {message}
+    </div>
+  );
+}
+
+type ReportDetailState =
+  | { kind: "clinic"; row: ClinicReportRow }
+  | { kind: "doctor"; row: DoctorReportRow }
+  | { kind: "provider_cost"; row: ProviderCostRow }
+  | null;
+
+function metricCard(label: string, value: string | number, icon: LucideIcon) {
   const Icon = icon;
   return (
-    <article className="rounded-[1.5rem] border border-white/90 bg-white/88 p-4 shadow-sm backdrop-blur">
-      <div className="flex items-center justify-between">
-        <p className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">{label}</p>
-        <span className="rounded-2xl bg-slate-100 p-2 text-slate-700">
-          <Icon className="size-4" />
-        </span>
-      </div>
-      <p className="mt-4 text-3xl font-semibold tracking-tight text-slate-950">{value}</p>
+    <article className={card("p-4")}>
+      <AdminInlineMetric icon={Icon} label={label} value={value} tone="slate" />
     </article>
   );
 }
@@ -311,7 +336,8 @@ export function ReportsPage() {
   const { user } = useAuth();
   const { lang } = useLang();
   const locale = lang === "de" ? "de-DE" : "ru-RU";
-  const text = lang === "de"
+  const text = useMemo(
+    () => (lang === "de"
     ? {
         accessTitle: "Berichte",
         accessDescription:
@@ -528,6 +554,7 @@ export function ReportsPage() {
           min: "Min.",
           max: "Max.",
           services: "Leistungen",
+          location: "Standort",
           conciergeRequests90d: "Concierge-Anfragen / 90 T.",
           openRequests: "Offene Anfragen",
           completed90d: "Abgeschlossen / 90 T.",
@@ -752,6 +779,7 @@ export function ReportsPage() {
           min: "Мин.",
           max: "Макс.",
           services: "Услуги",
+          location: "Локация",
           conciergeRequests90d: "Concierge-запросы / 90 дн.",
           openRequests: "Открытые запросы",
           completed90d: "Завершено / 90 дн.",
@@ -759,7 +787,9 @@ export function ReportsPage() {
           feedbackVendors: (feedback: number, vendors: number) =>
             `${feedback} отзывов / ${vendors} поставщиков`,
         },
-      };
+      }),
+    [lang],
+  );
   const sectionLabel = (section: string) =>
     text.sectionLabels[section as keyof typeof text.sectionLabels] ??
     section.replaceAll("_", " ");
@@ -771,6 +801,7 @@ export function ReportsPage() {
   const [version, setVersion] = useState(0);
   const [selectedClinicId, setSelectedClinicId] = useState<string>("");
   const [exportingSection, setExportingSection] = useState<string>("");
+  const [detail, setDetail] = useState<ReportDetailState>(null);
 
   useEffect(() => {
     if (!roleCanOpenReports(user?.role)) {
@@ -833,6 +864,663 @@ export function ReportsPage() {
     if (!selectedClinicId) return data.provider_costs;
     return data.provider_costs.filter((item) => item.provider_id === selectedClinicId);
   }, [data?.provider_costs, selectedClinicId]);
+  const clinicColumns = useMemo<ColumnDef<ClinicReportRow>[]>(
+    () => [
+      {
+        id: "clinic",
+        label: text.clinicReport.title,
+        accessor: (row) => row.name,
+        width: 240,
+        pinned: "left",
+        sortable: true,
+        render: (row) => <span className="text-sm font-medium text-foreground">{row.name}</span>,
+      },
+      {
+        id: "location",
+        label: text.common.location,
+        accessor: (row) => `${row.address_city ?? ""} ${row.address_country ?? ""}`,
+        width: 220,
+        render: (row) => (
+          <span className="text-xs text-foreground">
+            {[row.address_city, row.address_country].filter(Boolean).join(", ") || text.locationNotSet}
+          </span>
+        ),
+      },
+      {
+        id: "provider_type",
+        label: text.common.services,
+        accessor: (row) => row.provider_type,
+        width: 160,
+        render: (row) => <span className="text-xs text-foreground">{row.provider_type}</span>,
+      },
+      {
+        id: "patients",
+        label: text.common.patients90d,
+        accessor: (row) => row.active_patients_90d,
+        width: 140,
+        sortable: true,
+      },
+      {
+        id: "appointments",
+        label: text.common.appointments90d,
+        accessor: (row) => row.appointments_90d,
+        width: 150,
+        sortable: true,
+      },
+      {
+        id: "delivered",
+        label: text.common.deliveredItems,
+        accessor: (row) => row.delivered_items,
+        width: 160,
+        sortable: true,
+      },
+      {
+        id: "feedback",
+        label: text.common.feedback,
+        accessor: (row) => row.avg_feedback_score ?? -1,
+        width: 140,
+        sortable: true,
+        render: (row) => (
+          <span className="text-xs text-foreground">
+            {formatRating(row.avg_feedback_score, text.notRated)}
+          </span>
+        ),
+      },
+      {
+        id: "followup",
+        label: text.common.followupCompletion,
+        accessor: (row) => row.followup_completion_rate ?? -1,
+        width: 180,
+        sortable: true,
+        render: (row) => (
+          <span className="text-xs text-foreground">
+            {formatPercent(row.followup_completion_rate, text.noBaseline)}
+          </span>
+        ),
+      },
+      {
+        id: "gross",
+        label: text.summary.deliveredServiceVolume,
+        accessor: (row) => row.gross_service_volume ?? "",
+        width: 180,
+        render: (row) => (
+          <span className="text-xs text-foreground">
+            {row.gross_service_volume ? formatMoney(row.gross_service_volume, locale) : text.countsOnly}
+          </span>
+        ),
+      },
+    ],
+    [locale, text],
+  );
+  const serviceTypeColumns = useMemo<ColumnDef<ServiceTypeReportRow>[]>(
+    () => [
+      {
+        id: "service_type",
+        label: text.serviceTypeReport.title,
+        accessor: (row) => row.service_type,
+        width: 260,
+        pinned: "left",
+        render: (row) => (
+          <span className="text-sm font-medium text-foreground">
+            {serviceTypeLabel(row.service_type, text.serviceTypes)}
+          </span>
+        ),
+      },
+      {
+        id: "items",
+        label: text.common.deliveredItems,
+        accessor: (row) => row.item_count,
+        width: 130,
+        sortable: true,
+      },
+      {
+        id: "orders",
+        label: text.summary.activeOrders,
+        accessor: (row) => row.order_count,
+        width: 130,
+        sortable: true,
+      },
+      {
+        id: "patients",
+        label: text.common.patients90d,
+        accessor: (row) => row.patient_count,
+        width: 140,
+        sortable: true,
+      },
+      {
+        id: "gross",
+        label: text.summary.deliveredServiceVolume,
+        accessor: (row) => row.gross_total ?? "",
+        width: 180,
+        render: (row) => (
+          <span className="text-xs text-foreground">
+            {row.gross_total ? formatMoney(row.gross_total, locale) : text.countsOnly}
+          </span>
+        ),
+      },
+    ],
+    [locale, text],
+  );
+  const medicalProviderColumns = useMemo<ColumnDef<MedicalProviderReportRow>[]>(
+    () => [
+      {
+        id: "provider",
+        label: text.medicalProviders.title,
+        accessor: (row) => row.name,
+        width: 240,
+        pinned: "left",
+        sortable: true,
+        render: (row) => <span className="text-sm font-medium text-foreground">{row.name}</span>,
+      },
+      {
+        id: "location",
+        label: text.common.location,
+        accessor: (row) => `${row.address_city ?? ""} ${row.address_country ?? ""}`,
+        width: 220,
+        render: (row) => (
+          <span className="text-xs text-foreground">
+            {[row.address_city, row.address_country].filter(Boolean).join(", ") || text.locationNotSet}
+          </span>
+        ),
+      },
+      {
+        id: "patients",
+        label: text.common.patients90d,
+        accessor: (row) => row.active_patients_90d,
+        width: 140,
+        sortable: true,
+      },
+      {
+        id: "appointments",
+        label: text.common.appointments90d,
+        accessor: (row) => row.appointments_90d,
+        width: 150,
+        sortable: true,
+      },
+      {
+        id: "active_orders",
+        label: text.summary.activeOrders,
+        accessor: (row) => row.active_orders,
+        width: 140,
+        sortable: true,
+      },
+      {
+        id: "delivered",
+        label: text.common.deliveredItems,
+        accessor: (row) => row.delivered_items,
+        width: 160,
+        sortable: true,
+      },
+      {
+        id: "doctors",
+        label: text.common.doctors,
+        accessor: (row) => row.doctor_count,
+        width: 120,
+        sortable: true,
+      },
+      {
+        id: "last_activity",
+        label: text.common.latest,
+        accessor: (row) => row.last_activity_at ?? "",
+        width: 140,
+        render: (row) => (
+          <span className="text-xs text-foreground">
+            {row.last_activity_at
+              ? new Date(row.last_activity_at).toLocaleDateString(locale)
+              : text.noRecentActivity}
+          </span>
+        ),
+      },
+      {
+        id: "gross",
+        label: text.summary.deliveredServiceVolume,
+        accessor: (row) => row.gross_service_volume ?? "",
+        width: 180,
+        render: (row) => (
+          <span className="text-xs text-foreground">
+            {formatMoney(row.gross_service_volume ?? "0", locale)}
+          </span>
+        ),
+      },
+    ],
+    [locale, text],
+  );
+  const providerCostColumns = useMemo<ColumnDef<ProviderCostRow>[]>(
+    () => [
+      {
+        id: "service",
+        label: text.providerCosts.title,
+        accessor: (row) => row.service_label,
+        width: 220,
+        pinned: "left",
+        sortable: true,
+        render: (row) => <span className="text-sm font-medium text-foreground">{row.service_label}</span>,
+      },
+      {
+        id: "provider",
+        label: text.medicalProviders.title,
+        accessor: (row) => row.provider_name,
+        width: 220,
+        render: (row) => <span className="text-xs text-foreground">{row.provider_name}</span>,
+      },
+      {
+        id: "location",
+        label: text.common.location,
+        accessor: (row) => `${row.address_city ?? ""} ${row.address_country ?? ""}`,
+        width: 220,
+        render: (row) => (
+          <span className="text-xs text-foreground">
+            {[row.address_city, row.address_country].filter(Boolean).join(", ") || text.locationNotSet}
+          </span>
+        ),
+      },
+      {
+        id: "samples",
+        label: text.common.samples,
+        accessor: (row) => row.sample_count,
+        width: 110,
+        sortable: true,
+      },
+      {
+        id: "first",
+        label: text.common.min,
+        accessor: (row) => row.first_recorded_at ?? "",
+        width: 130,
+        render: (row) => (
+          <span className="text-xs text-foreground">
+            {row.first_recorded_at ? new Date(row.first_recorded_at).toLocaleDateString(locale) : text.unknown}
+          </span>
+        ),
+      },
+      {
+        id: "last",
+        label: text.common.latest,
+        accessor: (row) => row.last_recorded_at ?? "",
+        width: 130,
+        render: (row) => (
+          <span className="text-xs text-foreground">
+            {row.last_recorded_at ? new Date(row.last_recorded_at).toLocaleDateString(locale) : text.unknown}
+          </span>
+        ),
+      },
+      {
+        id: "change",
+        label: text.common.latestVsFirst,
+        accessor: (row) => row.change_pct ?? -999,
+        width: 160,
+        render: (row) => (
+          <span className="text-xs text-foreground">{formatChange(row.change_pct, text.noBaseline)}</span>
+        ),
+      },
+      {
+        id: "avg",
+        label: text.common.average,
+        accessor: (row) => row.avg_unit_gross ?? "",
+        width: 170,
+        render: (row) => (
+          <span className="text-xs text-foreground">{formatMoneyMetric(row.avg_unit_gross, locale)}</span>
+        ),
+      },
+      {
+        id: "latest_value",
+        label: text.common.latest,
+        accessor: (row) => row.latest_unit_gross ?? "",
+        width: 170,
+        render: (row) => (
+          <span className="text-xs text-foreground">{formatMoneyMetric(row.latest_unit_gross, locale)}</span>
+        ),
+      },
+    ],
+    [locale, text],
+  );
+  const nonMedicalProviderColumns = useMemo<ColumnDef<NonMedicalProviderReportRow>[]>(
+    () => [
+      {
+        id: "provider",
+        label: text.nonMedicalProviders.title,
+        accessor: (row) => row.name,
+        width: 240,
+        pinned: "left",
+        sortable: true,
+        render: (row) => <span className="text-sm font-medium text-foreground">{row.name}</span>,
+      },
+      {
+        id: "location",
+        label: text.common.location,
+        accessor: (row) => `${row.address_city ?? ""} ${row.address_country ?? ""}`,
+        width: 220,
+        render: (row) => (
+          <span className="text-xs text-foreground">
+            {[row.address_city, row.address_country].filter(Boolean).join(", ") || text.locationNotSet}
+          </span>
+        ),
+      },
+      {
+        id: "services",
+        label: text.common.services,
+        accessor: (row) => row.service_count,
+        width: 110,
+        sortable: true,
+      },
+      {
+        id: "patients",
+        label: text.common.patients90d,
+        accessor: (row) => row.active_patients_90d,
+        width: 140,
+        sortable: true,
+      },
+      {
+        id: "appointments",
+        label: text.common.appointments90d,
+        accessor: (row) => row.appointments_90d,
+        width: 150,
+        sortable: true,
+      },
+      {
+        id: "requests",
+        label: text.common.conciergeRequests90d,
+        accessor: (row) => row.concierge_requests_90d,
+        width: 170,
+        sortable: true,
+      },
+      {
+        id: "open_requests",
+        label: text.common.openRequests,
+        accessor: (row) => row.open_concierge_requests,
+        width: 140,
+        sortable: true,
+      },
+      {
+        id: "delivered",
+        label: text.common.deliveredItems,
+        accessor: (row) => row.delivered_items,
+        width: 150,
+        sortable: true,
+      },
+      {
+        id: "gross",
+        label: text.summary.deliveredServiceVolume,
+        accessor: (row) => row.gross_service_volume ?? "",
+        width: 180,
+        render: (row) => (
+          <span className="text-xs text-foreground">
+            {row.gross_service_volume ? formatMoney(row.gross_service_volume, locale) : text.countsOnly}
+          </span>
+        ),
+      },
+    ],
+    [locale, text],
+  );
+  const countryColumns = useMemo<ColumnDef<CountryReportRow>[]>(
+    () => [
+      {
+        id: "country",
+        label: text.countries.title,
+        accessor: (row) => row.country,
+        width: 220,
+        pinned: "left",
+        sortable: true,
+      },
+      {
+        id: "patients",
+        label: text.common.patients90d,
+        accessor: (row) => row.patient_count,
+        width: 140,
+        sortable: true,
+      },
+      {
+        id: "orders",
+        label: text.summary.activeOrders,
+        accessor: (row) => row.active_orders,
+        width: 140,
+        sortable: true,
+      },
+      {
+        id: "gross",
+        label: text.summary.deliveredServiceVolume,
+        accessor: (row) => row.gross_invoiced ?? "",
+        width: 180,
+        render: (row) => (
+          <span className="text-xs text-foreground">
+            {row.gross_invoiced ? formatMoney(row.gross_invoiced, locale) : text.countsOnly}
+          </span>
+        ),
+      },
+    ],
+    [locale, text],
+  );
+  const doctorColumns = useMemo<ColumnDef<DoctorReportRow>[]>(
+    () => [
+      {
+        id: "doctor",
+        label: text.doctors.title,
+        accessor: (row) => row.name,
+        width: 220,
+        pinned: "left",
+        sortable: true,
+        render: (row) => (
+          <span className="text-sm font-medium text-foreground">
+            {[row.title, row.name].filter(Boolean).join(" ")}
+          </span>
+        ),
+      },
+      {
+        id: "provider",
+        label: text.medicalProviders.title,
+        accessor: (row) => row.provider_name,
+        width: 220,
+        render: (row) => <span className="text-xs text-foreground">{row.provider_name}</span>,
+      },
+      {
+        id: "location",
+        label: text.common.location,
+        accessor: (row) => `${row.address_city ?? ""} ${row.address_country ?? ""}`,
+        width: 220,
+        render: (row) => (
+          <span className="text-xs text-foreground">
+            {[row.address_city, row.address_country].filter(Boolean).join(", ") || text.locationNotSet}
+          </span>
+        ),
+      },
+      {
+        id: "specialty",
+        label: text.common.specialties,
+        accessor: (row) => row.fachbereich ?? "",
+        width: 160,
+        render: (row) => <span className="text-xs text-foreground">{row.fachbereich || text.unknown}</span>,
+      },
+      {
+        id: "patients",
+        label: text.common.patients90d,
+        accessor: (row) => row.active_patients_90d,
+        width: 140,
+        sortable: true,
+      },
+      {
+        id: "appointments",
+        label: text.common.appointments90d,
+        accessor: (row) => row.appointments_90d,
+        width: 150,
+        sortable: true,
+      },
+      {
+        id: "active_orders",
+        label: text.summary.activeOrders,
+        accessor: (row) => row.active_orders,
+        width: 140,
+        sortable: true,
+      },
+      {
+        id: "delivered",
+        label: text.common.deliveredItems,
+        accessor: (row) => row.delivered_items,
+        width: 150,
+        sortable: true,
+      },
+      {
+        id: "feedback_count",
+        label: text.common.feedbackCount,
+        accessor: (row) => row.feedback_count,
+        width: 150,
+        sortable: true,
+      },
+      {
+        id: "treatment",
+        label: text.common.treatmentScore,
+        accessor: (row) => row.avg_treatment_score ?? -1,
+        width: 140,
+        sortable: true,
+        render: (row) => (
+          <span className="text-xs text-foreground">
+            {formatRating(row.avg_treatment_score, text.notRated)}
+          </span>
+        ),
+      },
+      {
+        id: "response",
+        label: text.common.doctorResponseTime,
+        accessor: (row) => row.avg_response_hours ?? -1,
+        width: 170,
+        sortable: true,
+        render: (row) => (
+          <span className="text-xs text-foreground">
+            {formatHours(row.avg_response_hours, text.noResponses)}
+          </span>
+        ),
+      },
+      {
+        id: "followup",
+        label: text.common.followupCompletion,
+        accessor: (row) => row.followup_completion_rate ?? -1,
+        width: 180,
+        sortable: true,
+        render: (row) => (
+          <span className="text-xs text-foreground">
+            {formatPercent(row.followup_completion_rate, text.noBaseline)}
+          </span>
+        ),
+      },
+      {
+        id: "gross",
+        label: text.summary.deliveredServiceVolume,
+        accessor: (row) => row.gross_service_volume ?? "",
+        width: 180,
+        render: (row) => (
+          <span className="text-xs text-foreground">
+            {row.gross_service_volume ? formatMoney(row.gross_service_volume, locale) : text.countsOnly}
+          </span>
+        ),
+      },
+    ],
+    [locale, text],
+  );
+  const forecastQuotePipelineColumns = useMemo<ColumnDef<ForecastQuotePipelineRow>[]>(
+    () => [
+      {
+        id: "status",
+        label: text.forecast.pipelineTitle,
+        accessor: (row) => row.status,
+        width: 240,
+        pinned: "left",
+        sortable: true,
+      },
+      {
+        id: "quotes",
+        label: text.forecast.openQuotes,
+        accessor: (row) => row.quote_count,
+        width: 130,
+        sortable: true,
+      },
+      {
+        id: "expiring",
+        label: text.forecast.expiring14d,
+        accessor: (row) => row.expiring_next_14d,
+        width: 150,
+        sortable: true,
+      },
+      {
+        id: "gross",
+        label: text.forecast.grossPipeline,
+        accessor: (row) => row.gross_total ?? "",
+        width: 180,
+        render: (row) => (
+          <span className="text-xs text-foreground">
+            {row.gross_total ? formatMoney(row.gross_total, locale) : text.countsOnly}
+          </span>
+        ),
+      },
+      {
+        id: "weighted",
+        label: text.forecast.weighted,
+        accessor: (row) => row.weighted_gross ?? "",
+        width: 180,
+        render: (row) => (
+          <span className="text-xs text-foreground">
+            {row.weighted_gross ? formatMoney(row.weighted_gross, locale) : text.weightedHidden}
+          </span>
+        ),
+      },
+    ],
+    [locale, text],
+  );
+  const forecastClinicCapacityColumns = useMemo<ColumnDef<ForecastClinicCapacityRow>[]>(
+    () => [
+      {
+        id: "clinic",
+        label: text.forecast.clinicCapacityTitle,
+        accessor: (row) => row.name,
+        width: 220,
+        pinned: "left",
+        sortable: true,
+        render: (row) => <span className="text-sm font-medium text-foreground">{row.name}</span>,
+      },
+      {
+        id: "location",
+        label: text.common.location,
+        accessor: (row) => row.address_city ?? "",
+        width: 200,
+        render: (row) => (
+          <span className="text-xs text-foreground">{row.address_city || text.locationNotSet}</span>
+        ),
+      },
+      {
+        id: "doctors",
+        label: text.common.doctors,
+        accessor: (row) => row.doctor_count,
+        width: 120,
+        sortable: true,
+      },
+      {
+        id: "appointments",
+        label: text.forecast.appointments30d,
+        accessor: (row) => row.appointments_next_30d,
+        width: 170,
+        sortable: true,
+      },
+      {
+        id: "followup",
+        label: text.forecast.followup30d,
+        accessor: (row) => row.followup_appointments_next_30d,
+        width: 170,
+        sortable: true,
+      },
+      {
+        id: "patients",
+        label: text.forecast.patients30d,
+        accessor: (row) => row.patients_next_30d,
+        width: 150,
+        sortable: true,
+      },
+      {
+        id: "orders",
+        label: text.forecast.orders30d,
+        accessor: (row) => row.active_orders_next_30d,
+        width: 150,
+        sortable: true,
+      },
+    ],
+    [text],
+  );
 
   async function exportSection(
     section:
@@ -870,21 +1558,14 @@ export function ReportsPage() {
 
   if (!roleCanOpenReports(user?.role)) {
     return (
-      <div className="space-y-6">
-        <section className={card("px-6 py-10 text-center")}>
-          <h1 className="text-2xl font-semibold text-slate-950">{text.accessTitle}</h1>
-          <p className="mt-3 text-sm text-slate-500">
-            {text.accessDescription}
-          </p>
-        </section>
-      </div>
+      <ShellBanner tone="warning">{text.accessDescription}</ShellBanner>
     );
   }
 
   if (loading) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
-        <div className="flex items-center gap-3 rounded-full border border-slate-200 bg-white px-5 py-3 text-sm text-slate-500 shadow-sm">
+        <div className="flex items-center gap-3 rounded-full border border-border bg-card px-5 py-3 text-sm text-muted-foreground shadow-sm">
           <LoaderCircle className="size-4 animate-spin" />
           {text.loadingWorkspace}
         </div>
@@ -893,31 +1574,24 @@ export function ReportsPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <section className={card("bg-[radial-gradient(circle_at_top_left,_rgba(56,189,248,0.14),_transparent_34%),linear-gradient(135deg,#0f172a_0%,#111827_54%,#14532d_100%)] px-6 py-6 text-white")}>
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-          <div className="max-w-3xl">
-            <p className="text-sm uppercase tracking-[0.18em] text-white/60">{text.analytics}</p>
-            <h1 className="mt-3 text-3xl font-semibold tracking-tight">{text.workspaceTitle}</h1>
-            <p className="mt-3 text-sm leading-7 text-white/75">
-              {text.workspaceDescription}
-            </p>
-          </div>
+    <div className="space-y-4">
+      <PageHeader
+        title={titleWithDot(text.workspaceTitle)}
+        description={text.workspaceDescription}
+        actions={
           <Button
             variant="outline"
-            className="border-white/15 bg-white/8 text-white hover:bg-white/12 hover:text-white"
+            className="h-9 rounded-lg"
             onClick={() => setVersion((value) => value + 1)}
           >
             {refreshing ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
             {text.refresh}
           </Button>
-        </div>
-      </section>
+        }
+      />
 
       {error ? (
-        <section className={card("border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700")}>
-          {error}
-        </section>
+        <ShellBanner tone="error">{error}</ShellBanner>
       ) : null}
 
       {data ? (
@@ -938,12 +1612,12 @@ export function ReportsPage() {
             <section className={card("p-6")}>
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <h2 className="text-base font-semibold text-slate-950">{text.billing.title}</h2>
-                  <p className="mt-1 text-sm text-slate-500">
+                  <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.billing.title)}</h2>
+                  <p className={cn("mt-1", tokens.text.muted)}>
                     {text.billing.description}
                   </p>
                 </div>
-                <Badge className="bg-slate-100 text-slate-700 hover:bg-slate-100">
+                <Badge variant="secondary">
                   {text.billing.trackedInvoices(data.billing_kpis.tracked_invoice_count)}
                 </Badge>
               </div>
@@ -976,17 +1650,17 @@ export function ReportsPage() {
                 )}
               </div>
               <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                <article className="rounded-[1.25rem] border border-slate-200 bg-slate-50 px-4 py-4">
-                  <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.billing.averageInvoiceGross}</p>
-                  <p className="mt-2 text-sm font-semibold text-slate-950">{formatMoneyMetric(data.billing_kpis.avg_invoice_gross, locale)}</p>
+                <article className={cn("rounded-xl px-4 py-4", tokens.surface.mutedCard)}>
+                  <p className={tokens.text.eyebrow}>{text.billing.averageInvoiceGross}</p>
+                  <p className={cn("mt-2", tokens.text.body)}>{formatMoneyMetric(data.billing_kpis.avg_invoice_gross, locale)}</p>
                 </article>
-                <article className="rounded-[1.25rem] border border-slate-200 bg-slate-50 px-4 py-4">
-                  <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.billing.overdueInvoices}</p>
-                  <p className="mt-2 text-sm font-semibold text-slate-950">{data.billing_kpis.overdue_invoice_count}</p>
+                <article className={cn("rounded-xl px-4 py-4", tokens.surface.mutedCard)}>
+                  <p className={tokens.text.eyebrow}>{text.billing.overdueInvoices}</p>
+                  <p className={cn("mt-2", tokens.text.body)}>{data.billing_kpis.overdue_invoice_count}</p>
                 </article>
-                <article className="rounded-[1.25rem] border border-slate-200 bg-slate-50 px-4 py-4">
-                  <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.billing.costPassthroughShare}</p>
-                  <p className="mt-2 text-sm font-semibold text-slate-950">{formatPercent(data.billing_kpis.cost_passthrough_share_pct, text.noBaseline)}</p>
+                <article className={cn("rounded-xl px-4 py-4", tokens.surface.mutedCard)}>
+                  <p className={tokens.text.eyebrow}>{text.billing.costPassthroughShare}</p>
+                  <p className={cn("mt-2", tokens.text.body)}>{formatPercent(data.billing_kpis.cost_passthrough_share_pct, text.noBaseline)}</p>
                 </article>
               </div>
             </section>
@@ -996,12 +1670,12 @@ export function ReportsPage() {
             <section className={card("p-6")}>
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <h2 className="text-base font-semibold text-slate-950">{text.sales.title}</h2>
-                  <p className="mt-1 text-sm text-slate-500">
+                  <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.sales.title)}</h2>
+                  <p className={cn("mt-1", tokens.text.muted)}>
                     {text.sales.description}
                   </p>
                 </div>
-                <Badge className="bg-slate-100 text-slate-700 hover:bg-slate-100">
+                <Badge variant="secondary">
                   {text.sales.leadCountries(data.sales_kpis.active_lead_country_count)}
                 </Badge>
               </div>
@@ -1016,23 +1690,23 @@ export function ReportsPage() {
                 )}
               </div>
               <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-[0.8fr_1.2fr]">
-                <article className="rounded-[1.25rem] border border-slate-200 bg-slate-50 px-4 py-4">
-                  <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.sales.newPartnerClinicsQuarter}</p>
-                  <p className="mt-2 text-sm font-semibold text-slate-950">{data.sales_kpis.new_partner_clinics_90d}</p>
+                <article className={cn("rounded-xl px-4 py-4", tokens.surface.mutedCard)}>
+                  <p className={tokens.text.eyebrow}>{text.sales.newPartnerClinicsQuarter}</p>
+                  <p className={cn("mt-2", tokens.text.body)}>{data.sales_kpis.new_partner_clinics_90d}</p>
                 </article>
-                <article className="rounded-[1.25rem] border border-slate-200 bg-slate-50 px-4 py-4">
+                <article className={cn("rounded-xl px-4 py-4", tokens.surface.mutedCard)}>
                   <div className="flex items-center justify-between gap-3">
-                    <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.sales.topLeadCountries90d}</p>
-                    <Badge className="bg-white text-slate-700 hover:bg-white">{data.sales_kpis.top_countries.length}</Badge>
+                    <p className={tokens.text.eyebrow}>{text.sales.topLeadCountries90d}</p>
+                    <Badge variant="outline">{data.sales_kpis.top_countries.length}</Badge>
                   </div>
                   <div className="mt-3 space-y-2">
                     {data.sales_kpis.top_countries.length > 0 ? data.sales_kpis.top_countries.map((item) => (
                       <div key={item.country} className="flex items-center justify-between gap-3 text-sm">
-                        <span className="text-slate-600">{item.country}</span>
-                        <span className="font-semibold text-slate-950">{item.lead_count}</span>
+                        <span className="text-muted-foreground">{item.country}</span>
+                        <span className="font-semibold text-foreground">{item.lead_count}</span>
                       </div>
                     )) : (
-                      <p className="text-sm text-slate-500">{text.sales.noLeadGeographyYet}</p>
+                      <p className="text-sm text-muted-foreground">{text.sales.noLeadGeographyYet}</p>
                     )}
                   </div>
                 </article>
@@ -1068,52 +1742,44 @@ export function ReportsPage() {
                   <section className={card("p-6")}>
                     <div className="flex items-start justify-between gap-4">
                       <div>
-                        <h2 className="text-base font-semibold text-slate-950">{text.forecast.pipelineTitle}</h2>
-                        <p className="mt-1 text-sm text-slate-500">
+                        <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.forecast.pipelineTitle)}</h2>
+                        <p className={cn("mt-1", tokens.text.muted)}>
                           {text.forecast.pipelineDescription}
                         </p>
                       </div>
-                      <Badge className="bg-slate-100 text-slate-700 hover:bg-slate-100">
+                      <Badge variant="secondary">
                         {text.forecast.quotes(forecasting.quote_pipeline.open_quotes)}
                       </Badge>
                     </div>
                     <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                      <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                        <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.forecast.expiring14d}</p>
-                        <p className="mt-2 text-sm font-semibold text-slate-950">{forecasting.quote_pipeline.expiring_next_14d}</p>
+                      <div className={cn("rounded-xl px-3 py-3", tokens.surface.mutedCard)}>
+                        <p className={tokens.text.eyebrow}>{text.forecast.expiring14d}</p>
+                        <p className={cn("mt-2", tokens.text.body)}>{forecasting.quote_pipeline.expiring_next_14d}</p>
                       </div>
-                      <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                        <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.forecast.grossPipeline}</p>
-                        <p className="mt-2 text-sm font-semibold text-slate-950">
+                      <div className={cn("rounded-xl px-3 py-3", tokens.surface.mutedCard)}>
+                        <p className={tokens.text.eyebrow}>{text.forecast.grossPipeline}</p>
+                        <p className={cn("mt-2", tokens.text.body)}>
                           {forecasting.quote_pipeline.gross_total ? formatMoney(forecasting.quote_pipeline.gross_total, locale) : text.countsOnly}
                         </p>
                       </div>
-                      <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                        <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.forecast.weighted}</p>
-                        <p className="mt-2 text-sm font-semibold text-slate-950">
+                      <div className={cn("rounded-xl px-3 py-3", tokens.surface.mutedCard)}>
+                        <p className={tokens.text.eyebrow}>{text.forecast.weighted}</p>
+                        <p className={cn("mt-2", tokens.text.body)}>
                           {forecasting.quote_pipeline.weighted_gross ? formatMoney(forecasting.quote_pipeline.weighted_gross, locale) : text.countsOnly}
                         </p>
                       </div>
-                      <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                        <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.forecast.readModel}</p>
-                        <p className="mt-2 text-sm font-semibold text-slate-950">{text.forecast.readModelLegend}</p>
+                      <div className={cn("rounded-xl px-3 py-3", tokens.surface.mutedCard)}>
+                        <p className={tokens.text.eyebrow}>{text.forecast.readModel}</p>
+                        <p className={cn("mt-2", tokens.text.body)}>{text.forecast.readModelLegend}</p>
                       </div>
                     </div>
-                    <div className="mt-5 space-y-3">
-                      {forecasting.quote_pipeline.by_status.map((item) => (
-                        <article key={item.status} className="rounded-[1.25rem] border border-slate-200 bg-white px-4 py-4 shadow-sm">
-                          <div className="flex flex-wrap items-center justify-between gap-3">
-                            <div>
-                              <p className="text-sm font-semibold text-slate-950">{item.status}</p>
-                              <p className="mt-1 text-sm text-slate-500">{text.forecast.statusSummary(item.quote_count, item.expiring_next_14d)}</p>
-                            </div>
-                            <div className="text-right text-sm text-slate-600">
-                              <div>{item.gross_total ? formatMoney(item.gross_total, locale) : text.countsOnly}</div>
-                              <div className="mt-1">{item.weighted_gross ? text.forecast.weightedValue(formatMoney(item.weighted_gross, locale)) : text.weightedHidden}</div>
-                            </div>
-                          </div>
-                        </article>
-                      ))}
+                    <div className="mt-5">
+                      <DataTable
+                        rows={forecasting.quote_pipeline.by_status}
+                        columns={forecastQuotePipelineColumns}
+                        rowId={(row) => row.status}
+                        emptyState={tableEmpty(text.countsOnly)}
+                      />
                     </div>
                   </section>
                 ) : null}
@@ -1121,32 +1787,32 @@ export function ReportsPage() {
                 <div className="space-y-6">
                   {forecastSections.has("collections") && forecasting.collections ? (
                     <section className={card("p-6")}>
-                      <h2 className="text-base font-semibold text-slate-950">{text.forecast.collectionsTitle}</h2>
-                      <p className="mt-1 text-sm text-slate-500">
+                      <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.forecast.collectionsTitle)}</h2>
+                      <p className={cn("mt-1", tokens.text.muted)}>
                         {text.forecast.collectionsDescription}
                       </p>
                       <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                        <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                          <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.forecast.due14d}</p>
-                          <p className="mt-2 text-sm font-semibold text-slate-950">
+                        <div className={cn("rounded-xl px-3 py-3", tokens.surface.mutedCard)}>
+                          <p className={tokens.text.eyebrow}>{text.forecast.due14d}</p>
+                          <p className={cn("mt-2", tokens.text.body)}>
                             {forecasting.collections.due_next_14d_count} / {forecasting.collections.due_next_14d_total ? formatMoney(forecasting.collections.due_next_14d_total, locale) : text.countsOnly}
                           </p>
                         </div>
-                        <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                          <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.forecast.overdue}</p>
-                          <p className="mt-2 text-sm font-semibold text-slate-950">
+                        <div className={cn("rounded-xl px-3 py-3", tokens.surface.mutedCard)}>
+                          <p className={tokens.text.eyebrow}>{text.forecast.overdue}</p>
+                          <p className={cn("mt-2", tokens.text.body)}>
                             {forecasting.collections.overdue_invoice_count} / {forecasting.collections.overdue_open_total ? formatMoney(forecasting.collections.overdue_open_total, locale) : text.countsOnly}
                           </p>
                         </div>
-                        <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                          <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.forecast.debtWorkflows}</p>
-                          <p className="mt-2 text-sm font-semibold text-slate-950">
+                        <div className={cn("rounded-xl px-3 py-3", tokens.surface.mutedCard)}>
+                          <p className={tokens.text.eyebrow}>{text.forecast.debtWorkflows}</p>
+                          <p className={cn("mt-2", tokens.text.body)}>
                             {text.forecast.workflowOpenReview(forecasting.collections.workflow_open_count, forecasting.collections.reviews_due_7d)}
                           </p>
                         </div>
-                        <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                          <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.forecast.escalationSplit}</p>
-                          <p className="mt-2 text-sm font-semibold text-slate-950">
+                        <div className={cn("rounded-xl px-3 py-3", tokens.surface.mutedCard)}>
+                          <p className={tokens.text.eyebrow}>{text.forecast.escalationSplit}</p>
+                          <p className={cn("mt-2", tokens.text.body)}>
                             {text.forecast.escalationSplitValue(forecasting.collections.payment_plan_count, forecasting.collections.escalated_count)}
                           </p>
                         </div>
@@ -1156,28 +1822,28 @@ export function ReportsPage() {
 
                   {forecastSections.has("followup") && forecasting.followup ? (
                     <section className={card("p-6")}>
-                      <h2 className="text-base font-semibold text-slate-950">{text.forecast.followupTitle}</h2>
-                      <p className="mt-1 text-sm text-slate-500">
+                      <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.forecast.followupTitle)}</h2>
+                      <p className={cn("mt-1", tokens.text.muted)}>
                         {text.forecast.followupDescription}
                       </p>
                       <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                        <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                          <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.forecast.activeFollowupOrders}</p>
-                          <p className="mt-2 text-sm font-semibold text-slate-950">{forecasting.followup.active_orders}</p>
+                        <div className={cn("rounded-xl px-3 py-3", tokens.surface.mutedCard)}>
+                          <p className={tokens.text.eyebrow}>{text.forecast.activeFollowupOrders}</p>
+                          <p className={cn("mt-2", tokens.text.body)}>{forecasting.followup.active_orders}</p>
                         </div>
-                        <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                          <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.forecast.milestones30d}</p>
-                          <p className="mt-2 text-sm font-semibold text-slate-950">{forecasting.followup.milestones_due_next_30d}</p>
+                        <div className={cn("rounded-xl px-3 py-3", tokens.surface.mutedCard)}>
+                          <p className={tokens.text.eyebrow}>{text.forecast.milestones30d}</p>
+                          <p className={cn("mt-2", tokens.text.body)}>{forecasting.followup.milestones_due_next_30d}</p>
                         </div>
-                        <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                          <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.forecast.oneWeekOneMonthSixMonth}</p>
-                          <p className="mt-2 text-sm font-semibold text-slate-950">
+                        <div className={cn("rounded-xl px-3 py-3", tokens.surface.mutedCard)}>
+                          <p className={tokens.text.eyebrow}>{text.forecast.oneWeekOneMonthSixMonth}</p>
+                          <p className={cn("mt-2", tokens.text.body)}>
                             {forecasting.followup.followup_1w_due_next_30d} / {forecasting.followup.followup_1m_due_next_30d} / {forecasting.followup.followup_6m_due_next_30d}
                           </p>
                         </div>
-                        <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                          <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.forecast.doctorPackageResults}</p>
-                          <p className="mt-2 text-sm font-semibold text-slate-950">
+                        <div className={cn("rounded-xl px-3 py-3", tokens.surface.mutedCard)}>
+                          <p className={tokens.text.eyebrow}>{text.forecast.doctorPackageResults}</p>
+                          <p className={cn("mt-2", tokens.text.body)}>
                             {forecasting.followup.doctor_followup_open} / {forecasting.followup.package_end_due_next_30d} / {forecasting.followup.results_handoff_pending}
                           </p>
                         </div>
@@ -1191,811 +1857,477 @@ export function ReportsPage() {
                 <section className={card("p-6")}>
                   <div className="flex items-start justify-between gap-4">
                     <div>
-                      <h2 className="text-base font-semibold text-slate-950">{text.forecast.clinicCapacityTitle}</h2>
-                      <p className="mt-1 text-sm text-slate-500">
+                      <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.forecast.clinicCapacityTitle)}</h2>
+                      <p className={cn("mt-1", tokens.text.muted)}>
                         {text.forecast.clinicCapacityDescription}
                       </p>
                     </div>
-                    <Badge className="bg-slate-100 text-slate-700 hover:bg-slate-100">
+                    <Badge variant="secondary">
                       {text.forecast.clinicCapacityBadge(forecasting.clinic_capacity.active_clinics, forecasting.clinic_capacity.appointments_next_30d_total)}
                     </Badge>
                   </div>
-                  <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                    {forecasting.clinic_capacity.clinics.map((item) => (
-                      <article key={item.provider_id} className="rounded-[1.25rem] border border-slate-200 bg-white px-4 py-4 shadow-sm">
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <p className="text-sm font-semibold text-slate-950">{item.name}</p>
-                            <p className="mt-1 text-sm text-slate-500">{item.address_city || text.locationNotSet}</p>
-                          </div>
-                          <Badge className="bg-slate-100 text-slate-700 hover:bg-slate-100">
-                            {text.forecast.doctors(item.doctor_count)}
-                          </Badge>
-                        </div>
-                        <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                          <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                            <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.forecast.appointments30d}</p>
-                            <p className="mt-2 text-sm font-semibold text-slate-950">{item.appointments_next_30d}</p>
-                          </div>
-                          <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                            <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.forecast.followup30d}</p>
-                            <p className="mt-2 text-sm font-semibold text-slate-950">{item.followup_appointments_next_30d}</p>
-                          </div>
-                          <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                            <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.forecast.patients30d}</p>
-                            <p className="mt-2 text-sm font-semibold text-slate-950">{item.patients_next_30d}</p>
-                          </div>
-                          <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                            <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.forecast.orders30d}</p>
-                            <p className="mt-2 text-sm font-semibold text-slate-950">{item.active_orders_next_30d}</p>
-                          </div>
-                        </div>
-                      </article>
-                    ))}
+                  <div className="mt-5">
+                    <DataTable
+                      rows={forecasting.clinic_capacity.clinics}
+                      columns={forecastClinicCapacityColumns}
+                      rowId={(row) => row.provider_id}
+                      emptyState={tableEmpty(text.countsOnly)}
+                    />
                   </div>
                 </section>
               ) : null}
             </>
           ) : null}
 
-          <section className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
-            <div className="space-y-6">
-              {allowedSections.has("clinics") ? (
-                <section className={card("p-6")}>
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <h2 className="text-base font-semibold text-slate-950">{text.clinicReport.title}</h2>
-                      <p className="mt-1 text-sm text-slate-500">
-                        {text.clinicReport.description}
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge className="bg-slate-100 text-slate-700 hover:bg-slate-100">
-                        {data.clinics.length}
-                      </Badge>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={exportingSection === "clinics"}
-                        onClick={() => void exportSection("clinics")}
-                      >
-                        {exportingSection === "clinics" ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}
-                        {text.exportCsv}
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="mt-5 space-y-3">
-                    {data.clinics.length > 0 ? (
-                      data.clinics.map((item) => (
-                        <article key={item.provider_id} className="rounded-[1.5rem] border border-slate-200 bg-white px-4 py-4 shadow-sm">
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div>
-                              <div className="flex flex-wrap items-center gap-2">
-                                <p className="text-sm font-semibold text-slate-950">{item.name}</p>
-                                <Badge className="bg-slate-100 text-slate-700 hover:bg-slate-100">
-                                  {item.provider_type}
-                                </Badge>
-                              </div>
-                              <p className="mt-2 text-sm text-slate-500">
-                                {[item.address_city, item.address_country].filter(Boolean).join(", ") || text.locationNotSet}
-                              </p>
-                            </div>
-                            {item.gross_service_volume ? (
-                              <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100">
-                                {formatMoney(item.gross_service_volume, locale)}
-                              </Badge>
-                            ) : (
-                              <Badge className="bg-slate-100 text-slate-600 hover:bg-slate-100">
-                                {text.countsOnly}
-                              </Badge>
-                            )}
-                          </div>
-                          <div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-4">
-                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.common.patients90d}</p>
-                              <p className="mt-2 text-sm font-semibold text-slate-950">{item.active_patients_90d}</p>
-                            </div>
-                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.common.appointments90d}</p>
-                              <p className="mt-2 text-sm font-semibold text-slate-950">{item.appointments_90d}</p>
-                            </div>
-                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.common.deliveredItems}</p>
-                              <p className="mt-2 text-sm font-semibold text-slate-950">{item.delivered_items}</p>
-                            </div>
-                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.common.doctors}</p>
-                              <p className="mt-2 text-sm font-semibold text-slate-950">{item.doctor_count}</p>
-                            </div>
-                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.common.feedback}</p>
-                              <p className="mt-2 text-sm font-semibold text-slate-950">{formatRating(item.avg_feedback_score, text.notRated)}</p>
-                            </div>
-                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.common.feedbackCount}</p>
-                              <p className="mt-2 text-sm font-semibold text-slate-950">{item.feedback_count}</p>
-                            </div>
-                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.common.treatmentScore}</p>
-                              <p className="mt-2 text-sm font-semibold text-slate-950">{formatRating(item.avg_treatment_score, text.notRated)}</p>
-                            </div>
-                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.common.doctorCommunication}</p>
-                              <p className="mt-2 text-sm font-semibold text-slate-950">{formatRating(item.avg_doctor_score, text.notRated)}</p>
-                            </div>
-                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.common.clinicResponseTime}</p>
-                              <p className="mt-2 text-sm font-semibold text-slate-950">{formatHours(item.avg_response_hours, text.noResponses)}</p>
-                              <p className="mt-1 text-[11px] text-slate-500">
-                                {text.common.answeredOpen(item.response_sample_count, item.open_communication_count)}
-                              </p>
-                            </div>
-                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.common.writtenFindings}</p>
-                              <p className="mt-2 text-sm font-semibold text-slate-950">{formatHours(item.avg_findings_turnaround_hours, text.noResponses)}</p>
-                              <p className="mt-1 text-[11px] text-slate-500">
-                                {text.common.linkedArztbrief(item.findings_sample_count)}
-                              </p>
-                            </div>
-                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.common.followupCompletion}</p>
-                              <p className="mt-2 text-sm font-semibold text-slate-950">
-                                {formatPercent(item.followup_completion_rate, text.noBaseline)}
-                              </p>
-                              <p className="mt-1 text-[11px] text-slate-500">
-                                {text.common.followupOrders(item.followup_completed_orders, item.followup_orders_total)}
-                              </p>
-                            </div>
-                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.common.clinicalOutcome}</p>
-                              <p className="mt-2 text-sm font-semibold text-slate-950">
-                                {formatPercent(item.treatment_success_yes_rate, text.noBaseline)} {text.common.yes}
-                              </p>
-                              <p className="mt-1 text-[11px] text-slate-500">
-                                {formatPercent(item.treatment_success_partial_rate, text.noBaseline)} {text.common.partial} · {formatPercent(item.complication_rate, text.noBaseline)} {text.common.complications}
-                              </p>
-                            </div>
-                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3 md:col-span-2 xl:col-span-2">
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.common.experienceBundle}</p>
-                              <p className="mt-2 text-sm font-semibold text-slate-950">
-                                {text.common.org} {formatRating(item.avg_organization_score, text.notRated)} · {text.common.service} {formatRating(item.avg_service_score, text.notRated)}
-                              </p>
-                              <p className="mt-1 text-[11px] text-slate-500">
-                                {text.common.ambience} {formatRating(item.avg_infrastructure_score, text.notRated)} · {text.common.value} {formatRating(item.avg_price_value_score, text.notRated)}
-                              </p>
-                            </div>
-                          </div>
-                          <div className="mt-4 flex flex-wrap gap-2">
-                            <Button
-                              variant={selectedClinicId === item.provider_id ? "default" : "outline"}
-                              size="sm"
-                              onClick={() =>
-                                setSelectedClinicId((current) =>
-                                  current === item.provider_id ? "" : item.provider_id,
-                                )
-                              }
-                            >
-                              {selectedClinicId === item.provider_id ? text.clearDrillDown : text.drillIntoDoctors}
-                            </Button>
-                            <StaffLink to={`/providers?provider=${item.provider_id}`}>
-                              <Button variant="outline" size="sm">{text.openProvider}</Button>
-                            </StaffLink>
-                          </div>
-                        </article>
-                      ))
-                    ) : (
-                      <div className="rounded-[1.5rem] border border-dashed border-slate-200 bg-slate-50/70 px-5 py-8 text-center text-sm text-slate-500">
-                        {text.clinicReport.empty}
+                    <section className="space-y-6">
+            {allowedSections.has("clinics") ? (
+              <AdminTableCard
+                title={titleWithDot(text.clinicReport.title)}
+                description={text.clinicReport.description}
+                count={data.clinics.length}
+                accessory={
+                  <AdminToolbar>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={exportingSection === "clinics"}
+                      onClick={() => void exportSection("clinics")}
+                    >
+                      {exportingSection === "clinics" ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}
+                      {text.exportCsv}
+                    </Button>
+                  </AdminToolbar>
+                }
+              >
+                <div className="p-3">
+                  <DataTable
+                    rows={data.clinics}
+                    columns={clinicColumns}
+                    rowId={(row) => row.provider_id}
+                    activeRowId={detail?.kind === "clinic" ? detail.row.provider_id : null}
+                    onRowClick={(row) => setDetail({ kind: "clinic", row })}
+                    rowActions={(row) => (
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant={selectedClinicId === row.provider_id ? "default" : "outline"}
+                          size="sm"
+                          onClick={() =>
+                            setSelectedClinicId((current) =>
+                              current === row.provider_id ? "" : row.provider_id,
+                            )
+                          }
+                        >
+                          {selectedClinicId === row.provider_id ? text.clearDrillDown : text.drillIntoDoctors}
+                        </Button>
+                        <StaffLink to={`/providers?provider=${row.provider_id}`}>
+                          <Button variant="outline" size="sm">{text.openProvider}</Button>
+                        </StaffLink>
                       </div>
                     )}
-                  </div>
-                </section>
-              ) : null}
-
-              {allowedSections.has("service_types") ? (
-                <section className={card("p-6")}>
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <h2 className="text-base font-semibold text-slate-950">{text.serviceTypeReport.title}</h2>
-                      <p className="mt-1 text-sm text-slate-500">
-                        {text.serviceTypeReport.description}
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge className="bg-slate-100 text-slate-700 hover:bg-slate-100">
-                        {data.service_types.length}
-                      </Badge>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={exportingSection === "service_types"}
-                        onClick={() => void exportSection("service_types")}
-                      >
-                        {exportingSection === "service_types" ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}
-                        {text.exportCsv}
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="mt-5 space-y-3">
-                    {data.service_types.length > 0 ? (
-                      data.service_types.map((item) => (
-                        <article key={item.service_type} className="rounded-[1.5rem] border border-slate-200 bg-white px-4 py-4 shadow-sm">
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div>
-                              <p className="text-sm font-semibold text-slate-950">{serviceTypeLabel(item.service_type, text.serviceTypes)}</p>
-                              <p className="mt-2 text-sm text-slate-500">
-                                {text.common.itemsOrdersPatients(item.item_count, item.order_count, item.patient_count)}
-                              </p>
-                            </div>
-                            {item.gross_total ? (
-                              <Badge className="bg-sky-100 text-sky-700 hover:bg-sky-100">
-                                {formatMoney(item.gross_total, locale)}
-                              </Badge>
-                            ) : (
-                              <Badge className="bg-slate-100 text-slate-600 hover:bg-slate-100">
-                                {text.countsOnly}
-                              </Badge>
-                            )}
-                          </div>
-                        </article>
-                      ))
-                    ) : (
-                      <div className="rounded-[1.5rem] border border-dashed border-slate-200 bg-slate-50/70 px-5 py-8 text-center text-sm text-slate-500">
-                        {text.serviceTypeReport.empty}
-                      </div>
-                    )}
-                  </div>
-                </section>
-              ) : null}
-
-              {allowedSections.has("medical_providers") ? (
-                <section className={card("p-6")}>
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <h2 className="text-base font-semibold text-slate-950">{text.medicalProviders.title}</h2>
-                      <p className="mt-1 text-sm text-slate-500">
-                        {text.medicalProviders.description}
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge className="bg-slate-100 text-slate-700 hover:bg-slate-100">
-                        {data.medical_providers.length}
-                      </Badge>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={exportingSection === "medical_providers"}
-                        onClick={() => void exportSection("medical_providers")}
-                      >
-                        {exportingSection === "medical_providers" ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}
-                        {text.exportCsv}
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="mt-5 space-y-3">
-                    {data.medical_providers.length > 0 ? (
-                      data.medical_providers.map((item) => (
-                        <article key={item.provider_id} className="rounded-[1.5rem] border border-slate-200 bg-white px-4 py-4 shadow-sm">
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div>
-                              <p className="text-sm font-semibold text-slate-950">{item.name}</p>
-                              <p className="mt-2 text-sm text-slate-500">
-                                {[item.address_city, item.address_country].filter(Boolean).join(", ") || text.locationNotSet}
-                              </p>
-                            </div>
-                            <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100">
-                              {formatMoney(item.gross_service_volume ?? "0", locale)}
-                            </Badge>
-                          </div>
-                          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.common.patients90d}</p>
-                              <p className="mt-2 text-sm font-semibold text-slate-950">{item.active_patients_90d}</p>
-                            </div>
-                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.common.appointments90d}</p>
-                              <p className="mt-2 text-sm font-semibold text-slate-950">{item.appointments_90d}</p>
-                            </div>
-                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.common.ordersDelivered}</p>
-                              <p className="mt-2 text-sm font-semibold text-slate-950">{item.active_orders} / {item.delivered_items}</p>
-                            </div>
-                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.common.doctorNetwork}</p>
-                              <p className="mt-2 text-sm font-semibold text-slate-950">{item.doctor_count}</p>
-                              <p className="mt-1 text-[11px] text-slate-500">
-                                {item.last_activity_at ? text.common.lastActivity(new Date(item.last_activity_at).toLocaleDateString(locale)) : text.noRecentActivity}
-                              </p>
-                            </div>
-                          </div>
-                          <div className="mt-4 space-y-3">
-                            <div>
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.common.specialties}</p>
-                              <div className="mt-2 flex flex-wrap gap-2">
-                                {item.doctor_specialties.length > 0 ? (
-                                  item.doctor_specialties.map((specialty) => (
-                                    <Badge key={`${item.provider_id}-${specialty}`} className="bg-slate-100 text-slate-700 hover:bg-slate-100">
-                                      {specialty}
-                                    </Badge>
-                                  ))
-                                ) : (
-                                  <Badge className="bg-slate-100 text-slate-600 hover:bg-slate-100">{text.common.noSpecialtyData}</Badge>
-                                )}
-                              </div>
-                            </div>
-                            <div>
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.common.serviceMix}</p>
-                              <div className="mt-2 flex flex-wrap gap-2">
-                                {item.service_focus.length > 0 ? (
-                                  item.service_focus.map((service) => (
-                                    <Badge key={`${item.provider_id}-${service}`} className="bg-slate-100 text-slate-700 hover:bg-slate-100">
-                                      {service}
-                                    </Badge>
-                                  ))
-                                ) : (
-                                  <Badge className="bg-slate-100 text-slate-600 hover:bg-slate-100">{text.common.noDeliveredServicesYet}</Badge>
-                                )}
-                              </div>
-                            </div>
-                            <div>
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.common.patientCountryMix}</p>
-                              <div className="mt-2 flex flex-wrap gap-2">
-                                {item.patient_country_mix.length > 0 ? (
-                                  item.patient_country_mix.map((country) => (
-                                    <Badge key={`${item.provider_id}-${country}`} className="bg-sky-100 text-sky-700 hover:bg-sky-100">
-                                      {country}
-                                    </Badge>
-                                  ))
-                                ) : (
-                                  <Badge className="bg-slate-100 text-slate-600 hover:bg-slate-100">{text.common.noCountryData}</Badge>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                          <div className="mt-4 flex flex-wrap gap-2">
-                            <StaffLink to={`/providers?provider=${item.provider_id}`}>
-                              <Button variant="outline" size="sm">{text.openProvider}</Button>
-                            </StaffLink>
-                          </div>
-                        </article>
-                      ))
-                    ) : (
-                      <div className="rounded-[1.5rem] border border-dashed border-slate-200 bg-slate-50/70 px-5 py-8 text-center text-sm text-slate-500">
-                        {text.medicalProviders.empty}
-                      </div>
-                    )}
-                  </div>
-                </section>
-              ) : null}
-
-              {allowedSections.has("provider_costs") ? (
-                <section className={card("p-6")}>
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <h2 className="text-base font-semibold text-slate-950">{text.providerCosts.title}</h2>
-                      <p className="mt-1 text-sm text-slate-500">
-                        {text.providerCosts.description}
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      {selectedClinic ? (
-                        <Badge className="bg-sky-100 text-sky-700 hover:bg-sky-100">
-                          {selectedClinic.name}
-                        </Badge>
-                      ) : null}
-                      <Badge className="bg-slate-100 text-slate-700 hover:bg-slate-100">
-                        {visibleProviderCosts.length}
-                      </Badge>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={exportingSection === "provider_costs"}
-                        onClick={() => void exportSection("provider_costs")}
-                      >
-                        {exportingSection === "provider_costs" ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}
-                        {text.exportCsv}
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="mt-5 space-y-3">
-                    {visibleProviderCosts.length > 0 ? (
-                      visibleProviderCosts.map((item) => (
-                        <article key={`${item.provider_id}-${item.service_label}`} className="rounded-[1.5rem] border border-slate-200 bg-white px-4 py-4 shadow-sm">
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div>
-                              <p className="text-sm font-semibold text-slate-950">{item.service_label}</p>
-                              <p className="mt-2 text-sm text-slate-500">
-                                {item.provider_name}
-                                {item.address_city || item.address_country
-                                  ? ` · ${[item.address_city, item.address_country].filter(Boolean).join(", ")}`
-                                  : ""}
-                              </p>
-                            </div>
-                            <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100">
-                              {formatMoneyMetric(item.latest_unit_gross)}
-                            </Badge>
-                          </div>
-                          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.common.samples}</p>
-                              <p className="mt-2 text-sm font-semibold text-slate-950">{item.sample_count}</p>
-                            </div>
-                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.common.latestVsFirst}</p>
-                              <p className="mt-2 text-sm font-semibold text-slate-950">{formatChange(item.change_pct, text.noBaseline)}</p>
-                              <p className="mt-1 text-[11px] text-slate-500">
-                                {formatMoneyMetric(item.earliest_unit_gross, locale)} → {formatMoneyMetric(item.latest_unit_gross, locale)}
-                              </p>
-                            </div>
-                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.common.average}</p>
-                              <p className="mt-2 text-sm font-semibold text-slate-950">{formatMoneyMetric(item.avg_unit_gross, locale)}</p>
-                              <p className="mt-1 text-[11px] text-slate-500">
-                                {text.common.min} {formatMoneyMetric(item.min_unit_gross, locale)} · {text.common.max} {formatMoneyMetric(item.max_unit_gross, locale)}
-                              </p>
-                            </div>
-                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.common.observedRange}</p>
-                              <p className="mt-2 text-sm font-semibold text-slate-950">
-                                {item.first_recorded_at ? new Date(item.first_recorded_at).toLocaleDateString(locale) : text.unknown}
-                              </p>
-                              <p className="mt-1 text-[11px] text-slate-500">
-                                {text.common.latest} {item.last_recorded_at ? new Date(item.last_recorded_at).toLocaleDateString(locale) : text.unknown}
-                              </p>
-                            </div>
-                          </div>
-                          {item.trend_points.length > 0 ? (
-                            <div className="mt-4 flex flex-wrap gap-2">
-                              {item.trend_points.map((point) => (
-                                <Badge
-                                  key={`${item.provider_id}-${item.service_label}-${point.month}`}
-                                  className="bg-slate-100 text-slate-700 hover:bg-slate-100"
-                                >
-                                  {point.month}: {formatMoneyMetric(point.avg_unit_gross, locale)}
-                                </Badge>
-                              ))}
-                            </div>
-                          ) : null}
-                        </article>
-                      ))
-                    ) : (
-                      <div className="rounded-[1.5rem] border border-dashed border-slate-200 bg-slate-50/70 px-5 py-8 text-center text-sm text-slate-500">
-                        {text.providerCosts.empty}
-                      </div>
-                    )}
-                  </div>
-                </section>
-              ) : null}
-
-              {allowedSections.has("non_medical_providers") ? (
-                <section className={card("p-6")}>
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <h2 className="text-base font-semibold text-slate-950">{text.nonMedicalProviders.title}</h2>
-                      <p className="mt-1 text-sm text-slate-500">
-                        {text.nonMedicalProviders.description}
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge className="bg-slate-100 text-slate-700 hover:bg-slate-100">
-                        {data.non_medical_providers.length}
-                      </Badge>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={exportingSection === "non_medical_providers"}
-                        onClick={() => void exportSection("non_medical_providers")}
-                      >
-                        {exportingSection === "non_medical_providers" ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}
-                        {text.exportCsv}
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="mt-5 space-y-3">
-                    {data.non_medical_providers.length > 0 ? (
-                      data.non_medical_providers.map((item) => (
-                        <article key={item.provider_id} className="rounded-[1.5rem] border border-slate-200 bg-white px-4 py-4 shadow-sm">
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div>
-                              <p className="text-sm font-semibold text-slate-950">{item.name}</p>
-                              <p className="mt-2 text-sm text-slate-500">
-                                {[item.address_city, item.address_country].filter(Boolean).join(", ") || text.locationNotSet}
-                              </p>
-                            </div>
-                            {item.gross_service_volume ? (
-                              <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100">
-                                {formatMoney(item.gross_service_volume, locale)}
-                              </Badge>
-                            ) : (
-                              <Badge className="bg-slate-100 text-slate-600 hover:bg-slate-100">
-                                {text.countsOnly}
-                              </Badge>
-                            )}
-                          </div>
-                          <div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-4">
-                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.common.services}</p>
-                              <p className="mt-2 text-sm font-semibold text-slate-950">{item.service_count}</p>
-                            </div>
-                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.common.patients90d}</p>
-                              <p className="mt-2 text-sm font-semibold text-slate-950">{item.active_patients_90d}</p>
-                            </div>
-                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.common.appointments90d}</p>
-                              <p className="mt-2 text-sm font-semibold text-slate-950">{item.appointments_90d}</p>
-                            </div>
-                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.common.conciergeRequests90d}</p>
-                              <p className="mt-2 text-sm font-semibold text-slate-950">{item.concierge_requests_90d}</p>
-                            </div>
-                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.common.openRequests}</p>
-                              <p className="mt-2 text-sm font-semibold text-slate-950">{item.open_concierge_requests}</p>
-                            </div>
-                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.common.completed90d}</p>
-                              <p className="mt-2 text-sm font-semibold text-slate-950">{item.completed_concierge_requests_90d}</p>
-                            </div>
-                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.common.deliveredItems}</p>
-                              <p className="mt-2 text-sm font-semibold text-slate-950">{item.delivered_items}</p>
-                            </div>
-                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.common.conciergeScore}</p>
-                              <p className="mt-2 text-sm font-semibold text-slate-950">{formatRating(item.avg_concierge_score, text.notRated)}</p>
-                              <p className="mt-1 text-[11px] text-slate-500">{text.common.feedbackVendors(item.feedback_count, item.vendor_count)}</p>
-                            </div>
-                          </div>
-                          {item.service_focus.length > 0 ? (
-                            <div className="mt-4 flex flex-wrap gap-2">
-                              {item.service_focus.map((service) => (
-                                <Badge key={`${item.provider_id}-${service}`} className="bg-slate-100 text-slate-700 hover:bg-slate-100">
-                                  {service}
-                                </Badge>
-                              ))}
-                            </div>
-                          ) : null}
-                          <div className="mt-4 flex flex-wrap gap-2">
-                            <StaffLink to={`/providers?provider=${item.provider_id}`}>
-                              <Button variant="outline" size="sm">{text.openProvider}</Button>
-                            </StaffLink>
-                          </div>
-                        </article>
-                      ))
-                    ) : (
-                      <div className="rounded-[1.5rem] border border-dashed border-slate-200 bg-slate-50/70 px-5 py-8 text-center text-sm text-slate-500">
-                        {text.nonMedicalProviders.empty}
-                      </div>
-                    )}
-                  </div>
-                </section>
-              ) : null}
-            </div>
-
-            <div className="space-y-6">
-              {allowedSections.has("countries") ? (
-                <section className={card("p-6")}>
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <h2 className="text-base font-semibold text-slate-950">{text.countries.title}</h2>
-                      <p className="mt-1 text-sm text-slate-500">
-                        {text.countries.description}
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge className="bg-slate-100 text-slate-700 hover:bg-slate-100">
-                        {data.countries.length}
-                      </Badge>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={exportingSection === "countries"}
-                        onClick={() => void exportSection("countries")}
-                      >
-                        {exportingSection === "countries" ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}
-                        {text.exportCsv}
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="mt-5 space-y-3">
-                    {data.countries.length > 0 ? (
-                      data.countries.map((item) => (
-                        <article key={item.country} className="rounded-[1.5rem] border border-slate-200 bg-white px-4 py-4 shadow-sm">
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <p className="text-sm font-semibold text-slate-950">{item.country}</p>
-                              <p className="mt-2 text-sm text-slate-500">
-                                {text.countries.summary(item.patient_count, item.active_orders)}
-                              </p>
-                            </div>
-                            {item.gross_invoiced ? (
-                              <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100">
-                                {formatMoney(item.gross_invoiced, locale)}
-                              </Badge>
-                            ) : (
-                              <Badge className="bg-slate-100 text-slate-600 hover:bg-slate-100">
-                                {text.countsOnly}
-                              </Badge>
-                            )}
-                          </div>
-                        </article>
-                      ))
-                    ) : (
-                      <div className="rounded-[1.5rem] border border-dashed border-slate-200 bg-slate-50/70 px-5 py-8 text-center text-sm text-slate-500">
-                        {text.countries.empty}
-                      </div>
-                    )}
-                  </div>
-                </section>
-              ) : null}
-
-              {allowedSections.has("doctors") ? (
-                <section className={card("p-6")}>
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <h2 className="text-base font-semibold text-slate-950">{text.doctors.title}</h2>
-                      <p className="mt-1 text-sm text-slate-500">
-                        {text.doctors.description}
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      {selectedClinic ? (
-                        <Badge className="bg-sky-100 text-sky-700 hover:bg-sky-100">
-                          {selectedClinic.name}
-                        </Badge>
-                      ) : null}
-                      <Badge className="bg-slate-100 text-slate-700 hover:bg-slate-100">
-                        {visibleDoctors.length}
-                      </Badge>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={exportingSection === "doctors"}
-                        onClick={() => void exportSection("doctors")}
-                      >
-                        {exportingSection === "doctors" ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}
-                        {text.exportCsv}
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="mt-5 space-y-3">
-                    {visibleDoctors.length > 0 ? (
-                      visibleDoctors.map((item) => (
-                        <article key={item.doctor_id} className="rounded-[1.5rem] border border-slate-200 bg-white px-4 py-4 shadow-sm">
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div>
-                              <div className="flex flex-wrap items-center gap-2">
-                                <p className="text-sm font-semibold text-slate-950">
-                                  {[item.title, item.name].filter(Boolean).join(" ")}
-                                </p>
-                                {item.fachbereich ? (
-                                  <Badge className="bg-slate-100 text-slate-700 hover:bg-slate-100">{item.fachbereich}</Badge>
-                                ) : null}
-                              </div>
-                              <p className="mt-2 text-sm text-slate-500">
-                                {item.provider_name}
-                                {item.address_city || item.address_country
-                                  ? ` · ${[item.address_city, item.address_country].filter(Boolean).join(", ")}`
-                                  : ""}
-                              </p>
-                            </div>
-                            {item.gross_service_volume ? (
-                              <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100">
-                                {formatMoney(item.gross_service_volume, locale)}
-                              </Badge>
-                            ) : (
-                              <Badge className="bg-slate-100 text-slate-600 hover:bg-slate-100">
-                                {text.countsOnly}
-                              </Badge>
-                            )}
-                          </div>
-                          <div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-4">
-                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.common.patients90d}</p>
-                              <p className="mt-2 text-sm font-semibold text-slate-950">{item.active_patients_90d}</p>
-                            </div>
-                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.common.appointments90d}</p>
-                              <p className="mt-2 text-sm font-semibold text-slate-950">{item.appointments_90d}</p>
-                            </div>
-                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.summary.activeOrders}</p>
-                              <p className="mt-2 text-sm font-semibold text-slate-950">{item.active_orders}</p>
-                            </div>
-                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.common.deliveredItems}</p>
-                              <p className="mt-2 text-sm font-semibold text-slate-950">{item.delivered_items}</p>
-                            </div>
-                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.common.feedbackCount}</p>
-                              <p className="mt-2 text-sm font-semibold text-slate-950">{item.feedback_count}</p>
-                            </div>
-                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.common.treatmentScore}</p>
-                              <p className="mt-2 text-sm font-semibold text-slate-950">{formatRating(item.avg_treatment_score, text.notRated)}</p>
-                            </div>
-                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.common.doctorCommunication}</p>
-                              <p className="mt-2 text-sm font-semibold text-slate-950">{formatRating(item.avg_doctor_score, text.notRated)}</p>
-                            </div>
-                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.common.doctorResponseTime}</p>
-                              <p className="mt-2 text-sm font-semibold text-slate-950">{formatHours(item.avg_response_hours, text.noResponses)}</p>
-                              <p className="mt-1 text-[11px] text-slate-500">
-                                {text.common.answeredOpen(item.response_sample_count, item.open_communication_count)}
-                              </p>
-                            </div>
-                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.common.writtenFindings}</p>
-                              <p className="mt-2 text-sm font-semibold text-slate-950">{formatHours(item.avg_findings_turnaround_hours, text.noResponses)}</p>
-                              <p className="mt-1 text-[11px] text-slate-500">
-                                {text.common.linkedArztbrief(item.findings_sample_count)}
-                              </p>
-                            </div>
-                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.common.followupCompletion}</p>
-                              <p className="mt-2 text-sm font-semibold text-slate-950">
-                                {formatPercent(item.followup_completion_rate, text.noBaseline)}
-                              </p>
-                              <p className="mt-1 text-[11px] text-slate-500">
-                                {text.common.followupOrders(item.followup_completed_orders, item.followup_orders_total)}
-                              </p>
-                            </div>
-                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3">
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.common.clinicalOutcome}</p>
-                              <p className="mt-2 text-sm font-semibold text-slate-950">
-                                {formatPercent(item.treatment_success_yes_rate, text.noBaseline)} {text.common.yes}
-                              </p>
-                              <p className="mt-1 text-[11px] text-slate-500">
-                                {formatPercent(item.treatment_success_partial_rate, text.noBaseline)} {text.common.partial} · {formatPercent(item.complication_rate, text.noBaseline)} {text.common.complications}
-                              </p>
-                            </div>
-                            <div className="rounded-[1rem] border border-slate-200 bg-slate-50 px-3 py-3 md:col-span-2 xl:col-span-2">
-                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{text.common.experienceBundle}</p>
-                              <p className="mt-2 text-sm font-semibold text-slate-950">
-                                {text.common.org} {formatRating(item.avg_organization_score, text.notRated)} · {text.common.service} {formatRating(item.avg_service_score, text.notRated)}
-                              </p>
-                              <p className="mt-1 text-[11px] text-slate-500">
-                                {text.common.ambience} {formatRating(item.avg_infrastructure_score, text.notRated)} · {text.common.value} {formatRating(item.avg_price_value_score, text.notRated)}
-                              </p>
-                            </div>
-                          </div>
-                        </article>
-                      ))
-                    ) : (
-                      <div className="rounded-[1.5rem] border border-dashed border-slate-200 bg-slate-50/70 px-5 py-8 text-center text-sm text-slate-500">
-                        {text.doctors.empty}
-                      </div>
-                    )}
-                  </div>
-                </section>
-              ) : null}
-
-              <section className={card("p-6")}>
-                <h2 className="text-base font-semibold text-slate-950">{text.visibility.title}</h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  {text.visibility.description}
-                </p>
-                <div className="mt-5 flex flex-wrap gap-2">
-                  {data.allowed_sections.map((item) => (
-                    <Badge key={item} className="bg-slate-100 text-slate-700 hover:bg-slate-100">
-                      {sectionLabel(item)}
-                    </Badge>
-                  ))}
-                  <Badge
-                    className={
-                      data.financial_metrics_visible
-                        ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-100"
-                        : "bg-amber-100 text-amber-700 hover:bg-amber-100"
-                    }
-                  >
-                    {data.financial_metrics_visible ? text.financialMetricsVisible : text.countsOnlyMode}
-                  </Badge>
+                    emptyState={tableEmpty(text.clinicReport.empty)}
+                  />
                 </div>
-              </section>
-            </div>
+              </AdminTableCard>
+            ) : null}
+
+            {allowedSections.has("service_types") ? (
+              <AdminTableCard
+                title={titleWithDot(text.serviceTypeReport.title)}
+                description={text.serviceTypeReport.description}
+                count={data.service_types.length}
+                accessory={
+                  <AdminToolbar>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={exportingSection === "service_types"}
+                      onClick={() => void exportSection("service_types")}
+                    >
+                      {exportingSection === "service_types" ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}
+                      {text.exportCsv}
+                    </Button>
+                  </AdminToolbar>
+                }
+              >
+                <div className="p-3">
+                  <DataTable
+                    rows={data.service_types}
+                    columns={serviceTypeColumns}
+                    rowId={(row) => row.service_type}
+                    emptyState={tableEmpty(text.serviceTypeReport.empty)}
+                  />
+                </div>
+              </AdminTableCard>
+            ) : null}
+
+            {allowedSections.has("medical_providers") ? (
+              <AdminTableCard
+                title={titleWithDot(text.medicalProviders.title)}
+                description={text.medicalProviders.description}
+                count={data.medical_providers.length}
+                accessory={
+                  <AdminToolbar>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={exportingSection === "medical_providers"}
+                      onClick={() => void exportSection("medical_providers")}
+                    >
+                      {exportingSection === "medical_providers" ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}
+                      {text.exportCsv}
+                    </Button>
+                  </AdminToolbar>
+                }
+              >
+                <div className="p-3">
+                  <DataTable
+                    rows={data.medical_providers}
+                    columns={medicalProviderColumns}
+                    rowId={(row) => row.provider_id}
+                    rowActions={(row) => (
+                      <StaffLink to={`/providers?provider=${row.provider_id}`}>
+                        <Button variant="outline" size="sm">{text.openProvider}</Button>
+                      </StaffLink>
+                    )}
+                    emptyState={tableEmpty(text.medicalProviders.empty)}
+                  />
+                </div>
+              </AdminTableCard>
+            ) : null}
+
+            {allowedSections.has("provider_costs") ? (
+              <AdminTableCard
+                title={titleWithDot(text.providerCosts.title)}
+                description={text.providerCosts.description}
+                count={visibleProviderCosts.length}
+                accessory={
+                    <AdminToolbar>
+                      {selectedClinic ? (
+                        <Badge variant="outline">{selectedClinic.name}</Badge>
+                      ) : null}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={exportingSection === "provider_costs"}
+                      onClick={() => void exportSection("provider_costs")}
+                    >
+                      {exportingSection === "provider_costs" ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}
+                      {text.exportCsv}
+                    </Button>
+                  </AdminToolbar>
+                }
+              >
+                <div className="p-3">
+                  <DataTable
+                    rows={visibleProviderCosts}
+                    columns={providerCostColumns}
+                    rowId={(row) => `${row.provider_id}-${row.service_label}`}
+                    activeRowId={
+                      detail?.kind === "provider_cost"
+                        ? `${detail.row.provider_id}-${detail.row.service_label}`
+                        : null
+                    }
+                    onRowClick={(row) => setDetail({ kind: "provider_cost", row })}
+                    rowActions={(row) => (
+                      <StaffLink to={`/providers?provider=${row.provider_id}`}>
+                        <Button variant="outline" size="sm">{text.openProvider}</Button>
+                      </StaffLink>
+                    )}
+                    emptyState={tableEmpty(text.providerCosts.empty)}
+                  />
+                </div>
+              </AdminTableCard>
+            ) : null}
+
+            {allowedSections.has("non_medical_providers") ? (
+              <AdminTableCard
+                title={titleWithDot(text.nonMedicalProviders.title)}
+                description={text.nonMedicalProviders.description}
+                count={data.non_medical_providers.length}
+                accessory={
+                  <AdminToolbar>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={exportingSection === "non_medical_providers"}
+                      onClick={() => void exportSection("non_medical_providers")}
+                    >
+                      {exportingSection === "non_medical_providers" ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}
+                      {text.exportCsv}
+                    </Button>
+                  </AdminToolbar>
+                }
+              >
+                <div className="p-3">
+                  <DataTable
+                    rows={data.non_medical_providers}
+                    columns={nonMedicalProviderColumns}
+                    rowId={(row) => row.provider_id}
+                    rowActions={(row) => (
+                      <StaffLink to={`/providers?provider=${row.provider_id}`}>
+                        <Button variant="outline" size="sm">{text.openProvider}</Button>
+                      </StaffLink>
+                    )}
+                    emptyState={tableEmpty(text.nonMedicalProviders.empty)}
+                  />
+                </div>
+              </AdminTableCard>
+            ) : null}
+
+            {allowedSections.has("countries") ? (
+              <AdminTableCard
+                title={titleWithDot(text.countries.title)}
+                description={text.countries.description}
+                count={data.countries.length}
+                accessory={
+                  <AdminToolbar>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={exportingSection === "countries"}
+                      onClick={() => void exportSection("countries")}
+                    >
+                      {exportingSection === "countries" ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}
+                      {text.exportCsv}
+                    </Button>
+                  </AdminToolbar>
+                }
+              >
+                <div className="p-3">
+                  <DataTable
+                    rows={data.countries}
+                    columns={countryColumns}
+                    rowId={(row) => row.country}
+                    emptyState={tableEmpty(text.countries.empty)}
+                  />
+                </div>
+              </AdminTableCard>
+            ) : null}
+
+            {allowedSections.has("doctors") ? (
+              <AdminTableCard
+                title={titleWithDot(text.doctors.title)}
+                description={text.doctors.description}
+                count={visibleDoctors.length}
+                accessory={
+                    <AdminToolbar>
+                      {selectedClinic ? (
+                        <Badge variant="outline">{selectedClinic.name}</Badge>
+                      ) : null}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={exportingSection === "doctors"}
+                      onClick={() => void exportSection("doctors")}
+                    >
+                      {exportingSection === "doctors" ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}
+                      {text.exportCsv}
+                    </Button>
+                  </AdminToolbar>
+                }
+              >
+                <div className="p-3">
+                  <DataTable
+                    rows={visibleDoctors}
+                    columns={doctorColumns}
+                    rowId={(row) => row.doctor_id}
+                    activeRowId={detail?.kind === "doctor" ? detail.row.doctor_id : null}
+                    onRowClick={(row) => setDetail({ kind: "doctor", row })}
+                    rowActions={(row) => (
+                      <StaffLink to={`/providers?provider=${row.provider_id}`}>
+                        <Button variant="outline" size="sm">{text.openProvider}</Button>
+                      </StaffLink>
+                    )}
+                    emptyState={tableEmpty(text.doctors.empty)}
+                  />
+                </div>
+              </AdminTableCard>
+            ) : null}
+
+            <AdminTableCard
+              title={titleWithDot(text.visibility.title)}
+              description={text.visibility.description}
+            >
+              <div className="flex flex-wrap gap-2 p-3">
+                {data.allowed_sections.map((item) => (
+                  <Badge key={item} variant="secondary">
+                    {sectionLabel(item)}
+                  </Badge>
+                ))}
+                <StatusBadge tone={data.financial_metrics_visible ? "success" : "warning"}>
+                  {data.financial_metrics_visible ? text.financialMetricsVisible : text.countsOnlyMode}
+                </StatusBadge>
+              </div>
+            </AdminTableCard>
           </section>
+
+          <Sheet open={Boolean(detail)} onOpenChange={(open) => !open && setDetail(null)}>
+            <SheetContent side="right" className="w-full p-0 sm:max-w-2xl">
+              {detail ? (
+                <AdminSheetScaffold
+                  title={titleWithDot(
+                    detail.kind === "clinic"
+                      ? detail.row.name
+                      : detail.kind === "doctor"
+                        ? [detail.row.title, detail.row.name].filter(Boolean).join(" ")
+                        : detail.row.service_label,
+                  )}
+                  description={
+                    detail.kind === "clinic"
+                      ? text.clinicReport.description
+                      : detail.kind === "doctor"
+                        ? text.doctors.description
+                        : text.providerCosts.description
+                  }
+                >
+                  {detail.kind === "clinic" ? (
+                    <>
+                      <AdminTableCard title={titleWithDot(text.clinicReport.title)}>
+                        <div className="grid gap-3 p-3 sm:grid-cols-2">
+                          <div className={card("p-3")}>
+                            <p className="text-xs text-muted-foreground">{text.common.services}</p>
+                            <p className="mt-1 text-sm font-medium text-foreground">{detail.row.provider_type}</p>
+                          </div>
+                          <div className={card("p-3")}>
+                            <p className="text-xs text-muted-foreground">{text.countries.title}</p>
+                            <p className="mt-1 text-sm font-medium text-foreground">
+                              {[detail.row.address_city, detail.row.address_country].filter(Boolean).join(", ") || text.locationNotSet}
+                            </p>
+                          </div>
+                          <div className={card("p-3")}>
+                            <p className="text-xs text-muted-foreground">{text.common.patients90d}</p>
+                            <p className="mt-1 text-sm font-medium text-foreground">{detail.row.active_patients_90d}</p>
+                          </div>
+                          <div className={card("p-3")}>
+                            <p className="text-xs text-muted-foreground">{text.common.appointments90d}</p>
+                            <p className="mt-1 text-sm font-medium text-foreground">{detail.row.appointments_90d}</p>
+                          </div>
+                          <div className={card("p-3")}>
+                            <p className="text-xs text-muted-foreground">{text.common.deliveredItems}</p>
+                            <p className="mt-1 text-sm font-medium text-foreground">{detail.row.delivered_items}</p>
+                          </div>
+                          <div className={card("p-3")}>
+                            <p className="text-xs text-muted-foreground">{text.summary.deliveredServiceVolume}</p>
+                            <p className="mt-1 text-sm font-medium text-foreground">
+                              {detail.row.gross_service_volume ? formatMoney(detail.row.gross_service_volume, locale) : text.countsOnly}
+                            </p>
+                          </div>
+                        </div>
+                      </AdminTableCard>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          variant={selectedClinicId === detail.row.provider_id ? "default" : "outline"}
+                          onClick={() =>
+                            setSelectedClinicId((current) =>
+                              current === detail.row.provider_id ? "" : detail.row.provider_id,
+                            )
+                          }
+                        >
+                          {selectedClinicId === detail.row.provider_id ? text.clearDrillDown : text.drillIntoDoctors}
+                        </Button>
+                        <StaffLink to={`/providers?provider=${detail.row.provider_id}`}>
+                          <Button variant="outline">{text.openProvider}</Button>
+                        </StaffLink>
+                      </div>
+                    </>
+                  ) : null}
+
+                  {detail.kind === "doctor" ? (
+                    <>
+                      <AdminTableCard title={titleWithDot(text.doctors.title)}>
+                        <div className="grid gap-3 p-3 sm:grid-cols-2">
+                          <div className={card("p-3")}>
+                            <p className="text-xs text-muted-foreground">{text.medicalProviders.title}</p>
+                            <p className="mt-1 text-sm font-medium text-foreground">{detail.row.provider_name}</p>
+                          </div>
+                          <div className={card("p-3")}>
+                            <p className="text-xs text-muted-foreground">{text.common.specialties}</p>
+                            <p className="mt-1 text-sm font-medium text-foreground">{detail.row.fachbereich || text.unknown}</p>
+                          </div>
+                          <div className={card("p-3")}>
+                            <p className="text-xs text-muted-foreground">{text.common.patients90d}</p>
+                            <p className="mt-1 text-sm font-medium text-foreground">{detail.row.active_patients_90d}</p>
+                          </div>
+                          <div className={card("p-3")}>
+                            <p className="text-xs text-muted-foreground">{text.common.appointments90d}</p>
+                            <p className="mt-1 text-sm font-medium text-foreground">{detail.row.appointments_90d}</p>
+                          </div>
+                          <div className={card("p-3")}>
+                            <p className="text-xs text-muted-foreground">{text.common.feedbackCount}</p>
+                            <p className="mt-1 text-sm font-medium text-foreground">{detail.row.feedback_count}</p>
+                          </div>
+                          <div className={card("p-3")}>
+                            <p className="text-xs text-muted-foreground">{text.common.followupCompletion}</p>
+                            <p className="mt-1 text-sm font-medium text-foreground">
+                              {formatPercent(detail.row.followup_completion_rate, text.noBaseline)}
+                            </p>
+                          </div>
+                        </div>
+                      </AdminTableCard>
+                      <StaffLink to={`/providers?provider=${detail.row.provider_id}`}>
+                        <Button variant="outline">{text.openProvider}</Button>
+                      </StaffLink>
+                    </>
+                  ) : null}
+
+                  {detail.kind === "provider_cost" ? (
+                    <>
+                      <AdminTableCard title={titleWithDot(text.providerCosts.title)}>
+                        <div className="grid gap-3 p-3 sm:grid-cols-2">
+                          <div className={card("p-3")}>
+                            <p className="text-xs text-muted-foreground">{text.medicalProviders.title}</p>
+                            <p className="mt-1 text-sm font-medium text-foreground">{detail.row.provider_name}</p>
+                          </div>
+                          <div className={card("p-3")}>
+                            <p className="text-xs text-muted-foreground">{text.common.samples}</p>
+                            <p className="mt-1 text-sm font-medium text-foreground">{detail.row.sample_count}</p>
+                          </div>
+                          <div className={card("p-3")}>
+                            <p className="text-xs text-muted-foreground">{text.common.latestVsFirst}</p>
+                            <p className="mt-1 text-sm font-medium text-foreground">
+                              {formatChange(detail.row.change_pct, text.noBaseline)}
+                            </p>
+                          </div>
+                          <div className={card("p-3")}>
+                            <p className="text-xs text-muted-foreground">{text.common.average}</p>
+                            <p className="mt-1 text-sm font-medium text-foreground">
+                              {formatMoneyMetric(detail.row.avg_unit_gross, locale)}
+                            </p>
+                          </div>
+                          <div className={card("p-3")}>
+                            <p className="text-xs text-muted-foreground">{text.common.min}</p>
+                            <p className="mt-1 text-sm font-medium text-foreground">
+                              {detail.row.first_recorded_at ? new Date(detail.row.first_recorded_at).toLocaleDateString(locale) : text.unknown}
+                            </p>
+                          </div>
+                          <div className={card("p-3")}>
+                            <p className="text-xs text-muted-foreground">{text.common.latest}</p>
+                            <p className="mt-1 text-sm font-medium text-foreground">
+                              {detail.row.last_recorded_at ? new Date(detail.row.last_recorded_at).toLocaleDateString(locale) : text.unknown}
+                            </p>
+                          </div>
+                        </div>
+                      </AdminTableCard>
+                      {detail.row.trend_points.length > 0 ? (
+                        <AdminTableCard title={titleWithDot(text.forecast.pipelineTitle)}>
+                          <div className="flex flex-wrap gap-2 p-3">
+                            {detail.row.trend_points.map((point) => (
+                              <Badge key={`${detail.row.provider_id}-${detail.row.service_label}-${point.month}`} variant="secondary">
+                                {point.month}: {formatMoneyMetric(point.avg_unit_gross, locale)}
+                              </Badge>
+                            ))}
+                          </div>
+                        </AdminTableCard>
+                      ) : null}
+                      <StaffLink to={`/providers?provider=${detail.row.provider_id}`}>
+                        <Button variant="outline">{text.openProvider}</Button>
+                      </StaffLink>
+                    </>
+                  ) : null}
+                </AdminSheetScaffold>
+              ) : null}
+            </SheetContent>
+          </Sheet>
         </>
       ) : null}
     </div>

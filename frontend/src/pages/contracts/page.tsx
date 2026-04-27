@@ -1009,13 +1009,16 @@ export function ContractsPage() {
       {
         id: "created_by_name",
         label: t.users_created,
-        accessor: (row) => `${row.created_by_name} ${row.created_by_role}`,
+        accessor: (row) => row.created_by_name,
         width: 200,
-        render: (row) => (
-          <span className="text-sm text-foreground">
-            {row.created_by_name} ({roleLabel(row.created_by_role)})
-          </span>
-        ),
+        render: (row) => <span className="text-sm text-foreground">{row.created_by_name}</span>,
+      },
+      {
+        id: "created_by_role",
+        label: t.users_role,
+        accessor: (row) => row.created_by_role,
+        width: 170,
+        render: (row) => <span className="text-xs text-foreground">{roleLabel(row.created_by_role)}</span>,
       },
       {
         id: "created_at",
@@ -1034,6 +1037,7 @@ export function ContractsPage() {
       t.invoices_paid_at,
       t.providers_service_valid_to,
       t.users_created,
+      t.users_role,
       t.users_status,
       text.gross,
       text.lineItemsCount,

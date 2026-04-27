@@ -781,24 +781,28 @@ export function OrdersPage() {
     {
       id: "patient",
       label: t.orders_patient,
-      accessor: (row) => `${row.patient_pid} ${row.patient_name}`,
+      accessor: (row) => row.patient_name,
       filterType: "text",
       group: "identity",
       sortable: true,
       searchable: true,
       required: true,
       pinned: "left",
-      width: 260,
+      width: 220,
       render: (row) => (
-        <div className="min-w-0">
-          <div className="truncate text-sm font-medium text-foreground">
-            {row.patient_name}
-          </div>
-          <div className="mt-0.5 truncate text-xs text-muted-foreground">
-            {row.patient_pid}
-          </div>
-        </div>
+        <span className="text-sm font-medium text-foreground">{row.patient_name}</span>
       ),
+    },
+    {
+      id: "patient_pid",
+      label: "PID",
+      accessor: (row) => row.patient_pid,
+      filterType: "text",
+      group: "identity",
+      sortable: true,
+      searchable: true,
+      width: 140,
+      render: (row) => <span className="text-xs text-foreground">{row.patient_pid}</span>,
     },
     {
       id: "phase",
