@@ -9,12 +9,15 @@ import {
   UsersRound,
 } from "lucide-react";
 
+import { AdminGuideButton } from "@/components/admin-guide";
 import {
   AdminInlineMetric,
   AdminSheetScaffold,
   SheetActionsFooter,
   AdminTableCard,
 } from "@/components/admin-page-patterns";
+import { DataTableSurface } from "@/components/data-table/data-table-surface";
+import type { ColumnDef } from "@/components/data-table/types";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -42,6 +45,8 @@ import {
   tokens,
 } from "@/components/ui-shell";
 import { Input } from "@/components/ui/input";
+import { clearApiCache } from "@/lib/api";
+import { useRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 import {
   approvePendingMfaLogin,
@@ -174,6 +179,16 @@ const SETTINGS_GROUPS: SettingsGroup[] = [
   },
 ];
 
+const ADMIN_SETTINGS_REALTIME_EVENTS = [
+  "system_setting.updated",
+  "system_setting.maintenance_toggled",
+  "session.revoked",
+  "session.revoked_all",
+  "pending_login.approved",
+  "pending_login.rejected",
+  "user.mfa_toggled",
+] as const;
+
 export function AdminSettingsPage() {
   const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
@@ -230,6 +245,13 @@ export function AdminSettingsPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useRealtimeSubscription(ADMIN_SETTINGS_REALTIME_EVENTS, () => {
+    clearApiCache("/admin/settings");
+    clearApiCache("/admin/sessions");
+    clearApiCache("/admin/mfa/pending");
+    void load();
+  });
 
   const accessTokenMinutes = editValues.access_token_minutes || "-";
 
@@ -320,7 +342,7 @@ export function AdminSettingsPage() {
     setSheetState({ saving: false, error: "", warning: "" });
   }
 
-  async function logoutUser(userId: string) {
+  const logoutUser = useCallback(async (userId: string) => {
     setActionBusyKey(`session:${userId}`);
     setFlash(null);
     try {
@@ -335,7 +357,7 @@ export function AdminSettingsPage() {
     } finally {
       setActionBusyKey("");
     }
-  }
+  }, [load, t.common_error, t.settings_updated]);
 
   async function logoutAll() {
     if (!window.confirm(t.settings_logout_all_confirm)) return;
@@ -355,7 +377,7 @@ export function AdminSettingsPage() {
     }
   }
 
-  async function approvePending(id: string) {
+  const approvePending = useCallback(async (id: string) => {
     setActionBusyKey(`mfa:approve:${id}`);
     setFlash(null);
     try {
@@ -370,9 +392,9 @@ export function AdminSettingsPage() {
     } finally {
       setActionBusyKey("");
     }
-  }
+  }, [load, t.common_error, t.settings_updated]);
 
-  async function rejectPending(id: string) {
+  const rejectPending = useCallback(async (id: string) => {
     setActionBusyKey(`mfa:reject:${id}`);
     setFlash(null);
     try {
@@ -387,7 +409,227 @@ export function AdminSettingsPage() {
     } finally {
       setActionBusyKey("");
     }
-  }
+  }, [load, t.common_error, t.settings_updated]);
+
+  const pendingColumns = useMemo<ColumnDef<PendingLogin>[]>(() => [
+    {
+      id: "name",
+      label: t.field_name,
+      accessor: (entry) => entry.user_name,
+      sortable: true,
+      width: 220,
+      render: (entry) => (
+        <div className="min-w-0">
+          <div className="text-xs font-medium text-foreground">{entry.user_name}</div>
+          <div className="text-[11px] text-muted-foreground">{entry.role}</div>
+        </div>
+      ),
+    },
+    {
+      id: "email",
+      label: t.field_email,
+      accessor: (entry) => entry.user_email,
+      sortable: true,
+      width: 230,
+      render: (entry) => (
+        <span className="font-mono text-xs text-muted-foreground">{entry.user_email}</span>
+      ),
+    },
+    {
+      id: "ip",
+      label: t.common_ip,
+      accessor: (entry) => entry.ip_address ?? "",
+      sortable: true,
+      width: 140,
+      render: (entry) => (
+        <span className="font-mono text-xs text-muted-foreground">
+          {entry.ip_address ?? "-"}
+        </span>
+      ),
+    },
+    {
+      id: "device",
+      label: t.common_device,
+      accessor: (entry) => shortAdminUserAgent(entry.user_agent),
+      sortable: true,
+      width: 260,
+      render: (entry) => (
+        <span className="truncate text-xs text-muted-foreground" title={entry.user_agent ?? ""}>
+          {shortAdminUserAgent(entry.user_agent)}
+        </span>
+      ),
+    },
+    {
+      id: "created_at",
+      label: t.activity_time,
+      accessor: (entry) => entry.created_at,
+      sortable: true,
+      width: 180,
+      render: (entry) => (
+        <span className="font-mono text-xs text-muted-foreground">
+          {formatAdminDateTime(entry.created_at, lang)}
+        </span>
+      ),
+    },
+    {
+      id: "actions",
+      label: t.users_actions,
+      accessor: (entry) => entry.id,
+      width: 210,
+      render: (entry) => {
+        const approveBusy = actionBusyKey === `mfa:approve:${entry.id}`;
+        const rejectBusy = actionBusyKey === `mfa:reject:${entry.id}`;
+        return (
+          <div className="flex items-center gap-1.5">
+            <Button
+              type="button"
+              size="sm"
+              className="h-8 rounded-lg"
+              disabled={approveBusy || rejectBusy}
+              onClick={(event) => {
+                event.stopPropagation();
+                void approvePending(entry.id);
+              }}
+            >
+              {approveBusy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
+              {t.mfa_approve}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="destructive"
+              className="h-8 rounded-lg"
+              disabled={approveBusy || rejectBusy}
+              onClick={(event) => {
+                event.stopPropagation();
+                void rejectPending(entry.id);
+              }}
+            >
+              {rejectBusy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
+              {t.mfa_reject}
+            </Button>
+          </div>
+        );
+      },
+    },
+  ], [
+    actionBusyKey,
+    approvePending,
+    lang,
+    rejectPending,
+    t.activity_time,
+    t.common_device,
+    t.common_ip,
+    t.field_email,
+    t.field_name,
+    t.mfa_approve,
+    t.mfa_reject,
+    t.users_actions,
+  ]);
+
+  const sessionColumns = useMemo<ColumnDef<SessionRow>[]>(() => [
+    {
+      id: "name",
+      label: t.field_name,
+      accessor: (session) => session.user_name,
+      sortable: true,
+      width: 190,
+      render: (session) => (
+        <span className="text-xs font-medium text-foreground">{session.user_name}</span>
+      ),
+    },
+    {
+      id: "email",
+      label: t.field_email,
+      accessor: (session) => session.user_email,
+      sortable: true,
+      width: 230,
+      render: (session) => (
+        <span className="font-mono text-xs text-muted-foreground">{session.user_email}</span>
+      ),
+    },
+    {
+      id: "role",
+      label: t.users_role,
+      accessor: (session) => session.role,
+      sortable: true,
+      width: 130,
+      render: (session) => <StatusBadge tone="neutral">{session.role}</StatusBadge>,
+    },
+    {
+      id: "ip",
+      label: t.common_ip,
+      accessor: (session) => session.ip_address ?? "",
+      sortable: true,
+      width: 140,
+      render: (session) => (
+        <span className="font-mono text-xs text-muted-foreground">
+          {session.ip_address ?? "-"}
+        </span>
+      ),
+    },
+    {
+      id: "device",
+      label: t.common_device,
+      accessor: (session) => shortAdminUserAgent(session.user_agent),
+      sortable: true,
+      width: 260,
+      render: (session) => (
+        <span className="truncate text-xs text-muted-foreground" title={session.user_agent ?? ""}>
+          {shortAdminUserAgent(session.user_agent)}
+        </span>
+      ),
+    },
+    {
+      id: "last_activity_at",
+      label: t.settings_last_active,
+      accessor: (session) => session.last_activity_at,
+      sortable: true,
+      width: 180,
+      render: (session) => (
+        <span className="font-mono text-xs text-muted-foreground">
+          {formatAdminDateTime(session.last_activity_at, lang)}
+        </span>
+      ),
+    },
+    {
+      id: "actions",
+      label: t.users_actions,
+      accessor: (session) => session.user_id,
+      width: 170,
+      render: (session) => {
+        const busy = actionBusyKey === `session:${session.user_id}`;
+        return (
+          <Button
+            type="button"
+            variant="destructive"
+            size="sm"
+            className="h-8 rounded-lg"
+            disabled={busy}
+            onClick={(event) => {
+              event.stopPropagation();
+              void logoutUser(session.user_id);
+            }}
+          >
+            {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
+            {t.settings_logout_user}
+          </Button>
+        );
+      },
+    },
+  ], [
+    actionBusyKey,
+    lang,
+    logoutUser,
+    t.common_device,
+    t.common_ip,
+    t.field_email,
+    t.field_name,
+    t.settings_last_active,
+    t.settings_logout_user,
+    t.users_actions,
+    t.users_role,
+  ]);
 
   return (
     <>
@@ -397,6 +639,7 @@ export function AdminSettingsPage() {
           description={t.settings_subtitle}
           actions={(
             <>
+              <AdminGuideButton title={t.settings_title} description={t.settings_subtitle} />
               <Button
                 type="button"
                 variant="outline"
@@ -537,82 +780,15 @@ export function AdminSettingsPage() {
                     <EmptyCell>{t.mfa_no_pending}</EmptyCell>
                   </div>
                 ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-[13px]">
-                      <thead className="bg-muted/40">
-                        <tr className="text-left text-[11px] uppercase tracking-wider text-muted-foreground">
-                          <th className="px-4 py-2.5 font-medium">{t.field_name}</th>
-                          <th className="px-4 py-2.5 font-medium">{t.field_email}</th>
-                          <th className="w-[140px] px-4 py-2.5 font-medium">{t.common_ip}</th>
-                          <th className="px-4 py-2.5 font-medium">{t.common_device}</th>
-                          <th className="w-[180px] px-4 py-2.5 font-medium">{t.activity_time}</th>
-                          <th className="w-[200px] px-4 py-2.5 font-medium">{t.users_actions}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {pending.map((entry) => {
-                          const approveBusy = actionBusyKey === `mfa:approve:${entry.id}`;
-                          const rejectBusy = actionBusyKey === `mfa:reject:${entry.id}`;
-                          return (
-                            <tr key={entry.id} className="border-t border-border">
-                              <td className="px-4 py-3">
-                                <div className="text-sm font-medium text-foreground">
-                                  {entry.user_name}
-                                </div>
-                                <div className="text-[11.5px] text-muted-foreground">
-                                  {entry.role}
-                                </div>
-                              </td>
-                              <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                                {entry.user_email}
-                              </td>
-                              <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                                {entry.ip_address ?? "-"}
-                              </td>
-                              <td
-                                className="max-w-[240px] px-4 py-3 text-xs text-muted-foreground truncate"
-                                title={entry.user_agent ?? ""}
-                              >
-                                {shortAdminUserAgent(entry.user_agent)}
-                              </td>
-                              <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                                {formatAdminDateTime(entry.created_at, lang)}
-                              </td>
-                              <td className="px-4 py-3">
-                                <div className="flex items-center gap-1.5">
-                                  <Button
-                                    type="button"
-                                    size="sm"
-                                    className="h-8 rounded-lg"
-                                    disabled={approveBusy || rejectBusy}
-                                    onClick={() => void approvePending(entry.id)}
-                                  >
-                                    {approveBusy ? (
-                                      <LoaderCircle className="size-3.5 animate-spin" />
-                                    ) : null}
-                                    {t.mfa_approve}
-                                  </Button>
-                                  <Button
-                                    type="button"
-                                    size="sm"
-                                    variant="destructive"
-                                    className="h-8 rounded-lg"
-                                    disabled={approveBusy || rejectBusy}
-                                    onClick={() => void rejectPending(entry.id)}
-                                  >
-                                    {rejectBusy ? (
-                                      <LoaderCircle className="size-3.5 animate-spin" />
-                                    ) : null}
-                                    {t.mfa_reject}
-                                  </Button>
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
+                  <DataTableSurface
+                    rows={pending}
+                    columns={pendingColumns}
+                    defaultDensity="comfortable"
+                    defaultSort={[{ field: "created_at", dir: "desc" }]}
+                    dictionary={t as unknown as Record<string, string>}
+                    rowId={(entry) => entry.id}
+                    tableClassName="min-h-[320px]"
+                  />
                 )}
               </AdminTableCard>
             </Section>
@@ -643,66 +819,15 @@ export function AdminSettingsPage() {
                     <EmptyCell>{t.settings_no_sessions}</EmptyCell>
                   </div>
                 ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-[13px]">
-                      <thead className="bg-muted/40">
-                        <tr className="text-left text-[11px] uppercase tracking-wider text-muted-foreground">
-                          <th className="px-4 py-2.5 font-medium">{t.field_name}</th>
-                          <th className="px-4 py-2.5 font-medium">{t.field_email}</th>
-                          <th className="w-[120px] px-4 py-2.5 font-medium">{t.users_role}</th>
-                          <th className="w-[140px] px-4 py-2.5 font-medium">{t.common_ip}</th>
-                          <th className="px-4 py-2.5 font-medium">{t.common_device}</th>
-                          <th className="w-[180px] px-4 py-2.5 font-medium">{t.settings_last_active}</th>
-                          <th className="w-[150px] px-4 py-2.5 font-medium">{t.users_actions}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {sessions.map((session) => {
-                          const busy = actionBusyKey === `session:${session.user_id}`;
-                          return (
-                            <tr key={session.family_id} className="border-t border-border">
-                              <td className="px-4 py-3">
-                                <div className="text-sm font-medium text-foreground">
-                                  {session.user_name}
-                                </div>
-                              </td>
-                              <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                                {session.user_email}
-                              </td>
-                              <td className="px-4 py-3">
-                                <StatusBadge tone="neutral">{session.role}</StatusBadge>
-                              </td>
-                              <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                                {session.ip_address ?? "-"}
-                              </td>
-                              <td
-                                className="max-w-[240px] px-4 py-3 text-xs text-muted-foreground truncate"
-                                title={session.user_agent ?? ""}
-                              >
-                                {shortAdminUserAgent(session.user_agent)}
-                              </td>
-                              <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                                {formatAdminDateTime(session.last_activity_at, lang)}
-                              </td>
-                              <td className="px-4 py-3">
-                                <Button
-                                  type="button"
-                                  variant="destructive"
-                                  size="sm"
-                                  className="h-8 rounded-lg"
-                                  disabled={busy}
-                                  onClick={() => void logoutUser(session.user_id)}
-                                >
-                                  {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
-                                  {t.settings_logout_user}
-                                </Button>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
+                  <DataTableSurface
+                    rows={sessions}
+                    columns={sessionColumns}
+                    defaultDensity="comfortable"
+                    defaultSort={[{ field: "last_activity_at", dir: "desc" }]}
+                    dictionary={t as unknown as Record<string, string>}
+                    rowId={(session) => session.family_id}
+                    tableClassName="min-h-[360px]"
+                  />
                 )}
               </AdminTableCard>
             </Section>

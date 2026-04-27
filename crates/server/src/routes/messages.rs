@@ -239,17 +239,33 @@ async fn create_message_notification(
         (None, None) => "Open chat".to_string(),
     };
 
-    let _ = sqlx::query(
+    match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
-           VALUES ($1, $2, $3, $4, 'message_peer', $5)"#,
+           VALUES ($1, $2, $3, $4, 'message_peer', $5)
+           RETURNING id"#,
     )
     .bind(to_user)
     .bind(kind)
     .bind(title)
     .bind(body)
     .bind(from_user)
-    .execute(&state.db)
-    .await;
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(notification_id) => {
+            crate::realtime::publish_notification_event(
+                state,
+                to_user,
+                "notification.created",
+                Some(notification_id),
+                json!({ "entity_type": "message_peer", "entity_id": from_user }),
+            )
+            .await;
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, user_id = %to_user, "create message notification");
+        }
+    }
 }
 
 async fn write_message_peer_audit(

@@ -123,6 +123,44 @@ export type AppointmentListItem = {
   is_blocked: boolean;
 };
 
+export type AppointmentRequestStatus =
+  | "requested"
+  | "approved"
+  | "rejected"
+  | "converted"
+  | "cancelled";
+
+export type AppointmentRequestItem = {
+  id: string;
+  patient_id: string;
+  patient_pid: string | null;
+  patient_name: string | null;
+  order_id: string | null;
+  order_number: string | null;
+  appointment_type: AppointmentKind;
+  care_path_kind: AppointmentCarePathKind | null;
+  preferred_date_from: string | null;
+  preferred_date_to: string | null;
+  preferred_time_of_day: string | null;
+  requested_provider_id: string | null;
+  requested_provider_name: string | null;
+  requested_doctor_id: string | null;
+  requested_doctor_name: string | null;
+  specialty: string | null;
+  location: string | null;
+  reason: string | null;
+  notes: string | null;
+  status: AppointmentRequestStatus;
+  review_note: string | null;
+  reviewed_by: string | null;
+  reviewed_by_name: string | null;
+  reviewed_at: string | null;
+  requested_at: string;
+  converted_appointment_id: string | null;
+  converted_appointment_title: string | null;
+  converted_appointment_date: string | null;
+};
+
 export type RecurringScopePreviewItem = {
   id: string;
   date: string;

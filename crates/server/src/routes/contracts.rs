@@ -916,6 +916,18 @@ async fn create_framework_contract(
                     "status": status,
                 }),
             ));
+            crate::realtime::publish_contract_event(
+                &state,
+                Some(auth.user_id),
+                "framework_contract.created",
+                contract_id,
+                serde_json::json!({
+                    "contract_number": contract_number.clone(),
+                    "patient_id": body.patient_id,
+                    "status": status.clone(),
+                }),
+            )
+            .await;
 
             (
                 StatusCode::CREATED,
@@ -1019,16 +1031,25 @@ async fn update_framework_contract_status(
     .await
     {
         Ok(result) if result.rows_affected() > 0 => {
+            let realtime_payload = serde_json::json!({
+                "status": body.status,
+                "signed_at": signed_at.map(|v| v.to_rfc3339()),
+            });
             state.audit_sender.try_send(audit::domain_event(
                 "update_framework_contract_status",
                 Some(auth.user_id),
                 "framework_contract",
                 Some(contract_id),
-                serde_json::json!({
-                    "status": body.status,
-                    "signed_at": signed_at.map(|v| v.to_rfc3339()),
-                }),
+                realtime_payload.clone(),
             ));
+            crate::realtime::publish_contract_event(
+                &state,
+                Some(auth.user_id),
+                "framework_contract.status_changed",
+                contract_id,
+                realtime_payload,
+            )
+            .await;
 
             match load_contract_detail(&state, contract_id, &auth).await {
                 Ok(Some(value)) => Json(value).into_response(),
@@ -1552,6 +1573,22 @@ async fn create_quote(
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create quote");
     }
 
+    crate::realtime::publish_quote_event(
+        &state,
+        Some(auth.user_id),
+        "quote.created",
+        quote_id,
+        serde_json::json!({
+            "quote_number": quote_number.clone(),
+            "order_id": order_id,
+            "order_number": order_ctx.order_number.clone(),
+            "patient_id": order_ctx.patient_id,
+            "status": "draft",
+            "total_gross": decimal_to_string(totals.total_gross),
+        }),
+    )
+    .await;
+
     (
         StatusCode::CREATED,
         Json(serde_json::json!({
@@ -1814,6 +1851,18 @@ async fn update_quote_status(
         tracing::error!(error = %e, quote_id = %quote_id, "commit quote status update");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update quote");
     }
+
+    crate::realtime::publish_quote_event(
+        &state,
+        Some(auth.user_id),
+        "quote.status_changed",
+        quote_id,
+        serde_json::json!({
+            "status": body.status,
+            "paid_amount": paid_amount.map(decimal_to_string),
+        }),
+    )
+    .await;
 
     match load_quote_detail(&state, quote_id, &auth).await {
         Ok(Some(value)) => Json(value).into_response(),

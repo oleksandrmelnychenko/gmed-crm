@@ -15,7 +15,7 @@ export const de: Translations = {
   nav_logout: "Abmelden",
   nav_my_documents: "Meine Dokumente",
   nav_my_appointments: "Meine Termine",
-  nav_my_services: "Meine Services",
+  nav_my_services: "Concierge",
   nav_my_invoices: "Meine Rechnungen",
   nav_my_privacy: "Datenschutz",
   nav_my_feedback: "Mein Feedback",

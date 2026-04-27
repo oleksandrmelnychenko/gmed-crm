@@ -26,7 +26,9 @@ import {
   TabLoader,
   textareaClass,
 } from "@/components/ui-shell";
+import { clearApiCache } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
+import { useRealtimeSubscription } from "@/lib/realtime";
 import {
   cancelPortalService,
   createPortalServiceRequest,
@@ -74,6 +76,13 @@ function toIsoDateTime(value: string) {
   return parsed.toISOString();
 }
 
+const PORTAL_SERVICE_REALTIME_EVENTS = [
+  "concierge_service.created",
+  "concierge_service.updated",
+  "concierge_service.cancelled",
+  "concierge_service.billing_ready",
+] as const;
+
 export function PatientServicesPage() {
   const { t } = useLang();
   const [services, setServices] = useState<PortalConciergeServiceItem[]>([]);
@@ -86,6 +95,11 @@ export function PatientServicesPage() {
   const [cancelBusyId, setCancelBusyId] = useState("");
   const [form, setForm] = useState<ServiceRequestFormState>(blankServiceRequestForm());
   const [version, setVersion] = useState(0);
+
+  useRealtimeSubscription(PORTAL_SERVICE_REALTIME_EVENTS, () => {
+    clearApiCache("/me/concierge-services");
+    setVersion((value) => value + 1);
+  });
 
   useEffect(() => {
     let cancelled = false;

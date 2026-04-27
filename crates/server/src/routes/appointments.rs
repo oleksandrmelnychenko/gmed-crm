@@ -749,6 +749,8 @@ async fn create_my_appointment_request(
         }
     };
 
+    let appointment_type = body.appointment_type.clone();
+
     state.audit_sender.try_send(audit::domain_event(
         "create_appointment_request",
         Some(auth.user_id),
@@ -756,8 +758,8 @@ async fn create_my_appointment_request(
         Some(request_id),
         serde_json::json!({
             "patient_id": patient_id,
-            "appointment_type": body.appointment_type,
-            "care_path_kind": care_path_kind,
+            "appointment_type": appointment_type.clone(),
+            "care_path_kind": care_path_kind.clone(),
             "preferred_date_from": preferred_date_from.map(|value| value.to_string()),
             "preferred_date_to": preferred_date_to.map(|value| value.to_string()),
             "preferred_time_of_day": preferred_time_of_day,
@@ -790,7 +792,7 @@ async fn create_my_appointment_request(
     })
     .unwrap_or_else(|| "Patient".to_string());
 
-    let _ = sqlx::query(
+    if let Ok(notification_rows) = sqlx::query(
         r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
            SELECT pa.user_id, 'appointment_request', $2, $3, 'appointment_request', $1
            FROM patient_assignments pa
@@ -798,13 +800,52 @@ async fn create_my_appointment_request(
            WHERE pa.patient_id = $4
              AND pa.revoked_at IS NULL
              AND u.is_active = true
-             AND u.role IN ('patient_manager', 'ceo')"#,
+             AND u.role IN ('patient_manager', 'ceo')
+           RETURNING id, user_id"#,
     )
     .bind(request_id)
     .bind(format!("New appointment request: {patient_label}"))
     .bind("A patient requested appointment planning through the portal.")
     .bind(patient_id)
-    .execute(&state.db)
+    .fetch_all(&state.db)
+    .await
+    {
+        for notification_row in notification_rows {
+            let notification_id = notification_row
+                .try_get::<Uuid, _>("id")
+                .unwrap_or_else(|_| Uuid::nil());
+            let user_id = notification_row
+                .try_get::<Uuid, _>("user_id")
+                .unwrap_or_else(|_| Uuid::nil());
+            if notification_id != Uuid::nil() && user_id != Uuid::nil() {
+                crate::realtime::publish_notification_event(
+                    &state,
+                    user_id,
+                    "notification.created",
+                    Some(notification_id),
+                    serde_json::json!({
+                        "entity_type": "appointment_request",
+                        "entity_id": request_id,
+                    }),
+                )
+                .await;
+            }
+        }
+    }
+
+    crate::realtime::publish_appointment_request_event(
+        &state,
+        Some(auth.user_id),
+        "appointment_request.created",
+        request_id,
+        patient_id,
+        Some(auth.user_id),
+        serde_json::json!({
+            "appointment_type": appointment_type,
+            "care_path_kind": care_path_kind,
+            "status": "requested",
+        }),
+    )
     .await;
 
     match load_appointment_request_row(&state, request_id).await {
@@ -944,6 +985,7 @@ async fn review_appointment_request(
         );
     }
 
+    let next_status = body.status.clone();
     let review_note = normalize_optional_text(body.review_note);
     if let Err(e) = sqlx::query(
         r#"UPDATE patient_appointment_requests
@@ -954,7 +996,7 @@ async fn review_appointment_request(
            WHERE id = $1"#,
     )
     .bind(id)
-    .bind(&body.status)
+    .bind(&next_status)
     .bind(review_note.clone())
     .bind(auth.user_id)
     .execute(&state.db)
@@ -974,25 +1016,54 @@ async fn review_appointment_request(
         Some(id),
         serde_json::json!({
             "patient_id": patient_id,
-            "status": body.status,
-            "review_note": review_note,
+            "status": next_status.clone(),
+            "review_note": review_note.clone(),
         }),
     ));
 
-    let _ = sqlx::query(
-        "INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id) VALUES ($1, 'appointment_request_update', $2, $3, 'appointment_request', $4)",
+    if requested_by != Uuid::nil() {
+        if let Ok(notification_id) = sqlx::query_scalar::<_, Uuid>(
+            "INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id) VALUES ($1, 'appointment_request_update', $2, $3, 'appointment_request', $4) RETURNING id",
+        )
+        .bind(requested_by)
+        .bind(format!("Appointment request {next_status}"))
+        .bind(
+            if next_status == "approved" {
+                "Your appointment request was approved and is waiting for scheduling."
+            } else {
+                "Your appointment request was reviewed and rejected."
+            },
+        )
+        .bind(id)
+        .fetch_one(&state.db)
+        .await
+        {
+            crate::realtime::publish_notification_event(
+                &state,
+                requested_by,
+                "notification.created",
+                Some(notification_id),
+                serde_json::json!({
+                    "entity_type": "appointment_request",
+                    "entity_id": id,
+                }),
+            )
+            .await;
+        }
+    }
+
+    crate::realtime::publish_appointment_request_event(
+        &state,
+        Some(auth.user_id),
+        "appointment_request.reviewed",
+        id,
+        patient_id,
+        (requested_by != Uuid::nil()).then_some(requested_by),
+        serde_json::json!({
+            "status": next_status,
+            "review_note": review_note,
+        }),
     )
-    .bind(requested_by)
-    .bind(format!("Appointment request {}", body.status))
-    .bind(
-        if body.status == "approved" {
-            "Your appointment request was approved and is waiting for scheduling."
-        } else {
-            "Your appointment request was reviewed and rejected."
-        },
-    )
-    .bind(id)
-    .execute(&state.db)
     .await;
 
     match load_appointment_request_row(&state, id).await {
@@ -1249,7 +1320,7 @@ async fn convert_appointment_request(
         serde_json::json!({
             "patient_id": patient_id,
             "appointment_id": appointment_id,
-            "appointment_type": request_type,
+            "appointment_type": request_type.clone(),
             "provider_id": body.provider_id,
             "doctor_id": body.doctor_id,
             "owner_user_id": owner_user_id,
@@ -1258,14 +1329,57 @@ async fn convert_appointment_request(
         }),
     ));
 
-    let _ = sqlx::query(
-        "INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id) VALUES ($1, 'appointment_request_update', $2, $3, 'appointment_request', $4)",
+    if requested_by != Uuid::nil() {
+        if let Ok(notification_id) = sqlx::query_scalar::<_, Uuid>(
+            "INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id) VALUES ($1, 'appointment_request_update', $2, $3, 'appointment_request', $4) RETURNING id",
+        )
+        .bind(requested_by)
+        .bind("Appointment request scheduled")
+        .bind("Your appointment request was converted into a scheduled appointment.")
+        .bind(id)
+        .fetch_one(&state.db)
+        .await
+        {
+            crate::realtime::publish_notification_event(
+                &state,
+                requested_by,
+                "notification.created",
+                Some(notification_id),
+                serde_json::json!({
+                    "entity_type": "appointment_request",
+                    "entity_id": id,
+                }),
+            )
+            .await;
+        }
+    }
+
+    crate::realtime::publish_appointment_request_event(
+        &state,
+        Some(auth.user_id),
+        "appointment_request.converted",
+        id,
+        patient_id,
+        (requested_by != Uuid::nil()).then_some(requested_by),
+        serde_json::json!({
+            "appointment_id": appointment_id,
+            "status": "converted",
+        }),
     )
-    .bind(requested_by)
-    .bind("Appointment request scheduled")
-    .bind("Your appointment request was converted into a scheduled appointment.")
-    .bind(id)
-    .execute(&state.db)
+    .await;
+
+    crate::realtime::publish_appointment_event(
+        &state,
+        Some(auth.user_id),
+        "appointment.created",
+        appointment_id,
+        serde_json::json!({
+            "source": "appointment_request",
+            "request_id": id,
+            "appointment_type": request_type,
+            "care_path_kind": request_care_path_kind,
+        }),
+    )
     .await;
 
     Json(serde_json::json!({
@@ -2198,6 +2312,14 @@ async fn create_appointment(
         }),
     ));
     tracing::info!(by = %auth.user_id, apt = %root_appointment_id, series_created_count = created_appointments.len(), "Appointment created");
+    crate::realtime::publish_appointment_event(
+        &state,
+        Some(auth.user_id),
+        "appointment.created",
+        root_appointment_id,
+        serde_json::json!({ "series_created_count": created_appointments.len() }),
+    )
+    .await;
     (
         StatusCode::CREATED,
         Json(serde_json::json!({
@@ -3873,6 +3995,26 @@ async fn update_appointment(
         }),
     ));
 
+    for (target_id, _, _) in &updated_targets {
+        crate::realtime::publish_appointment_event(
+            &state,
+            Some(auth.user_id),
+            "appointment.updated",
+            *target_id,
+            serde_json::json!({
+                "recurrence_scope": match recurrence_scope {
+                    AppointmentRecurrenceScope::Single => "single",
+                    AppointmentRecurrenceScope::Following => "following",
+                    AppointmentRecurrenceScope::Series => "series",
+                },
+                "split_performed": split_performed,
+                "affected_count": updated_targets.len(),
+                "created_occurrence_count": created_targets.len(),
+            }),
+        )
+        .await;
+    }
+
     Json(serde_json::json!({
         "ok": true,
         "conflicts": conflicts,
@@ -4165,6 +4307,25 @@ async fn update_status(
                 "affected_count": rows_affected,
             }),
         ));
+    }
+
+    for appointment_id in &target_ids {
+        crate::realtime::publish_appointment_event(
+            &state,
+            Some(auth.user_id),
+            "appointment.status_changed",
+            *appointment_id,
+            serde_json::json!({
+                "status": body.status,
+                "recurrence_scope": match recurrence_scope {
+                    AppointmentRecurrenceScope::Single => "single",
+                    AppointmentRecurrenceScope::Following => "following",
+                    AppointmentRecurrenceScope::Series => "series",
+                },
+                "affected_count": rows_affected,
+            }),
+        )
+        .await;
     }
 
     Json(serde_json::json!({

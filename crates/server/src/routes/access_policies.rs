@@ -54,6 +54,262 @@ struct ResetRequest {
 const VALID_ACCESS_LEVELS: &[&str] = &["full", "masked", "hidden", "conditional"];
 const VALID_CONDITIONS: &[&str] = &["assigned_appointment", "freigegeben", "own_data"];
 
+type DefaultPatientPolicy = (
+    &'static str,
+    &'static str,
+    &'static str,
+    Option<&'static str>,
+    bool,
+);
+
+const DEFAULT_PATIENT_POLICIES: &[DefaultPatientPolicy] = &[
+    ("patient_manager", "name", "full", None, false),
+    ("patient_manager", "birth_date", "full", None, false),
+    ("patient_manager", "phone", "full", None, false),
+    ("patient_manager", "email", "full", None, false),
+    ("patient_manager", "nationality", "full", None, false),
+    ("patient_manager", "languages", "full", None, false),
+    ("patient_manager", "insurance", "full", None, false),
+    ("patient_manager", "diagnosis", "full", None, false),
+    ("patient_manager", "medications", "full", None, false),
+    ("patient_manager", "allergies", "full", None, false),
+    ("patient_manager", "vitals", "full", None, false),
+    ("patient_manager", "internal_notes", "full", None, false),
+    ("patient_manager", "travel_data", "full", None, false),
+    ("patient_manager", "functional_labels", "full", None, false),
+    ("teamlead_interpreter", "name", "full", None, false),
+    ("teamlead_interpreter", "birth_date", "full", None, false),
+    ("teamlead_interpreter", "phone", "full", None, false),
+    ("teamlead_interpreter", "email", "full", None, false),
+    ("teamlead_interpreter", "nationality", "full", None, false),
+    ("teamlead_interpreter", "languages", "full", None, false),
+    ("teamlead_interpreter", "insurance", "hidden", None, false),
+    ("teamlead_interpreter", "diagnosis", "hidden", None, false),
+    ("teamlead_interpreter", "medications", "hidden", None, false),
+    ("teamlead_interpreter", "allergies", "hidden", None, false),
+    ("teamlead_interpreter", "vitals", "hidden", None, false),
+    (
+        "teamlead_interpreter",
+        "internal_notes",
+        "hidden",
+        None,
+        false,
+    ),
+    ("teamlead_interpreter", "travel_data", "full", None, false),
+    (
+        "teamlead_interpreter",
+        "functional_labels",
+        "full",
+        None,
+        false,
+    ),
+    ("interpreter", "name", "full", None, false),
+    ("interpreter", "birth_date", "full", None, false),
+    ("interpreter", "phone", "full", None, false),
+    ("interpreter", "email", "masked", None, false),
+    ("interpreter", "nationality", "full", None, false),
+    ("interpreter", "languages", "full", None, false),
+    ("interpreter", "insurance", "hidden", None, false),
+    (
+        "interpreter",
+        "diagnosis",
+        "conditional",
+        Some("assigned_appointment"),
+        false,
+    ),
+    (
+        "interpreter",
+        "medications",
+        "conditional",
+        Some("assigned_appointment"),
+        false,
+    ),
+    (
+        "interpreter",
+        "allergies",
+        "conditional",
+        Some("assigned_appointment"),
+        false,
+    ),
+    ("interpreter", "vitals", "hidden", None, false),
+    ("interpreter", "internal_notes", "hidden", None, false),
+    ("interpreter", "travel_data", "hidden", None, false),
+    ("interpreter", "functional_labels", "full", None, false),
+    ("concierge", "name", "full", None, false),
+    ("concierge", "birth_date", "full", None, false),
+    ("concierge", "phone", "full", None, false),
+    ("concierge", "email", "full", None, false),
+    ("concierge", "nationality", "full", None, false),
+    ("concierge", "languages", "full", None, false),
+    ("concierge", "insurance", "hidden", None, false),
+    ("concierge", "diagnosis", "hidden", None, true),
+    ("concierge", "medications", "hidden", None, true),
+    ("concierge", "allergies", "hidden", None, true),
+    ("concierge", "vitals", "hidden", None, true),
+    ("concierge", "internal_notes", "hidden", None, false),
+    ("concierge", "travel_data", "full", None, false),
+    ("concierge", "functional_labels", "full", None, false),
+    ("billing", "name", "full", None, false),
+    ("billing", "birth_date", "full", None, false),
+    ("billing", "phone", "full", None, false),
+    ("billing", "email", "full", None, false),
+    ("billing", "nationality", "full", None, false),
+    ("billing", "languages", "hidden", None, false),
+    ("billing", "insurance", "full", None, false),
+    ("billing", "diagnosis", "hidden", None, true),
+    ("billing", "medications", "hidden", None, true),
+    ("billing", "allergies", "hidden", None, true),
+    ("billing", "vitals", "hidden", None, true),
+    ("billing", "internal_notes", "hidden", None, false),
+    ("billing", "travel_data", "hidden", None, false),
+    ("billing", "functional_labels", "hidden", None, false),
+    ("sales", "name", "hidden", None, false),
+    ("sales", "birth_date", "hidden", None, false),
+    ("sales", "phone", "hidden", None, false),
+    ("sales", "email", "hidden", None, false),
+    ("sales", "nationality", "hidden", None, false),
+    ("sales", "languages", "hidden", None, false),
+    ("sales", "insurance", "hidden", None, false),
+    ("sales", "diagnosis", "hidden", None, true),
+    ("sales", "medications", "hidden", None, true),
+    ("sales", "allergies", "hidden", None, true),
+    ("sales", "vitals", "hidden", None, true),
+    ("sales", "internal_notes", "hidden", None, false),
+    ("sales", "travel_data", "hidden", None, false),
+    ("sales", "functional_labels", "hidden", None, false),
+    ("patient", "name", "conditional", Some("freigegeben"), false),
+    (
+        "patient",
+        "birth_date",
+        "conditional",
+        Some("freigegeben"),
+        false,
+    ),
+    (
+        "patient",
+        "phone",
+        "conditional",
+        Some("freigegeben"),
+        false,
+    ),
+    (
+        "patient",
+        "email",
+        "conditional",
+        Some("freigegeben"),
+        false,
+    ),
+    (
+        "patient",
+        "nationality",
+        "conditional",
+        Some("freigegeben"),
+        false,
+    ),
+    (
+        "patient",
+        "languages",
+        "conditional",
+        Some("freigegeben"),
+        false,
+    ),
+    (
+        "patient",
+        "insurance",
+        "conditional",
+        Some("freigegeben"),
+        false,
+    ),
+    (
+        "patient",
+        "diagnosis",
+        "conditional",
+        Some("freigegeben"),
+        false,
+    ),
+    (
+        "patient",
+        "medications",
+        "conditional",
+        Some("freigegeben"),
+        false,
+    ),
+    (
+        "patient",
+        "allergies",
+        "conditional",
+        Some("freigegeben"),
+        false,
+    ),
+    (
+        "patient",
+        "vitals",
+        "conditional",
+        Some("freigegeben"),
+        false,
+    ),
+    ("patient", "internal_notes", "hidden", None, true),
+    (
+        "patient",
+        "travel_data",
+        "conditional",
+        Some("freigegeben"),
+        false,
+    ),
+    ("patient", "functional_labels", "hidden", None, false),
+    ("ceo_assistant", "name", "full", None, false),
+    ("ceo_assistant", "birth_date", "full", None, false),
+    ("ceo_assistant", "phone", "full", None, false),
+    ("ceo_assistant", "email", "full", None, false),
+    ("ceo_assistant", "nationality", "full", None, false),
+    ("ceo_assistant", "languages", "full", None, false),
+    ("ceo_assistant", "insurance", "hidden", None, false),
+    ("ceo_assistant", "diagnosis", "hidden", None, true),
+    ("ceo_assistant", "medications", "hidden", None, true),
+    ("ceo_assistant", "allergies", "hidden", None, true),
+    ("ceo_assistant", "vitals", "hidden", None, true),
+    ("ceo_assistant", "internal_notes", "hidden", None, false),
+    ("ceo_assistant", "travel_data", "full", None, false),
+    ("ceo_assistant", "functional_labels", "hidden", None, false),
+];
+
+async fn ensure_patient_policy_defaults(
+    state: &AppState,
+    updated_by: Uuid,
+) -> Result<u64, sqlx::Error> {
+    let mut restored = 0;
+    for &(role, field_name, access_level, condition_type, is_system_locked) in
+        DEFAULT_PATIENT_POLICIES
+    {
+        let result = sqlx::query(
+            r#"
+            INSERT INTO field_access_policies (
+                role,
+                entity_type,
+                field_name,
+                access_level,
+                condition_type,
+                is_system_locked,
+                updated_by,
+                updated_at
+            )
+            VALUES ($1, 'patient', $2, $3, $4, $5, $6, now())
+            ON CONFLICT (role, entity_type, field_name) DO NOTHING
+            "#,
+        )
+        .bind(role)
+        .bind(field_name)
+        .bind(access_level)
+        .bind(condition_type)
+        .bind(is_system_locked)
+        .bind(updated_by)
+        .execute(&state.db)
+        .await?;
+        restored += result.rows_affected();
+    }
+    Ok(restored)
+}
+
 async fn list_policies(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -63,6 +319,22 @@ async fn list_policies(
 
     let entity_filter = query.entity_type.as_deref();
     let role_filter = query.role.as_deref();
+
+    if entity_filter == Some("patient") {
+        match ensure_patient_policy_defaults(&state, auth.user_id).await {
+            Ok(restored) if restored > 0 => {
+                tracing::warn!(restored, "Repaired missing patient access policy defaults");
+            }
+            Ok(_) => {}
+            Err(e) => {
+                tracing::error!(error = %e, "Failed to repair patient access policy defaults");
+                return Err(err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to repair patient access policy defaults",
+                ));
+            }
+        }
+    }
 
     let rows = sqlx::query!(
         "SELECT id, role, entity_type, field_name, access_level, condition_type, is_system_locked
@@ -212,6 +484,19 @@ async fn update_policy(
         level = %body.access_level,
         "Access policy updated"
     );
+    crate::realtime::publish_admin_event(
+        &state,
+        Some(auth.user_id),
+        "access_policy.updated",
+        "access_policy",
+        row.id,
+        serde_json::json!({
+            "role": body.role,
+            "entity_type": body.entity_type,
+            "field_name": body.field_name,
+        }),
+    )
+    .await;
 
     Ok(Json(serde_json::json!({"ok": true})))
 }
@@ -225,16 +510,183 @@ async fn reset_entity(
         return e;
     }
 
-    let result = sqlx::query!(
-        "DELETE FROM field_access_policies WHERE entity_type = $1 AND NOT is_system_locked",
-        body.entity_type
+    if body.entity_type != "patient" {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Only patient access policies can be reset",
+        );
+    }
+
+    let result = sqlx::query(
+        r#"
+        WITH deleted AS (
+            DELETE FROM field_access_policies
+            WHERE entity_type = $1 AND NOT is_system_locked
+            RETURNING 1
+        ),
+        defaults(role, entity_type, field_name, access_level, condition_type, is_system_locked) AS (
+            VALUES
+                ('patient_manager', 'patient', 'name', 'full', NULL, false),
+                ('patient_manager', 'patient', 'birth_date', 'full', NULL, false),
+                ('patient_manager', 'patient', 'phone', 'full', NULL, false),
+                ('patient_manager', 'patient', 'email', 'full', NULL, false),
+                ('patient_manager', 'patient', 'nationality', 'full', NULL, false),
+                ('patient_manager', 'patient', 'languages', 'full', NULL, false),
+                ('patient_manager', 'patient', 'insurance', 'full', NULL, false),
+                ('patient_manager', 'patient', 'diagnosis', 'full', NULL, false),
+                ('patient_manager', 'patient', 'medications', 'full', NULL, false),
+                ('patient_manager', 'patient', 'allergies', 'full', NULL, false),
+                ('patient_manager', 'patient', 'vitals', 'full', NULL, false),
+                ('patient_manager', 'patient', 'internal_notes', 'full', NULL, false),
+                ('patient_manager', 'patient', 'travel_data', 'full', NULL, false),
+                ('patient_manager', 'patient', 'functional_labels', 'full', NULL, false),
+
+                ('teamlead_interpreter', 'patient', 'name', 'full', NULL, false),
+                ('teamlead_interpreter', 'patient', 'birth_date', 'full', NULL, false),
+                ('teamlead_interpreter', 'patient', 'phone', 'full', NULL, false),
+                ('teamlead_interpreter', 'patient', 'email', 'full', NULL, false),
+                ('teamlead_interpreter', 'patient', 'nationality', 'full', NULL, false),
+                ('teamlead_interpreter', 'patient', 'languages', 'full', NULL, false),
+                ('teamlead_interpreter', 'patient', 'insurance', 'hidden', NULL, false),
+                ('teamlead_interpreter', 'patient', 'diagnosis', 'hidden', NULL, false),
+                ('teamlead_interpreter', 'patient', 'medications', 'hidden', NULL, false),
+                ('teamlead_interpreter', 'patient', 'allergies', 'hidden', NULL, false),
+                ('teamlead_interpreter', 'patient', 'vitals', 'hidden', NULL, false),
+                ('teamlead_interpreter', 'patient', 'internal_notes', 'hidden', NULL, false),
+                ('teamlead_interpreter', 'patient', 'travel_data', 'full', NULL, false),
+                ('teamlead_interpreter', 'patient', 'functional_labels', 'full', NULL, false),
+
+                ('interpreter', 'patient', 'name', 'full', NULL, false),
+                ('interpreter', 'patient', 'birth_date', 'full', NULL, false),
+                ('interpreter', 'patient', 'phone', 'full', NULL, false),
+                ('interpreter', 'patient', 'email', 'masked', NULL, false),
+                ('interpreter', 'patient', 'nationality', 'full', NULL, false),
+                ('interpreter', 'patient', 'languages', 'full', NULL, false),
+                ('interpreter', 'patient', 'insurance', 'hidden', NULL, false),
+                ('interpreter', 'patient', 'diagnosis', 'conditional', 'assigned_appointment', false),
+                ('interpreter', 'patient', 'medications', 'conditional', 'assigned_appointment', false),
+                ('interpreter', 'patient', 'allergies', 'conditional', 'assigned_appointment', false),
+                ('interpreter', 'patient', 'vitals', 'hidden', NULL, false),
+                ('interpreter', 'patient', 'internal_notes', 'hidden', NULL, false),
+                ('interpreter', 'patient', 'travel_data', 'hidden', NULL, false),
+                ('interpreter', 'patient', 'functional_labels', 'full', NULL, false),
+
+                ('concierge', 'patient', 'name', 'full', NULL, false),
+                ('concierge', 'patient', 'birth_date', 'full', NULL, false),
+                ('concierge', 'patient', 'phone', 'full', NULL, false),
+                ('concierge', 'patient', 'email', 'full', NULL, false),
+                ('concierge', 'patient', 'nationality', 'full', NULL, false),
+                ('concierge', 'patient', 'languages', 'full', NULL, false),
+                ('concierge', 'patient', 'insurance', 'hidden', NULL, false),
+                ('concierge', 'patient', 'diagnosis', 'hidden', NULL, true),
+                ('concierge', 'patient', 'medications', 'hidden', NULL, true),
+                ('concierge', 'patient', 'allergies', 'hidden', NULL, true),
+                ('concierge', 'patient', 'vitals', 'hidden', NULL, true),
+                ('concierge', 'patient', 'internal_notes', 'hidden', NULL, false),
+                ('concierge', 'patient', 'travel_data', 'full', NULL, false),
+                ('concierge', 'patient', 'functional_labels', 'full', NULL, false),
+
+                ('billing', 'patient', 'name', 'full', NULL, false),
+                ('billing', 'patient', 'birth_date', 'full', NULL, false),
+                ('billing', 'patient', 'phone', 'full', NULL, false),
+                ('billing', 'patient', 'email', 'full', NULL, false),
+                ('billing', 'patient', 'nationality', 'full', NULL, false),
+                ('billing', 'patient', 'languages', 'hidden', NULL, false),
+                ('billing', 'patient', 'insurance', 'full', NULL, false),
+                ('billing', 'patient', 'diagnosis', 'hidden', NULL, true),
+                ('billing', 'patient', 'medications', 'hidden', NULL, true),
+                ('billing', 'patient', 'allergies', 'hidden', NULL, true),
+                ('billing', 'patient', 'vitals', 'hidden', NULL, true),
+                ('billing', 'patient', 'internal_notes', 'hidden', NULL, false),
+                ('billing', 'patient', 'travel_data', 'hidden', NULL, false),
+                ('billing', 'patient', 'functional_labels', 'hidden', NULL, false),
+
+                ('sales', 'patient', 'name', 'hidden', NULL, false),
+                ('sales', 'patient', 'birth_date', 'hidden', NULL, false),
+                ('sales', 'patient', 'phone', 'hidden', NULL, false),
+                ('sales', 'patient', 'email', 'hidden', NULL, false),
+                ('sales', 'patient', 'nationality', 'hidden', NULL, false),
+                ('sales', 'patient', 'languages', 'hidden', NULL, false),
+                ('sales', 'patient', 'insurance', 'hidden', NULL, false),
+                ('sales', 'patient', 'diagnosis', 'hidden', NULL, true),
+                ('sales', 'patient', 'medications', 'hidden', NULL, true),
+                ('sales', 'patient', 'allergies', 'hidden', NULL, true),
+                ('sales', 'patient', 'vitals', 'hidden', NULL, true),
+                ('sales', 'patient', 'internal_notes', 'hidden', NULL, false),
+                ('sales', 'patient', 'travel_data', 'hidden', NULL, false),
+                ('sales', 'patient', 'functional_labels', 'hidden', NULL, false),
+
+                ('patient', 'patient', 'name', 'conditional', 'freigegeben', false),
+                ('patient', 'patient', 'birth_date', 'conditional', 'freigegeben', false),
+                ('patient', 'patient', 'phone', 'conditional', 'freigegeben', false),
+                ('patient', 'patient', 'email', 'conditional', 'freigegeben', false),
+                ('patient', 'patient', 'nationality', 'conditional', 'freigegeben', false),
+                ('patient', 'patient', 'languages', 'conditional', 'freigegeben', false),
+                ('patient', 'patient', 'insurance', 'conditional', 'freigegeben', false),
+                ('patient', 'patient', 'diagnosis', 'conditional', 'freigegeben', false),
+                ('patient', 'patient', 'medications', 'conditional', 'freigegeben', false),
+                ('patient', 'patient', 'allergies', 'conditional', 'freigegeben', false),
+                ('patient', 'patient', 'vitals', 'conditional', 'freigegeben', false),
+                ('patient', 'patient', 'internal_notes', 'hidden', NULL, true),
+                ('patient', 'patient', 'travel_data', 'conditional', 'freigegeben', false),
+                ('patient', 'patient', 'functional_labels', 'hidden', NULL, false),
+
+                ('ceo_assistant', 'patient', 'name', 'full', NULL, false),
+                ('ceo_assistant', 'patient', 'birth_date', 'full', NULL, false),
+                ('ceo_assistant', 'patient', 'phone', 'full', NULL, false),
+                ('ceo_assistant', 'patient', 'email', 'full', NULL, false),
+                ('ceo_assistant', 'patient', 'nationality', 'full', NULL, false),
+                ('ceo_assistant', 'patient', 'languages', 'full', NULL, false),
+                ('ceo_assistant', 'patient', 'insurance', 'hidden', NULL, false),
+                ('ceo_assistant', 'patient', 'diagnosis', 'hidden', NULL, true),
+                ('ceo_assistant', 'patient', 'medications', 'hidden', NULL, true),
+                ('ceo_assistant', 'patient', 'allergies', 'hidden', NULL, true),
+                ('ceo_assistant', 'patient', 'vitals', 'hidden', NULL, true),
+                ('ceo_assistant', 'patient', 'internal_notes', 'hidden', NULL, false),
+                ('ceo_assistant', 'patient', 'travel_data', 'full', NULL, false),
+                ('ceo_assistant', 'patient', 'functional_labels', 'hidden', NULL, false)
+        )
+        INSERT INTO field_access_policies (
+            role,
+            entity_type,
+            field_name,
+            access_level,
+            condition_type,
+            is_system_locked,
+            updated_by,
+            updated_at
+        )
+        SELECT role, entity_type, field_name, access_level, condition_type, is_system_locked, $2, now()
+        FROM defaults
+        WHERE entity_type = $1
+        ON CONFLICT (role, entity_type, field_name) DO UPDATE
+        SET access_level = EXCLUDED.access_level,
+            condition_type = EXCLUDED.condition_type,
+            is_system_locked = EXCLUDED.is_system_locked,
+            updated_by = EXCLUDED.updated_by,
+            updated_at = now()
+        "#,
     )
+    .bind(&body.entity_type)
+    .bind(auth.user_id)
     .execute(&state.db)
     .await;
 
     match result {
         Ok(r) => {
-            tracing::info!(by = %auth.user_id, entity = %body.entity_type, deleted = r.rows_affected(), "Access policies reset");
+            tracing::info!(by = %auth.user_id, entity = %body.entity_type, restored = r.rows_affected(), "Access policies reset to defaults");
+            crate::realtime::publish_admin_event(
+                &state,
+                Some(auth.user_id),
+                "access_policy.reset",
+                "access_policy",
+                auth.user_id,
+                serde_json::json!({
+                    "entity_type": body.entity_type,
+                    "restored": r.rows_affected(),
+                }),
+            )
+            .await;
             StatusCode::NO_CONTENT.into_response()
         }
         Err(e) => {

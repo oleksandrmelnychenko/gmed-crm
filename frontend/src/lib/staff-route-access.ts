@@ -300,7 +300,7 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
   },
   {
     id: "orders",
-    match: "exact",
+    match: "prefix",
     path: "/orders",
     roles: ROLES_ORDERS,
     nav: { section: "crm", labelKey: "orders_title" },
@@ -347,7 +347,6 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     roles: ROLES_SERVICES,
     nav: { section: "crm", labelKey: "nav_my_services" },
   },
-  { id: "privacy", match: "exact", path: "/privacy", roles: ALL_STAFF_ROLES },
   {
     id: "dashboard",
     match: "exact",

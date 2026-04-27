@@ -28,7 +28,14 @@ export function AdminToolbar({
   className?: string;
 }) {
   return (
-    <div className={cn("flex items-center gap-1.5 flex-wrap", className)}>
+    <div
+      className={cn(
+        "relative z-30 flex w-full flex-wrap items-center gap-1.5 rounded-lg border border-border bg-card/80 p-2 shadow-sm",
+        "[&_[data-slot=input]]:bg-background [&_[data-slot=input]]:text-[13px]",
+        "[&_[data-slot=select-trigger]]:bg-background [&_[data-slot=select-trigger]]:text-[13px]",
+        className,
+      )}
+    >
       {children}
     </div>
   );
@@ -72,7 +79,6 @@ export function AdminInlineMetric({
 
 export function AdminTableCard({
   title,
-  description,
   count,
   accessory,
   children,
@@ -93,16 +99,11 @@ export function AdminTableCard({
       )}
     >
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-4 py-3">
-        <div className="min-w-0 space-y-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
-              {title}
-            </h3>
-            {count !== undefined ? <CountBadge>{count}</CountBadge> : null}
-          </div>
-          {description ? (
-            <p className="text-[12px] text-muted-foreground">{description}</p>
-          ) : null}
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
+            {title}
+          </h3>
+          {count !== undefined ? <CountBadge>{count}</CountBadge> : null}
         </div>
         {accessory ? <div className="shrink-0">{accessory}</div> : null}
       </div>

@@ -18,10 +18,12 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Banner, tokens } from "@/components/ui-shell";
+import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { useRealtimeSubscription } from "@/lib/realtime";
 
 import {
   canAssignTarget,
@@ -48,6 +50,14 @@ const LazyPatientsShortcutsDialog = lazy(async () => {
   return { default: mod.PatientsShortcutsDialog };
 });
 
+const PATIENT_REALTIME_EVENTS = [
+  "patient.created",
+  "patient.updated",
+  "patient.assigned",
+  "patient.assignment_revoked",
+  "patient.activated",
+  "patient.deactivated",
+] as const;
 
 export function PatientsPage() {
   const { user } = useAuth();
@@ -154,6 +164,14 @@ export function PatientsPage() {
     refreshList();
     refreshDetail();
   }
+
+  useRealtimeSubscription(PATIENT_REALTIME_EVENTS, (event) => {
+    clearApiCache("/patients");
+    if (selectedId && event.entity_id === selectedId) {
+      refreshDetail();
+    }
+    refreshList();
+  });
 
   if (!permissions.canViewPage) {
     return (

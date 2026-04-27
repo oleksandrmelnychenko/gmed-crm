@@ -29,8 +29,10 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
+import { useRealtimeSubscription } from "@/lib/realtime";
 import {
   feedbackSourceLabel,
   feedbackStatusTone,
@@ -75,6 +77,11 @@ import type {
 function shellCard(extra?: string) {
   return cn("rounded-[1.75rem] border border-slate-200 bg-white shadow-sm", extra);
 }
+
+const FEEDBACK_REALTIME_EVENTS = [
+  "feedback.submitted",
+  "feedback.reviewed",
+] as const;
 
 function scoreField(
   label: string,
@@ -218,6 +225,12 @@ function PatientFeedbackWorkspace() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [version, setVersion] = useState(0);
+
+  useRealtimeSubscription(FEEDBACK_REALTIME_EVENTS, () => {
+    clearApiCache("/me/feedback");
+    clearApiCache("/me/appointments");
+    setVersion((value) => value + 1);
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -624,6 +637,13 @@ function StaffFeedbackWorkspace() {
     [deferredSearch, statusFilter, sourceFilter],
   );
 
+  useRealtimeSubscription(FEEDBACK_REALTIME_EVENTS, () => {
+    if (!canViewWorkspace) return;
+    clearApiCache("/feedback");
+    clearApiCache("/feedback/summary");
+    setVersion((value) => value + 1);
+  });
+
   useEffect(() => {
     let cancelled = false;
     if (!canViewWorkspace) {
@@ -929,9 +949,9 @@ function StaffFeedbackWorkspace() {
                   )}
                 </p>
               </div>
-              <div className="flex flex-col gap-3 md:flex-row">
-                <div className="relative">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+              <div className="relative z-30 flex w-full flex-wrap items-center gap-1.5 rounded-lg border border-slate-200 bg-white/80 p-2 shadow-sm lg:w-auto">
+                <div className="relative min-w-[240px] flex-1 md:flex-none">
+                  <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-slate-400" />
                   <Input
                     value={search}
                     onChange={(event) => setSearch(event.target.value)}
@@ -940,13 +960,13 @@ function StaffFeedbackWorkspace() {
                       "Поиск по пациенту, клинике, врачу или заметке",
                       "Search patient, clinic, doctor or note",
                     )}
-                    className="w-full rounded-2xl pl-9 md:w-80"
+                    className="h-8 w-full rounded-lg bg-white pl-8 text-[13px] md:w-80"
                   />
                 </div>
                 <select
                   value={statusFilter}
                   onChange={(event) => setStatusFilter(event.target.value)}
-                  className="h-10 rounded-2xl border border-slate-200 bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
+                  className="h-8 rounded-lg border border-slate-200 bg-white px-2.5 text-[13px] text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
                 >
                   <option value="">{l("Alle Status", "Все статусы", "All statuses")}</option>
                   <option value="submitted">{l("Eingereicht", "Отправлено", "Submitted")}</option>
@@ -956,7 +976,7 @@ function StaffFeedbackWorkspace() {
                 <select
                   value={sourceFilter}
                   onChange={(event) => setSourceFilter(event.target.value)}
-                  className="h-10 rounded-2xl border border-slate-200 bg-card px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
+                  className="h-8 rounded-lg border border-slate-200 bg-white px-2.5 text-[13px] text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
                 >
                   <option value="">{l("Alle Quellen", "Все источники", "All sources")}</option>
                   <option value="patient_portal">{l("Patientenportal", "Портал пациента", "Patient portal")}</option>

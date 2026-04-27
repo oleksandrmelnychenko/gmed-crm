@@ -8,6 +8,7 @@ pub mod crypto;
 pub mod file_scan;
 pub mod file_sniff;
 pub mod rate_limit;
+pub mod realtime;
 pub mod routes;
 pub mod security_headers;
 pub mod settings;
@@ -38,6 +39,7 @@ pub fn build_app(app_state: state::AppState) -> Router {
         Router::new()
             .merge(routes::leads::public_router())
             .merge(routes::messages::public_router())
+            .merge(routes::realtime::public_router())
             .merge(routes::e2e_support::public_router()),
     );
 

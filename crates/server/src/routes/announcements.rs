@@ -142,6 +142,16 @@ async fn create_announcement(
                 Some(r.id),
                 serde_json::json!({ "title": body.title }),
             ));
+            crate::realtime::publish_announcement_event(
+                &state,
+                Some(auth.user_id),
+                "announcement.created",
+                r.id,
+                serde_json::json!({
+                    "is_active": body.is_active.unwrap_or(true),
+                }),
+            )
+            .await;
             Json(serde_json::json!({"ok": true, "id": r.id})).into_response()
         }
         Err(e) => { tracing::error!(error = %e, "create announcement"); err(StatusCode::INTERNAL_SERVER_ERROR, "Failed") }
@@ -165,7 +175,19 @@ async fn update_announcement(
         "UPDATE announcements SET title=$2, message=$3, variant=$4, is_active=$5, ends_at=$6 WHERE id=$1",
         id, body.title, body.message, variant, body.is_active.unwrap_or(true), ends
     ).execute(&state.db).await {
-        Ok(r) if r.rows_affected() > 0 => Json(serde_json::json!({"ok": true})).into_response(),
+        Ok(r) if r.rows_affected() > 0 => {
+            crate::realtime::publish_announcement_event(
+                &state,
+                Some(auth.user_id),
+                "announcement.updated",
+                id,
+                serde_json::json!({
+                    "is_active": body.is_active.unwrap_or(true),
+                }),
+            )
+            .await;
+            Json(serde_json::json!({"ok": true})).into_response()
+        }
         Ok(_) => err(StatusCode::NOT_FOUND, "Announcement not found"),
         Err(e) => { tracing::error!(error = %e, "update announcement"); err(StatusCode::INTERNAL_SERVER_ERROR, "Failed") }
     }
@@ -183,6 +205,14 @@ async fn delete_announcement(
     let _ = sqlx::query!("DELETE FROM announcements WHERE id = $1", id)
         .execute(&state.db)
         .await;
+    crate::realtime::publish_announcement_event(
+        &state,
+        Some(auth.user_id),
+        "announcement.deleted",
+        id,
+        serde_json::json!({}),
+    )
+    .await;
     Json(serde_json::json!({"ok": true})).into_response()
 }
 

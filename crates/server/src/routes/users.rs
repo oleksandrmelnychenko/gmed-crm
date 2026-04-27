@@ -239,6 +239,18 @@ async fn create_user(
                 Some(r.id),
                 serde_json::json!({ "role": body.role, "email": body.email }),
             ));
+            crate::realtime::publish_admin_event(
+                &state,
+                Some(auth.user_id),
+                "user.created",
+                "user",
+                r.id,
+                serde_json::json!({
+                    "role": r.role.clone(),
+                    "email": r.email.clone(),
+                }),
+            )
+            .await;
 
             Ok((
                 StatusCode::CREATED,
@@ -326,6 +338,18 @@ async fn update_user(
                     "email": new_email,
                 }),
             ));
+            crate::realtime::publish_admin_event(
+                &state,
+                Some(auth.user_id),
+                "user.updated",
+                "user",
+                user_id,
+                serde_json::json!({
+                    "role": r.role.clone(),
+                    "email": r.email.clone(),
+                }),
+            )
+            .await;
 
             Ok(Json(UserResponse {
                 id: r.id,
@@ -372,6 +396,15 @@ async fn deactivate_user(
         Ok(r) if r.rows_affected() > 0 => {
             crate::auth::tokens::revoke_all_families(&state.db, user_id, "user_deactivated").await;
             tracing::info!(by = %auth.user_id, target = %user_id, "User deactivated");
+            crate::realtime::publish_admin_event(
+                &state,
+                Some(auth.user_id),
+                "user.deactivated",
+                "user",
+                user_id,
+                serde_json::json!({ "user_id": user_id }),
+            )
+            .await;
             Ok(StatusCode::NO_CONTENT)
         }
         Ok(_) => Err(err(
@@ -405,6 +438,15 @@ async fn activate_user(
     match result {
         Ok(r) if r.rows_affected() > 0 => {
             tracing::info!(by = %auth.user_id, target = %user_id, "User activated");
+            crate::realtime::publish_admin_event(
+                &state,
+                Some(auth.user_id),
+                "user.activated",
+                "user",
+                user_id,
+                serde_json::json!({ "user_id": user_id }),
+            )
+            .await;
             Ok(StatusCode::NO_CONTENT)
         }
         Ok(_) => Err(err(
@@ -459,6 +501,15 @@ async fn reset_password(
         Ok(r) if r.rows_affected() > 0 => {
             crate::auth::tokens::revoke_all_families(&state.db, user_id, "password_reset").await;
             tracing::info!(by = %auth.user_id, target = %user_id, "Password reset");
+            crate::realtime::publish_admin_event(
+                &state,
+                Some(auth.user_id),
+                "user.password_reset",
+                "user",
+                user_id,
+                serde_json::json!({ "user_id": user_id }),
+            )
+            .await;
             Ok(StatusCode::NO_CONTENT)
         }
         Ok(_) => Err(err(StatusCode::NOT_FOUND, "User not found")),

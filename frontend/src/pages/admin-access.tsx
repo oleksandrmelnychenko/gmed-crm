@@ -13,20 +13,20 @@ import {
   Lock,
   RefreshCcw,
   RotateCcw,
-  Search,
   ShieldCheck,
   Zap,
 } from "lucide-react";
 
+import { AdminGuideButton, GuideSection } from "@/components/admin-guide";
 import {
   AdminInlineMetric,
   AdminSheetScaffold,
   SheetActionsFooter,
-  AdminToolbar,
   AdminTableCard,
 } from "@/components/admin-page-patterns";
+import { DataTableSurface } from "@/components/data-table/data-table-surface";
+import type { ColumnDef } from "@/components/data-table/types";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Sheet,
   SheetContent,
@@ -41,7 +41,9 @@ import {
   TabLoader,
   tokens,
 } from "@/components/ui-shell";
+import { clearApiCache } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { useRealtimeSubscription } from "@/lib/realtime";
 import {
   fetchAccessPolicies,
   resetAccessPolicies,
@@ -57,6 +59,7 @@ interface Policy {
 }
 
 const ROLE_KEYS = [
+  "ceo_assistant",
   "patient_manager",
   "teamlead_interpreter",
   "interpreter",
@@ -80,7 +83,15 @@ const FIELD_KEYS = [
   "vitals",
   "internal_notes",
   "travel_data",
+  "functional_labels",
 ] as const;
+
+type AccessFieldKey = (typeof FIELD_KEYS)[number];
+
+type AccessMatrixRow = {
+  field: AccessFieldKey;
+  label: string;
+};
 
 const ACCESS_CYCLE = ["full", "masked", "hidden", "conditional"] as const;
 
@@ -99,6 +110,7 @@ const ACCESS_FIELD_LABELS = {
     vitals: "Vitalwerte",
     internal_notes: "Interne Notizen",
     travel_data: "Reisedaten",
+    functional_labels: "Funktionslabels",
   },
   ru: {
     name: "Имя",
@@ -114,6 +126,7 @@ const ACCESS_FIELD_LABELS = {
     vitals: "Показатели",
     internal_notes: "Внутренние заметки",
     travel_data: "Данные поездки",
+    functional_labels: "Функциональные метки",
   },
 } as const;
 
@@ -159,6 +172,11 @@ const LEVEL_CONFIG: Record<
   },
 };
 
+const ADMIN_ACCESS_REALTIME_EVENTS = [
+  "access_policy.updated",
+  "access_policy.reset",
+] as const;
+
 function nextAccessLevel(current: string): string {
   const idx = ACCESS_CYCLE.indexOf(current as (typeof ACCESS_CYCLE)[number]);
   return ACCESS_CYCLE[(idx + 1) % ACCESS_CYCLE.length];
@@ -195,11 +213,9 @@ export function AdminAccessPage() {
   const [policies, setPolicies] = useState<Policy[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [search, setSearch] = useState("");
   const [saveBusyToken, setSaveBusyToken] = useState("");
   const [resetBusy, setResetBusy] = useState(false);
-  const [selectedField, setSelectedField] =
-    useState<(typeof FIELD_KEYS)[number] | null>(null);
+  const [selectedField, setSelectedField] = useState<AccessFieldKey | null>(null);
 
   const loadPolicies = useCallback(async () => {
     setLoading(true);
@@ -219,27 +235,29 @@ export function AdminAccessPage() {
     void loadPolicies();
   }, [loadPolicies]);
 
-  const visibleFields = useMemo(() => {
-    const needle = search.trim().toLowerCase();
-    if (!needle) return FIELD_KEYS;
-    return FIELD_KEYS.filter((field) =>
-      fieldLabels[field].toLowerCase().includes(needle),
-    );
-  }, [fieldLabels, search]);
+  useRealtimeSubscription(ADMIN_ACCESS_REALTIME_EVENTS, () => {
+    clearApiCache("/access-policies");
+    void loadPolicies();
+  });
+
+  const accessRows = useMemo<AccessMatrixRow[]>(
+    () => FIELD_KEYS.map((field) => ({ field, label: fieldLabels[field] })),
+    [fieldLabels],
+  );
 
   const metrics = useMemo(() => {
     const relevantPolicies = policies.filter((policy) =>
-      visibleFields.includes(policy.field_name as (typeof FIELD_KEYS)[number]),
+      FIELD_KEYS.includes(policy.field_name as (typeof FIELD_KEYS)[number]),
     );
     return {
-      fields: visibleFields.length,
+      fields: FIELD_KEYS.length,
       roles: ROLE_KEYS.length,
       conditional: relevantPolicies.filter(
         (policy) => policy.access_level === "conditional" && !policy.is_system_locked,
       ).length,
       locked: relevantPolicies.filter((policy) => policy.is_system_locked).length,
     };
-  }, [policies, visibleFields]);
+  }, [policies]);
 
   const selectedFieldPolicies = useMemo(() => {
     if (!selectedField) return [];
@@ -333,6 +351,100 @@ export function AdminAccessPage() {
     }
   }, [loadPolicies, t.common_error]);
 
+  const accessColumns = useMemo<ColumnDef<AccessMatrixRow>[]>(() => [
+    {
+      id: "field",
+      label: t.access_field,
+      accessor: (row) => row.label,
+      required: true,
+      pinned: "left",
+      width: 220,
+      searchable: true,
+      render: (row) => (
+        <button
+          type="button"
+          className="block min-w-0 text-left"
+          onClick={(event) => {
+            event.stopPropagation();
+            setSelectedField(row.field);
+          }}
+        >
+          <div className="truncate font-medium text-foreground">{row.label}</div>
+          <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
+            {ui.fieldWorkspace}
+          </div>
+        </button>
+      ),
+    },
+    ...ROLE_KEYS.map<ColumnDef<AccessMatrixRow>>((role) => ({
+      id: `role:${role}`,
+      label: roleLabel(role, tr),
+      accessor: (row) => {
+        const policy = policies.find(
+          (item) => item.role === role && item.field_name === row.field,
+        );
+        return levelLabel(
+          policy?.access_level ?? "hidden",
+          policy?.is_system_locked ?? false,
+        );
+      },
+      width: 116,
+      render: (row) => {
+        const policy = policies.find(
+          (item) => item.role === role && item.field_name === row.field,
+        );
+        const level = policy?.access_level ?? "hidden";
+        const locked = policy?.is_system_locked ?? false;
+        const cfg = locked
+          ? LEVEL_CONFIG.locked
+          : LEVEL_CONFIG[level] ?? LEVEL_CONFIG.hidden;
+        const Icon = cfg.icon;
+        const busy = saveBusyToken === `${role}:${row.field}`;
+
+        return (
+          <div className="flex justify-center">
+            <button
+              type="button"
+              title={
+                locked
+                  ? t.access_system_locked
+                  : `${levelLabel(level, false)} - ${ui.clickToChange}`
+              }
+              disabled={locked || busy}
+              onClick={(event) => {
+                event.stopPropagation();
+                void updatePolicy(role, row.field);
+              }}
+              className={cn(
+                "inline-flex size-9 items-center justify-center rounded-xl border transition-all",
+                cfg.buttonClass,
+                locked
+                  ? "cursor-not-allowed opacity-60"
+                  : "hover:scale-105 hover:shadow-sm active:scale-95",
+              )}
+            >
+              {busy ? (
+                <LoaderCircle className="size-4 animate-spin" />
+              ) : (
+                <Icon className="size-[17px]" />
+              )}
+            </button>
+          </div>
+        );
+      },
+    })),
+  ], [
+    levelLabel,
+    policies,
+    saveBusyToken,
+    t.access_field,
+    t.access_system_locked,
+    tr,
+    ui.clickToChange,
+    ui.fieldWorkspace,
+    updatePolicy,
+  ]);
+
   const handleDetailOpenChange = useSheetDirtyGuard({
     isDirty: saveBusyToken !== "",
     onClose: () => setSelectedField(null),
@@ -347,6 +459,66 @@ export function AdminAccessPage() {
           description={t.access_subtitle}
           actions={(
             <>
+              <AdminGuideButton
+                title={lang === "de" ? "Zugriffsstufen — Anleitung" : "Уровни доступа — гайд"}
+                description={
+                  lang === "de"
+                    ? "So funktionieren die Felder, Buttons und Symbole auf dieser Seite."
+                    : "Как работают поля, кнопки и иконки на этой странице."
+                }
+              >
+                <GuideSection title={lang === "de" ? "Zugriffsstufen" : "Уровни доступа"}>
+                  <ul className="space-y-2">
+                    {(
+                      [
+                        ["full", t.access_full, lang === "de" ? "Volle Sichtbarkeit und Bearbeitung." : "Полная видимость и редактирование."],
+                        ["masked", t.access_masked, lang === "de" ? "Wert nur teilweise sichtbar (z. B. ****)." : "Значение видно частично (например, ****)."],
+                        ["hidden", t.access_hidden, lang === "de" ? "Feld komplett ausgeblendet." : "Поле полностью скрыто."],
+                        ["conditional", t.access_conditional, lang === "de" ? "Sichtbar nur unter bestimmten Bedingungen (z. B. nach Freigabe)." : "Видно только при выполнении условий (например, после одобрения)."],
+                        ["locked", t.access_system_locked, lang === "de" ? "Vom System gesperrt — kann nicht geändert werden." : "Заблокировано системой — менять нельзя."],
+                      ] as const
+                    ).map(([key, label, description]) => {
+                      const Icon = LEVEL_CONFIG[key].icon;
+                      return (
+                        <li key={key} className="flex items-start gap-3">
+                          <span
+                            className={cn(
+                              "mt-0.5 inline-flex size-6 shrink-0 items-center justify-center rounded-md border",
+                              LEVEL_CONFIG[key].buttonClass,
+                            )}
+                          >
+                            <Icon className="size-3.5" />
+                          </span>
+                          <div className="min-w-0">
+                            <p className="font-medium text-foreground">{label}</p>
+                            <p className="text-[12px] text-muted-foreground">{description}</p>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </GuideSection>
+
+                <GuideSection title={lang === "de" ? "Wie ändern" : "Как менять"}>
+                  <p>
+                    {lang === "de"
+                      ? "Eine Zeile in der Tabelle anklicken → rechts öffnet sich der Workspace. Im Block „Permissions“ auf den Stufen-Button neben einer Rolle klicken — die Stufe wechselt im Zyklus:"
+                      : "Кликни строку в таблице — справа откроется рабочая область. В блоке «Permissions» жми кнопку рядом с ролью — уровень меняется по циклу:"}
+                  </p>
+                  <p className="mt-1 rounded-md bg-muted/40 px-2.5 py-1.5 font-mono text-[12px] text-foreground">
+                    {t.access_full} → {t.access_masked} → {t.access_hidden} → {t.access_conditional} → {t.access_full}
+                  </p>
+                  <p className="mt-1 text-[12px]">
+                    {lang === "de" ? "Gesperrte Felder (Schloss-Symbol) sind vom System fixiert." : "Заблокированные поля (иконка замка) фиксируются системой."}
+                  </p>
+                </GuideSection>
+
+                <GuideSection title={lang === "de" ? "Reset" : "Сброс"}>
+                  {lang === "de"
+                    ? "Die orange Schaltfläche oben rechts (Reset) setzt alle Stufen auf den Standardzustand zurück."
+                    : "Оранжевая кнопка вверху (Reset) возвращает все уровни к дефолтным."}
+                </GuideSection>
+              </AdminGuideButton>
               <Button
                 type="button"
                 variant="outline"
@@ -359,8 +531,8 @@ export function AdminAccessPage() {
               </Button>
               <Button
                 type="button"
-                variant="outline"
-                className="h-9 rounded-lg gap-1.5 bg-card px-3.5"
+                variant="default"
+                className="h-9 rounded-lg gap-1.5 px-3.5"
                 disabled={resetBusy}
                 onClick={() => void resetPolicies()}
               >
@@ -371,18 +543,9 @@ export function AdminAccessPage() {
           )}
         />
 
-        <AdminToolbar>
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
-            <Input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder={t.common_search}
-              className="h-8 w-[240px] rounded-lg bg-card pl-8 text-[13px]"
-            />
-          </div>
+        <div className="flex flex-wrap items-center gap-1.5">
           <StatusBadge tone="info">{`${t.access_entity}: ${ui.entityPatient}`}</StatusBadge>
-        </AdminToolbar>
+        </div>
 
         <div className="flex flex-wrap gap-x-8 gap-y-4">
           <AdminInlineMetric
@@ -421,96 +584,25 @@ export function AdminAccessPage() {
         {!loading && !error ? (
           <AdminTableCard
             title={t.access_title}
-            description={t.access_subtitle}
-            count={visibleFields.length}
+            count={FIELD_KEYS.length}
           >
-            {visibleFields.length === 0 ? (
+            {accessRows.length === 0 ? (
               <div className="p-4">
                 <EmptyCell>{t.access_field}</EmptyCell>
               </div>
             ) : (
               <>
-                <div className="overflow-x-auto">
-                  <table className="w-full border-collapse text-[13px]">
-                    <thead className="bg-muted/40">
-                      <tr className="text-left text-[11px] uppercase tracking-wider text-muted-foreground">
-                        <th className="sticky left-0 z-20 min-w-[200px] bg-muted/40 px-4 py-2.5 font-medium">
-                          {t.access_field}
-                        </th>
-                        {ROLE_KEYS.map((role) => (
-                          <th key={role} className="px-2 py-2.5 text-center min-w-[108px] font-medium">
-                            {roleLabel(role, tr)}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {visibleFields.map((field, rowIndex) => (
-                        <tr
-                          key={field}
-                          className={cn(
-                            "border-t border-border transition-colors hover:bg-muted/30",
-                            rowIndex % 2 === 1 && "bg-muted/[0.12]",
-                          )}
-                        >
-                          <td className="sticky left-0 z-10 border-r border-border bg-card px-4 py-3">
-                            <button
-                              type="button"
-                              className="text-left"
-                              onClick={() => setSelectedField(field)}
-                            >
-                              <div className="font-medium text-foreground">{fieldLabels[field]}</div>
-                              <div className="mt-1 text-[11.5px] text-muted-foreground">
-                                {ui.fieldWorkspace}
-                              </div>
-                            </button>
-                          </td>
-
-                          {ROLE_KEYS.map((role) => {
-                            const policy = policies.find(
-                              (item) => item.role === role && item.field_name === field,
-                            );
-                            const level = policy?.access_level ?? "hidden";
-                            const locked = policy?.is_system_locked ?? false;
-                            const cfg = locked
-                              ? LEVEL_CONFIG.locked
-                              : LEVEL_CONFIG[level] ?? LEVEL_CONFIG.hidden;
-                            const Icon = cfg.icon;
-                            const busy = saveBusyToken === `${role}:${field}`;
-
-                            return (
-                              <td key={role} className="px-2 py-3 text-center">
-                                <button
-                                  type="button"
-                                  title={
-                                    locked
-                                      ? t.access_system_locked
-                                      : `${levelLabel(level, false)} - ${ui.clickToChange}`
-                                  }
-                                  disabled={locked || busy}
-                                  onClick={() => void updatePolicy(role, field)}
-                                  className={cn(
-                                    "inline-flex size-10 items-center justify-center rounded-xl border transition-all",
-                                    cfg.buttonClass,
-                                    locked
-                                      ? "cursor-not-allowed opacity-60"
-                                      : "hover:scale-105 hover:shadow-sm active:scale-95",
-                                  )}
-                                >
-                                  {busy ? (
-                                    <LoaderCircle className="size-4 animate-spin" />
-                                  ) : (
-                                    <Icon className="size-[18px]" />
-                                  )}
-                                </button>
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <DataTableSurface
+                  rows={accessRows}
+                  columns={accessColumns}
+                  defaultDensity="comfortable"
+                  dictionary={tr}
+                  defaultFrozenColumns={["field"]}
+                  rowId={(row) => row.field}
+                  activeRowId={selectedField}
+                  onRowClick={(row) => setSelectedField(row.field)}
+                  tableClassName="min-h-[560px]"
+                />
 
                 <div className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-3">
                   {(
@@ -537,7 +629,6 @@ export function AdminAccessPage() {
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
           <AdminSheetScaffold
             title={selectedField ? fieldLabels[selectedField] : t.access_title}
-            description={selectedField ? ui.fieldWorkspace : t.access_subtitle}
             footer={(
               <SheetActionsFooter>
                 <Button
@@ -554,44 +645,76 @@ export function AdminAccessPage() {
             {selectedField ? (
               <>
                 <section className={cn("space-y-3 rounded-xl p-3.5", tokens.surface.softCard)}>
-                  <h3 className="text-[13px] font-semibold tracking-tight text-foreground">Meta</h3>
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <StatusBadge tone="info">{`${t.access_entity}: ${ui.entityPatient}`}</StatusBadge>
-                    <StatusBadge tone="neutral">{fieldLabels[selectedField]}</StatusBadge>
-                    <StatusBadge tone="brand">{`${t.users_role}: ${ROLE_KEYS.length}`}</StatusBadge>
+                  <div className="space-y-1">
+                    <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
+                      Permissions
+                    </h3>
+                    <p className="text-[11px] text-muted-foreground">
+                      {ui.clickToChange} — {t.access_full} → {t.access_masked} → {t.access_hidden} → {t.access_conditional}.
+                    </p>
                   </div>
-                </section>
 
-                <section className={cn("space-y-3 rounded-xl p-3.5", tokens.surface.softCard)}>
-                  <h3 className="text-[13px] font-semibold tracking-tight text-foreground">Permissions</h3>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {(
+                      [
+                        ["full", t.access_full],
+                        ["masked", t.access_masked],
+                        ["hidden", t.access_hidden],
+                        ["conditional", t.access_conditional],
+                        ["locked", t.access_system_locked],
+                      ] as const
+                    ).map(([key, label]) => {
+                      const Icon = LEVEL_CONFIG[key].icon;
+                      return (
+                        <span
+                          key={key}
+                          className={cn(
+                            "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium",
+                            LEVEL_CONFIG[key].buttonClass,
+                          )}
+                        >
+                          <Icon className="size-3" />
+                          {label}
+                        </span>
+                      );
+                    })}
+                  </div>
+
                   {selectedFieldPolicies.map(({ role, policy }) => {
                     const level = policy?.access_level ?? "hidden";
                     const locked = policy?.is_system_locked ?? false;
                     const busy = saveBusyToken === `${role}:${selectedField}`;
+                    const config = LEVEL_CONFIG[locked ? "locked" : level] ?? LEVEL_CONFIG.hidden;
+                    const Icon = config.icon;
+                    const nextLevel = locked ? null : nextAccessLevel(level);
                     return (
                       <div
                         key={role}
                         className="rounded-lg border border-border/50 bg-card/60 px-3 py-3"
                       >
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <p className="text-[13px] font-semibold text-foreground">
-                              {roleLabel(role, tr)}
-                            </p>
-                            <p className="mt-1 text-[12px] text-muted-foreground">
-                              {levelLabel(level, locked)}
-                            </p>
-                          </div>
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="text-[13px] font-semibold text-foreground">
+                            {roleLabel(role, tr)}
+                          </p>
                           <Button
                             type="button"
                             size="sm"
                             variant="outline"
-                            className="h-8 rounded-lg"
+                            className={cn("h-8 rounded-lg gap-1.5", config.buttonClass)}
                             disabled={locked || busy}
+                            title={
+                              locked
+                                ? t.access_system_locked
+                                : `${ui.clickToChange} → ${levelLabel(nextLevel ?? level, false)}`
+                            }
                             onClick={() => void updatePolicy(role, selectedField)}
                           >
-                            {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
-                            {locked ? t.access_system_locked : ui.clickToChange}
+                            {busy ? (
+                              <LoaderCircle className="size-3.5 animate-spin" />
+                            ) : (
+                              <Icon className="size-3.5" />
+                            )}
+                            {levelLabel(level, locked)}
                           </Button>
                         </div>
                       </div>
@@ -613,4 +736,3 @@ export function AdminAccessPage() {
     </>
   );
 }
-

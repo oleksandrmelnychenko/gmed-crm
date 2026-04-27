@@ -702,6 +702,17 @@ async fn create_case(
             "patient_id": body.patient_id,
         }),
     ));
+    crate::realtime::publish_case_event(
+        &state,
+        Some(auth.user_id),
+        "case.created",
+        created_case_id,
+        serde_json::json!({
+            "case_id": created_case_code.clone(),
+            "patient_id": body.patient_id,
+        }),
+    )
+    .await;
 
     tracing::info!(by = %auth.user_id, case = %created_case_code, "Case created");
 
@@ -2435,7 +2446,18 @@ async fn version_log(
 
     if let Err(e) = tx.commit().await {
         tracing::error!(error = %e, case_id = %case_id, section, "commit case version tx");
+        return;
     }
+    crate::realtime::publish_case_event(
+        state,
+        Some(user_id),
+        "case.updated",
+        case_id,
+        serde_json::json!({
+            "section": section,
+        }),
+    )
+    .await;
 }
 
 async fn load_case_retention_years(state: &AppState, default: i64) -> i64 {
@@ -2904,9 +2926,21 @@ async fn confirm_medication_expiry(
         serde_json::json!({
             "patient_id": patient_id,
             "medication_id": medication_id,
-            "expiry_date": expiry_date,
+            "expiry_date": expiry_date.clone(),
         }),
     ));
+    crate::realtime::publish_case_event(
+        &state,
+        Some(auth.user_id),
+        "case.medication_expiry_confirmed",
+        case_id,
+        serde_json::json!({
+            "patient_id": patient_id,
+            "medication_id": medication_id,
+            "expiry_date": expiry_date,
+        }),
+    )
+    .await;
 
     Json(serde_json::json!({ "ok": true })).into_response()
 }
@@ -3023,18 +3057,20 @@ pub async fn run_medication_expiry_scheduler_once(
         .fetch_optional(&state.db)
         .await?;
 
-        if inserted.is_none() {
+        let Some(inserted) = inserted else {
             continue;
-        }
+        };
+        let medication_expiry_event_id: Uuid = inserted.try_get("id").unwrap_or_default();
 
         summary.events_created += 1;
         let recipients =
             resolve_medication_expiry_notification_recipients(state, candidate.patient_id).await?;
 
         for recipient_id in recipients {
-            sqlx::query(
+            let notification_row = sqlx::query(
                 r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
-                   VALUES ($1, $2, $3, $4, 'case', $5)"#,
+                   VALUES ($1, $2, $3, $4, 'case', $5)
+                   RETURNING id, user_id"#,
             )
             .bind(recipient_id)
             .bind("medication_expiry_confirmation")
@@ -3050,8 +3086,23 @@ pub async fn run_medication_expiry_scheduler_once(
                 candidate.patient_name
             ))
             .bind(candidate.case_id)
-            .execute(&state.db)
+            .fetch_one(&state.db)
             .await?;
+            let notification_id: Uuid = notification_row.try_get("id").unwrap_or_default();
+            let user_id: Uuid = notification_row.try_get("user_id").unwrap_or_default();
+            if !notification_id.is_nil() && !user_id.is_nil() {
+                crate::realtime::publish_notification_event(
+                    state,
+                    user_id,
+                    "notification.created",
+                    Some(notification_id),
+                    serde_json::json!({
+                        "entity_type": "case",
+                        "entity_id": candidate.case_id,
+                    }),
+                )
+                .await;
+            }
             summary.notifications_created += 1;
         }
 
@@ -3063,10 +3114,24 @@ pub async fn run_medication_expiry_scheduler_once(
             serde_json::json!({
                 "patient_id": candidate.patient_id,
                 "medication_id": candidate.medication_id,
-                "medication_name": candidate.medication_name,
+                "medication_name": candidate.medication_name.clone(),
                 "expiry_date": candidate.expiry_date.to_string(),
             }),
         ));
+        crate::realtime::publish_case_event(
+            state,
+            None,
+            "case.medication_expiry_flagged",
+            candidate.case_id,
+            serde_json::json!({
+                "medication_expiry_event_id": medication_expiry_event_id,
+                "patient_id": candidate.patient_id,
+                "medication_id": candidate.medication_id,
+                "medication_name": candidate.medication_name,
+                "expiry_date": candidate.expiry_date.to_string(),
+            }),
+        )
+        .await;
     }
 
     Ok(summary)

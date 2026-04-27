@@ -8,7 +8,9 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from "@/components/ui/label";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Banner, inputClass, textareaClass, tokens } from "@/components/ui-shell";
+import { clearApiCache } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
+import { useRealtimeSubscription } from "@/lib/realtime";
 import {
   fetchPortalInvoiceDetail,
   fetchPortalInvoices,
@@ -32,6 +34,14 @@ function shellCard(extra?: string) {
   return cn("rounded-[1.75rem] border border-slate-200 bg-white shadow-sm", extra);
 }
 
+const PORTAL_INVOICE_REALTIME_EVENTS = [
+  "invoice.created",
+  "invoice.status_changed",
+  "invoice.dunning_created",
+  "invoice.overdue_marked",
+  "document.payment_proof_uploaded",
+] as const;
+
 export function PatientInvoicesPage() {
   const { lang } = useLang();
   const [invoices, setInvoices] = useState<PortalInvoiceItem[]>([]);
@@ -54,6 +64,17 @@ export function PatientInvoicesPage() {
       lang === "de" ? de : lang === "ru" ? ru : en,
     [lang],
   );
+
+  useRealtimeSubscription(PORTAL_INVOICE_REALTIME_EVENTS, (event) => {
+    clearApiCache("/me/invoices");
+    if (event.entity_type === "invoice") {
+      clearApiCache(`/me/invoices/${event.entity_id}`);
+    }
+    if (selectedInvoiceId) {
+      clearApiCache(`/me/invoices/${selectedInvoiceId}`);
+    }
+    setVersion((value) => value + 1);
+  });
 
   useEffect(() => {
     let cancelled = false;

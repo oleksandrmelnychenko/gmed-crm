@@ -8,19 +8,22 @@ import {
   type FormEvent,
   type ReactNode,
 } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import {
+  ArrowLeft,
   Building2,
   CalendarClock,
   CheckCircle2,
   ChevronRight,
   ClipboardList,
+  Filter,
   LoaderCircle,
   Plus,
   RefreshCw,
   Search,
   Stethoscope,
   Wallet,
+  X,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -28,10 +31,9 @@ import {
   AdminSheetScaffold,
   AdminInlineMetric,
   AdminTableCard,
-  AdminToolbar,
   SheetFormFooter,
 } from "@/components/admin-page-patterns";
-import { DataTable } from "@/components/data-table/data-table";
+import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
 import { Button } from "@/components/ui/button";
 import {
@@ -61,8 +63,10 @@ import {
   textareaClass as shellTextareaClass,
   tokens,
 } from "@/components/ui-shell";
+import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
+import { useRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
 import {
@@ -150,6 +154,21 @@ import type {
   WorkflowChecklistResponse,
 } from "./model/types";
 
+const ORDER_REALTIME_EVENTS = [
+  "order.created",
+  "order.phase_changed",
+  "order.process_gates_updated",
+  "order.debt_management_updated",
+  "order.planning_preparation_updated",
+  "order.execution_flow_updated",
+  "order.followup_flow_updated",
+  "order.external_invoice_created",
+  "order.external_invoice_updated",
+  "order.external_invoice_overdue",
+  "order.leistung_added",
+  "order.leistung_approved",
+] as const;
+
 type StatCardProps = {
   label: string;
   value: string;
@@ -178,6 +197,14 @@ type EmptyStateProps = {
 
 const selectClassName = shellSelectClassName;
 const textareaClassName = shellTextareaClass;
+const ORDER_DEFAULT_FROZEN_COLUMNS = ["order_number", "patient"];
+const ORDER_MAX_FROZEN_COLUMNS = 3;
+const ORDER_COLUMN_GROUPS = {
+  identity: "Identity",
+  workflow: "Workflow",
+  finance: "Finance",
+  audit: "Audit",
+};
 
 function StatCard({ label, value, description, icon }: StatCardProps) {
   return (
@@ -269,7 +296,10 @@ export function OrdersPage() {
   const tx = t as unknown as Record<string, string>;
   const { user } = useAuth();
   const { staffGo } = useStaffNavigate();
+  const { orderId: routeOrderIdParam } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
+  const routeOrderId = routeOrderIdParam ?? "";
+  const isOrderRouteDetail = routeOrderId !== "";
   const permissions = orderPermissions(user?.role);
   const locale = lang === "de" ? "de-DE" : "ru-RU";
   const l = useCallback((de: string, ru: string) => (lang === "de" ? de : ru), [lang]);
@@ -604,7 +634,9 @@ export function OrdersPage() {
     SupportingDocumentOption[]
   >([]);
 
-  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(
+    routeOrderId || null,
+  );
   const [orderDetail, setOrderDetail] = useState<OrderDetail | null>(null);
   const [workflowChecklist, setWorkflowChecklist] =
     useState<WorkflowChecklistResponse | null>(null);
@@ -733,9 +765,12 @@ export function OrdersPage() {
       id: "order_number",
       label: l("Auftrag", "Заказ"),
       accessor: (row) => row.order_number,
+      filterType: "text",
+      group: "identity",
       sortable: true,
       searchable: true,
       required: true,
+      pinned: "left",
       width: 160,
       render: (row) => (
         <span className="font-mono text-xs font-semibold tracking-[0.12em] text-foreground">
@@ -747,9 +782,12 @@ export function OrdersPage() {
       id: "patient",
       label: t.orders_patient,
       accessor: (row) => `${row.patient_pid} ${row.patient_name}`,
+      filterType: "text",
+      group: "identity",
       sortable: true,
       searchable: true,
       required: true,
+      pinned: "left",
       width: 260,
       render: (row) => (
         <div className="min-w-0">
@@ -766,6 +804,12 @@ export function OrdersPage() {
       id: "phase",
       label: t.orders_phase,
       accessor: (row) => phaseLabel(row.phase),
+      filterType: "enum",
+      filterOptions: ORDER_PHASES.map((phase) => ({
+        value: phase,
+        label: phaseLabel(phase),
+      })),
+      group: "workflow",
       sortable: true,
       width: 170,
       render: (row) => (
@@ -778,6 +822,12 @@ export function OrdersPage() {
       id: "status",
       label: t.users_status,
       accessor: (row) => orderStatusLabel(row.status),
+      filterType: "enum",
+      filterOptions: ORDER_STATUSES.map((status) => ({
+        value: status,
+        label: orderStatusLabel(status),
+      })),
+      group: "workflow",
       sortable: true,
       width: 150,
       render: (row) => (
@@ -790,6 +840,8 @@ export function OrdersPage() {
       id: "created_at",
       label: l("Erstellt", "Создано"),
       accessor: (row) => row.created_at,
+      filterType: "date",
+      group: "audit",
       sortable: true,
       width: 160,
       render: (row) => (
@@ -802,6 +854,8 @@ export function OrdersPage() {
       id: "total_estimated",
       label: l("Geschaftsvolumen", "Оценочный объём"),
       accessor: (row) => numberFromUnknown(row.total_estimated) ?? 0,
+      filterType: "number",
+      group: "finance",
       sortable: true,
       width: 170,
       render: (row) => (
@@ -906,6 +960,43 @@ export function OrdersPage() {
     });
   }
 
+  const resetOrderWorkspace = useCallback(() => {
+    setSelectedOrderId(null);
+    setOrderDetail(null);
+    setWorkflowChecklist(null);
+    setWorkflowAssignments([]);
+    setDetailError(null);
+    setPhaseDraft("");
+    setProcessGateError(null);
+    setProcessGateForm(blankOrderProcessGateForm());
+  }, []);
+
+  function closeOrderWorkspace() {
+    resetOrderWorkspace();
+    if (isOrderRouteDetail) {
+      staffGo("/orders");
+      return;
+    }
+    syncQuery({ order: null });
+  }
+
+  useRealtimeSubscription(ORDER_REALTIME_EVENTS, (event) => {
+    if (!permissions.canViewPage) return;
+    clearApiCache("/orders");
+    clearApiCache("/orders/debt-management");
+    if (event.entity_type === "order" && event.entity_id) {
+      clearApiCache(`/orders/${event.entity_id}`);
+      clearApiCache(`/orders/${event.entity_id}/workflow-checklist`);
+      clearApiCache(`/documents?order_id=${event.entity_id}`);
+    }
+    if (selectedOrderId && selectedOrderId !== event.entity_id) {
+      clearApiCache(`/orders/${selectedOrderId}`);
+      clearApiCache(`/orders/${selectedOrderId}/workflow-checklist`);
+      clearApiCache(`/documents?order_id=${selectedOrderId}`);
+    }
+    triggerReload();
+  });
+
   const ensureProviderDoctors = useCallback(
     async (providerId: string) => {
       if (!providerId) return [] as DoctorOption[];
@@ -942,7 +1033,7 @@ export function OrdersPage() {
     startTransition(() => {
       setSelectedOrderId(orderId);
     });
-    syncQuery({ order: orderId });
+    staffGo(`/orders/${orderId}`);
   }
 
   function resetCreateDialog(open: boolean) {
@@ -970,8 +1061,18 @@ export function OrdersPage() {
     const patientParam = searchParams.get("patient") ?? "";
     const providerParam = searchParams.get("provider") ?? "";
     const doctorParam = searchParams.get("doctor") ?? "";
-    const orderParam = searchParams.get("order") ?? "";
+    const legacyOrderParam = searchParams.get("order") ?? "";
     const createParam = searchParams.get("create") ?? "";
+
+    if (!routeOrderId && legacyOrderParam) {
+      const params = new URLSearchParams(searchParams);
+      params.delete("order");
+      const suffix = params.toString();
+      staffGo(`/orders/${legacyOrderParam}${suffix ? `?${suffix}` : ""}`);
+      return;
+    }
+
+    const orderParam = routeOrderId;
 
     setFilters((current) => {
       if (
@@ -992,6 +1093,8 @@ export function OrdersPage() {
     if (orderParam && orderParam !== selectedOrderId) {
       setSelectedOrderId(orderParam);
       setDetailLoading(true);
+    } else if (!orderParam && selectedOrderId) {
+      resetOrderWorkspace();
     }
 
     if (createParam && permissions.canCreate) {
@@ -1005,7 +1108,15 @@ export function OrdersPage() {
       params.delete("create");
       setSearchParams(params, { replace: true });
     }
-  }, [permissions.canCreate, searchParams, selectedOrderId, setSearchParams]);
+  }, [
+    permissions.canCreate,
+    resetOrderWorkspace,
+    routeOrderId,
+    searchParams,
+    selectedOrderId,
+    setSearchParams,
+    staffGo,
+  ]);
 
   useEffect(() => {
     if (!permissions.canViewPage) return;
@@ -1712,22 +1823,23 @@ export function OrdersPage() {
     );
   }
 
+  const anyQuickFilterActive =
+    filters.search.trim() !== "" ||
+    filters.phase !== "" ||
+    filters.status !== "" ||
+    filters.patientId !== "" ||
+    filters.providerId !== "" ||
+    filters.doctorId !== "";
+
   return (
-    <div className="space-y-6">
+    <div className={cn("space-y-6", isOrderRouteDetail && "min-h-0")}>
+      {!isOrderRouteDetail ? (
+        <>
       <PageHeader
         title={t.orders_title}
         description={t.orders_subtitle}
         actions={
           <>
-            <Button
-              type="button"
-              variant="outline"
-              className="h-9 rounded-lg px-3.5"
-              onClick={triggerReload}
-            >
-              <RefreshCw className="size-4" />
-              {l("Aktualisieren", "Обновить")}
-            </Button>
             {permissions.canCreate ? (
               <Button
                 type="button"
@@ -1864,255 +1976,281 @@ export function OrdersPage() {
         </SectionCard>
       ) : null}
 
-      <AdminTableCard
-        title={titleWithDot(tx.orders_title)}
-        description={tx.orders_subtitle}
-        count={orders.length}
-      >
-        <div className="space-y-4 border-b border-border px-4 py-4">
-          <AdminToolbar className="gap-2">
-            <div className="relative min-w-[260px] flex-1">
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                id="orders-search"
-                value={filters.search}
-                onChange={(event) =>
-                  startTransition(() =>
-                    setFilters((current) => ({
-                      ...current,
-                      search: event.target.value,
-                    })),
-                  )
-                }
-                placeholder={t.search_placeholder}
-                className={cn(shellInputClassName, "pl-9")}
-              />
-            </div>
-
-            <div className="w-[180px] min-w-[180px]">
-              <ShadSelect
-                value={filters.phase || "__all__"}
-                onValueChange={(value) =>
+      <div className="overflow-hidden rounded-xl border border-border bg-card">
+        <div className="relative z-30 flex flex-wrap items-center gap-1.5 border-b border-border/70 bg-card px-3 py-2">
+          <div className="relative min-w-[220px] flex-1 sm:max-w-sm">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              id="orders-search"
+              value={filters.search}
+              onChange={(event) =>
+                startTransition(() =>
                   setFilters((current) => ({
                     ...current,
-                    phase: value && value !== "__all__" ? value : "",
-                  }))
+                    search: event.target.value,
+                  })),
+                )
+              }
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  setFilters((current) => ({ ...current, search: "" }));
+                  (event.target as HTMLInputElement).blur();
                 }
-              >
-                <SelectTrigger className={cn(selectClassName, "w-[180px] min-w-[180px]")}>
-                  <SelectValue>
-                    {filters.phase ? phaseLabel(filters.phase) : t.providers_all}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__all__">{t.providers_all}</SelectItem>
-                  {ORDER_PHASES.map((phase) => (
-                    <SelectItem key={phase} value={phase}>
-                      {phaseLabel(phase)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </ShadSelect>
-            </div>
+              }}
+              placeholder={t.search_placeholder}
+              className={cn(shellInputClassName, "h-8 rounded-lg bg-background pl-8 text-[13px]")}
+            />
+          </div>
 
-            <div className="w-[180px] min-w-[180px]">
-              <ShadSelect
-                value={filters.status || "__all__"}
-                onValueChange={(value) =>
-                  setFilters((current) => ({
-                    ...current,
-                    status: value && value !== "__all__" ? value : "",
-                  }))
-                }
-              >
-                <SelectTrigger className={cn(selectClassName, "w-[180px] min-w-[180px]")}>
-                  <SelectValue>
-                    {filters.status ? orderStatusLabel(filters.status) : t.providers_all}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__all__">{t.providers_all}</SelectItem>
-                  {ORDER_STATUSES.map((status) => (
-                    <SelectItem key={status} value={status}>
-                      {orderStatusLabel(status)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </ShadSelect>
-            </div>
+          <ShadSelect
+            value={filters.phase || "__all__"}
+            onValueChange={(value) =>
+              setFilters((current) => ({
+                ...current,
+                phase: value && value !== "__all__" ? value : "",
+              }))
+            }
+          >
+            <SelectTrigger size="sm" className="h-8 w-[170px] bg-background text-[13px]">
+              <Filter className="mr-1 size-3.5 text-muted-foreground" />
+              <SelectValue>
+                {filters.phase ? phaseLabel(filters.phase) : t.orders_phase}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__">{t.providers_all}</SelectItem>
+              {ORDER_PHASES.map((phase) => (
+                <SelectItem key={phase} value={phase}>
+                  {phaseLabel(phase)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </ShadSelect>
 
-            <div className="w-[220px] min-w-[220px]">
-              <ShadSelect
-                value={filters.patientId || "__all__"}
-                onValueChange={(value) => {
-                  const patientId = value && value !== "__all__" ? value : "";
-                  setFilters((current) => ({ ...current, patientId }));
-                  syncQuery({ patient: patientId || null });
-                }}
-              >
-                <SelectTrigger className={cn(selectClassName, "w-[220px] min-w-[220px]")}>
-                  <SelectValue>
-                    {selectedFilterPatient
-                      ? patientLabel(selectedFilterPatient, l("Patient", "Пациент"))
-                      : l("Alle Patienten", "Все пациенты")}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__all__">
-                    {l("Alle Patienten", "Все пациенты")}
-                  </SelectItem>
-                  {patients.map((patient) => (
-                    <SelectItem key={patient.id} value={patient.id}>
-                      {patientLabel(patient, l("Patient", "Пациент"))}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </ShadSelect>
-            </div>
+          <ShadSelect
+            value={filters.status || "__all__"}
+            onValueChange={(value) =>
+              setFilters((current) => ({
+                ...current,
+                status: value && value !== "__all__" ? value : "",
+              }))
+            }
+          >
+            <SelectTrigger size="sm" className="h-8 w-[160px] bg-background text-[13px]">
+              <SelectValue>
+                {filters.status ? orderStatusLabel(filters.status) : t.users_status}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__">{t.providers_all}</SelectItem>
+              {ORDER_STATUSES.map((status) => (
+                <SelectItem key={status} value={status}>
+                  {orderStatusLabel(status)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </ShadSelect>
 
-            <div className="w-[220px] min-w-[220px]">
-              <ShadSelect
-                value={filters.providerId || "__all__"}
-                onValueChange={(value) => {
-                  const providerId = value && value !== "__all__" ? value : "";
-                  setFilters((current) => ({
-                    ...current,
-                    providerId,
-                    doctorId: "",
-                  }));
-                  syncQuery({ provider: providerId || null, doctor: null });
-                }}
-              >
-                <SelectTrigger className={cn(selectClassName, "w-[220px] min-w-[220px]")}>
-                  <SelectValue>
-                    {selectedFilterProvider
-                      ? `${selectedFilterProvider.name}${selectedFilterProvider.address_city ? ` (${selectedFilterProvider.address_city})` : ""}`
-                      : t.providers_all}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__all__">{t.providers_all}</SelectItem>
-                  {providers.map((provider) => (
-                    <SelectItem key={provider.id} value={provider.id}>
-                      {provider.name}
-                      {provider.address_city ? ` (${provider.address_city})` : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </ShadSelect>
-            </div>
+          <ShadSelect
+            value={filters.patientId || "__all__"}
+            onValueChange={(value) => {
+              const patientId = value && value !== "__all__" ? value : "";
+              setFilters((current) => ({ ...current, patientId }));
+              syncQuery({ patient: patientId || null });
+            }}
+          >
+            <SelectTrigger size="sm" className="h-8 w-[210px] bg-background text-[13px]">
+              <SelectValue>
+                {selectedFilterPatient
+                  ? patientLabel(selectedFilterPatient, l("Patient", "Пациент"))
+                  : l("Alle Patienten", "Все пациенты")}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__">
+                {l("Alle Patienten", "Все пациенты")}
+              </SelectItem>
+              {patients.map((patient) => (
+                <SelectItem key={patient.id} value={patient.id}>
+                  {patientLabel(patient, l("Patient", "Пациент"))}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </ShadSelect>
 
-            <div className="w-[200px] min-w-[200px]">
-              <ShadSelect
-                value={filters.doctorId || "__all__"}
-                onValueChange={(value) => {
-                  const doctorId = value && value !== "__all__" ? value : "";
-                  setFilters((current) => ({ ...current, doctorId }));
-                  syncQuery({ doctor: doctorId || null });
-                }}
-                disabled={!filters.providerId}
-              >
-                <SelectTrigger className={cn(selectClassName, "w-[200px] min-w-[200px]")}>
-                  <SelectValue>
-                    {selectedFilterDoctor
-                      ? `${selectedFilterDoctor.name}${selectedFilterDoctor.fachbereich ? ` (${selectedFilterDoctor.fachbereich})` : ""}`
-                      : l("Arzt", "Врач")}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__all__">{t.providers_all}</SelectItem>
-                  {filterDoctorOptions.map((doctor) => (
-                    <SelectItem key={doctor.id} value={doctor.id}>
-                      {doctor.name}
-                      {doctor.fachbereich ? ` (${doctor.fachbereich})` : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </ShadSelect>
-            </div>
+          <ShadSelect
+            value={filters.providerId || "__all__"}
+            onValueChange={(value) => {
+              const providerId = value && value !== "__all__" ? value : "";
+              setFilters((current) => ({
+                ...current,
+                providerId,
+                doctorId: "",
+              }));
+              syncQuery({ provider: providerId || null, doctor: null });
+            }}
+          >
+            <SelectTrigger size="sm" className="h-8 w-[210px] bg-background text-[13px]">
+              <SelectValue>
+                {selectedFilterProvider
+                  ? `${selectedFilterProvider.name}${selectedFilterProvider.address_city ? ` (${selectedFilterProvider.address_city})` : ""}`
+                  : t.common_provider}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__">{t.providers_all}</SelectItem>
+              {providers.map((provider) => (
+                <SelectItem key={provider.id} value={provider.id}>
+                  {provider.name}
+                  {provider.address_city ? ` (${provider.address_city})` : ""}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </ShadSelect>
 
+          <ShadSelect
+            value={filters.doctorId || "__all__"}
+            onValueChange={(value) => {
+              const doctorId = value && value !== "__all__" ? value : "";
+              setFilters((current) => ({ ...current, doctorId }));
+              syncQuery({ doctor: doctorId || null });
+            }}
+            disabled={!filters.providerId}
+          >
+            <SelectTrigger size="sm" className="h-8 w-[190px] bg-background text-[13px]">
+              <SelectValue>
+                {selectedFilterDoctor
+                  ? `${selectedFilterDoctor.name}${selectedFilterDoctor.fachbereich ? ` (${selectedFilterDoctor.fachbereich})` : ""}`
+                  : l("Arzt", "Врач")}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__">{t.providers_all}</SelectItem>
+              {filterDoctorOptions.map((doctor) => (
+                <SelectItem key={doctor.id} value={doctor.id}>
+                  {doctor.name}
+                  {doctor.fachbereich ? ` (${doctor.fachbereich})` : ""}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </ShadSelect>
+
+          <div className="ml-auto flex items-center gap-1">
             <Button
               type="button"
               variant="outline"
-              className="h-9 rounded-lg px-3.5"
-              onClick={() => {
-                setFilters(DEFAULT_FILTERS);
-                syncQuery({
-                  patient: null,
-                  provider: null,
-                  doctor: null,
-                  order: null,
-                });
-              }}
+              size="icon-sm"
+              title={l("Aktualisieren", "Обновить")}
+              aria-label={l("Aktualisieren", "Обновить")}
+              onClick={triggerReload}
             >
-              {t.access_reset}
+              <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
             </Button>
-          </AdminToolbar>
+            {anyQuickFilterActive ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setFilters(DEFAULT_FILTERS);
+                  syncQuery({
+                    patient: null,
+                    provider: null,
+                    doctor: null,
+                    order: null,
+                  });
+                }}
+              >
+                <X className="size-3.5" />
+                {t.common_reset}
+              </Button>
+            ) : null}
+          </div>
         </div>
 
-        <div className="space-y-3 p-4">
-          {listError ? (
-            <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+        {listError ? (
+          <div className="border-b border-border/70 px-3 py-2">
+            <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
               {listError}
             </div>
-          ) : null}
-          <DataTable
-            rows={orders}
-            columns={orderTableColumns}
-            rowId={(row) => row.id}
-            density="compact"
-            loading={loading}
-            activeRowId={selectedOrderId}
-            onRowClick={(row) => openOrder(row.id)}
-            rowAccent={(row) => {
-              if (row.id === selectedOrderId) return "bg-sky-500";
-              if (row.status === "cancelled") return "bg-rose-500";
-              if (row.status === "completed") return "bg-emerald-500";
-              if (row.phase === "execution") return "bg-amber-500";
-              return null;
-            }}
-            emptyState={
-              <EmptyState
-                title={tx.common_not_set}
-                description={tx.orders_subtitle}
-                action={
-                  permissions.canCreate ? (
-                    <Button
-                      type="button"
-                      className="h-9 rounded-lg px-3.5"
-                      onClick={() => setCreateOpen(true)}
-                    >
-                      <Plus className="size-4" />
-                      {l("Neuen Auftrag", "Создать заказ")}
-                    </Button>
-                  ) : undefined
-                }
-              />
-            }
-          />
-        </div>
-      </AdminTableCard>
+          </div>
+        ) : null}
+        <DataTableSurface
+          rows={orders}
+          columns={orderTableColumns}
+          rowId={(row) => row.id}
+          defaultDensity="compact"
+          defaultFrozenColumns={ORDER_DEFAULT_FROZEN_COLUMNS}
+          dictionary={tx}
+          groupLabels={ORDER_COLUMN_GROUPS}
+          loading={loading}
+          maxFrozenColumns={ORDER_MAX_FROZEN_COLUMNS}
+          toolbarClassName="border-b border-border/70 bg-card px-3 py-2"
+          activeRowId={selectedOrderId}
+          onRowClick={(row) => openOrder(row.id)}
+          rowAccent={(row) => {
+            if (row.id === selectedOrderId) return "bg-sky-500";
+            if (row.status === "cancelled") return "bg-rose-500";
+            if (row.status === "completed") return "bg-emerald-500";
+            if (row.phase === "execution") return "bg-amber-500";
+            return null;
+          }}
+          emptyState={
+            <EmptyState
+              title={tx.common_not_set}
+              description={tx.orders_subtitle}
+              action={
+                permissions.canCreate ? (
+                  <Button
+                    type="button"
+                    className="h-9 rounded-lg px-3.5"
+                    onClick={() => setCreateOpen(true)}
+                  >
+                    <Plus className="size-4" />
+                    {l("Neuen Auftrag", "Создать заказ")}
+                  </Button>
+                ) : undefined
+              }
+            />
+          }
+        />
+      </div>
+        </>
+      ) : null}
 
       <Sheet
-        open={Boolean(selectedOrderId)}
+        open={!isOrderRouteDetail && Boolean(selectedOrderId)}
         onOpenChange={(open) => {
           if (!open) {
-            setSelectedOrderId(null);
-            setOrderDetail(null);
-            setWorkflowChecklist(null);
-            setWorkflowAssignments([]);
-            setDetailError(null);
-            setPhaseDraft("");
-            setProcessGateError(null);
-            setProcessGateForm(blankOrderProcessGateForm());
-            syncQuery({ order: null });
+            closeOrderWorkspace();
           }
         }}
       >
         <SheetContent
+          inline={isOrderRouteDetail}
           side="right"
-          className="w-full border-l border-border p-0 sm:max-w-3xl"
+          showCloseButton={!isOrderRouteDetail}
+          showOverlay={!isOrderRouteDetail}
+          className={cn(
+            isOrderRouteDetail
+              ? "min-h-0 flex-1 rounded-none border-0 bg-transparent p-0 shadow-none sm:max-w-none"
+              : "w-full border-l border-border p-0 sm:max-w-3xl",
+          )}
         >
+          {isOrderRouteDetail ? (
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8 rounded-lg gap-1.5"
+                onClick={closeOrderWorkspace}
+              >
+                <ArrowLeft className="size-4" />
+                {tx.orders_title}
+              </Button>
+            </div>
+          ) : null}
           <AdminSheetScaffold
             title={
               orderDetail

@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import {
   Bar,
   BarChart,
@@ -10,6 +11,9 @@ import {
   YAxis,
 } from "recharts";
 
+import { DataTableSurface } from "@/components/data-table/data-table-surface";
+import type { ColumnDef } from "@/components/data-table/types";
+
 import {
   ChartSkeleton,
   EmptyChart,
@@ -17,6 +21,17 @@ import {
 } from "./staff-dashboard-surface-primitives";
 
 const PALETTE = ["#f97316", "#fb923c", "#fdba74", "#fed7aa", "#fff4ed", "#a3a3a3"];
+
+type TopProviderRow = {
+  id: string;
+  name: string;
+  patient_count: number;
+  appointment_count: number;
+};
+
+type RankedTopProviderRow = TopProviderRow & {
+  rank: number;
+};
 
 export function HorizontalBars({
   data,
@@ -318,44 +333,71 @@ export function TopProvidersTable({
   tr,
   onOpen,
 }: {
-  rows: Array<{ id: string; name: string; patient_count: number; appointment_count: number }>;
+  rows: TopProviderRow[];
   loading: boolean;
   tr: DashboardTranslations;
   onOpen: (id: string) => void;
 }) {
+  const rankedRows = useMemo<RankedTopProviderRow[]>(
+    () => rows.map((row, index) => ({ ...row, rank: index + 1 })),
+    [rows],
+  );
+
+  const columns = useMemo<ColumnDef<RankedTopProviderRow>[]>(() => [
+    {
+      id: "rank",
+      label: "#",
+      accessor: (row) => row.rank,
+      width: 48,
+      render: (row) => (
+        <span className="font-mono text-[12px] text-muted-foreground">
+          {row.rank}
+        </span>
+      ),
+    },
+    {
+      id: "provider",
+      label: tr.providers_title ?? "Provider",
+      accessor: (row) => row.name,
+      required: true,
+      pinned: "left",
+      width: 220,
+      render: (row) => (
+        <span className="truncate font-medium text-foreground">{row.name}</span>
+      ),
+    },
+    {
+      id: "patients",
+      label: tr.patients_title ?? "Patients",
+      accessor: (row) => row.patient_count,
+      width: 112,
+      render: (row) => (
+        <span className="block text-right tabular-nums">{row.patient_count}</span>
+      ),
+    },
+    {
+      id: "appointments",
+      label: tr.appointments_title ?? "Appointments",
+      accessor: (row) => row.appointment_count,
+      width: 132,
+      render: (row) => (
+        <span className="block text-right tabular-nums">{row.appointment_count}</span>
+      ),
+    },
+  ], [tr.appointments_title, tr.patients_title, tr.providers_title]);
+
   if (loading) return <div className="py-6"><ChartSkeleton /></div>;
   if (rows.length === 0) return <EmptyChart label={tr.dash_no_data ?? "No data"} />;
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-[13px]">
-        <thead>
-          <tr className="text-left text-[11px] uppercase tracking-wider text-muted-foreground">
-            <th className="pb-2 font-medium">#</th>
-            <th className="pb-2 font-medium">{tr.providers_title ?? "Provider"}</th>
-            <th className="pb-2 text-right font-medium">{tr.patients_title ?? "Patients"}</th>
-            <th className="pb-2 text-right font-medium">
-              {tr.appointments_title ?? "Appointments"}
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, index) => (
-            <tr
-              key={row.id}
-              className="cursor-pointer border-t border-border transition-colors hover:bg-muted/40"
-              onClick={() => onOpen(row.id)}
-            >
-              <td className="w-10 py-2 font-mono text-[12px] text-muted-foreground">
-                {index + 1}
-              </td>
-              <td className="py-2 font-medium text-foreground">{row.name}</td>
-              <td className="py-2 text-right tabular-nums">{row.patient_count}</td>
-              <td className="py-2 text-right tabular-nums">{row.appointment_count}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <DataTableSurface
+      rows={rankedRows}
+      columns={columns}
+      defaultDensity="comfortable"
+      dictionary={tr as Record<string, string>}
+      rowId={(row) => row.id}
+      onRowClick={(row) => onOpen(row.id)}
+      tableClassName="min-h-[220px] bg-transparent"
+    />
   );
 }

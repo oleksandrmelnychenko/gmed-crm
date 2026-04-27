@@ -4,7 +4,9 @@ import { LoaderCircle, RefreshCw, Shield } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { clearApiCache } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
+import { useRealtimeSubscription } from "@/lib/realtime";
 import {
   createPortalPrivacyRequest,
   fetchPortalPrivacyRequests,
@@ -20,6 +22,12 @@ import type { PortalPrivacyRequest } from "@/pages/patients/model/portal-shared"
 import { cn } from "@/lib/utils";
 
 type RequestType = "erasure" | "restriction" | "third_party_revoke";
+
+const PORTAL_PRIVACY_REALTIME_EVENTS = [
+  "privacy_request.created",
+  "privacy_request.reviewed",
+  "privacy_request.executed",
+] as const;
 
 export function PatientPrivacyPage() {
   const { lang } = useLang();
@@ -37,6 +45,11 @@ export function PatientPrivacyPage() {
       lang === "de" ? de : lang === "ru" ? ru : en,
     [lang],
   );
+
+  useRealtimeSubscription(PORTAL_PRIVACY_REALTIME_EVENTS, () => {
+    clearApiCache("/me/privacy-requests");
+    setVersion((value) => value + 1);
+  });
 
   useEffect(() => {
     let cancelled = false;

@@ -9,20 +9,19 @@ import {
 } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
-  ArrowDown,
-  ArrowUp,
   Building2,
   CalendarClock,
-  Filter,
+  Download,
   LoaderCircle,
   Mail,
   MapPin,
-  MoreHorizontal,
   Phone,
   Plus,
   RefreshCw,
+  Search,
   Stethoscope,
   Trash2,
+  X,
   UsersRound,
 } from "lucide-react";
 
@@ -49,13 +48,17 @@ import { useLang } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
+import { ColumnVisibilityMenu } from "@/components/data-table/column-visibility-menu";
+import { DataTable } from "@/components/data-table/data-table";
+import { DensityToggle } from "@/components/data-table/density-toggle";
+import { exportCsv } from "@/components/data-table/csv-export";
+import { FilterBuilder } from "@/components/data-table/filter-builder";
+import { SortBuilder } from "@/components/data-table/sort-builder";
+import type { DensityLevel, FilterPredicate, SortStack } from "@/components/data-table/types";
+import { useLocalStorage, useVersionedLocalStorage } from "@/components/data-table/use-local-storage";
+import { readDataTableState, writeDataTableState } from "@/components/data-table/url-state";
 import {
-  ColumnFilterDateRangePopover,
-  ColumnFilterPopover,
-  ColumnFilterSelectPopover,
   KpiInlineStat,
-  PaginationControls,
-  type SortDir,
 } from "@/components/data-table";
 import {
   createProvider,
@@ -71,20 +74,16 @@ import {
 } from "./data/provider-api";
 import {
   DEFAULT_FILTERS,
-  DEFAULT_PROVIDER_COLUMN_ORDER,
-  PROVIDER_COLUMN_META,
   blankDoctorForm,
   blankProviderForm,
   blankServiceForm,
   buildProvidersQuery,
-  compareProvidersByColumn,
   compactDate,
   compactDateTime,
   doctorToForm,
   humanizeCode,
   moneyLabel,
   patientLabel,
-  providerColumnText,
   providerMeta,
   providerPermissions,
   providerToForm,
@@ -93,7 +92,6 @@ import {
   toDoctorPayload,
   toProviderPayload,
   toServicePayload,
-  type ProviderColumnKey,
 } from "./model/list-model";
 import type {
   DoctorFormState,
@@ -107,127 +105,39 @@ import type {
   ServiceItem,
 } from "./model/types";
 import {
+  DEFAULT_PROVIDER_FROZEN_COLUMNS,
+  DEFAULT_PROVIDER_HIDDEN_COLUMNS,
+  MAX_PROVIDER_FROZEN_COLUMNS,
+  PROVIDER_COLUMN_GROUPS,
+} from "./ui/providers-columns";
+import { useProvidersListTableModel } from "./ui/hooks/use-providers-list-table-model";
+import {
   PageHeader,
   inputClass as shellInputClassName,
   selectClass as shellSelectClassName,
   textareaClass as shellTextareaClass,
 } from "@/components/ui-shell";
+import { clearApiCache } from "@/lib/api";
+import { useRealtimeSubscription } from "@/lib/realtime";
 
 const selectTriggerClassName = shellSelectClassName;
 const textareaClassName = shellTextareaClass;
-
-function ProviderCell({
-  colKey,
-  provider,
-  rowNumber,
-  tr,
-  l,
-}: {
-  colKey: ProviderColumnKey;
-  provider: ProviderSummary;
-  rowNumber: number;
-  tr: Record<string, string>;
-  l: (de: string, ru: string, en: string) => string;
-}) {
-  switch (colKey) {
-    case "status":
-      return (
-        <td className="px-3 py-2.5">
-          <span
-            className={cn(
-              "inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[11.5px] font-medium",
-              provider.is_active ? "bg-emerald-50 text-emerald-700" : "bg-neutral-100 text-neutral-600",
-            )}
-          >
-            <span className={cn("size-1.5 rounded-full", provider.is_active ? "bg-emerald-500" : "bg-neutral-400")} />
-            {provider.is_active ? (tr.common_active ?? "active") : (tr.common_inactive ?? "inactive")}
-          </span>
-        </td>
-      );
-    case "no":
-      return (
-        <td className="px-3 py-2.5 text-muted-foreground font-mono text-[12px] tabular-nums">
-          {rowNumber}
-        </td>
-      );
-    case "provider":
-      return (
-        <td className="px-3 py-2.5">
-          <div className="flex items-center gap-2.5">
-            <div className="flex items-center justify-center size-7 rounded-full bg-muted text-[11px] font-medium text-foreground shrink-0">
-              {provider.name
-                .split(/\s+/)
-                .slice(0, 2)
-                .map((w) => w[0]?.toUpperCase() ?? "")
-                .join("")}
-            </div>
-            <div className="min-w-0">
-              <div className="font-medium text-foreground truncate">{provider.name}</div>
-              {provider.legal_name && provider.legal_name !== provider.name ? (
-                <div className="text-[11.5px] text-muted-foreground truncate">{provider.legal_name}</div>
-              ) : provider.tax_id ? (
-                <div className="text-[11.5px] text-muted-foreground truncate">
-                  {l("Steuer-ID", "Налоговый ID", "Tax ID")} {provider.tax_id}
-                </div>
-              ) : null}
-            </div>
-          </div>
-        </td>
-      );
-    case "type":
-      return (
-        <td className="px-3 py-2.5">
-          <Badge
-            variant="outline"
-            className={cn(
-              "rounded-full text-[10px]",
-              provider.provider_type === "medical"
-                ? "border-sky-200 bg-sky-50 text-sky-700"
-                : "border-violet-200 bg-violet-50 text-violet-700",
-            )}
-          >
-            {provider.provider_type === "medical" ? tr.providers_type_medical : tr.providers_type_non_medical}
-          </Badge>
-        </td>
-      );
-    case "location":
-      return (
-        <td className="px-3 py-2.5 text-muted-foreground">
-          {[provider.address_city, provider.address_country].filter(Boolean).join(", ") || "—"}
-        </td>
-      );
-    case "fachbereich":
-      return (
-        <td className="px-3 py-2.5 text-muted-foreground truncate max-w-[200px]">
-          {provider.fachbereich ?? "—"}
-        </td>
-      );
-    case "doctors":
-      return (
-        <td className="px-3 py-2.5 text-foreground tabular-nums">
-          {provider.doctor_count}
-        </td>
-      );
-    case "patients":
-      return (
-        <td className="px-3 py-2.5 text-foreground tabular-nums">
-          {provider.patient_count}
-        </td>
-      );
-    case "contract":
-      return (
-        <td className="px-3 py-2.5">
-          {provider.has_contract ? (
-            <Badge variant="outline" className="rounded-full text-[10px] border-emerald-200 bg-emerald-50 text-emerald-700">
-              {tr.providers_contract_with}
-            </Badge>
-          ) : (
-            <span className="text-muted-foreground">—</span>
-          )}
-        </td>
-      );
-  }
-}
+const DEFAULT_PROVIDER_SORT: SortStack = [{ field: "provider", dir: "asc" }];
+const PROVIDER_REALTIME_EVENTS = [
+  "provider.created",
+  "provider.updated",
+  "provider.deleted",
+  "provider.activated",
+  "provider.deactivated",
+  "provider.template_created",
+  "provider.template_updated",
+  "provider.doctor_created",
+  "provider.doctor_updated",
+  "provider.doctor_deleted",
+  "provider.service_created",
+  "provider.service_updated",
+  "provider.service_deleted",
+] as const;
 
 function cardClass(extra?: string) {
   return cn(
@@ -300,75 +210,60 @@ function ProvidersPage() {
   const { staffGo } = useStaffNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const permissions = useMemo(() => providerPermissions(user?.role), [user?.role]);
-  const [filters, setFilters] = useState<ProviderFilters>(DEFAULT_FILTERS);
+  const [filters, setFilters] = useState<ProviderFilters>(() => {
+    const base = {
+      ...DEFAULT_FILTERS,
+      providerType: permissions.forceNonMedical ? "non_medical" : DEFAULT_FILTERS.providerType,
+    };
+    if (typeof window === "undefined") return base;
+
+    const params = new URLSearchParams(window.location.search);
+    const tableState = readDataTableState(params);
+    const activeOnly = params.get("active");
+    const providerType = params.get("provider_type");
+    const hasContract = params.get("contract");
+
+    return {
+      ...base,
+      search: tableState.search ?? "",
+      providerType: permissions.forceNonMedical
+        ? "non_medical"
+        : providerType === "medical" || providerType === "non_medical"
+          ? providerType
+          : base.providerType,
+      activeOnly:
+        activeOnly === "" || activeOnly === "true" || activeOnly === "false"
+          ? activeOnly
+          : base.activeOnly,
+      hasContract:
+        hasContract === "true" || hasContract === "false" ? hasContract : base.hasContract,
+    };
+  });
   const deferredSearch = useDeferredValue(filters.search);
+  const [filterPredicates, setFilterPredicatesState] = useState<FilterPredicate[]>(() => {
+    if (typeof window === "undefined") return [];
+    return readDataTableState(new URLSearchParams(window.location.search)).filters ?? [];
+  });
+  const [sortStack, setSortStackState] = useState<SortStack>(() => {
+    if (typeof window === "undefined") return DEFAULT_PROVIDER_SORT;
+    const tableState = readDataTableState(new URLSearchParams(window.location.search));
+    return tableState.sort?.length ? tableState.sort : DEFAULT_PROVIDER_SORT;
+  });
+  const [hiddenColumns, setHiddenColumns] = useVersionedLocalStorage<string[]>(
+    "providers.hiddenColumns",
+    DEFAULT_PROVIDER_HIDDEN_COLUMNS,
+    1,
+  );
+  const [frozenColumns, setFrozenColumns] = useVersionedLocalStorage<string[]>(
+    "providers.frozenColumns",
+    DEFAULT_PROVIDER_FROZEN_COLUMNS,
+    1,
+  );
+  const [density, setDensity] = useLocalStorage<DensityLevel>("providers.density", "compact");
   const [providers, setProviders] = useState<ProviderSummary[]>([]);
   const [listBusy, setListBusy] = useState(false);
   const [listError, setListError] = useState("");
   const [listVersion, setListVersion] = useState(0);
-  const [page, setPage] = useState(0);
-  const [pageSize, setPageSize] = useState(20);
-
-  const [columnOrder, setColumnOrder] = useState<ProviderColumnKey[]>(
-    DEFAULT_PROVIDER_COLUMN_ORDER,
-  );
-  const [draggingKey, setDraggingKey] = useState<ProviderColumnKey | null>(null);
-  const [dropTargetKey, setDropTargetKey] = useState<ProviderColumnKey | null>(null);
-  const [sortBy, setSortBy] = useState<{ key: ProviderColumnKey; dir: SortDir } | null>(null);
-  const [columnFilters, setColumnFilters] = useState<Record<ProviderColumnKey, string>>({
-    status: "",
-    no: "",
-    provider: "",
-    type: "",
-    location: "",
-    fachbereich: "",
-    doctors: "",
-    patients: "",
-    contract: "",
-  });
-  const [filterOpen, setFilterOpen] = useState<ProviderColumnKey | null>(null);
-
-  function toggleSort(key: ProviderColumnKey) {
-    setSortBy((current) => {
-      if (!current || current.key !== key) return { key, dir: "asc" };
-      if (current.dir === "asc") return { key, dir: "desc" };
-      return null;
-    });
-  }
-
-  function setColumnFilter(key: ProviderColumnKey, value: string) {
-    setColumnFilters((current) => ({ ...current, [key]: value }));
-  }
-
-  function handleColumnDragStart(key: ProviderColumnKey) {
-    setDraggingKey(key);
-  }
-
-  function handleColumnDragOver(event: React.DragEvent, key: ProviderColumnKey) {
-    event.preventDefault();
-    if (draggingKey && key !== draggingKey) setDropTargetKey(key);
-  }
-
-  function handleColumnDrop(target: ProviderColumnKey) {
-    if (!draggingKey || draggingKey === target) {
-      setDraggingKey(null);
-      setDropTargetKey(null);
-      return;
-    }
-    setColumnOrder((current) => {
-      const next = current.filter((k) => k !== draggingKey);
-      const insertAt = next.indexOf(target);
-      next.splice(insertAt, 0, draggingKey);
-      return next;
-    });
-    setDraggingKey(null);
-    setDropTargetKey(null);
-  }
-
-  function handleColumnDragEnd() {
-    setDraggingKey(null);
-    setDropTargetKey(null);
-  }
 
   const [createOpen, setCreateOpen] = useState(false);
   const [createBusy, setCreateBusy] = useState(false);
@@ -407,70 +302,62 @@ function ProvidersPage() {
     [effectiveFilters, permissions.forceNonMedical]
   );
 
-  const metrics = useMemo(() => {
-    return providers.reduce(
-      (acc, item) => {
-        acc.total += 1;
-        if (item.is_active) acc.active += 1;
-        acc.doctors += item.doctor_count;
-        acc.patients += item.patient_count;
-        acc.appointments += item.appointment_count;
-        acc.services += item.service_count;
-        acc.conciergeRequests += item.concierge_service_count;
-        acc.openConciergeRequests += item.open_concierge_service_count;
-        return acc;
-      },
-      {
-        total: 0,
-        active: 0,
-        doctors: 0,
-        patients: 0,
-        appointments: 0,
-        services: 0,
-        conciergeRequests: 0,
-        openConciergeRequests: 0,
+  const { columns, metrics, sortedAndFilteredProviders } = useProvidersListTableModel({
+    deferredSearch,
+    filterPredicates,
+    frozenColumns,
+    providers,
+    sortStack,
+    tr,
+  });
+
+  const anyFilterActive =
+    filters.search.trim() !== "" ||
+    filters.providerType !== (permissions.forceNonMedical ? "non_medical" : "") ||
+    filters.activeOnly !== DEFAULT_FILTERS.activeOnly ||
+    filters.hasContract !== "" ||
+    filterPredicates.length > 0;
+
+  function setFilterPredicates(next: FilterPredicate[]) {
+    setFilterPredicatesState(next);
+    const params = writeDataTableState(new URLSearchParams(searchParams), { filters: next });
+    setSearchParams(params, { replace: true });
+  }
+
+  function setSortStack(next: SortStack) {
+    setSortStackState(next);
+    const params = writeDataTableState(new URLSearchParams(searchParams), { sort: next });
+    setSearchParams(params, { replace: true });
+  }
+
+  function setSearch(value: string) {
+    setFilters((current) => ({ ...current, search: value }));
+    const params = writeDataTableState(new URLSearchParams(searchParams), { search: value });
+    setSearchParams(params, { replace: true });
+  }
+
+  function setServerFilter(key: keyof ProviderFilters, value: string, queryKey: string) {
+    setFilters((current) => ({ ...current, [key]: value }));
+    syncQuery({ [queryKey]: value || null });
+  }
+
+  function handleColumnFreezeChange(columnId: string, frozen: boolean) {
+    setFrozenColumns((current) => {
+      if (frozen) {
+        if (current.includes(columnId) || current.length >= MAX_PROVIDER_FROZEN_COLUMNS) {
+          return current;
+        }
+        return [...current, columnId];
       }
-    );
-  }, [providers]);
-
-  const sortedAndFilteredProviders = useMemo(() => {
-    const hasFilter = Object.values(columnFilters).some((v) => v.trim() !== "");
-    const filtered = hasFilter
-      ? providers.filter((p) => {
-          for (const key of columnOrder) {
-            const raw = columnFilters[key].trim();
-            if (!raw) continue;
-            if (key === "status") {
-              if (raw === "active" && !p.is_active) return false;
-              if (raw === "inactive" && p.is_active) return false;
-            } else if (key === "type") {
-              if (p.provider_type !== raw) return false;
-            } else if (key === "contract") {
-              if (raw === "with" && !p.has_contract) return false;
-              if (raw === "without" && p.has_contract) return false;
-            } else {
-              const haystack = providerColumnText(p, key, tr).toLowerCase();
-              if (!haystack.includes(raw.toLowerCase())) return false;
-            }
-          }
-          return true;
-        })
-      : providers;
-    if (!sortBy) return filtered;
-    const arr = [...filtered];
-    arr.sort((a, b) => {
-      const cmp = compareProvidersByColumn(a, b, sortBy.key);
-      return sortBy.dir === "asc" ? cmp : -cmp;
+      return current.filter((id) => id !== columnId);
     });
-    return arr;
-  }, [providers, columnFilters, columnOrder, sortBy, tr]);
+  }
 
-  const totalPages = Math.max(1, Math.ceil(sortedAndFilteredProviders.length / pageSize));
-  const paginatedProviders = useMemo(
-    () => sortedAndFilteredProviders.slice(page * pageSize, (page + 1) * pageSize),
-    [sortedAndFilteredProviders, page, pageSize]
-  );
-  useEffect(() => { setPage(0); }, [providers.length, pageSize]);
+  function exportProviders() {
+    const visibleColumns = columns.filter((column) => !hiddenColumns.includes(column.id) || column.required);
+    const stamp = new Date().toISOString().slice(0, 10);
+    exportCsv(sortedAndFilteredProviders, visibleColumns, `providers-${stamp}.csv`);
+  }
 
   function syncQuery(next: Record<string, string | null>) {
     const params = new URLSearchParams(searchParams);
@@ -557,6 +444,13 @@ function ProvidersPage() {
 
   useEffect(() => {
     setCreateForm(blankProviderForm(permissions.forceNonMedical ? "non_medical" : "medical"));
+    if (permissions.forceNonMedical) {
+      setFilters((current) =>
+        current.providerType === "non_medical"
+          ? current
+          : { ...current, providerType: "non_medical" },
+      );
+    }
   }, [permissions.forceNonMedical]);
 
   function refreshList() {
@@ -566,6 +460,29 @@ function ProvidersPage() {
   function refreshDetail() {
     setDetailVersion((current) => current + 1);
   }
+
+  useRealtimeSubscription(PROVIDER_REALTIME_EVENTS, (event) => {
+    if (!permissions.canViewPage) return;
+    clearApiCache("/providers");
+    if (event.entity_type === "provider" && event.entity_id) {
+      clearApiCache(`/providers/${event.entity_id}`);
+      clearApiCache(`/providers/${event.entity_id}/patients`);
+      clearApiCache(`/providers/${event.entity_id}/templates`);
+      clearApiCache(`/appointments?provider_id=${event.entity_id}`);
+    }
+    if (selectedId && selectedId !== event.entity_id) {
+      clearApiCache(`/providers/${selectedId}`);
+      clearApiCache(`/providers/${selectedId}/patients`);
+      clearApiCache(`/providers/${selectedId}/templates`);
+      clearApiCache(`/appointments?provider_id=${selectedId}`);
+    }
+    startTransition(() => {
+      setListVersion((current) => current + 1);
+      if (!selectedId || selectedId === event.entity_id) {
+        setDetailVersion((current) => current + 1);
+      }
+    });
+  });
 
   function openProvider(id: string) {
     staffGo(`/providers/${id}`);
@@ -577,7 +494,17 @@ function ProvidersPage() {
       ...DEFAULT_FILTERS,
       providerType: permissions.forceNonMedical ? "non_medical" : "",
     });
-    syncQuery({ provider: null });
+    setFilterPredicatesState([]);
+    setSortStackState(DEFAULT_PROVIDER_SORT);
+    const params = writeDataTableState(new URLSearchParams(searchParams), {
+      filters: [],
+      sort: DEFAULT_PROVIDER_SORT,
+      search: "",
+    });
+    params.delete("provider_type");
+    params.delete("active");
+    params.delete("contract");
+    setSearchParams(params, { replace: true });
   }
 
   function openCreateSheet() {
@@ -763,20 +690,6 @@ function ProvidersPage() {
           title={t.providers_title}
           actions={
             <>
-              <Button
-                type="button"
-                variant="outline"
-                className="h-9 rounded-lg px-3.5"
-                onClick={() => {
-                  refreshList();
-                  if (detailOpen && selectedId) {
-                    refreshDetail();
-                  }
-                }}
-              >
-                <RefreshCw className="size-4" />
-                {l("Aktualisieren", "Обновить", "Refresh")}
-              </Button>
               {permissions.canManageRegistry ? (
                 <Button
                   type="button"
@@ -814,226 +727,251 @@ function ProvidersPage() {
           />
         </div>
 
-        {/* Top search bar */}
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="relative flex-1 min-w-[260px]">
-            <Input
-              value={filters.search}
-              onChange={(event) => setFilters((current) => ({ ...current, search: event.target.value }))}
-              placeholder={t.common_search}
-              className="h-9 rounded-lg bg-card pl-3"
-            />
+        <div className="relative z-30 flex flex-col gap-2 rounded-lg border border-border bg-card/80 p-2 shadow-sm">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <div className="relative min-w-[240px] flex-1 sm:max-w-sm">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={filters.search}
+                onChange={(event) => setSearch(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    setSearch("");
+                    (event.target as HTMLInputElement).blur();
+                  }
+                }}
+                placeholder={t.common_search}
+                className="h-8 w-full rounded-lg bg-background pl-8 text-[13px]"
+              />
+            </div>
+
+            <ShadSelect
+              value={filters.providerType}
+              onValueChange={(value) => setServerFilter("providerType", value ?? "", "provider_type")}
+              disabled={permissions.forceNonMedical}
+            >
+              <SelectTrigger size="sm" className="h-8 w-[170px] bg-background text-[13px]">
+                <SelectValue>
+                  {filters.providerType === "medical"
+                    ? t.providers_type_medical
+                    : filters.providerType === "non_medical"
+                      ? t.providers_type_non_medical
+                      : t.providers_all}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">{t.providers_all}</SelectItem>
+                <SelectItem value="medical">{t.providers_type_medical}</SelectItem>
+                <SelectItem value="non_medical">{t.providers_type_non_medical}</SelectItem>
+              </SelectContent>
+            </ShadSelect>
+
+            <ShadSelect
+              value={filters.activeOnly}
+              onValueChange={(value) => setServerFilter("activeOnly", value ?? "", "active")}
+            >
+              <SelectTrigger size="sm" className="h-8 w-[140px] bg-background text-[13px]">
+                <SelectValue>
+                  {filters.activeOnly === "true"
+                    ? t.common_active
+                    : filters.activeOnly === "false"
+                      ? t.common_inactive
+                      : t.providers_all}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">{t.providers_all}</SelectItem>
+                <SelectItem value="true">{t.common_active}</SelectItem>
+                <SelectItem value="false">{t.common_inactive}</SelectItem>
+              </SelectContent>
+            </ShadSelect>
+
+            <ShadSelect
+              value={filters.hasContract}
+              onValueChange={(value) => setServerFilter("hasContract", value ?? "", "contract")}
+            >
+              <SelectTrigger size="sm" className="h-8 w-[160px] bg-background text-[13px]">
+                <SelectValue>
+                  {filters.hasContract === "true"
+                    ? t.providers_contract_with
+                    : filters.hasContract === "false"
+                      ? t.providers_contract_without
+                      : t.providers_contract}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">{t.providers_all}</SelectItem>
+                <SelectItem value="true">{t.providers_contract_with}</SelectItem>
+                <SelectItem value="false">{t.providers_contract_without}</SelectItem>
+              </SelectContent>
+            </ShadSelect>
+
+            <div className="ml-auto flex items-center gap-1">
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                title={t.common_refresh ?? "Refresh"}
+                aria-label={t.common_refresh ?? "Refresh"}
+                onClick={() => {
+                  refreshList();
+                  if (detailOpen && selectedId) {
+                    refreshDetail();
+                  }
+                }}
+              >
+                <RefreshCw className={cn("size-3.5", listBusy && "animate-spin")} />
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                title={t.common_export ?? "Export"}
+                aria-label={t.common_export ?? "Export"}
+                onClick={exportProviders}
+              >
+                <Download className="size-3.5" />
+              </Button>
+            </div>
           </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-9 rounded-lg"
-            onClick={resetFilters}
-          >
-            {l("Zurücksetzen", "Сбросить", "Reset")}
-          </Button>
+
+          <div className="flex flex-wrap items-center gap-1.5">
+            <FilterBuilder
+              columns={columns}
+              rows={providers}
+              filters={filterPredicates}
+              onChange={setFilterPredicates}
+              translations={{
+                addFilter: tr.table_filter ?? "Filter",
+                clearAll: tr.table_sort_clear ?? tr.common_reset ?? "Clear",
+                searchPlaceholder: tr.table_filter_search_fields ?? tr.common_search ?? "Search",
+                noFields: tr.table_filter_no_fields ?? "No available fields",
+                remove: tr.table_filter_remove ?? tr.common_remove ?? "Remove",
+                valuePlaceholder: tr.table_filter_value ?? "Value",
+                yes: tr.common_yes ?? "Yes",
+                no: tr.common_no ?? "No",
+                operatorLabels: {
+                  contains: tr.filter_op_contains ?? "contains",
+                  does_not_contain: tr.filter_op_does_not_contain ?? "does not contain",
+                  is_empty: tr.filter_op_is_empty ?? "is empty",
+                  is_not_empty: tr.filter_op_is_not_empty ?? "is not empty",
+                  is: tr.filter_op_is ?? "is",
+                  is_not: tr.filter_op_is_not ?? "is not",
+                  is_any_of: tr.filter_op_is_any_of ?? "is any of",
+                  is_none_of: tr.filter_op_is_none_of ?? "is none of",
+                  has_any: tr.filter_op_has_any ?? "has any of",
+                  has_all: tr.filter_op_has_all ?? "has all of",
+                  has_none: tr.filter_op_has_none ?? "has none of",
+                  before: tr.filter_op_before ?? "before",
+                  after: tr.filter_op_after ?? "after",
+                  between: tr.filter_op_between ?? "between",
+                  last_n_days: tr.filter_op_last_n_days ?? "last N days",
+                  equals: tr.filter_op_equals ?? "equals",
+                },
+              }}
+            />
+            <SortBuilder
+              columns={columns}
+              value={sortStack}
+              onChange={setSortStack}
+              translations={{
+                buttonLabel: tr.common_sort ?? "Sort",
+                addSort: tr.table_sort_add ?? "Add sort",
+                clearAll: tr.table_sort_clear ?? tr.common_reset ?? "Clear",
+                ascending: tr.table_sort_ascending ?? "Asc",
+                descending: tr.table_sort_descending ?? "Desc",
+                emptyHint: tr.common_sort ?? "Sort",
+                moveUp: tr.table_sort_move_up ?? "Move up",
+                moveDown: tr.table_sort_move_down ?? "Move down",
+                remove: tr.table_sort_remove ?? tr.common_remove ?? "Remove",
+              }}
+            />
+            <ColumnVisibilityMenu
+              columns={columns}
+              hiddenColumns={hiddenColumns}
+              onChange={setHiddenColumns}
+              defaultHidden={DEFAULT_PROVIDER_HIDDEN_COLUMNS}
+              frozenColumns={frozenColumns}
+              onFrozenColumnsChange={setFrozenColumns}
+              defaultFrozen={DEFAULT_PROVIDER_FROZEN_COLUMNS}
+              maxFrozenColumns={MAX_PROVIDER_FROZEN_COLUMNS}
+              groupLabels={PROVIDER_COLUMN_GROUPS}
+              buttonLabel={tr.table_columns ?? "Columns"}
+              searchPlaceholder={tr.table_columns_search ?? "Search columns"}
+              resetLabel={tr.common_reset ?? "Reset"}
+              showAllLabel={tr.table_columns_show_all ?? "Show all"}
+              hideAllLabel={tr.table_columns_hide_all ?? "Hide all"}
+              noMatchLabel={tr.table_columns_no_match ?? "No matching columns"}
+              requiredNoteLabel={tr.table_columns_required ?? "required"}
+              freezeLabel={tr.table_columns_freeze ?? "Freeze"}
+              unfreezeLabel={tr.table_columns_unfreeze ?? "Unfreeze"}
+              frozenNoteLabel={tr.table_columns_frozen ?? "frozen"}
+            />
+            <DensityToggle
+              value={density}
+              onChange={setDensity}
+              ariaLabel={tr.table_density ?? "Row density"}
+              labels={{
+                comfortable: tr.table_density_comfortable ?? "Comfortable",
+                compact: tr.table_density_compact ?? "Compact",
+                condensed: tr.table_density_condensed ?? "Condensed",
+              }}
+            />
+            {anyFilterActive ? (
+              <Button type="button" variant="ghost" size="sm" onClick={resetFilters}>
+                <X className="size-3.5" />
+                {l("Zurücksetzen", "Сбросить", "Reset")}
+              </Button>
+            ) : null}
+          </div>
         </div>
 
         {/* Error banner */}
         {listError ? <Banner tone="error">{listError}</Banner> : null}
 
-        {/* Table card */}
-        <div className="rounded-xl border border-border bg-card overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-[13px]">
-              <thead className="bg-muted/40">
-                <tr className="text-left text-[11px] uppercase tracking-wider text-muted-foreground">
-                  {columnOrder.map((key) => {
-                    const meta = PROVIDER_COLUMN_META[key];
-                    const isDragging = draggingKey === key;
-                    const isDropTarget = dropTargetKey === key && draggingKey && dropTargetKey !== draggingKey;
-                    const isSorted = sortBy?.key === key;
-                    const SortIcon = isSorted ? (sortBy?.dir === "asc" ? ArrowUp : ArrowDown) : null;
-                    const filterValue = columnFilters[key];
-                    const filterActive = filterValue.trim() !== "";
-                    const isFilterOpen = filterOpen === key;
-                    return (
-                      <th
-                        key={key}
-                        draggable
-                        onDragStart={() => handleColumnDragStart(key)}
-                        onDragOver={(e) => handleColumnDragOver(e, key)}
-                        onDrop={() => handleColumnDrop(key)}
-                        onDragEnd={handleColumnDragEnd}
-                        className={cn(
-                          "px-3 py-2.5 font-medium select-none relative",
-                          meta.widthClass,
-                          isSorted && "text-foreground",
-                          isDragging && "opacity-50",
-                          isDropTarget && "before:absolute before:left-0 before:top-0 before:bottom-0 before:w-[2px] before:bg-[var(--brand)]"
-                        )}
-                      >
-                        <div className="flex items-center justify-between gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (meta.sortable && !draggingKey) toggleSort(key);
-                            }}
-                            disabled={!meta.sortable}
-                            className={cn(
-                              "flex items-center gap-1 min-w-0 text-left",
-                              meta.sortable && "cursor-pointer hover:text-foreground"
-                            )}
-                            title={meta.sortable ? (tr[meta.labelKey] ?? meta.labelKey) : ""}
-                          >
-                            <span className="truncate">{tr[meta.labelKey] ?? meta.labelKey}</span>
-                            {SortIcon ? <SortIcon className="size-3 text-[var(--brand)] shrink-0" /> : null}
-                          </button>
-                          {meta.filter !== "none" ? (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setFilterOpen(isFilterOpen ? null : key);
-                              }}
-                              title={t.common_search}
-                              className={cn(
-                                "inline-flex items-center justify-center size-5 rounded transition-colors shrink-0",
-                                filterActive
-                                  ? "text-[var(--brand)] hover:bg-[var(--brand-soft)]"
-                                  : "text-muted-foreground/60 hover:text-foreground hover:bg-muted"
-                              )}
-                            >
-                              <Filter className="size-3" />
-                            </button>
-                          ) : null}
-                        </div>
-                        {isFilterOpen && meta.filter === "text" ? (
-                          <ColumnFilterPopover
-                            value={filterValue}
-                            onChange={(v) => setColumnFilter(key, v)}
-                            onClear={() => setColumnFilter(key, "")}
-                            onClose={() => setFilterOpen(null)}
-                            placeholder={tr[meta.labelKey] ?? meta.labelKey}
-                            tr={tr}
-                          />
-                        ) : null}
-                        {isFilterOpen && meta.filter === "select" ? (
-                          <ColumnFilterSelectPopover
-                            value={filterValue}
-                            onChange={(v) => setColumnFilter(key, v)}
-                            onClear={() => setColumnFilter(key, "")}
-                            onClose={() => setFilterOpen(null)}
-                            options={
-                              key === "status"
-                                ? [
-                                    { value: "", label: t.providers_all },
-                                    { value: "active", label: t.common_active },
-                                    { value: "inactive", label: t.common_inactive },
-                                  ]
-                                : key === "type"
-                                  ? [
-                                      { value: "", label: t.providers_all },
-                                      { value: "medical", label: t.providers_type_medical },
-                                      { value: "non_medical", label: t.providers_type_non_medical },
-                                    ]
-                                  : [
-                                      { value: "", label: t.providers_all },
-                                      { value: "with", label: t.providers_contract_with },
-                                      { value: "without", label: t.providers_contract_without },
-                                    ]
-                            }
-                            tr={tr}
-                          />
-                        ) : null}
-                        {isFilterOpen && meta.filter === "daterange" ? (
-                          <ColumnFilterDateRangePopover
-                            value={filterValue}
-                            onChange={(v) => setColumnFilter(key, v)}
-                            onClear={() => setColumnFilter(key, "")}
-                            onClose={() => setFilterOpen(null)}
-                            tr={tr}
-                          />
-                        ) : null}
-                      </th>
-                    );
-                  })}
-                  <th className="w-8 px-2 py-2.5"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {listBusy ? (
-                  <tr>
-                    <td colSpan={columnOrder.length + 1} className="py-16 text-center text-muted-foreground">
-                      <LoaderCircle className="inline-block mr-2 size-4 animate-spin align-text-bottom" />
-                      {t.common_loading}
-                    </td>
-                  </tr>
-                ) : paginatedProviders.length === 0 ? (
-                  <tr>
-                    <td colSpan={columnOrder.length + 1} className="py-16 text-center text-muted-foreground text-[13px]">
-                      {t.patients_no_match}
-                    </td>
-                  </tr>
-                ) : (
-                  paginatedProviders.map((provider, idx) => {
-                    const rowNumber = page * pageSize + idx + 1;
-                    return (
-                      <tr
-                        key={provider.id}
-                        className="group/row border-t border-border transition-colors hover:bg-muted/40 cursor-pointer relative"
-                        onClick={() => openProvider(provider.id)}
-                      >
-                        {columnOrder.map((colKey) => (
-                          <ProviderCell
-                            key={colKey}
-                            colKey={colKey}
-                            provider={provider}
-                            rowNumber={rowNumber}
-                            tr={tr}
-                            l={l}
-                          />
-                        ))}
-                        <td className="w-8 px-2 py-2.5" onClick={(e) => e.stopPropagation()}>
-                          <button
-                            type="button"
-                            className="size-7 rounded-md inline-flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors opacity-0 group-hover/row:opacity-100"
-                          >
-                            <MoreHorizontal className="size-3.5" />
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Pagination */}
-          <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-t border-border text-[12.5px] flex-wrap">
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <span>{t.pagination_per_page}</span>
-              <ShadSelect value={String(pageSize)} onValueChange={(v) => setPageSize(Number(v))}>
-                <SelectTrigger size="sm" className="h-7 w-[70px] text-[12.5px]">
-                  <SelectValue>{pageSize}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="10">10</SelectItem>
-                  <SelectItem value="20">20</SelectItem>
-                  <SelectItem value="50">50</SelectItem>
-                  <SelectItem value="100">100</SelectItem>
-                </SelectContent>
-              </ShadSelect>
+        <DataTable
+          rows={sortedAndFilteredProviders}
+          columns={columns}
+          hiddenColumns={hiddenColumns}
+          sort={sortStack}
+          onSortChange={setSortStack}
+          onColumnFreezeChange={handleColumnFreezeChange}
+          isColumnFreezeDisabled={(column, nextFrozen) =>
+            nextFrozen &&
+            !frozenColumns.includes(column.id) &&
+            frozenColumns.length >= MAX_PROVIDER_FROZEN_COLUMNS
+          }
+          columnHeaderContextMenuLabels={{
+            column: tr.table_columns ?? "Column",
+            freeze: tr.table_columns_freeze ?? "Freeze column",
+            unfreeze: tr.table_columns_unfreeze ?? "Unfreeze column",
+            frozen: tr.table_columns_frozen ?? "Frozen",
+            freezeLimitReached: tr.table_columns_freeze_limit ?? "Freeze limit reached",
+          }}
+          density={density}
+          rowId={(provider) => provider.id}
+          activeRowId={selectedId}
+          onRowClick={(provider) => openProvider(provider.id)}
+          loading={listBusy && providers.length === 0}
+          emptyState={<span className="text-sm text-muted-foreground">{t.patients_no_match}</span>}
+          className="min-h-[460px]"
+          footer={
+            <div className="flex items-center justify-between">
+              <span className="tabular-nums">
+                {sortedAndFilteredProviders.length === providers.length
+                  ? `${providers.length}`
+                  : `${sortedAndFilteredProviders.length} / ${providers.length}`}{" "}
+                {t.providers_title.toLowerCase()}
+              </span>
+              {listBusy && providers.length > 0 ? (
+                <span className="inline-flex items-center gap-1">
+                  <LoaderCircle className="size-3 animate-spin" />
+                  {t.common_loading}
+                </span>
+              ) : null}
             </div>
-
-            <PaginationControls page={page} totalPages={totalPages} onPage={setPage} />
-
-            <div className="text-muted-foreground">
-              {sortedAndFilteredProviders.length === 0
-                ? "0"
-                : `${page * pageSize + 1}–${Math.min((page + 1) * pageSize, sortedAndFilteredProviders.length)}`}
-              {" / "}
-              {sortedAndFilteredProviders.length}
-            </div>
-          </div>
-        </div>
+          }
+        />
       </div>
 
       <Sheet open={createOpen} onOpenChange={setCreateOpen}>

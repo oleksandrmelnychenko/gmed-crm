@@ -932,6 +932,19 @@ pub async fn run_auto_dunning_scheduler_once(
                     }),
                 )
                 .await;
+                crate::realtime::publish_invoice_event(
+                    state,
+                    Some(actor_user_id),
+                    "invoice.overdue_marked",
+                    candidate.invoice_id,
+                    serde_json::json!({
+                        "trigger": "invoice_scheduler",
+                        "status": "overdue",
+                        "due_date": candidate.due_date.to_string(),
+                        "balance_due": decimal_to_string(balance_due),
+                    }),
+                )
+                .await;
             }
         }
 
@@ -969,6 +982,19 @@ pub async fn run_auto_dunning_scheduler_once(
                 state,
                 actor_user_id,
                 "auto_create_invoice_dunning_event",
+                candidate.invoice_id,
+                serde_json::json!({
+                    "trigger": "invoice_scheduler",
+                    "level": level,
+                    "balance_due": decimal_to_string(balance_due),
+                    "due_date_snapshot": candidate.due_date.to_string(),
+                }),
+            )
+            .await;
+            crate::realtime::publish_invoice_event(
+                state,
+                Some(actor_user_id),
+                "invoice.dunning_created",
                 candidate.invoice_id,
                 serde_json::json!({
                     "trigger": "invoice_scheduler",
@@ -3128,6 +3154,22 @@ async fn create_invoice_from_quote(
                 }),
             ));
 
+            crate::realtime::publish_invoice_event(
+                &state,
+                Some(auth.user_id),
+                "invoice.created",
+                invoice_id,
+                serde_json::json!({
+                    "invoice_number": invoice_number,
+                    "invoice_type": invoice_type,
+                    "quote_id": ctx.quote_id,
+                    "order_id": ctx.order_id,
+                    "patient_id": ctx.patient_id,
+                    "status": "draft",
+                }),
+            )
+            .await;
+
             match load_invoice_detail(&state, invoice_id, &auth).await {
                 Ok(Some(invoice)) => (StatusCode::CREATED, Json(invoice)).into_response(),
                 Ok(None) => err(StatusCode::NOT_FOUND, "Invoice not found"),
@@ -3418,6 +3460,7 @@ async fn create_dunning_event(
     .await
     {
         Ok(row) => {
+            let dunning_event_id = row.try_get::<Uuid, _>("id").unwrap_or_default();
             let _ = sqlx::query(
                 "UPDATE invoices
                  SET status = CASE
@@ -3443,8 +3486,23 @@ async fn create_dunning_event(
             )
             .await;
 
+            crate::realtime::publish_invoice_event(
+                &state,
+                Some(auth.user_id),
+                "invoice.dunning_created",
+                invoice_id,
+                serde_json::json!({
+                    "dunning_event_id": dunning_event_id,
+                    "level": body.level,
+                    "status": "overdue",
+                    "balance_due": decimal_to_string(balance_due),
+                    "due_date_snapshot": due_date.to_string(),
+                }),
+            )
+            .await;
+
             Json(serde_json::json!({
-                "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                "id": dunning_event_id,
                 "invoice_id": invoice_id,
                 "level": row.try_get::<String, _>("level").unwrap_or_default(),
                 "note": row.try_get::<Option<String>, _>("note").unwrap_or_default(),
@@ -3538,6 +3596,7 @@ async fn update_invoice_status(
     } else {
         None
     };
+    let paid_at_payload = paid_at.as_ref().map(|value| value.to_rfc3339());
 
     match sqlx::query(
         r#"UPDATE invoices
@@ -3578,11 +3637,26 @@ async fn update_invoice_status(
                 "invoice",
                 Some(invoice_id),
                 serde_json::json!({
-                    "status": effective_status,
+                    "status": effective_status.clone(),
                     "paid_amount": decimal_to_string(effective_paid_amount),
                     "due_date": due_date.map(|value| value.to_string()),
                 }),
             ));
+
+            crate::realtime::publish_invoice_event(
+                &state,
+                Some(auth.user_id),
+                "invoice.status_changed",
+                invoice_id,
+                serde_json::json!({
+                    "patient_id": patient_id,
+                    "status": effective_status,
+                    "paid_amount": decimal_to_string(effective_paid_amount),
+                    "due_date": due_date.map(|value| value.to_string()),
+                    "paid_at": paid_at_payload,
+                }),
+            )
+            .await;
 
             match load_invoice_detail(&state, invoice_id, &auth).await {
                 Ok(Some(invoice)) => Json(invoice).into_response(),

@@ -147,7 +147,7 @@ export function ColumnVisibilityMenu<T>({
       {open ? (
         <div
           role="menu"
-          className="absolute right-0 z-50 mt-1 flex w-80 flex-col rounded-lg border border-border bg-popover text-popover-foreground shadow-md"
+          className="absolute right-0 z-[110] mt-1 flex w-80 flex-col rounded-lg border border-border bg-popover text-popover-foreground shadow-xl"
         >
           <div className="flex items-center gap-2 border-b border-border p-2">
             <Search className="size-3.5 text-muted-foreground" />

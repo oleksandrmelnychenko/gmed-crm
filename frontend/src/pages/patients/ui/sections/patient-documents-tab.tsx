@@ -342,9 +342,9 @@ export function PatientDocumentsTab({
               ))}
             </div>
             <div className="hidden overflow-hidden rounded-xl border border-border/50 bg-card md:block">
-              <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr] gap-3 border-b border-border/60 bg-muted/40 px-4 py-2.5">
+              <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr] gap-3 border-b border-border/60 bg-card px-4 py-2.5 font-mono">
                 {[documentsFilenameLabel, appointmentsTypeLabel, usersStatusLabel, patientsAssignedByLabel, usersCreatedLabel].map((label) => (
-                  <span key={label} className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                  <span key={label} className="truncate text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/80">
                     {label}
                   </span>
                 ))}
@@ -356,8 +356,8 @@ export function PatientDocumentsTab({
                   target="_blank"
                   rel="noreferrer"
                   className={cn(
-                    "grid grid-cols-[2fr_1fr_1fr_1fr_1fr] gap-3 items-center px-4 py-2.5 transition-colors hover:bg-muted/40",
-                    idx < filteredDocuments.length - 1 && "border-b border-border/40",
+                    "grid grid-cols-[2fr_1fr_1fr_1fr_1fr] items-center gap-3 px-4 py-2.5 transition-colors hover:bg-muted/45 focus-visible:bg-muted/45 focus-visible:outline-none",
+                    idx < filteredDocuments.length - 1 && "border-b border-border/45",
                   )}
                 >
                   <span className="min-w-0 truncate text-sm font-medium text-foreground">{doc.filename}</span>

@@ -17,9 +17,11 @@ import {
 } from "lucide-react";
 import {
 } from "@/components/ui-shell";
+import { clearApiCache } from "@/lib/api";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
+import { useRealtimeSubscription } from "@/lib/realtime";
 import {
   buildInterpreterMobileAgendaSections,
   buildAppointmentTimelineEvents,
@@ -54,8 +56,14 @@ import { useAppointmentLinkedRecords } from "@/pages/appointments/data/use-appoi
 import { useAppointmentLinkedPatient } from "@/pages/appointments/data/use-appointment-linked-patient";
 import { useAppointmentsMetadata } from "@/pages/appointments/data/use-appointments-metadata";
 import { useAppointmentSchedulerActions } from "@/pages/appointments/data/use-appointment-scheduler-actions";
+import { useAppointmentRequestsQueue } from "@/pages/appointments/data/use-appointment-requests-queue";
 import { useAppointmentsSchedulerData } from "@/pages/appointments/data/use-appointments-scheduler-data";
 import { useProviderDoctorOptions } from "@/pages/appointments/data/use-provider-doctor-options";
+import {
+  convertAppointmentRequest,
+  reviewAppointmentRequest,
+  type ConvertAppointmentRequestInput,
+} from "@/pages/appointments/data/appointment-mutations";
 import {
   matchesOperationalScope,
   operationalScopeOptions,
@@ -179,6 +187,18 @@ const EMPTY_DETAIL_DERIVED_STATE = {
   billingReadinessWarnings: [] as string[],
   completionWarnings: [] as string[],
 };
+const APPOINTMENT_REALTIME_EVENTS = [
+  "appointment.created",
+  "appointment.updated",
+  "appointment.status_changed",
+  "appointment_request.created",
+  "appointment_request.reviewed",
+  "appointment_request.converted",
+  "concierge_service.created",
+  "concierge_service.updated",
+  "concierge_service.cancelled",
+  "concierge_service.billing_ready",
+] as const;
 
 const loadDesktopDetailWorkspaceContent = () =>
   import("@/pages/appointments/ui/workspace/desktop-detail-workspace-content");
@@ -207,6 +227,8 @@ function StaffAppointmentsPage() {
   );
   const permissions = appointmentPermissions(user?.role);
   const patientSheetPermissions = linkedPatientPermissions(user?.role);
+  const canReviewAppointmentRequests =
+    user?.role === "ceo" || user?.role === "patient_manager";
   const isMobile = useIsMobile();
   const calendarRef = useRef<FullCalendar | null>(null);
   const [calendarView, setCalendarView] = useState<CalendarView>(() =>
@@ -218,6 +240,7 @@ function StaffAppointmentsPage() {
   const [filters, setFilters] = useState<FiltersState>(DEFAULT_FILTERS);
   const [operationalScope, setOperationalScope] =
     useState<OperationalScope>("all");
+  const [requestActionBusy, setRequestActionBusy] = useState("");
   const deferredSearch = useDeferredValue(filters.search);
   const {
     appointmentsNotice,
@@ -420,6 +443,16 @@ function StaffAppointmentsPage() {
   } = useAppointmentsSchedulerData({
     appointmentsQuery,
     attentionQuery,
+    appointmentsVersion,
+    failedLoadMessage: tr.common_failed_load,
+  });
+  const {
+    appointmentRequests,
+    appointmentRequestsLoading,
+    appointmentRequestsError,
+    setAppointmentRequestsError,
+  } = useAppointmentRequestsQueue({
+    enabled: canReviewAppointmentRequests,
     appointmentsVersion,
     failedLoadMessage: tr.common_failed_load,
   });
@@ -1129,6 +1162,45 @@ function StaffAppointmentsPage() {
     dismissCalendarQuickActionMenu();
     bumpDetailVersion();
   }, [bumpDetailVersion, dismissCalendarQuickActionMenu]);
+
+  const handleReviewAppointmentRequest = useCallback(
+    async (requestId: string, status: "approved" | "rejected") => {
+      const busyKey = `${requestId}:${status}`;
+      setRequestActionBusy(busyKey);
+      setAppointmentRequestsError("");
+
+      try {
+        await reviewAppointmentRequest(requestId, status);
+        clearApiCache("/appointments/requests");
+        reportAppointmentsNotice(
+          status === "approved"
+            ? appointmentText(
+                "Portal-Anfrage freigegeben.",
+                "Запрос портала согласован.",
+                "Portal request approved.",
+              )
+            : appointmentText(
+                "Portal-Anfrage abgelehnt.",
+                "Запрос портала отклонён.",
+                "Portal request rejected.",
+              ),
+        );
+        refreshAppointments();
+      } catch (error) {
+        setAppointmentRequestsError(
+          error instanceof Error ? error.message : tr.common_failed_save,
+        );
+      } finally {
+        setRequestActionBusy((current) => (current === busyKey ? "" : current));
+      }
+    },
+    [
+      refreshAppointments,
+      reportAppointmentsNotice,
+      setAppointmentRequestsError,
+      tr.common_failed_save,
+    ],
+  );
   const {
     handleDatesSet,
     applyTodayScope,
@@ -1210,6 +1282,42 @@ function StaffAppointmentsPage() {
     syncQuery,
   ]);
 
+  const handleConvertAppointmentRequest = useCallback(
+    async (requestId: string, input: ConvertAppointmentRequestInput) => {
+      const busyKey = `${requestId}:convert`;
+      setRequestActionBusy(busyKey);
+      setAppointmentRequestsError("");
+
+      try {
+        const result = await convertAppointmentRequest(requestId, input);
+        clearApiCache("/appointments");
+        clearApiCache("/appointments/requests");
+        reportAppointmentsNotice(
+          appointmentText(
+            "Portal-Anfrage als Termin geplant.",
+            "Запрос портала запланирован как приём.",
+            "Portal request scheduled as appointment.",
+          ),
+        );
+        refreshAppointments();
+        openDetailSheet(result.appointment_id);
+      } catch (error) {
+        setAppointmentRequestsError(
+          error instanceof Error ? error.message : tr.common_failed_save,
+        );
+      } finally {
+        setRequestActionBusy((current) => (current === busyKey ? "" : current));
+      }
+    },
+    [
+      openDetailSheet,
+      refreshAppointments,
+      reportAppointmentsNotice,
+      setAppointmentRequestsError,
+      tr.common_failed_save,
+    ],
+  );
+
   const handleFollowUpVisitCreated = useCallback(
     ({ id, notice }: { id?: string; notice: string }) => {
       reportAppointmentsNotice(notice);
@@ -1222,6 +1330,22 @@ function StaffAppointmentsPage() {
     },
     [openDetailSheet, refreshAppointments, refreshDetail, reportAppointmentsNotice],
   );
+
+  useRealtimeSubscription(APPOINTMENT_REALTIME_EVENTS, (event) => {
+    clearApiCache("/appointments");
+    if (event.entity_type === "concierge_service") {
+      clearApiCache("/concierge-services");
+      if (detailOpen) {
+        refreshDetail();
+      }
+      return;
+    }
+    if (event.entity_type === "appointment" && detailOpen && selectedId && event.entity_id === selectedId) {
+      refreshDetail();
+      return;
+    }
+    refreshAppointments();
+  });
 
   function handleEventClick(info: EventClickArg) {
     openDetailSheet(info.event.id);
@@ -1359,11 +1483,17 @@ function StaffAppointmentsPage() {
           todayLabel={tr.dash_patients_today ?? "Today"}
           activeLabel={tr.common_active ?? "Active"}
           pendingLabel={tr.mfa_pending ?? "Pending"}
+          requestLabel={appointmentText(
+            "Portal-Anfragen",
+            "Запросы портала",
+            "Portal requests",
+          )}
           attentionLabel={tr.common_error ?? "Attention"}
           totalLabel={tr.providers_all ?? "All"}
           todayAppointments={todayAppointments}
           activeAppointments={activeAppointments}
           pendingInterpreterResponses={pendingInterpreterResponses}
+          appointmentRequestCount={appointmentRequests.length}
           attentionCount={attentionCount}
           totalAppointments={scopedAppointments.length}
           appointmentsError={appointmentsError}
@@ -1471,18 +1601,30 @@ function StaffAppointmentsPage() {
             appointmentsLoading,
             metadataLoading,
             items: queueAppointments,
+            appointmentRequests,
+            appointmentRequestsLoading,
+            appointmentRequestsError,
+            currentUserId: user?.id,
+            staff,
+            interpreters,
             openDetailSheet,
             operationalScope: activeOperationalScope,
             userRole: user?.role,
             attentionIndex,
             canManageStatus: permissions.canManageStatus,
             actionBusy,
+            requestActionBusy,
             onStatusChange: performStatusChange,
+            onReviewRequest: handleReviewAppointmentRequest,
+            onConvertRequest: handleConvertAppointmentRequest,
           }}
           toolbar={{
             searchAriaLabel: t.common_search,
             searchPlaceholder: t.common_search.replace(/[.…]+$/u, ""),
-            queueLabel: t.appointments_title,
+            queueLabel:
+              appointmentRequests.length > 0
+                ? `${appointmentText("Queue", "Очередь", "Queue")} (${appointmentRequests.length})`
+                : appointmentText("Queue", "Очередь", "Queue"),
             onOpenFilters: openFiltersModal,
             onOpenSearch: openSearchModal,
             onOpenQueue: openQueueModal,

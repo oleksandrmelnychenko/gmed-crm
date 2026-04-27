@@ -927,6 +927,21 @@ async fn create_patient_privacy_request(
         }),
     ));
 
+    crate::realtime::publish_privacy_request_event(
+        &state,
+        Some(auth.user_id),
+        "privacy_request.created",
+        request_id,
+        json!({
+            "patient_id": patient_id,
+            "request_type": request_type,
+            "source": source,
+            "status": "requested",
+            "due_at": due_at.to_rfc3339(),
+        }),
+    )
+    .await;
+
     match fetch_privacy_request_payload(&state, request_id).await {
         Ok(payload) => (StatusCode::CREATED, Json(payload)).into_response(),
         Err(response) => response,
@@ -1161,6 +1176,22 @@ async fn review_privacy_request(
             "review_note": review_note,
         }),
     ));
+
+    crate::realtime::publish_privacy_request_event(
+        &state,
+        Some(auth.user_id),
+        "privacy_request.reviewed",
+        request.id,
+        json!({
+            "patient_id": request.patient_id,
+            "request_type": request.request_type,
+            "source": request.source,
+            "review_action": action,
+            "status": next_status,
+            "retention_until": retention_until.map(|value| value.to_rfc3339()),
+        }),
+    )
+    .await;
 
     match fetch_privacy_request_payload(&state, request_id).await {
         Ok(payload) => Json(payload).into_response(),
@@ -1775,6 +1806,35 @@ async fn create_manual_erasure_request(
         }),
     ));
 
+    crate::realtime::publish_privacy_request_event(
+        state,
+        Some(actor_id),
+        "privacy_request.created",
+        request_id,
+        json!({
+            "patient_id": patient_id,
+            "request_type": "erasure",
+            "source": "admin_intake",
+            "status": "approved",
+            "manual_override": true,
+        }),
+    )
+    .await;
+    crate::realtime::publish_privacy_request_event(
+        state,
+        Some(actor_id),
+        "privacy_request.reviewed",
+        request_id,
+        json!({
+            "patient_id": patient_id,
+            "request_type": "erasure",
+            "review_action": "approve",
+            "status": "approved",
+            "manual_override": true,
+        }),
+    )
+    .await;
+
     Ok(request_id)
 }
 
@@ -1834,6 +1894,22 @@ async fn complete_privacy_request_execution(
             "execution": execution,
         }),
     ));
+
+    crate::realtime::publish_privacy_request_event(
+        state,
+        Some(actor_id),
+        "privacy_request.executed",
+        request_id,
+        json!({
+            "patient_id": patient_id,
+            "request_type": request_type,
+            "manual_override": manual_override,
+            "status": "completed",
+            "executed_at": executed_at.to_rfc3339(),
+            "execution": execution.clone(),
+        }),
+    )
+    .await;
 
     Ok(json!({
         "ok": true,

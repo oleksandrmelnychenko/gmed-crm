@@ -1,3 +1,7 @@
+import { useMemo } from "react";
+
+import { DataTableSurface } from "@/components/data-table/data-table-surface";
+import type { ColumnDef } from "@/components/data-table/types";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
@@ -65,7 +69,6 @@ export function DocumentsGrid({
   labels,
   localizeCode,
   onSelectionChange,
-  onToggleSelection,
   onOpenDocument,
   statusBadge,
   visibilityBadge,
@@ -76,169 +79,232 @@ export function DocumentsGrid({
   formatFileSize,
   formatDateTime,
 }: DocumentsGridProps) {
-  return (
-    <div className="rounded-xl border border-border bg-card overflow-hidden">
-      <div className="overflow-x-auto">
-        <table className="w-full text-[13px]">
-          <thead className="bg-muted/40">
-            <tr className="text-left text-[11px] uppercase tracking-wider text-muted-foreground">
-              {showSelection ? (
-                <th className="w-10 px-3 py-2.5">
-                  <input
-                    type="checkbox"
-                    aria-label={labels.selectBulkShare}
-                    checked={
-                      documents.length > 0 &&
-                      documents.every((d) => selectedDocumentIds.includes(d.id))
-                    }
-                    onChange={(event) =>
-                      onSelectionChange(
-                        event.target.checked ? documents.map((d) => d.id) : [],
-                      )
-                    }
-                    className="size-4 rounded border-input"
-                  />
-                </th>
-              ) : null}
-              <th className="px-3 py-2.5 font-medium">{labels.filename}</th>
-              <th className="px-3 py-2.5 font-medium">{labels.patient}</th>
-              <th className="px-3 py-2.5 font-medium">{labels.category}</th>
-              <th className="px-3 py-2.5 font-medium">{labels.status}</th>
-              <th className="px-3 py-2.5 font-medium">{labels.visibility}</th>
-              <th className="px-3 py-2.5 font-medium text-right">{labels.size}</th>
-              <th className="px-3 py-2.5 font-medium">{labels.uploadedBy}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {documents.map((item) => (
-              <tr
-                key={item.id}
-                className={cn(
-                  "group/row border-t border-border transition-colors hover:bg-muted/40 cursor-pointer",
-                  selectedId === item.id && "bg-sky-50/60",
-                )}
-                onClick={() => onOpenDocument(item.id)}
+  const {
+    filename: filenameLabel,
+    patient: patientLabel,
+    category: categoryLabel,
+    status: statusLabel,
+    visibility: visibilityLabel,
+    size: sizeLabel,
+    uploadedBy: uploadedByLabel,
+    unclassified: unclassifiedLabel,
+    current: currentVersionLabel,
+    pidFallback,
+    notSet,
+    unknownUploader,
+    needsCategorization,
+  } = labels;
+
+  const columns = useMemo<ColumnDef<DocumentsGridItem>[]>(() => [
+    {
+      id: "filename",
+      label: filenameLabel,
+      accessor: (item) => localizeCode(item.auto_name),
+      sortable: true,
+      searchable: true,
+      required: true,
+      pinned: "left",
+      width: 300,
+      render: (item) => (
+        <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="truncate font-medium text-foreground">
+              {localizeCode(item.auto_name)}
+            </span>
+            {item.needs_categorization ? (
+              <Badge
+                variant="outline"
+                className="shrink-0 rounded-full border-amber-200 bg-amber-50 text-[10px] text-amber-700"
               >
-                {showSelection ? (
-                  <td
-                    className="w-10 px-3 py-2.5"
-                    onClick={(event) => event.stopPropagation()}
-                  >
-                    <input
-                      type="checkbox"
-                      aria-label={labels.selectBulkShare}
-                      checked={selectedDocumentIds.includes(item.id)}
-                      onChange={(event) =>
-                        onToggleSelection(item.id, event.target.checked)
-                      }
-                      className="size-4 rounded border-input"
-                    />
-                  </td>
-                ) : null}
-                <td className="px-3 py-2.5 min-w-0">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="truncate font-medium text-foreground">
-                      {localizeCode(item.auto_name)}
-                    </span>
-                    {item.needs_categorization ? (
-                      <Badge
-                        variant="outline"
-                        className="rounded-full text-[10px] border-amber-200 bg-amber-50 text-amber-700 shrink-0"
-                      >
-                        {labels.needsCategorization}
-                      </Badge>
-                    ) : null}
-                  </div>
-                  <div className="mt-0.5 flex flex-wrap items-center gap-x-1 text-xs text-muted-foreground">
-                    <span className="truncate">
-                      {item.original_filename ?? labels.unclassified}
-                    </span>
-                    <span className="text-muted-foreground/60">·</span>
-                    <span>v{item.version_number}</span>
-                    {item.is_latest_version ? (
-                      <>
-                        <span className="text-muted-foreground/60">·</span>
-                        <span>{labels.current}</span>
-                      </>
-                    ) : null}
-                  </div>
-                </td>
-                <td className="px-3 py-2.5">
-                  {item.patient_name ? (
-                    <div className="min-w-0">
-                      <span className="font-mono text-xs text-muted-foreground">
-                        {item.patient_pid ?? labels.pidFallback}
-                      </span>
-                      <div className="truncate text-foreground">{item.patient_name}</div>
-                    </div>
-                  ) : (
-                    <span className="text-muted-foreground">{labels.notSet}</span>
-                  )}
-                </td>
-                <td className="px-3 py-2.5">
-                  {item.art || item.category ? (
-                    <div className="min-w-0">
-                      {item.art ? (
-                        <div className="truncate text-foreground">
-                          {localizeCode(item.art)}
-                        </div>
-                      ) : null}
-                      {item.category ? (
-                        <div className="truncate text-xs text-muted-foreground">
-                          {localizeCode(item.category)}
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : (
-                    <span className="text-muted-foreground">{labels.unclassified}</span>
-                  )}
-                </td>
-                <td className="px-3 py-2.5">
-                  <Badge
-                    variant="outline"
-                    className={cn("rounded-full text-[10px]", statusBadge(item.status))}
-                  >
-                    {formatStatusLabel(item.status)}
-                  </Badge>
-                </td>
-                <td className="px-3 py-2.5">
-                  <div className="flex flex-col items-start gap-1">
-                    <Badge
-                      variant="outline"
-                      className={cn(
-                        "rounded-full text-[10px]",
-                        visibilityBadge(item.visibility),
-                      )}
-                    >
-                      {formatVisibilityLabel(item.visibility)}
-                    </Badge>
-                    <Badge
-                      variant="outline"
-                      className={cn(
-                        "rounded-full text-[10px]",
-                        sensitivityBadge(item.data_sensitivity),
-                      )}
-                    >
-                      {formatSensitivityLabel(item.data_sensitivity)}
-                    </Badge>
-                  </div>
-                </td>
-                <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">
-                  {formatFileSize(item.file_size)}
-                </td>
-                <td className="px-3 py-2.5">
-                  <div className="text-foreground truncate">
-                    {item.uploaded_by_name || labels.unknownUploader}
-                  </div>
-                  <div className="text-xs text-muted-foreground">
-                    {formatDateTime(item.updated_at)}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
+                {needsCategorization}
+              </Badge>
+            ) : null}
+          </div>
+          <div className="mt-0.5 flex items-center gap-x-1 text-[11px] text-muted-foreground">
+            <span className="truncate">
+              {item.original_filename ?? unclassifiedLabel}
+            </span>
+            <span className="text-muted-foreground/60">·</span>
+            <span>v{item.version_number}</span>
+            {item.is_latest_version ? (
+              <>
+                <span className="text-muted-foreground/60">·</span>
+                <span>{currentVersionLabel}</span>
+              </>
+            ) : null}
+          </div>
+        </div>
+      ),
+    },
+    {
+      id: "patient",
+      label: patientLabel,
+      accessor: (item) => item.patient_name ?? "",
+      sortable: true,
+      searchable: true,
+      width: 210,
+      render: (item) =>
+        item.patient_name ? (
+          <div className="min-w-0">
+            <span className="font-mono text-[11px] text-muted-foreground">
+              {item.patient_pid ?? pidFallback}
+            </span>
+            <div className="truncate text-xs text-foreground">{item.patient_name}</div>
+          </div>
+        ) : (
+          <span className="text-xs text-muted-foreground">{notSet}</span>
+        ),
+    },
+    {
+      id: "category",
+      label: categoryLabel,
+      accessor: (item) => `${item.art ?? ""} ${item.category ?? ""}`.trim(),
+      sortable: true,
+      searchable: true,
+      width: 210,
+      render: (item) =>
+        item.art || item.category ? (
+          <div className="min-w-0">
+            {item.art ? (
+              <div className="truncate text-xs text-foreground">
+                {localizeCode(item.art)}
+              </div>
+            ) : null}
+            {item.category ? (
+              <div className="truncate text-[11px] text-muted-foreground">
+                {localizeCode(item.category)}
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <span className="text-xs text-muted-foreground">{unclassifiedLabel}</span>
+        ),
+    },
+    {
+      id: "status",
+      label: statusLabel,
+      accessor: (item) => item.status,
+      sortable: true,
+      width: 140,
+      render: (item) => (
+        <Badge
+          variant="outline"
+          className={cn("rounded-full text-[10px]", statusBadge(item.status))}
+        >
+          {formatStatusLabel(item.status)}
+        </Badge>
+      ),
+    },
+    {
+      id: "visibility",
+      label: visibilityLabel,
+      accessor: (item) => `${item.visibility} ${item.data_sensitivity}`,
+      sortable: true,
+      width: 170,
+      render: (item) => (
+        <div className="flex flex-col items-start gap-1">
+          <Badge
+            variant="outline"
+            className={cn("rounded-full text-[10px]", visibilityBadge(item.visibility))}
+          >
+            {formatVisibilityLabel(item.visibility)}
+          </Badge>
+          <Badge
+            variant="outline"
+            className={cn(
+              "rounded-full text-[10px]",
+              sensitivityBadge(item.data_sensitivity),
+            )}
+          >
+            {formatSensitivityLabel(item.data_sensitivity)}
+          </Badge>
+        </div>
+      ),
+    },
+    {
+      id: "size",
+      label: sizeLabel,
+      accessor: (item) => item.file_size,
+      sortable: true,
+      width: 110,
+      render: (item) => (
+        <span className="block text-right tabular-nums text-muted-foreground">
+          {formatFileSize(item.file_size)}
+        </span>
+      ),
+    },
+    {
+      id: "uploaded_by",
+      label: uploadedByLabel,
+      accessor: (item) => item.uploaded_by_name ?? "",
+      sortable: true,
+      searchable: true,
+      width: 210,
+      render: (item) => (
+        <div className="min-w-0">
+          <div className="truncate text-xs text-foreground">
+            {item.uploaded_by_name || unknownUploader}
+          </div>
+          <div className="text-[11px] text-muted-foreground">
+            {formatDateTime(item.updated_at)}
+          </div>
+        </div>
+      ),
+    },
+    {
+      id: "updated_at",
+      label: uploadedByLabel,
+      accessor: (item) => item.updated_at,
+      sortable: true,
+      defaultVisible: false,
+      width: 0,
+    },
+  ], [
+    categoryLabel,
+    currentVersionLabel,
+    filenameLabel,
+    formatDateTime,
+    formatFileSize,
+    formatSensitivityLabel,
+    formatStatusLabel,
+    formatVisibilityLabel,
+    localizeCode,
+    needsCategorization,
+    notSet,
+    patientLabel,
+    pidFallback,
+    sensitivityBadge,
+    sizeLabel,
+    statusBadge,
+    statusLabel,
+    unclassifiedLabel,
+    unknownUploader,
+    uploadedByLabel,
+    visibilityBadge,
+    visibilityLabel,
+  ]);
+
+  return (
+    <DataTableSurface
+      rows={documents}
+      columns={columns}
+      defaultHiddenColumns={["updated_at"]}
+      defaultSort={[{ field: "updated_at", dir: "desc" }]}
+      rowId={(item) => item.id}
+      activeRowId={selectedId}
+      selectionEnabled={showSelection}
+      selectedIds={selectedDocumentIds}
+      onSelectedIdsChange={onSelectionChange}
+      onRowClick={(item) => onOpenDocument(item.id)}
+      tableClassName="min-h-[360px]"
+      footer={({ filteredCount, totalCount }) => (
+        <span className="tabular-nums">
+          {filteredCount === totalCount
+            ? `${totalCount}`
+            : `${filteredCount} / ${totalCount}`}{" "}
+          {filenameLabel.toLowerCase()}
+        </span>
+      )}
+    />
   );
 }

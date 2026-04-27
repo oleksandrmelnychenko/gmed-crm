@@ -22,7 +22,7 @@ import { useSearchParams } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { CaseRosterItem } from "@/components/cases-roster-section";
-import { DataTable } from "@/components/data-table/data-table";
+import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
 import {
   AdminInlineMetric,
@@ -48,6 +48,7 @@ import {
   Sheet,
   SheetContent,
 } from "@/components/ui/sheet";
+import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import {
   getLang,
@@ -55,6 +56,7 @@ import {
   type Translations,
   useLang,
 } from "@/lib/i18n";
+import { useRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
 import {
@@ -478,6 +480,12 @@ const DEFAULT_CASE_TEXT_SNIPPET_FORM: CaseTextSnippetFormState = {
 
 const inputClassName = shellInputClassName;
 const textareaClassName = shellTextareaClass;
+const CASE_REALTIME_EVENTS = [
+  "case.created",
+  "case.updated",
+  "case.medication_expiry_confirmed",
+  "case.medication_expiry_flagged",
+] as const;
 
 function casePermissions(role?: string): CasePermissions {
   return {
@@ -1115,6 +1123,25 @@ export function CasesPage({
     () => doctors.find((doctor) => doctor.id === overviewForm.zuweiser_doctor_id) ?? null,
     [doctors, overviewForm.zuweiser_doctor_id],
   );
+
+  useRealtimeSubscription(CASE_REALTIME_EVENTS, (event) => {
+    if (!permissions.canViewPage) return;
+    clearApiCache("/cases");
+    if (event.entity_type === "case" && event.entity_id) {
+      clearApiCache(`/cases/${event.entity_id}`);
+      clearApiCache(`/cases/${event.entity_id}/history`);
+    }
+    if (selectedId && selectedId !== event.entity_id) {
+      clearApiCache(`/cases/${selectedId}`);
+      clearApiCache(`/cases/${selectedId}/history`);
+    }
+    startTransition(() => {
+      setListVersion((current) => current + 1);
+      if (!selectedId || selectedId === event.entity_id) {
+        setDetailVersion((current) => current + 1);
+      }
+    });
+  });
   const snippetContext = useMemo(
     () => ({
       patientName:
@@ -2118,10 +2145,12 @@ export function CasesPage({
                 <Banner tone="error">{listError}</Banner>
               </div>
             ) : (
-              <DataTable
+              <DataTableSurface
                 rows={cases}
                 columns={caseTableColumns}
                 rowId={(item) => item.id}
+                defaultDensity="comfortable"
+                dictionary={t as unknown as Record<string, string>}
                 activeRowId={selectedId || undefined}
                 onRowClick={(item) => openCase(item.id)}
                 loading={listBusy}
@@ -2153,10 +2182,14 @@ export function CasesPage({
                     }
                   />
                 )}
-                className="min-h-[360px] rounded-none border-0"
-                footer={(
+                tableClassName="min-h-[360px]"
+                footer={({ filteredCount, totalCount }) => (
                   <div className="flex items-center justify-between text-xs text-muted-foreground">
-                    <span className="tabular-nums">{cases.length}</span>
+                    <span className="tabular-nums">
+                      {filteredCount === totalCount
+                        ? `${totalCount}`
+                        : `${filteredCount} / ${totalCount}`}
+                    </span>
                     <span>{t.patients_records}</span>
                   </div>
                 )}

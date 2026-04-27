@@ -4,7 +4,9 @@ import { CalendarClock, LoaderCircle, RefreshCw, Send, Stethoscope } from "lucid
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { clearApiCache } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
+import { useRealtimeSubscription } from "@/lib/realtime";
 import {
   createPortalAppointmentRequest,
   fetchPortalAppointmentsWorkspace,
@@ -57,6 +59,18 @@ function blankRequestForm(): RequestFormState {
   };
 }
 
+const PORTAL_APPOINTMENT_REALTIME_EVENTS = [
+  "appointment.created",
+  "appointment.updated",
+  "appointment.status_changed",
+  "appointment_request.created",
+  "appointment_request.reviewed",
+  "appointment_request.converted",
+  "order.phase_changed",
+  "order.followup_flow_updated",
+  "order.external_invoice_overdue",
+] as const;
+
 export function PatientAppointmentsPage() {
   const { lang } = useLang();
   const [appointments, setAppointments] = useState<PortalAppointmentItem[]>([]);
@@ -75,6 +89,13 @@ export function PatientAppointmentsPage() {
       lang === "de" ? de : lang === "ru" ? ru : en,
     [lang],
   );
+
+  useRealtimeSubscription(PORTAL_APPOINTMENT_REALTIME_EVENTS, () => {
+    clearApiCache("/me/appointments");
+    clearApiCache("/me/appointment-requests");
+    clearApiCache("/me/followup-milestones");
+    setVersion((value) => value + 1);
+  });
 
   useEffect(() => {
     let cancelled = false;

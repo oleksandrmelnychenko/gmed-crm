@@ -15,7 +15,7 @@ export const ru: Translations = {
   nav_logout: "Выход",
   nav_my_documents: "Мои документы",
   nav_my_appointments: "Мои визиты",
-  nav_my_services: "Мои сервисы",
+  nav_my_services: "Concierge",
   nav_my_invoices: "Мои счета",
   nav_my_privacy: "Конфиденциальность",
   nav_my_feedback: "Мой фидбек",

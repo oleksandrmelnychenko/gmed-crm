@@ -8,17 +8,25 @@ import {
   type ReactNode,
 } from "react";
 import { useSearchParams } from "react-router-dom";
-import { CalendarClock, Download, LoaderCircle, Plus, RefreshCw, Search, Wallet } from "lucide-react";
+import {
+  CalendarClock,
+  Download,
+  Filter,
+  LoaderCircle,
+  Plus,
+  RefreshCw,
+  Search,
+  Wallet,
+  X,
+} from "lucide-react";
 
 import {
   AdminInlineMetric,
   AdminSheetScaffold,
-  AdminTableCard,
-  AdminToolbar,
   SheetActionsFooter,
   SheetFormFooter,
 } from "@/components/admin-page-patterns";
-import { DataTable } from "@/components/data-table/data-table";
+import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,8 +47,10 @@ import {
   textareaClass as shellTextareaClass,
   tokens,
 } from "@/components/ui-shell";
+import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
+import { useRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { PatientInvoicesPage } from "@/pages/patients/portal-invoices-page";
 import { cn } from "@/lib/utils";
@@ -94,6 +104,31 @@ import type {
 } from "./model/types";
 const selectClassName = shellSelectClassName;
 const textareaClassName = shellTextareaClass;
+const INVOICE_DEFAULT_FROZEN_COLUMNS = ["invoice_number", "patient_name"];
+const INVOICE_MAX_FROZEN_COLUMNS = 3;
+const INVOICE_COLUMN_GROUPS = {
+  identity: "Identity",
+  context: "Context",
+  status: "Status",
+  finance: "Finance",
+  audit: "Audit",
+};
+const ACCOUNTING_DEFAULT_FROZEN_COLUMNS = ["entry_date", "description"];
+const ACCOUNTING_MAX_FROZEN_COLUMNS = 3;
+const ACCOUNTING_COLUMN_GROUPS = {
+  accounting: "Accounting",
+  context: "Context",
+  finance: "Finance",
+  audit: "Audit",
+};
+
+const STAFF_INVOICE_REALTIME_EVENTS = [
+  "invoice.created",
+  "invoice.status_changed",
+  "invoice.dunning_created",
+  "invoice.overdue_marked",
+  "document.payment_proof_uploaded",
+] as const;
 
 function openPdfBlobPreview(blob: Blob, popupMessage: string) {
   const url = URL.createObjectURL(blob);
@@ -146,7 +181,6 @@ function StaffInvoicesPage() {
   const text = {
     accessDenied: t.invoices_workspace_access_denied,
     workspaceKicker: t.invoices_workspace_kicker,
-    workspaceDescription: t.invoices_workspace_description,
     refresh: t.invoices_workspace_refresh,
     newInvoice: t.invoices_workspace_new_invoice,
     grossTotal: t.invoices_workspace_gross_total,
@@ -156,7 +190,6 @@ function StaffInvoicesPage() {
     quotesReady: t.invoices_workspace_quotes_ready,
     quotesReadyDescription: t.invoices_workspace_quotes_ready_description,
     accountingTitle: t.invoices_workspace_accounting_title,
-    accountingDescription: t.invoices_workspace_accounting_description,
     refreshLedger: t.invoices_workspace_refresh_ledger,
     exportCsv: t.invoices_workspace_export_csv,
     cashIncome: t.invoices_workspace_cash_income,
@@ -353,13 +386,38 @@ function StaffInvoicesPage() {
     const balance = invoices.reduce((sum, invoice) => sum + Number(invoice.balance_due ?? 0), 0);
     return { total: invoiceTotal, paid, sent, gross, balance };
   }, [invoiceTotal, invoices]);
+  const anyQuickFilterActive =
+    filters.search.trim() !== "" ||
+    filters.patientId !== "" ||
+    filters.orderId !== "" ||
+    filters.quoteId !== "" ||
+    filters.status !== "" ||
+    filters.invoiceType !== "";
+
+  useRealtimeSubscription(STAFF_INVOICE_REALTIME_EVENTS, (event) => {
+    if (!access.canView) return;
+    clearApiCache("/invoices");
+    clearApiCache("/invoices/accounting-ledger");
+    if (event.entity_type === "invoice") {
+      clearApiCache(`/invoices/${event.entity_id}`);
+    }
+    if (selectedInvoiceId) {
+      clearApiCache(`/invoices/${selectedInvoiceId}`);
+    }
+    setReloadToken((current) => current + 1);
+  });
+
   const invoiceTableColumns: ColumnDef<InvoiceItem>[] = [
       {
         id: "invoice_number",
         label: t.invoices_number,
         accessor: (row) => row.invoice_number,
+        filterType: "text",
+        group: "identity",
         sortable: true,
+        searchable: true,
         required: true,
+        pinned: "left",
         width: 180,
         render: (row) => (
           <span className="font-mono text-xs font-semibold tracking-[0.14em] text-muted-foreground">
@@ -371,6 +429,8 @@ function StaffInvoicesPage() {
         id: "issued_at",
         label: t.invoices_issued_at,
         accessor: (row) => row.issued_at,
+        filterType: "date",
+        group: "audit",
         sortable: true,
         width: 170,
         render: (row) => formatDateTime(row.issued_at, locale, t.common_not_set),
@@ -379,8 +439,12 @@ function StaffInvoicesPage() {
         id: "patient_name",
         label: t.invoices_patient,
         accessor: (row) => row.patient_name,
+        filterType: "text",
+        group: "identity",
         sortable: true,
+        searchable: true,
         required: true,
+        pinned: "left",
         width: 220,
         render: (row) => (
           <div>
@@ -393,14 +457,20 @@ function StaffInvoicesPage() {
         id: "order_number",
         label: t.orders_title,
         accessor: (row) => row.order_number,
+        filterType: "text",
+        group: "context",
         sortable: true,
+        searchable: true,
         width: 180,
       },
       {
         id: "quote_number",
         label: t.contracts_type,
         accessor: (row) => row.quote_number ?? "",
+        filterType: "text",
+        group: "context",
         sortable: true,
+        searchable: true,
         width: 160,
         render: (row) => row.quote_number ?? t.common_not_set,
       },
@@ -408,6 +478,12 @@ function StaffInvoicesPage() {
         id: "invoice_type",
         label: t.invoices_type,
         accessor: (row) => row.invoice_type,
+        filterType: "enum",
+        filterOptions: INVOICE_TYPES.map((invoiceType) => ({
+          value: invoiceType,
+          label: invoiceTypeLabel(invoiceType),
+        })),
+        group: "status",
         sortable: true,
         width: 140,
         render: (row) => (
@@ -420,6 +496,12 @@ function StaffInvoicesPage() {
         id: "status",
         label: t.invoices_status,
         accessor: (row) => row.status,
+        filterType: "enum",
+        filterOptions: INVOICE_STATUSES.map((status) => ({
+          value: status,
+          label: invoiceStatusLabel(status),
+        })),
+        group: "status",
         sortable: true,
         width: 150,
         render: (row) => (
@@ -432,6 +514,8 @@ function StaffInvoicesPage() {
         id: "due_date",
         label: t.invoices_due_at,
         accessor: (row) => row.due_date ?? "",
+        filterType: "date",
+        group: "audit",
         sortable: true,
         width: 150,
         render: (row) => formatDate(row.due_date, locale, t.common_not_set),
@@ -440,6 +524,8 @@ function StaffInvoicesPage() {
         id: "paid_amount",
         label: t.invoices_paid,
         accessor: (row) => Number(row.paid_amount ?? 0),
+        filterType: "number",
+        group: "finance",
         sortable: true,
         width: 140,
         render: (row) => (
@@ -452,6 +538,8 @@ function StaffInvoicesPage() {
         id: "balance_due",
         label: text.balance,
         accessor: (row) => Number(row.balance_due ?? 0),
+        filterType: "number",
+        group: "finance",
         sortable: true,
         width: 140,
         render: (row) => (
@@ -464,6 +552,8 @@ function StaffInvoicesPage() {
         id: "total_gross",
         label: t.invoices_total,
         accessor: (row) => Number(row.total_gross ?? 0),
+        filterType: "number",
+        group: "finance",
         sortable: true,
         width: 150,
         render: (row) => (
@@ -478,8 +568,11 @@ function StaffInvoicesPage() {
       id: "entry_date",
       label: text.ledgerDate,
       accessor: (row) => row.entry_date,
+      filterType: "date",
+      group: "audit",
       sortable: true,
       required: true,
+      pinned: "left",
       width: 130,
       render: (row) => formatDate(row.entry_date, locale, t.common_not_set),
     },
@@ -487,6 +580,12 @@ function StaffInvoicesPage() {
       id: "direction",
       label: text.ledgerDirection,
       accessor: (row) => row.direction,
+      filterType: "enum",
+      filterOptions: ["income", "expense"].map((direction) => ({
+        value: direction,
+        label: accountingDirectionLabel(direction),
+      })),
+      group: "accounting",
       sortable: true,
       width: 130,
       render: (row) => (
@@ -499,7 +598,10 @@ function StaffInvoicesPage() {
       id: "invoice_number",
       label: t.invoices_number,
       accessor: (row) => row.invoice_number ?? row.external_invoice_number ?? "",
+      filterType: "text",
+      group: "context",
       sortable: true,
+      searchable: true,
       width: 170,
       render: (row) => (
         <span className="font-mono text-xs text-muted-foreground">
@@ -511,7 +613,11 @@ function StaffInvoicesPage() {
       id: "description",
       label: text.ledgerEntry,
       accessor: (row) => row.description,
+      filterType: "text",
+      group: "accounting",
       sortable: true,
+      searchable: true,
+      pinned: "left",
       width: 260,
       render: (row) => (
         <span className="block truncate text-sm text-foreground">{row.description}</span>
@@ -521,6 +627,8 @@ function StaffInvoicesPage() {
       id: "category",
       label: text.ledgerCategory,
       accessor: (row) => row.category,
+      filterType: "text",
+      group: "accounting",
       sortable: true,
       width: 150,
     },
@@ -528,7 +636,10 @@ function StaffInvoicesPage() {
       id: "order_number",
       label: t.orders_title,
       accessor: (row) => row.order_number ?? "",
+      filterType: "text",
+      group: "context",
       sortable: true,
+      searchable: true,
       width: 160,
       render: (row) => row.order_number ?? text.noOrder,
     },
@@ -536,7 +647,10 @@ function StaffInvoicesPage() {
       id: "patient_name",
       label: t.invoices_patient,
       accessor: (row) => row.patient_name ?? "",
+      filterType: "text",
+      group: "context",
       sortable: true,
+      searchable: true,
       width: 210,
       render: (row) =>
         row.patient_name ? `${row.patient_name}${row.patient_pid ? ` (${row.patient_pid})` : ""}` : text.noPatient,
@@ -545,6 +659,8 @@ function StaffInvoicesPage() {
       id: "amount_net",
       label: text.net,
       accessor: (row) => Number(row.amount_net ?? 0),
+      filterType: "number",
+      group: "finance",
       sortable: true,
       width: 130,
       render: (row) => (
@@ -557,6 +673,8 @@ function StaffInvoicesPage() {
       id: "amount_vat",
       label: t.invoices_vat,
       accessor: (row) => Number(row.amount_vat ?? 0),
+      filterType: "number",
+      group: "finance",
       sortable: true,
       width: 130,
       render: (row) => (
@@ -569,6 +687,8 @@ function StaffInvoicesPage() {
       id: "amount_gross",
       label: text.gross,
       accessor: (row) => Number(row.amount_gross ?? 0),
+      filterType: "number",
+      group: "finance",
       sortable: true,
       width: 140,
       render: (row) => (
@@ -583,8 +703,11 @@ function StaffInvoicesPage() {
       id: "period",
       label: text.ledgerPeriod,
       accessor: (row) => row.period,
+      filterType: "text",
+      group: "audit",
       sortable: true,
       required: true,
+      pinned: "left",
       width: 160,
       render: (row) => <span className="font-medium text-foreground">{row.period}</span>,
     },
@@ -592,6 +715,8 @@ function StaffInvoicesPage() {
       id: "income_gross",
       label: text.income,
       accessor: (row) => Number(row.income_gross ?? 0),
+      filterType: "number",
+      group: "finance",
       sortable: true,
       width: 170,
       render: (row) => (
@@ -604,6 +729,8 @@ function StaffInvoicesPage() {
       id: "expense_gross",
       label: text.expense,
       accessor: (row) => Number(row.expense_gross ?? 0),
+      filterType: "number",
+      group: "finance",
       sortable: true,
       width: 170,
       render: (row) => (
@@ -616,6 +743,8 @@ function StaffInvoicesPage() {
       id: "net_surplus",
       label: text.surplus,
       accessor: (row) => Number(row.net_surplus ?? 0),
+      filterType: "number",
+      group: "finance",
       sortable: true,
       width: 180,
       render: (row) => {
@@ -854,18 +983,8 @@ function StaffInvoicesPage() {
       <div className="space-y-6">
         <PageHeader
           title={t.invoices_title}
-          description={text.workspaceDescription}
           actions={(
             <>
-              <Button
-                type="button"
-                variant="outline"
-                className="rounded-lg"
-                onClick={() => setReloadToken((current) => current + 1)}
-              >
-                <RefreshCw className="mr-2 size-4" />
-                {text.refresh}
-              </Button>
               {access.canCreate ? (
                 <Button
                   type="button"
@@ -918,30 +1037,30 @@ function StaffInvoicesPage() {
         {access.canAccounting ? (
           <SectionCard
             title={text.accountingTitle}
-            description={text.accountingDescription}
             action={
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center gap-1.5">
                 <Input
                   type="number"
                   min="2020"
                   max="2100"
                   value={accountingYear}
                   onChange={(event) => setAccountingYear(event.target.value || currentYear)}
-                  className={cn(shellInputClassName, "w-28")}
+                  className={cn(shellInputClassName, "h-8 w-24 rounded-lg bg-background text-[13px]")}
                 />
                 <Button
                   type="button"
                   variant="outline"
-                  className="rounded-lg"
+                  size="icon-sm"
+                  title={text.refreshLedger}
+                  aria-label={text.refreshLedger}
                   onClick={() => setReloadToken((current) => current + 1)}
                 >
-                  <RefreshCw className="mr-2 size-4" />
-                  {text.refreshLedger}
+                  <RefreshCw className={cn("size-3.5", accountingBusy && "animate-spin")} />
                 </Button>
                 <Button
                   type="button"
                   variant="outline"
-                  className="rounded-lg"
+                  size="sm"
                   onClick={() =>
                     void downloadAccountingLedgerExport(accountingYear).catch((error) =>
                       setAccountingError(
@@ -950,7 +1069,7 @@ function StaffInvoicesPage() {
                     )
                   }
                 >
-                  <Download className="mr-2 size-4" />
+                  <Download className="size-3.5" />
                   {text.exportCsv}
                 </Button>
               </div>
@@ -980,11 +1099,16 @@ function StaffInvoicesPage() {
                     value={formatMoney(accountingSummary.cost_passthrough_revenue_gross)}
                   />
                 </div>
-                <DataTable
+                <DataTableSurface
                   rows={accountingEntries}
                   columns={accountingTableColumns}
                   rowId={(row) => row.id}
-                  density="compact"
+                  defaultDensity="compact"
+                  defaultFrozenColumns={ACCOUNTING_DEFAULT_FROZEN_COLUMNS}
+                  dictionary={t as unknown as Record<string, string>}
+                  groupLabels={ACCOUNTING_COLUMN_GROUPS}
+                  maxFrozenColumns={ACCOUNTING_MAX_FROZEN_COLUMNS}
+                  toolbarClassName="border-b border-border/70 bg-card px-3 py-2"
                   rowAccent={(row) => (row.direction === "income" ? "bg-emerald-500" : "bg-rose-500")}
                   emptyState={
                     <EmptyState
@@ -995,11 +1119,16 @@ function StaffInvoicesPage() {
                 />
                 <div className="space-y-3">
                   <div className={tokens.text.eyebrow}>{text.monthlyEuer}</div>
-                  <DataTable
+                  <DataTableSurface
                     rows={accountingMonthly}
                     columns={accountingMonthlyTableColumns}
                     rowId={(row) => row.period}
-                    density="compact"
+                    defaultDensity="compact"
+                    defaultFrozenColumns={["period"]}
+                    dictionary={t as unknown as Record<string, string>}
+                    groupLabels={ACCOUNTING_COLUMN_GROUPS}
+                    maxFrozenColumns={2}
+                    toolbarClassName="border-b border-border/70 bg-card px-3 py-2"
                     rowAccent={(row) => {
                       const value = Number(row.net_surplus ?? 0);
                       if (value > 0) return "bg-emerald-500";
@@ -1021,263 +1150,285 @@ function StaffInvoicesPage() {
 
         {optionsError ? <ShellBanner tone="error">{optionsError}</ShellBanner> : null}
 
-        <AdminTableCard
-          title={titleWithDot(t.invoices_title)}
-          description={t.invoices_subtitle}
-          count={invoiceTotal}
-        >
-          <div className="space-y-4 border-b border-border px-4 py-4">
-            <AdminToolbar className="gap-2">
-              <div className="relative min-w-[260px] flex-1">
-                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={filters.search}
-                  onChange={(event) => startTransition(() => {
-                    setFilters((current) => ({ ...current, search: event.target.value }));
+        <div className="overflow-hidden rounded-xl border border-border bg-card">
+          <div className="relative z-30 flex flex-wrap items-center gap-1.5 border-b border-border/70 bg-card px-3 py-2">
+            <div className="relative min-w-[220px] flex-1 sm:max-w-sm">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={filters.search}
+                onChange={(event) => startTransition(() => {
+                  setFilters((current) => ({ ...current, search: event.target.value }));
+                  setInvoicePage(1);
+                })}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    setFilters((current) => ({ ...current, search: "" }));
                     setInvoicePage(1);
-                  })}
-                  className={cn(shellInputClassName, "pl-9")}
-                  placeholder={text.searchPlaceholder}
-                />
-              </div>
-              <div className="w-[220px] min-w-[220px]">
-                <ShadSelect
-                  value={filters.patientId || "__all__"}
-                  onValueChange={(value) => {
-                    const patientId = value && value !== "__all__" ? value : "";
-                    setFilters((current) => ({
-                      ...current,
-                      patientId,
-                      orderId:
-                        current.orderId &&
-                        orders.some((order) => order.id === current.orderId && order.patient_id === patientId)
-                          ? current.orderId
-                          : "",
-                      quoteId:
-                        current.quoteId &&
-                        quotes.some((quote) => quote.id === current.quoteId && quote.patient_id === patientId)
-                          ? current.quoteId
-                          : "",
-                    }));
-                    setInvoicePage(1);
-                    syncQuery({ patient: patientId || null, order: null, quote: null });
-                  }}
-                >
-                  <SelectTrigger className={cn(selectClassName, "w-[220px] min-w-[220px]")}>
-                    <SelectValue>
-                      {selectedFilterPatient
-                        ? `${selectedFilterPatient.patient_id} | ${[
-                            selectedFilterPatient.first_name,
-                            selectedFilterPatient.last_name,
-                          ]
-                            .filter(Boolean)
-                            .join(" ")}`
-                        : t.providers_all}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__all__">{t.providers_all}</SelectItem>
-                    {patients.map((patient) => (
-                      <SelectItem key={patient.id} value={patient.id}>
-                        {`${patient.patient_id} | ${[patient.first_name, patient.last_name].filter(Boolean).join(" ")}`}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </ShadSelect>
-              </div>
-              <div className="w-[220px] min-w-[220px]">
-                <ShadSelect
-                  value={filters.orderId || "__all__"}
-                  onValueChange={(value) => {
-                    const orderId = value && value !== "__all__" ? value : "";
-                    setFilters((current) => ({
-                      ...current,
-                      orderId,
-                      quoteId:
-                        current.quoteId &&
-                        quotes.some((quote) => quote.id === current.quoteId && quote.order_id === orderId)
-                          ? current.quoteId
-                          : "",
-                    }));
-                    setInvoicePage(1);
-                    syncQuery({ order: orderId || null, quote: null });
-                  }}
-                >
-                  <SelectTrigger className={cn(selectClassName, "w-[220px] min-w-[220px]")}>
-                    <SelectValue>
-                      {selectedFilterOrder
-                        ? `${selectedFilterOrder.order_number} | ${selectedFilterOrder.patient_pid} | ${selectedFilterOrder.patient_name}`
-                        : text.allOrders}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__all__">{text.allOrders}</SelectItem>
-                    {filteredOrders.map((order) => (
-                      <SelectItem key={order.id} value={order.id}>
-                        {`${order.order_number} | ${order.patient_pid} | ${order.patient_name}`}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </ShadSelect>
-              </div>
-              <div className="w-[220px] min-w-[220px]">
-                <ShadSelect
-                  value={filters.quoteId || "__all__"}
-                  onValueChange={(value) => {
-                    const quoteId = value && value !== "__all__" ? value : "";
-                    setFilters((current) => ({ ...current, quoteId }));
-                    setInvoicePage(1);
-                    syncQuery({ quote: quoteId || null });
-                  }}
-                >
-                  <SelectTrigger className={cn(selectClassName, "w-[220px] min-w-[220px]")}>
-                    <SelectValue>
-                      {selectedFilterQuote
-                        ? `${selectedFilterQuote.quote_number} | ${selectedFilterQuote.order_number} | ${selectedFilterQuote.patient_pid}`
-                        : text.allQuotes}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__all__">{text.allQuotes}</SelectItem>
-                    {filteredQuotes.map((quote) => (
-                      <SelectItem key={quote.id} value={quote.id}>
-                        {`${quote.quote_number} | ${quote.order_number} | ${quote.patient_pid}`}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </ShadSelect>
-              </div>
-              <div className="w-[180px] min-w-[180px]">
-                <ShadSelect
-                  value={filters.status || "__all__"}
-                  onValueChange={(value) => {
-                    setFilters((current) => ({
-                      ...current,
-                      status: value && value !== "__all__" ? value : "",
-                    }));
-                    setInvoicePage(1);
-                  }}
-                >
-                  <SelectTrigger className={cn(selectClassName, "w-[180px] min-w-[180px]")}>
-                    <SelectValue>
-                      {filters.status ? invoiceStatusLabel(filters.status) : t.providers_all}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__all__">{t.providers_all}</SelectItem>
-                    {INVOICE_STATUSES.map((status) => (
-                      <SelectItem key={status} value={status}>
-                        {invoiceStatusLabel(status)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </ShadSelect>
-              </div>
-              <div className="w-[180px] min-w-[180px]">
-                <ShadSelect
-                  value={filters.invoiceType || "__all__"}
-                  onValueChange={(value) => {
-                    setFilters((current) => ({
-                      ...current,
-                      invoiceType: value && value !== "__all__" ? value : "",
-                    }));
-                    setInvoicePage(1);
-                  }}
-                >
-                  <SelectTrigger className={cn(selectClassName, "w-[180px] min-w-[180px]")}>
-                    <SelectValue>
-                      {filters.invoiceType
-                        ? invoiceTypeLabel(filters.invoiceType)
-                        : t.providers_all}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__all__">{t.providers_all}</SelectItem>
-                    {INVOICE_TYPES.map((invoiceType) => (
-                      <SelectItem key={invoiceType} value={invoiceType}>
-                        {invoiceTypeLabel(invoiceType)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </ShadSelect>
-              </div>
+                    (event.target as HTMLInputElement).blur();
+                  }
+                }}
+                className={cn(shellInputClassName, "h-8 rounded-lg bg-background pl-8 text-[13px]")}
+                placeholder={text.searchPlaceholder}
+              />
+            </div>
+
+            <ShadSelect
+              value={filters.patientId || "__all__"}
+              onValueChange={(value) => {
+                const patientId = value && value !== "__all__" ? value : "";
+                setFilters((current) => ({
+                  ...current,
+                  patientId,
+                  orderId:
+                    current.orderId &&
+                    orders.some((order) => order.id === current.orderId && order.patient_id === patientId)
+                      ? current.orderId
+                      : "",
+                  quoteId:
+                    current.quoteId &&
+                    quotes.some((quote) => quote.id === current.quoteId && quote.patient_id === patientId)
+                      ? current.quoteId
+                      : "",
+                }));
+                setInvoicePage(1);
+                syncQuery({ patient: patientId || null, order: null, quote: null });
+              }}
+            >
+              <SelectTrigger size="sm" className="h-8 w-[210px] bg-background text-[13px]">
+                <SelectValue>
+                  {selectedFilterPatient
+                    ? `${selectedFilterPatient.patient_id} | ${[
+                        selectedFilterPatient.first_name,
+                        selectedFilterPatient.last_name,
+                      ]
+                        .filter(Boolean)
+                        .join(" ")}`
+                    : t.invoices_patient}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">{t.providers_all}</SelectItem>
+                {patients.map((patient) => (
+                  <SelectItem key={patient.id} value={patient.id}>
+                    {`${patient.patient_id} | ${[patient.first_name, patient.last_name].filter(Boolean).join(" ")}`}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </ShadSelect>
+
+            <ShadSelect
+              value={filters.orderId || "__all__"}
+              onValueChange={(value) => {
+                const orderId = value && value !== "__all__" ? value : "";
+                setFilters((current) => ({
+                  ...current,
+                  orderId,
+                  quoteId:
+                    current.quoteId &&
+                    quotes.some((quote) => quote.id === current.quoteId && quote.order_id === orderId)
+                      ? current.quoteId
+                      : "",
+                }));
+                setInvoicePage(1);
+                syncQuery({ order: orderId || null, quote: null });
+              }}
+            >
+              <SelectTrigger size="sm" className="h-8 w-[210px] bg-background text-[13px]">
+                <SelectValue>
+                  {selectedFilterOrder
+                    ? `${selectedFilterOrder.order_number} | ${selectedFilterOrder.patient_pid}`
+                    : text.allOrders}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">{text.allOrders}</SelectItem>
+                {filteredOrders.map((order) => (
+                  <SelectItem key={order.id} value={order.id}>
+                    {`${order.order_number} | ${order.patient_pid} | ${order.patient_name}`}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </ShadSelect>
+
+            <ShadSelect
+              value={filters.quoteId || "__all__"}
+              onValueChange={(value) => {
+                const quoteId = value && value !== "__all__" ? value : "";
+                setFilters((current) => ({ ...current, quoteId }));
+                setInvoicePage(1);
+                syncQuery({ quote: quoteId || null });
+              }}
+            >
+              <SelectTrigger size="sm" className="h-8 w-[190px] bg-background text-[13px]">
+                <SelectValue>
+                  {selectedFilterQuote
+                    ? `${selectedFilterQuote.quote_number} | ${selectedFilterQuote.patient_pid}`
+                    : text.allQuotes}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">{text.allQuotes}</SelectItem>
+                {filteredQuotes.map((quote) => (
+                  <SelectItem key={quote.id} value={quote.id}>
+                    {`${quote.quote_number} | ${quote.order_number} | ${quote.patient_pid}`}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </ShadSelect>
+
+            <ShadSelect
+              value={filters.status || "__all__"}
+              onValueChange={(value) => {
+                setFilters((current) => ({
+                  ...current,
+                  status: value && value !== "__all__" ? value : "",
+                }));
+                setInvoicePage(1);
+              }}
+            >
+              <SelectTrigger size="sm" className="h-8 w-[160px] bg-background text-[13px]">
+                <Filter className="mr-1 size-3.5 text-muted-foreground" />
+                <SelectValue>
+                  {filters.status ? invoiceStatusLabel(filters.status) : t.invoices_status}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">{t.providers_all}</SelectItem>
+                {INVOICE_STATUSES.map((status) => (
+                  <SelectItem key={status} value={status}>
+                    {invoiceStatusLabel(status)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </ShadSelect>
+
+            <ShadSelect
+              value={filters.invoiceType || "__all__"}
+              onValueChange={(value) => {
+                setFilters((current) => ({
+                  ...current,
+                  invoiceType: value && value !== "__all__" ? value : "",
+                }));
+                setInvoicePage(1);
+              }}
+            >
+              <SelectTrigger size="sm" className="h-8 w-[150px] bg-background text-[13px]">
+                <SelectValue>
+                  {filters.invoiceType
+                    ? invoiceTypeLabel(filters.invoiceType)
+                    : t.invoices_type}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">{t.providers_all}</SelectItem>
+                {INVOICE_TYPES.map((invoiceType) => (
+                  <SelectItem key={invoiceType} value={invoiceType}>
+                    {invoiceTypeLabel(invoiceType)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </ShadSelect>
+
+            <div className="ml-auto flex items-center gap-1">
               <Button
                 type="button"
                 variant="outline"
-                className="h-9 rounded-lg px-3.5"
-                onClick={() => {
-                  setFilters({
-                    ...DEFAULT_FILTERS,
-                    patientId: searchParams.get("patient") ?? "",
-                    orderId: searchParams.get("order") ?? "",
-                    quoteId: searchParams.get("quote") ?? "",
-                  });
-                  setInvoicePage(1);
-                }}
+                size="icon-sm"
+                title={text.refresh}
+                aria-label={text.refresh}
+                onClick={() => setReloadToken((current) => current + 1)}
               >
-                {t.access_reset}
+                <RefreshCw className={cn("size-3.5", listBusy && "animate-spin")} />
               </Button>
-            </AdminToolbar>
-          </div>
-
-          <div className="space-y-3 p-4">
-            {listError ? <ShellBanner tone="error">{listError}</ShellBanner> : null}
-            <DataTable
-              rows={invoices}
-              columns={invoiceTableColumns}
-              rowId={(row) => row.id}
-              density="compact"
-              loading={listBusy}
-              activeRowId={selectedInvoiceId || null}
-              onRowClick={(row) => openInvoice(row.id)}
-              rowAccent={(row) => {
-                if (row.id === selectedInvoiceId) return "bg-sky-500";
-                if (row.status === "overdue") return "bg-rose-500";
-                if (row.status === "paid") return "bg-emerald-500";
-                return null;
-              }}
-              emptyState={
-                <EmptyState
-                  title={t.common_not_set}
-                  description={text.emptyInvoicesDescription}
-                  action={
-                    access.canCreate ? (
-                      <Button type="button" onClick={() => setCreateOpen(true)}>
-                        <Plus className="mr-2 size-4" />
-                        {t.invoices_new}
-                      </Button>
-                    ) : null
-                  }
-                />
-              }
-              footer={`${text.pageLabel} ${invoicePage} ${text.pageOf} ${invoiceTotalPages} | ${invoiceTotal} ${text.invoiceCount}`}
-            />
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
-              <div className="flex gap-2">
+              {anyQuickFilterActive ? (
                 <Button
                   type="button"
-                  variant="outline"
-                  className="rounded-lg"
-                  disabled={listBusy || invoicePage <= 1}
-                  onClick={() => setInvoicePage((current) => Math.max(1, current - 1))}
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setFilters(DEFAULT_FILTERS);
+                    setInvoicePage(1);
+                    syncQuery({ patient: null, order: null, quote: null, page: null });
+                  }}
                 >
-                  {text.previous}
+                  <X className="size-3.5" />
+                  {t.common_reset}
                 </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="rounded-lg"
-                  disabled={listBusy || invoicePage >= invoiceTotalPages}
-                  onClick={() =>
-                    setInvoicePage((current) => Math.min(invoiceTotalPages, current + 1))
-                  }
-                >
-                  {text.next}
-                </Button>
-              </div>
+              ) : null}
             </div>
           </div>
-        </AdminTableCard>
+
+          {listError ? (
+            <div className="border-b border-border/70 px-3 py-2">
+              <ShellBanner tone="error">{listError}</ShellBanner>
+            </div>
+          ) : null}
+          <DataTableSurface
+            rows={invoices}
+            columns={invoiceTableColumns}
+            rowId={(row) => row.id}
+            defaultDensity="compact"
+            defaultFrozenColumns={INVOICE_DEFAULT_FROZEN_COLUMNS}
+            dictionary={t as unknown as Record<string, string>}
+            groupLabels={INVOICE_COLUMN_GROUPS}
+            loading={listBusy}
+            maxFrozenColumns={INVOICE_MAX_FROZEN_COLUMNS}
+            toolbarClassName="border-b border-border/70 bg-card px-3 py-2"
+            activeRowId={selectedInvoiceId || null}
+            onRowClick={(row) => openInvoice(row.id)}
+            rowAccent={(row) => {
+              if (row.id === selectedInvoiceId) return "bg-sky-500";
+              if (row.status === "overdue") return "bg-rose-500";
+              if (row.status === "paid") return "bg-emerald-500";
+              return null;
+            }}
+            emptyState={
+              <EmptyState
+                title={t.common_not_set}
+                description={text.emptyInvoicesDescription}
+                action={
+                  access.canCreate ? (
+                    <Button type="button" onClick={() => setCreateOpen(true)}>
+                      <Plus className="mr-2 size-4" />
+                      {t.invoices_new}
+                    </Button>
+                  ) : null
+                }
+              />
+            }
+            footer={({ filteredCount, totalCount }) => {
+              const pageRowsLabel =
+                filteredCount === totalCount
+                  ? `${totalCount}`
+                  : `${filteredCount} / ${totalCount}`;
+              return `${text.pageLabel} ${invoicePage} ${text.pageOf} ${invoiceTotalPages} | ${pageRowsLabel} / ${invoiceTotal} ${text.invoiceCount}`;
+            }}
+          />
+          <div className="flex flex-col gap-3 border-t border-border/70 px-3 py-2 sm:flex-row sm:items-center sm:justify-end">
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={listBusy || invoicePage <= 1}
+                onClick={() => setInvoicePage((current) => Math.max(1, current - 1))}
+              >
+                {text.previous}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={listBusy || invoicePage >= invoiceTotalPages}
+                onClick={() =>
+                  setInvoicePage((current) => Math.min(invoiceTotalPages, current + 1))
+                }
+              >
+                {text.next}
+              </Button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <Sheet open={createOpen} onOpenChange={setCreateOpen}>
@@ -1454,7 +1605,7 @@ function StaffInvoicesPage() {
                   </div>
                 </SectionCard>
 
-                <SectionCard title={t.invoices_status} description={t.invoices_subtitle}>
+                <SectionCard title={t.invoices_status}>
                   {statusError ? <ShellBanner tone="error">{statusError}</ShellBanner> : null}
                   <div className="grid gap-4 sm:grid-cols-2">
                     <Field label={t.users_status}>
@@ -1630,15 +1781,6 @@ function SectionCard({ title, description, action, children }: { title: string; 
       </div>
       <div className="px-4 py-4">{children}</div>
     </section>
-  );
-}
-
-function titleWithDot(title: ReactNode) {
-  return (
-    <span className="inline-flex items-center gap-2">
-      <span aria-hidden className="size-1.5 rounded-full bg-primary/70" />
-      <span>{title}</span>
-    </span>
   );
 }
 

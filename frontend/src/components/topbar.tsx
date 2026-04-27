@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   Bell,
@@ -11,9 +11,11 @@ import {
   MessageSquare,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
+import { clearApiCache } from "@/lib/api";
 import { useNavState } from "@/lib/nav-state";
 import { staffHrefIfAllowed } from "@/lib/staff-route-access";
 import { useLang } from "@/lib/i18n";
+import { useRealtimeSubscription } from "@/lib/realtime";
 import {
   fetchNotificationPanelWorkspace,
   fetchTopbarChatMessages,
@@ -27,6 +29,15 @@ import {
   type ChatMessage,
   type Notification,
 } from "@/components/topbar-data";
+
+const TOPBAR_REALTIME_EVENTS = [
+  "notification.created",
+  "notification.read",
+  "notifications.read_all",
+  "announcement.created",
+  "announcement.updated",
+  "announcement.deleted",
+] as const;
 
 function initials(name: string) {
   return name
@@ -60,6 +71,12 @@ function notificationHref(item: Notification) {
   if (item.entity_type === "provider") return `/providers?provider=${item.entity_id}`;
   if (item.entity_type === "order") return `/orders?order=${item.entity_id}`;
   if (item.entity_type === "appointment") return `/appointments?appointment=${item.entity_id}`;
+  if (item.entity_type === "appointment_request") return "/appointments";
+  if (item.entity_type === "concierge_service") return "/services";
+  if (item.entity_type === "document") return `/documents?document=${item.entity_id}`;
+  if (item.entity_type === "invoice") return `/invoices?invoice=${item.entity_id}`;
+  if (item.entity_type === "privacy_request") return "/admin/compliance";
+  if (item.entity_type === "feedback") return "/feedback";
   if (item.entity_type === "case") return `/cases?case=${item.entity_id}`;
   return null;
 }
@@ -115,6 +132,19 @@ export function Topbar() {
       window.clearInterval(timer);
     };
   }, [isPatientPortal]);
+
+  useRealtimeSubscription(TOPBAR_REALTIME_EVENTS, (event) => {
+    if (isPatientPortal) return;
+    if (event.type.startsWith("announcement.")) {
+      clearApiCache("/announcements/active");
+      return;
+    }
+    clearApiCache("/notifications");
+    void fetchTopbarPresence().then((presence) => {
+      setUnread(presence.unreadCount);
+      setOnlineUsers(presence.onlineUsers);
+    });
+  });
 
   const toggleLang = () => {
     setLang(lang === "de" ? "ru" : "de");
@@ -274,7 +304,7 @@ function NotificationPanel({
   const [notifs, setNotifs] = useState<Notification[]>([]);
   const [announcements, setAnnouncements] = useState<ActiveAnnouncement[]>([]);
 
-  useEffect(() => {
+  const loadWorkspace = useCallback(() => {
     fetchNotificationPanelWorkspace()
       .then((workspace) => {
         setNotifs(workspace.notifications);
@@ -282,6 +312,19 @@ function NotificationPanel({
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    loadWorkspace();
+  }, [loadWorkspace]);
+
+  useRealtimeSubscription(TOPBAR_REALTIME_EVENTS, (event) => {
+    if (event.type.startsWith("announcement.")) {
+      clearApiCache("/announcements/active");
+    } else {
+      clearApiCache("/notifications");
+    }
+    loadWorkspace();
+  });
 
   const markAll = () => {
     markAllNotificationsRead().catch(() => {});
@@ -418,6 +461,22 @@ function UsersPanel({
       .then(() => fetchTopbarChatMessages(uid).then(setChatMsgs))
       .catch(() => {});
   };
+
+  useRealtimeSubscription(TOPBAR_REALTIME_EVENTS, (event) => {
+    if (!chatUser || event.type !== "notification.created") return;
+    if (
+      event.payload?.entity_type !== "message_peer" ||
+      event.payload?.entity_id !== chatUser.user_id
+    ) {
+      return;
+    }
+
+    clearApiCache(`/messages/${chatUser.user_id}`);
+    fetchTopbarChatMessages(chatUser.user_id)
+      .then(setChatMsgs)
+      .then(() => markTopbarChatRead(chatUser.user_id))
+      .catch(() => {});
+  });
 
   useEffect(() => {
     bodyRef.current?.scrollTo(0, bodyRef.current.scrollHeight);

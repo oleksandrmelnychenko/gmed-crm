@@ -1,0 +1,238 @@
+{
+  "summaries": [
+    {
+      "route": "/",
+      "file": "docs/testing/table-screenshots/dashboard.png",
+      "tables": 1,
+      "rows": 6,
+      "controlButtons": [
+        "Фильтр",
+        "Сортировка",
+        "Колонки (4 / 4)1"
+      ],
+      "pageErrors": 0,
+      "consoleErrors": 2
+    },
+    {
+      "route": "/patients",
+      "file": "docs/testing/table-screenshots/patients.png",
+      "tables": 1,
+      "rows": 15,
+      "controlButtons": [
+        "Фильтр",
+        "Колонки (8 / 15)2"
+      ],
+      "pageErrors": 0,
+      "consoleErrors": 2
+    },
+    {
+      "route": "/providers",
+      "file": "docs/testing/table-screenshots/providers.png",
+      "tables": 1,
+      "rows": 7,
+      "controlButtons": [
+        "Колонки (12 / 18)1",
+        "Filter"
+      ],
+      "pageErrors": 0,
+      "consoleErrors": 2
+    },
+    {
+      "route": "/leads",
+      "file": "docs/testing/table-screenshots/leads.png",
+      "tables": 1,
+      "rows": 11,
+      "controlButtons": [
+        "Фильтр",
+        "Сортировка",
+        "Колонки (9 / 9)1"
+      ],
+      "pageErrors": 0,
+      "consoleErrors": 2
+    },
+    {
+      "route": "/cases",
+      "file": "docs/testing/table-screenshots/cases.png",
+      "tables": 1,
+      "rows": 12,
+      "controlButtons": [
+        "Фильтр",
+        "Сортировка",
+        "Колонки (6 / 6)0"
+      ],
+      "pageErrors": 0,
+      "consoleErrors": 2
+    },
+    {
+      "route": "/orders",
+      "file": "docs/testing/table-screenshots/orders.png",
+      "tables": 1,
+      "rows": 11,
+      "controlButtons": [
+        "Фильтр",
+        "Сортировка",
+        "Колонки (6 / 6)0"
+      ],
+      "pageErrors": 0,
+      "consoleErrors": 2
+    },
+    {
+      "route": "/contracts",
+      "file": "docs/testing/table-screenshots/contracts.png",
+      "tables": 2,
+      "rows": 10,
+      "controlButtons": [
+        "Фильтр",
+        "Сортировка",
+        "Колонки (8 / 8)0"
+      ],
+      "pageErrors": 0,
+      "consoleErrors": 2
+    },
+    {
+      "route": "/invoices",
+      "file": "docs/testing/table-screenshots/invoices.png",
+      "tables": 3,
+      "rows": 13,
+      "controlButtons": [
+        "Фильтр",
+        "Сортировка",
+        "Колонки (10 / 10)0",
+        "Колонки (4 / 4)0",
+        "Колонки (11 / 11)0"
+      ],
+      "pageErrors": 0,
+      "consoleErrors": 2
+    },
+    {
+      "route": "/documents",
+      "file": "docs/testing/table-screenshots/documents.png",
+      "tables": 1,
+      "rows": 13,
+      "controlButtons": [
+        "Сбросить фильтры",
+        "Filter",
+        "Columns (7 / 8)1"
+      ],
+      "pageErrors": 0,
+      "consoleErrors": 2
+    },
+    {
+      "route": "/admin/access",
+      "file": "docs/testing/table-screenshots/admin-access.png",
+      "tables": 1,
+      "rows": 14,
+      "controlButtons": [
+        "Фильтр",
+        "Сортировка",
+        "Колонки (8 / 8)1"
+      ],
+      "pageErrors": 0,
+      "consoleErrors": 2
+    },
+    {
+      "route": "/admin/activity",
+      "file": "docs/testing/table-screenshots/admin-activity.png",
+      "tables": 1,
+      "rows": 301,
+      "controlButtons": [
+        "Фильтр по действию▼",
+        "Фильтр",
+        "Колонки (5 / 5)0"
+      ],
+      "pageErrors": 0,
+      "consoleErrors": 2
+    },
+    {
+      "route": "/admin/health",
+      "file": "docs/testing/table-screenshots/admin-health.png",
+      "tables": 1,
+      "rows": 11,
+      "controlButtons": [
+        "Фильтр",
+        "Сортировка",
+        "Колонки (2 / 2)0"
+      ],
+      "pageErrors": 0,
+      "consoleErrors": 2
+    },
+    {
+      "route": "/admin/settings",
+      "file": "docs/testing/table-screenshots/admin-settings.png",
+      "tables": 1,
+      "rows": 12,
+      "controlButtons": [
+        "Фильтр",
+        "Колонки (7 / 7)0"
+      ],
+      "pageErrors": 0,
+      "consoleErrors": 2
+    },
+    {
+      "route": "/admin/security",
+      "file": "docs/testing/table-screenshots/admin-security.png",
+      "tables": 3,
+      "rows": 26,
+      "controlButtons": [
+        "Фильтр",
+        "Колонки (5 / 5)0",
+        "Колонки (3 / 3)0"
+      ],
+      "pageErrors": 0,
+      "consoleErrors": 2
+    },
+    {
+      "route": "/admin/notifications",
+      "file": "docs/testing/table-screenshots/admin-notifications.png",
+      "tables": 1,
+      "rows": 1,
+      "controlButtons": [
+        "Фильтр",
+        "Сортировка",
+        "Колонки (5 / 5)0"
+      ],
+      "pageErrors": 0,
+      "consoleErrors": 2
+    },
+    {
+      "route": "/admin/custom-fields",
+      "file": "docs/testing/table-screenshots/admin-custom-fields.png",
+      "tables": 1,
+      "rows": 1,
+      "controlButtons": [
+        "Фильтр",
+        "Сортировка",
+        "Колонки (6 / 6)0"
+      ],
+      "pageErrors": 0,
+      "consoleErrors": 2
+    },
+    {
+      "route": "/admin/announcements",
+      "file": "docs/testing/table-screenshots/admin-announcements.png",
+      "tables": 1,
+      "rows": 1,
+      "controlButtons": [
+        "Фильтр",
+        "Сортировка",
+        "Колонки (7 / 7)0"
+      ],
+      "pageErrors": 0,
+      "consoleErrors": 2
+    },
+    {
+      "route": "/admin/compliance",
+      "file": "docs/testing/table-screenshots/admin-compliance.png",
+      "tables": 3,
+      "rows": 14,
+      "controlButtons": [
+        "Фильтр",
+        "Колонки (3 / 3)1",
+        "Колонки (5 / 5)1",
+        "Колонки (7 / 7)1"
+      ],
+      "pageErrors": 0,
+      "consoleErrors": 2
+    }
+  ]
+}

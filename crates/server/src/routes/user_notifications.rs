@@ -80,6 +80,14 @@ async fn mark_read(
     )
     .execute(&state.db)
     .await;
+    crate::realtime::publish_notification_event(
+        &state,
+        auth.user_id,
+        "notification.read",
+        Some(id),
+        serde_json::json!({}),
+    )
+    .await;
     Json(serde_json::json!({"ok": true})).into_response()
 }
 
@@ -92,6 +100,14 @@ async fn mark_all_read(
         auth.user_id
     )
     .execute(&state.db)
+    .await;
+    crate::realtime::publish_notification_event(
+        &state,
+        auth.user_id,
+        "notifications.read_all",
+        None,
+        serde_json::json!({}),
+    )
     .await;
     Json(serde_json::json!({"ok": true})).into_response()
 }

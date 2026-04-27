@@ -17,7 +17,7 @@ pub struct TokenSettings {
 impl Default for TokenSettings {
     fn default() -> Self {
         Self {
-            access_token_minutes: 15,
+            access_token_minutes: 60,
             refresh_token_days: 30,
             max_sessions_per_user: 10,
             session_idle_days: 7,
@@ -70,7 +70,7 @@ async fn get_i64(pool: &PgPool, key: &str, default: i64) -> i64 {
 
 pub async fn load_from_db(pool: &PgPool) -> Result<TokenSettings, sqlx::Error> {
     Ok(TokenSettings {
-        access_token_minutes: get_i64(pool, "access_token_minutes", 15).await,
+        access_token_minutes: get_i64(pool, "access_token_minutes", 60).await,
         refresh_token_days: get_i64(pool, "refresh_token_days", 30).await,
         max_sessions_per_user: get_i64(pool, "max_sessions_per_user", 10).await,
         session_idle_days: get_i64(pool, "session_idle_days", 7).await,

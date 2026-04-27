@@ -23,6 +23,7 @@ pub mod notifications;
 pub mod orders;
 pub mod patients;
 pub mod providers;
+pub mod realtime;
 pub mod sops;
 pub mod stats;
 pub mod tasks;

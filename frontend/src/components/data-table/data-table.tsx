@@ -54,13 +54,54 @@ export type DataTableProps<T> = {
   selectionEnabled?: boolean;
   rowAccent?: (row: T) => string | null;
   rowActions?: (row: T) => ReactNode;
+  rowActionsLabel?: ReactNode;
+  rowActionsWidth?: number;
   loading?: boolean;
   emptyState?: ReactNode;
   loadingState?: ReactNode;
   footer?: ReactNode;
   className?: string;
   overscan?: number;
+  storageKey?: string;
 };
+
+const COLUMN_WIDTH_MIN = 60;
+const COLUMN_WIDTH_MAX = 800;
+
+function widthStorageKey(storageKey?: string) {
+  return storageKey ? `${storageKey}:column-widths` : null;
+}
+
+function loadStoredWidths(storageKey?: string): Record<string, number> {
+  const key = widthStorageKey(storageKey);
+  if (!key || typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object") return {};
+    const result: Record<string, number> = {};
+    for (const [id, value] of Object.entries(parsed as Record<string, unknown>)) {
+      const num = Number(value);
+      if (Number.isFinite(num) && num >= COLUMN_WIDTH_MIN && num <= COLUMN_WIDTH_MAX) {
+        result[id] = num;
+      }
+    }
+    return result;
+  } catch {
+    return {};
+  }
+}
+
+function saveStoredWidths(storageKey: string | undefined, widths: Record<string, number>) {
+  const key = widthStorageKey(storageKey);
+  if (!key || typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(key, JSON.stringify(widths));
+  } catch {
+    // ignore quota / disabled storage
+  }
+}
 
 export function DataTable<T>({
   rows,
@@ -81,12 +122,15 @@ export function DataTable<T>({
   selectionEnabled = false,
   rowAccent,
   rowActions,
+  rowActionsLabel = "Actions",
+  rowActionsWidth = 144,
   loading = false,
   emptyState,
   loadingState,
   footer,
   className,
   overscan = 10,
+  storageKey,
 }: DataTableProps<T>) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const columnMenuRef = useRef<HTMLDivElement | null>(null);
@@ -97,9 +141,62 @@ export function DataTable<T>({
   } | null>(null);
   const rowHeight = DENSITY_ROW_HEIGHT[density];
 
-  const visibleCols = useMemo(
+  const [widthOverrides, setWidthOverrides] = useState<Record<string, number>>(
+    () => loadStoredWidths(storageKey),
+  );
+
+  useEffect(() => {
+    setWidthOverrides(loadStoredWidths(storageKey));
+  }, [storageKey]);
+
+  const baseVisibleCols = useMemo(
     () => orderColumnsForPinning(columns.filter((c) => !hiddenColumns.includes(c.id) || c.required)),
     [columns, hiddenColumns],
+  );
+
+  const visibleCols = useMemo<ColumnDef<T>[]>(
+    () =>
+      baseVisibleCols.map((col) =>
+        widthOverrides[col.id]
+          ? { ...col, width: widthOverrides[col.id] }
+          : col,
+      ),
+    [baseVisibleCols, widthOverrides],
+  );
+
+  const headerCellRefs = useRef<Map<string, HTMLElement>>(new Map());
+
+  const beginColumnResize = useCallback(
+    (columnId: string, event: ReactMouseEvent<HTMLSpanElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const cellEl = headerCellRefs.current.get(columnId);
+      const startX = event.clientX;
+      const startWidth = cellEl?.getBoundingClientRect().width ?? 160;
+      const handleMove = (moveEvent: MouseEvent) => {
+        const next = Math.min(
+          COLUMN_WIDTH_MAX,
+          Math.max(COLUMN_WIDTH_MIN, startWidth + moveEvent.clientX - startX),
+        );
+        setWidthOverrides((current) => {
+          if (current[columnId] === next) return current;
+          return { ...current, [columnId]: next };
+        });
+      };
+      const handleUp = () => {
+        window.removeEventListener("mousemove", handleMove);
+        window.removeEventListener("mouseup", handleUp);
+        document.body.style.cursor = "";
+        setWidthOverrides((current) => {
+          saveStoredWidths(storageKey, current);
+          return current;
+        });
+      };
+      window.addEventListener("mousemove", handleMove);
+      window.addEventListener("mouseup", handleUp);
+      document.body.style.cursor = "col-resize";
+    },
+    [storageKey],
   );
 
   // eslint-disable-next-line react-hooks/incompatible-library -- tanstack-virtual returns functions that the React compiler can't memoize; safe here because DataTable is not memoized.
@@ -184,8 +281,9 @@ export function DataTable<T>({
       buildGridTemplate(visibleCols, {
         selection: selectionEnabled,
         actions: Boolean(rowActions),
+        actionsWidth: rowActionsWidth,
       }),
-    [rowActions, selectionEnabled, visibleCols],
+    [rowActions, rowActionsWidth, selectionEnabled, visibleCols],
   );
 
   const allSelected = selectionEnabled && rows.length > 0 && selectedIds.length === rows.length;
@@ -244,7 +342,7 @@ export function DataTable<T>({
         <div
           role="row"
           aria-rowindex={1}
-          className="data-table-header-row sticky top-0 z-20 grid items-center bg-card text-xs font-medium text-muted-foreground"
+          className="data-table-header-row sticky top-0 z-20 grid items-center border-b border-border/60 bg-card font-mono text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/80"
           style={{
             gridTemplateColumns: gridTemplate,
             height: HEADER_HEIGHT,
@@ -267,6 +365,10 @@ export function DataTable<T>({
             return (
               <button
                 key={col.id}
+                ref={(el) => {
+                  if (el) headerCellRefs.current.set(col.id, el);
+                  else headerCellRefs.current.delete(col.id);
+                }}
                 type="button"
                 role="columnheader"
                 data-column-id={col.id}
@@ -281,7 +383,7 @@ export function DataTable<T>({
                 onClick={(e) => handleSortClick(col, e)}
                 onContextMenu={(e) => handleColumnContextMenu(col, e)}
                 className={cn(
-                  "data-table-header-cell flex h-full items-center gap-1 border-b border-border/70 bg-card px-2 text-left",
+                  "data-table-header-cell relative flex h-full items-center gap-1 border-b border-border/60 bg-card px-2 text-left",
                   col.sortable && "cursor-pointer hover:bg-muted/65",
                   pinStyle.className,
                   isPinned && "bg-card shadow-[1px_0_0_color-mix(in_oklch,var(--border)_70%,transparent)]",
@@ -291,7 +393,7 @@ export function DataTable<T>({
                 aria-haspopup={onColumnFreezeChange ? "menu" : undefined}
                 disabled={!col.sortable && !onColumnFreezeChange}
               >
-                <span className="truncate">{col.label}</span>
+                <span className="truncate uppercase tracking-[0.08em]">{col.label}</span>
                 {isPinned ? (
                   <span
                     title={columnHeaderContextMenuLabels?.frozen ?? "Frozen"}
@@ -318,14 +420,27 @@ export function DataTable<T>({
                     <ChevronsUpDown className="size-3 opacity-40" />
                   )
                 ) : null}
+                <span
+                  role="separator"
+                  aria-orientation="vertical"
+                  aria-label="Resize column"
+                  onMouseDown={(e) => beginColumnResize(col.id, e)}
+                  onClick={(e) => e.stopPropagation()}
+                  onContextMenu={(e) => e.stopPropagation()}
+                  className="absolute right-0 top-0 z-10 h-full w-1 cursor-col-resize select-none bg-transparent transition-colors hover:bg-primary/40 active:bg-primary/60"
+                />
               </button>
             );
           })}
           {rowActions ? (
             <div
-              className="sticky right-0 z-30 flex h-full items-center justify-end border-l border-b border-border/50 bg-card px-2 shadow-[-1px_0_0_color-mix(in_oklch,var(--border)_70%,transparent)]"
+              role="columnheader"
+              data-column-id="__actions"
+              className="sticky right-0 z-30 flex h-full items-center justify-end border-l border-b border-border/50 bg-card px-2 text-right shadow-[-1px_0_0_color-mix(in_oklch,var(--border)_70%,transparent)]"
               style={{ gridColumn: `${visibleCols.length + (selectionEnabled ? 2 : 1)}` }}
-            />
+            >
+              <span className="truncate uppercase tracking-[0.08em]">{rowActionsLabel}</span>
+            </div>
           ) : null}
         </div>
 
@@ -406,9 +521,10 @@ export function DataTable<T>({
                   })}
                   {rowActions ? (
                     <div
-                      className="data-table-cell sticky right-0 z-20 flex h-full items-center justify-end gap-1 border-l border-border/45 px-1 opacity-0 shadow-[-1px_0_0_color-mix(in_oklch,var(--border)_65%,transparent)] transition-[opacity,background-color] group-hover/row:opacity-100"
+                      className="data-table-cell sticky right-0 z-20 flex h-full items-center justify-end gap-1 border-l border-border/45 px-1 opacity-0 shadow-[-1px_0_0_color-mix(in_oklch,var(--border)_65%,transparent)] transition-[opacity,background-color] group-focus-within/row:opacity-100 group-hover/row:opacity-100"
                       style={{
                         gridColumn: `${visibleCols.length + (selectionEnabled ? 2 : 1)}`,
+                        width: rowActionsWidth,
                       }}
                       onClick={(e) => e.stopPropagation()}
                     >
@@ -479,7 +595,7 @@ function ColumnHeaderContextMenu<T>({
       data-column-header-context-menu
       role="menu"
       aria-label={`${labels?.column ?? "Column"} ${column.label}`}
-      className="fixed z-[100] w-56 overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-xl"
+      className="fixed z-[120] w-56 overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-xl"
       style={{ left: x, top: y }}
     >
       <div className="flex items-center justify-between gap-2 border-b border-border px-2.5 py-2">
@@ -556,7 +672,7 @@ function rowToneStyle(opts: {
 
 function buildGridTemplate<T>(
   cols: readonly ColumnDef<T>[],
-  opts: { selection: boolean; actions: boolean },
+  opts: { selection: boolean; actions: boolean; actionsWidth: number },
 ): string {
   const parts: string[] = [];
   if (opts.selection) parts.push("32px");
@@ -564,7 +680,7 @@ function buildGridTemplate<T>(
     const width = columnWidth(col);
     parts.push(width ? `${width}px` : "minmax(120px, 1fr)");
   }
-  if (opts.actions) parts.push("auto");
+  if (opts.actions) parts.push(`${opts.actionsWidth}px`);
   return parts.join(" ");
 }
 

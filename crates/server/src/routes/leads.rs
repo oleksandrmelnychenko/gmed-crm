@@ -549,6 +549,17 @@ async fn create_lead(
             {
                 return resp;
             }
+            crate::realtime::publish_lead_event(
+                &state,
+                Some(auth.user_id),
+                "lead.created",
+                id,
+                json!({
+                    "source": body.source,
+                    "intake_source": "manual",
+                }),
+            )
+            .await;
             tracing::info!(by = %auth.user_id, lead = %id, "Lead created manually");
             (StatusCode::CREATED, Json(json!({ "id": id }))).into_response()
         }
@@ -955,6 +966,21 @@ async fn update_lead(
                     "consent_privacy_practices": body.consent_privacy_practices,
                 }),
             ));
+            crate::realtime::publish_lead_event(
+                &state,
+                Some(auth.user_id),
+                "lead.updated",
+                lead_id,
+                json!({
+                    "compliance_status": body.compliance_status,
+                    "date_of_birth": body.date_of_birth,
+                    "legal_sex": body.legal_sex,
+                    "contact_updated": body.email.is_some() || body.phone.is_some(),
+                    "consent_healthcare": body.consent_healthcare,
+                    "consent_privacy_practices": body.consent_privacy_practices,
+                }),
+            )
+            .await;
 
             Json(json!({
                 "ok": true,
@@ -1074,6 +1100,17 @@ async fn qualify_lead(
             {
                 return resp;
             }
+            crate::realtime::publish_lead_event(
+                &state,
+                Some(auth.user_id),
+                "lead.status_changed",
+                lead_id,
+                json!({
+                    "from_status": current_status,
+                    "status": body.status,
+                }),
+            )
+            .await;
             Json(json!({ "ok": true })).into_response()
         }
         Ok(_) => err(StatusCode::NOT_FOUND, "Lead not found"),
@@ -1252,6 +1289,28 @@ async fn convert_lead(
     {
         return resp;
     }
+    crate::realtime::publish_lead_event(
+        &state,
+        Some(auth.user_id),
+        "lead.converted",
+        lead_id,
+        json!({
+            "patient_id": patient_id,
+            "patient_pid": pid.clone(),
+        }),
+    )
+    .await;
+    crate::realtime::publish_patient_event(
+        &state,
+        Some(auth.user_id),
+        "patient.created",
+        patient_id,
+        json!({
+            "patient_pid": pid.clone(),
+            "source_lead_id": lead_id,
+        }),
+    )
+    .await;
 
     tracing::info!(by = %auth.user_id, lead = %lead_id, patient = %patient_id, "Lead converted to patient");
 
@@ -1434,6 +1493,19 @@ async fn resolve_failed_lead(
             {
                 return resp;
             }
+            crate::realtime::publish_lead_event(
+                &state,
+                Some(auth.user_id),
+                "lead.failed_resolved",
+                lead_id,
+                json!({
+                    "resolution": outcome_status,
+                    "reason": reason,
+                    "note": note,
+                    "failed_from_status": current_status,
+                }),
+            )
+            .await;
 
             let refreshed = match sqlx::query(
                 r#"SELECT qualification_status,
@@ -1929,6 +2001,18 @@ async fn ingest_lead_intake(
     {
         return resp;
     }
+    crate::realtime::publish_lead_event(
+        &state,
+        None,
+        "lead.created",
+        lead_id,
+        json!({
+            "source": "Website Wizard",
+            "intake_source": "visitor_facade",
+            "attachment_count": parsed.files.len(),
+        }),
+    )
+    .await;
 
     (
         StatusCode::CREATED,

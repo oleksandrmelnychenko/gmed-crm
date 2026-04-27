@@ -265,20 +265,60 @@ async fn create_my_privacy_request(
         ),
     };
 
-    let _ = sqlx::query(
+    if let Ok(notification_rows) = sqlx::query(
         r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
-           SELECT pa.user_id, 'privacy_request', $2, $3, 'patient', $1
+           SELECT pa.user_id, 'privacy_request', $2, $3, 'privacy_request', $1
            FROM patient_assignments pa
            JOIN users u ON u.id = pa.user_id
-           WHERE pa.patient_id = $1
+           WHERE pa.patient_id = $4
              AND pa.revoked_at IS NULL
              AND u.is_active = true
-             AND u.role IN ('patient_manager', 'ceo')"#,
+             AND u.role IN ('patient_manager', 'ceo')
+           RETURNING id, user_id"#,
     )
-    .bind(patient_id)
+    .bind(request_id)
     .bind(notification_title)
     .bind(notification_body)
-    .execute(&state.db)
+    .bind(patient_id)
+    .fetch_all(&state.db)
+    .await
+    {
+        for notification_row in notification_rows {
+            let notification_id = notification_row
+                .try_get::<Uuid, _>("id")
+                .unwrap_or_else(|_| Uuid::nil());
+            let user_id = notification_row
+                .try_get::<Uuid, _>("user_id")
+                .unwrap_or_else(|_| Uuid::nil());
+            if notification_id != Uuid::nil() && user_id != Uuid::nil() {
+                crate::realtime::publish_notification_event(
+                    &state,
+                    user_id,
+                    "notification.created",
+                    Some(notification_id),
+                    serde_json::json!({
+                        "entity_type": "privacy_request",
+                        "entity_id": request_id,
+                    }),
+                )
+                .await;
+            }
+        }
+    }
+
+    crate::realtime::publish_privacy_request_event(
+        &state,
+        Some(auth.user_id),
+        "privacy_request.created",
+        request_id,
+        serde_json::json!({
+            "patient_id": patient_id,
+            "request_type": request_type.clone(),
+            "source": "patient_request",
+            "status": "requested",
+            "due_at": due_at.to_rfc3339(),
+        }),
+    )
     .await;
 
     let response = serde_json::json!({
@@ -573,6 +613,19 @@ async fn confirm_my_document_release(
             "source": "patient_portal",
         }),
     ));
+
+    crate::realtime::publish_document_event(
+        &state,
+        Some(auth.user_id),
+        "document.confirmed",
+        id,
+        serde_json::json!({
+            "patient_id": patient_id,
+            "share_id": share_id,
+            "source": "patient_portal",
+        }),
+    )
+    .await;
 
     Json(serde_json::json!({
         "ok": true,

@@ -9,6 +9,7 @@ import {
   UsersRound,
 } from "lucide-react";
 
+import { AdminGuideButton } from "@/components/admin-guide";
 import {
   AdminSheetScaffold,
   AdminInlineMetric,
@@ -23,7 +24,9 @@ import {
   TabLoader,
 } from "@/components/ui-shell";
 import { useSheetDirtyGuard } from "@/hooks/use-sheet-dirty-guard";
+import { clearApiCache } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
+import { useRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -79,6 +82,17 @@ const ROLE_COLORS: Record<string, string> = {
   it_admin: "bg-slate-100 text-slate-700",
   patient: "bg-emerald-100 text-emerald-700",
 };
+
+const ADMIN_USER_REALTIME_EVENTS = [
+  "user.created",
+  "user.updated",
+  "user.deactivated",
+  "user.activated",
+  "user.password_reset",
+  "user.unlocked",
+  "user.force_password_reset",
+  "user.mfa_toggled",
+] as const;
 
 function initials(name: string) {
   return name
@@ -144,6 +158,11 @@ export function AdminUsersPage() {
   useEffect(() => {
     void loadUsers();
   }, [loadUsers]);
+
+  useRealtimeSubscription(ADMIN_USER_REALTIME_EVENTS, () => {
+    clearApiCache("/users");
+    void loadUsers();
+  });
 
   const metrics = useMemo(() => {
     const total = users.length;
@@ -270,6 +289,7 @@ export function AdminUsersPage() {
         description={t.users_subtitle}
         actions={(
           <>
+            <AdminGuideButton title={t.users_title} description={t.users_subtitle} showTableToolbarGuide={false} />
             <Button
               type="button"
               variant="outline"
@@ -489,9 +509,9 @@ export function AdminUsersPage() {
             </div>
           ) : (
             <>
-              <div className="grid grid-cols-[2.5fr_2.5fr_1.5fr_1fr_1.2fr_1.5fr] gap-3 px-5 py-3 border-b border-border/50 bg-slate-900">
+              <div className="grid grid-cols-[2.5fr_2.5fr_1.5fr_1fr_1.2fr_1.5fr] gap-3 border-b border-border/60 bg-card px-5 py-2.5 font-mono">
                 {[t.users_name, t.users_email, t.users_role, t.users_status, t.users_created, t.users_actions].map((h) => (
-                  <span key={h} className="text-[11px] font-semibold uppercase tracking-wider text-white/80">{h}</span>
+                  <span key={h} className="truncate text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/80">{h}</span>
                 ))}
               </div>
 
@@ -499,20 +519,20 @@ export function AdminUsersPage() {
                 <div
                   key={user.id}
                   className={cn(
-                    "grid grid-cols-[2.5fr_2.5fr_1.5fr_1fr_1.2fr_1.5fr] gap-3 items-center px-5 py-3 transition-colors hover:bg-slate-50/60",
-                    idx < filtered.length - 1 && "border-b border-border/30",
+                    "grid grid-cols-[2.5fr_2.5fr_1.5fr_1fr_1.2fr_1.5fr] items-center gap-3 px-5 py-3 transition-colors hover:bg-muted/45 focus-within:bg-muted/45",
+                    idx < filtered.length - 1 && "border-b border-border/45",
                   )}
                 >
                   <div className="flex items-center gap-3 min-w-0">
-                    <div className="flex items-center justify-center size-9 shrink-0 rounded-full bg-slate-100 text-[11px] font-semibold text-slate-600">
+                    <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-semibold text-muted-foreground">
                       {initials(user.name)}
                     </div>
-                    <span className="text-sm font-medium text-slate-900 truncate">{user.name}</span>
+                    <span className="truncate text-sm font-medium text-foreground">{user.name}</span>
                   </div>
 
                   <div className="flex items-center gap-1.5 min-w-0">
-                    <Mail className="size-3.5 text-slate-400 shrink-0" />
-                    <span className="text-sm text-slate-500 truncate">{user.email}</span>
+                    <Mail className="size-3.5 shrink-0 text-muted-foreground/70" />
+                    <span className="truncate text-sm text-muted-foreground">{user.email}</span>
                   </div>
 
                   <div>
@@ -531,7 +551,7 @@ export function AdminUsersPage() {
                     </span>
                   </div>
 
-                  <span className="text-xs text-slate-400">{formatDate(user.created_at)}</span>
+                  <span className="text-xs tabular-nums text-muted-foreground">{formatDate(user.created_at)}</span>
 
                   <div className="flex items-center gap-1.5">
                     <Button variant="outline" size="xs" className="rounded-lg" onClick={() => openEdit(user)}>

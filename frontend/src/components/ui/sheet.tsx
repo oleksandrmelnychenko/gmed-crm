@@ -38,18 +38,37 @@ function SheetOverlay({ className, ...props }: SheetPrimitive.Backdrop.Props) {
 function SheetContent({
   className,
   children,
+  inline = false,
   overlayClassName,
   side = "right",
   showCloseButton = true,
   showOverlay = true,
   ...props
 }: SheetPrimitive.Popup.Props & {
+  inline?: boolean
   overlayClassName?: string
   side?: "top" | "right" | "bottom" | "left"
   showCloseButton?: boolean
   showOverlay?: boolean
 }) {
   const { t } = useLang()
+
+  if (inline) {
+    return (
+      <div
+        data-slot="sheet-content"
+        data-side={side}
+        className={cn(
+          "flex min-h-0 flex-col gap-4 bg-popover text-sm text-popover-foreground",
+          className
+        )}
+        {...(props as React.ComponentProps<"div">)}
+      >
+        {children}
+      </div>
+    )
+  }
+
   return (
     <SheetPortal>
       {showOverlay ? <SheetOverlay className={overlayClassName} /> : null}

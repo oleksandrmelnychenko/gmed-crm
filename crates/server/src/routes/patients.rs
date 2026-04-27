@@ -1085,6 +1085,15 @@ async fn create_patient(
 
     tracing::info!(by = %auth.user_id, patient = %row.patient_id, "Patient created");
 
+    crate::realtime::publish_patient_event(
+        &state,
+        Some(auth.user_id),
+        "patient.created",
+        row.id,
+        serde_json::json!({}),
+    )
+    .await;
+
     Ok((
         StatusCode::CREATED,
         Json(serde_json::json!({
@@ -1264,6 +1273,14 @@ async fn update_patient(
                 Some(patient_uuid),
                 audit_context,
             ));
+            crate::realtime::publish_patient_event(
+                &state,
+                Some(auth.user_id),
+                "patient.updated",
+                patient_uuid,
+                serde_json::json!({}),
+            )
+            .await;
             Json(serde_json::json!({"ok": true})).into_response()
         }
         Err(e) => {
@@ -4442,6 +4459,15 @@ async fn assign_patient(
 
     tracing::info!(by = %auth.user_id, patient = %patient_uuid, to = %body.user_id, "Patient assigned");
 
+    crate::realtime::publish_patient_event(
+        &state,
+        Some(auth.user_id),
+        "patient.assigned",
+        patient_uuid,
+        serde_json::json!({ "assigned_user_id": body.user_id }),
+    )
+    .await;
+
     Ok(Json(serde_json::json!({"ok": true})))
 }
 
@@ -4628,16 +4654,17 @@ async fn insert_patient_assignment_notification(
     body: String,
     patient_id: Uuid,
 ) -> Result<(), axum::response::Response> {
-    sqlx::query(
+    let notification_id = sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
-           VALUES ($1, $2, $3, $4, 'patient', $5)"#,
+           VALUES ($1, $2, $3, $4, 'patient', $5)
+           RETURNING id"#,
     )
     .bind(user_id)
     .bind(kind)
     .bind(title)
     .bind(body)
     .bind(patient_id)
-    .execute(&state.db)
+    .fetch_one(&state.db)
     .await
     .map_err(|e| {
         tracing::error!(error = %e, user_id = %user_id, patient_id = %patient_id, "Failed to insert patient assignment notification");
@@ -4646,6 +4673,15 @@ async fn insert_patient_assignment_notification(
             "Failed to notify assigned user",
         )
     })?;
+
+    crate::realtime::publish_notification_event(
+        state,
+        user_id,
+        "notification.created",
+        Some(notification_id),
+        serde_json::json!({ "entity_type": "patient", "entity_id": patient_id }),
+    )
+    .await;
 
     Ok(())
 }
@@ -5277,6 +5313,15 @@ async fn revoke_assignment(
                 serde_json::json!({ "revoked_user_id": body.user_id }),
             ));
             tracing::info!(by = %auth.user_id, patient = %patient_id, revoked = %body.user_id, "Assignment revoked");
+            crate::realtime::publish_patient_event_with_targets(
+                &state,
+                Some(auth.user_id),
+                "patient.assignment_revoked",
+                patient_id,
+                vec![body.user_id],
+                serde_json::json!({ "revoked_user_id": body.user_id }),
+            )
+            .await;
             Json(serde_json::json!({"ok": true})).into_response()
         }
         Ok(_) => err(StatusCode::NOT_FOUND, "Assignment not found or already revoked"),
@@ -5311,6 +5356,14 @@ async fn activate_patient(
                 serde_json::json!({}),
             ));
             tracing::info!(by = %auth.user_id, patient = %patient_id, "Patient activated");
+            crate::realtime::publish_patient_event(
+                &state,
+                Some(auth.user_id),
+                "patient.activated",
+                patient_id,
+                serde_json::json!({}),
+            )
+            .await;
             Json(serde_json::json!({"ok": true})).into_response()
         }
         Ok(_) => err(StatusCode::NOT_FOUND, "Patient not found or already active"),
@@ -5348,6 +5401,14 @@ async fn deactivate_patient(
                 serde_json::json!({}),
             ));
             tracing::info!(by = %auth.user_id, patient = %patient_id, "Patient deactivated");
+            crate::realtime::publish_patient_event(
+                &state,
+                Some(auth.user_id),
+                "patient.deactivated",
+                patient_id,
+                serde_json::json!({}),
+            )
+            .await;
             Json(serde_json::json!({"ok": true})).into_response()
         }
         Ok(_) => err(

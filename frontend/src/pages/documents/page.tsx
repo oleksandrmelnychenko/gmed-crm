@@ -60,8 +60,10 @@ import {
   Sheet,
   SheetContent,
 } from "@/components/ui/sheet";
+import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { getLang, t as translateCatalog, useLang } from "@/lib/i18n";
+import { useRealtimeSubscription } from "@/lib/realtime";
 import { PatientDocumentsPage } from "@/pages/patients/portal-documents-page";
 import { cn } from "@/lib/utils";
 import {
@@ -350,6 +352,19 @@ function formatExtractionStatusLabel(
   }
 }
 
+const STAFF_DOCUMENT_REALTIME_EVENTS = [
+  "document.uploaded",
+  "document.payment_proof_uploaded",
+  "document.generated",
+  "document.updated",
+  "document.deleted",
+  "document.portal_released",
+  "document.portal_revoked",
+  "document.confirmed",
+  "document.translation_requested",
+  "document.translation_updated",
+] as const;
+
 export function DocumentsPage() {
   const { user } = useAuth();
 
@@ -545,6 +560,16 @@ function StaffDocumentsPage() {
   const [shareBusy, setShareBusy] = useState(false);
   const [shareError, setShareError] = useState("");
   const [portalBusy, setPortalBusy] = useState(false);
+
+  useRealtimeSubscription(STAFF_DOCUMENT_REALTIME_EVENTS, (event) => {
+    if (!canView) return;
+    clearApiCache("/documents");
+    clearApiCache("/documents/intake-queue");
+    if (event.entity_type === "document") {
+      clearApiCache(`/documents/${event.entity_id}`);
+    }
+    startTransition(() => setVersion((current) => current + 1));
+  });
 
   const selectedTemplate = useMemo(
     () =>
@@ -1723,142 +1748,143 @@ function StaffDocumentsPage() {
         title={t.documents_title}
         accessory={<CountBadge>{documents.length}</CountBadge>}
       >
-        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-6">
-          <div className="relative xl:col-span-2">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={filters.search}
+        <div className="relative z-30 space-y-1.5 rounded-lg border border-border bg-card/80 p-2 shadow-sm">
+          <div className="grid gap-1.5 md:grid-cols-2 xl:grid-cols-6">
+            <div className="relative xl:col-span-2">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={filters.search}
+                onChange={(event) =>
+                  setFilters((current) => ({
+                    ...current,
+                    search: event.target.value,
+                  }))
+                }
+                className="h-8 rounded-lg bg-background pl-8 text-[13px]"
+                placeholder={t.common_search}
+              />
+            </div>
+            <select
+              value={filters.patientId}
               onChange={(event) =>
                 setFilters((current) => ({
                   ...current,
-                  search: event.target.value,
+                  patientId: event.target.value,
+                  orderId: "",
+                  appointmentId: "",
                 }))
               }
-              className="h-9 rounded-lg bg-card pl-9"
-              placeholder={t.common_search}
+              className={cn(selectClassName, "h-8 bg-background text-[13px]")}
+            >
+              <option value="">{text.allPatients}</option>
+              {patients.map((patient) => (
+                <option key={patient.id} value={patient.id}>
+                  {patientOptionLabel(patient)}
+                </option>
+              ))}
+            </select>
+            <select
+              value={filters.status}
+              onChange={(event) =>
+                setFilters((current) => ({
+                  ...current,
+                  status: event.target.value,
+                }))
+              }
+              className={cn(selectClassName, "h-8 bg-background text-[13px]")}
+            >
+              <option value="">{text.allStatuses}</option>
+              {STATUS_OPTIONS.map((status) => (
+                <option key={status} value={status}>
+                  {formatDocumentStatusLabel(status, t)}
+                </option>
+              ))}
+            </select>
+            <select
+              value={filters.visibility}
+              onChange={(event) =>
+                setFilters((current) => ({
+                  ...current,
+                  visibility: event.target.value,
+                }))
+              }
+              className={cn(selectClassName, "h-8 bg-background text-[13px]")}
+            >
+              <option value="">{text.allVisibility}</option>
+              {VISIBILITY_OPTIONS.map((value) => (
+                <option key={value} value={value}>
+                  {formatVisibilityLabel(value, t)}
+                </option>
+              ))}
+            </select>
+            <Input
+              value={filters.art}
+              onChange={(event) =>
+                setFilters((current) => ({ ...current, art: event.target.value }))
+              }
+              list="documents-art-options"
+              className="h-8 rounded-lg bg-background text-[13px]"
+              placeholder={t.documents_category}
             />
           </div>
-          <select
-            value={filters.patientId}
-            onChange={(event) =>
-              setFilters((current) => ({
-                ...current,
-                patientId: event.target.value,
-                orderId: "",
-                appointmentId: "",
-              }))
-            }
-            className={selectClassName}
-          >
-            <option value="">{text.allPatients}</option>
-            {patients.map((patient) => (
-              <option key={patient.id} value={patient.id}>
-                {patientOptionLabel(patient)}
-              </option>
-            ))}
-          </select>
-          <select
-            value={filters.status}
-            onChange={(event) =>
-              setFilters((current) => ({
-                ...current,
-                status: event.target.value,
-              }))
-            }
-            className={selectClassName}
-          >
-            <option value="">{text.allStatuses}</option>
-            {STATUS_OPTIONS.map((status) => (
-              <option key={status} value={status}>
-                {formatDocumentStatusLabel(status, t)}
-              </option>
-            ))}
-          </select>
-          <select
-            value={filters.visibility}
-            onChange={(event) =>
-              setFilters((current) => ({
-                ...current,
-                visibility: event.target.value,
-              }))
-            }
-            className={selectClassName}
-          >
-            <option value="">{text.allVisibility}</option>
-            {VISIBILITY_OPTIONS.map((value) => (
-              <option key={value} value={value}>
-                {formatVisibilityLabel(value, t)}
-              </option>
-            ))}
-          </select>
-          <Input
-            value={filters.art}
-            onChange={(event) =>
-              setFilters((current) => ({ ...current, art: event.target.value }))
-            }
-            list="documents-art-options"
-            className="h-9 rounded-lg bg-card"
-            placeholder={t.documents_category}
-          />
-        </div>
-        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-          <Input
-            value={filters.orderId}
-            onChange={(event) =>
-              setFilters((current) => ({
-                ...current,
-                orderId: event.target.value,
-              }))
-            }
-            className="h-9 rounded-lg bg-card"
-            placeholder={t.orders_title}
-          />
-          <Input
-            value={filters.appointmentId}
-            onChange={(event) =>
-              setFilters((current) => ({
-                ...current,
-                appointmentId: event.target.value,
-              }))
-            }
-            className="h-9 rounded-lg bg-card"
-            placeholder={t.appointments_title}
-          />
-          <Input
-            type="date"
-            value={filters.dateFrom}
-            onChange={(event) =>
-              setFilters((current) => ({
-                ...current,
-                dateFrom: event.target.value,
-              }))
-            }
-            aria-label={t.documents_date_from}
-            className="h-9 rounded-lg bg-card"
-          />
-          <Input
-            type="date"
-            value={filters.dateTo}
-            onChange={(event) =>
-              setFilters((current) => ({
-                ...current,
-                dateTo: event.target.value,
-              }))
-            }
-            aria-label={t.documents_date_to}
-            className="h-9 rounded-lg bg-card"
-          />
-        </div>
-        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-          <select
-            value={filters.category}
-            onChange={(event) =>
-              setFilters((current) => ({
-                ...current,
-                category: event.target.value,
-              }))
-            }
-            className={selectClassName}
+          <div className="grid gap-1.5 md:grid-cols-2 xl:grid-cols-4">
+            <Input
+              value={filters.orderId}
+              onChange={(event) =>
+                setFilters((current) => ({
+                  ...current,
+                  orderId: event.target.value,
+                }))
+              }
+              className="h-8 rounded-lg bg-background text-[13px]"
+              placeholder={t.orders_title}
+            />
+            <Input
+              value={filters.appointmentId}
+              onChange={(event) =>
+                setFilters((current) => ({
+                  ...current,
+                  appointmentId: event.target.value,
+                }))
+              }
+              className="h-8 rounded-lg bg-background text-[13px]"
+              placeholder={t.appointments_title}
+            />
+            <Input
+              type="date"
+              value={filters.dateFrom}
+              onChange={(event) =>
+                setFilters((current) => ({
+                  ...current,
+                  dateFrom: event.target.value,
+                }))
+              }
+              aria-label={t.documents_date_from}
+              className="h-8 rounded-lg bg-background text-[13px]"
+            />
+            <Input
+              type="date"
+              value={filters.dateTo}
+              onChange={(event) =>
+                setFilters((current) => ({
+                  ...current,
+                  dateTo: event.target.value,
+                }))
+              }
+              aria-label={t.documents_date_to}
+              className="h-8 rounded-lg bg-background text-[13px]"
+            />
+          </div>
+          <div className="grid gap-1.5 md:grid-cols-2 xl:grid-cols-4">
+            <select
+              value={filters.category}
+              onChange={(event) =>
+                setFilters((current) => ({
+                  ...current,
+                  category: event.target.value,
+                }))
+              }
+              className={cn(selectClassName, "h-8 bg-background text-[13px]")}
             >
               <option value="">{text.allCategories}</option>
               {categories.map((category) => (
@@ -1867,51 +1893,52 @@ function StaffDocumentsPage() {
                 </option>
               ))}
             </select>
-          <Input
-            value={filters.klinik}
-            onChange={(event) =>
-              setFilters((current) => ({
-                ...current,
-                klinik: event.target.value,
-              }))
-            }
-            className="h-9 rounded-lg bg-card"
-            placeholder={t.documents_clinic}
-          />
-          <Input
-            value={filters.ursprung}
-            onChange={(event) =>
-              setFilters((current) => ({
-                ...current,
-                ursprung: event.target.value,
-              }))
-            }
-            className="h-9 rounded-lg bg-card"
-            placeholder={t.documents_source}
-          />
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-9 rounded-lg"
-            onClick={() =>
-              setFilters({
-                search: "",
-                patientId: "",
-                orderId: "",
-                appointmentId: "",
-                status: "",
-                visibility: "",
-                art: "",
-                category: "",
-                dateFrom: "",
-                dateTo: "",
-                klinik: "",
-                ursprung: "",
-              })
-            }
-          >
-            {text.resetFilters}
-          </Button>
+            <Input
+              value={filters.klinik}
+              onChange={(event) =>
+                setFilters((current) => ({
+                  ...current,
+                  klinik: event.target.value,
+                }))
+              }
+              className="h-8 rounded-lg bg-background text-[13px]"
+              placeholder={t.documents_clinic}
+            />
+            <Input
+              value={filters.ursprung}
+              onChange={(event) =>
+                setFilters((current) => ({
+                  ...current,
+                  ursprung: event.target.value,
+                }))
+              }
+              className="h-8 rounded-lg bg-background text-[13px]"
+              placeholder={t.documents_source}
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-lg px-3 text-[13px]"
+              onClick={() =>
+                setFilters({
+                  search: "",
+                  patientId: "",
+                  orderId: "",
+                  appointmentId: "",
+                  status: "",
+                  visibility: "",
+                  art: "",
+                  category: "",
+                  dateFrom: "",
+                  dateTo: "",
+                  klinik: "",
+                  ursprung: "",
+                })
+              }
+            >
+              {text.resetFilters}
+            </Button>
+          </div>
         </div>
         <datalist id="documents-art-options">
           {arts.map((art) => (

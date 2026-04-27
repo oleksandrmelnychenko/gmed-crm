@@ -19,6 +19,7 @@ import {
   X,
 } from "lucide-react";
 
+import { AdminGuideButton } from "@/components/admin-guide";
 import {
   AdminInlineMetric,
   AdminSheetScaffold,
@@ -27,6 +28,8 @@ import {
   AdminToolbar,
   AdminTableCard,
 } from "@/components/admin-page-patterns";
+import { DataTableSurface } from "@/components/data-table/data-table-surface";
+import type { ColumnDef } from "@/components/data-table/types";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -57,6 +60,8 @@ import {
   tokens,
 } from "@/components/ui-shell";
 import { Input } from "@/components/ui/input";
+import { clearApiCache } from "@/lib/api";
+import { useRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 import {
   createAdminNotificationChannel,
@@ -77,6 +82,12 @@ type FlashState =
   | { tone: "success"; text: string }
   | { tone: "error"; text: string }
   | null;
+
+const ADMIN_NOTIFICATION_CHANNEL_REALTIME_EVENTS = [
+  "notification_channel.created",
+  "notification_channel.updated",
+  "notification_channel.deleted",
+] as const;
 
 export function AdminNotificationsPage() {
   const { t } = useLang();
@@ -114,6 +125,11 @@ export function AdminNotificationsPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useRealtimeSubscription(ADMIN_NOTIFICATION_CHANNEL_REALTIME_EVENTS, () => {
+    clearApiCache("/admin/notifications");
+    void load();
+  });
 
   const filteredChannels = useMemo(() => {
     return channels.filter((channel) => {
@@ -204,12 +220,15 @@ export function AdminNotificationsPage() {
     }
   }
 
-  async function handleDelete(id: string) {
+  const handleDelete = useCallback(async (id: string) => {
     setFlash(null);
     setActionBusyId(id);
     try {
       await deleteAdminNotificationChannel(id);
-      if (selectedChannelId === id) handleDetailOpenChange(false);
+      if (selectedChannelId === id) {
+        setDetailOpen(false);
+        setSelectedChannelId("");
+      }
       await load();
     } catch (deleteError) {
       setFlash({
@@ -219,9 +238,9 @@ export function AdminNotificationsPage() {
     } finally {
       setActionBusyId("");
     }
-  }
+  }, [load, selectedChannelId, t.common_error]);
 
-  async function handleTest(id: string) {
+  const handleTest = useCallback(async (id: string) => {
     setFlash(null);
     setActionBusyId(id);
     try {
@@ -235,7 +254,121 @@ export function AdminNotificationsPage() {
     } finally {
       setActionBusyId("");
     }
-  }
+  }, [t.common_error, t.notif_test_ok]);
+
+  const columns = useMemo<ColumnDef<Channel>[]>(() => [
+    {
+      id: "name",
+      label: t.notif_name,
+      accessor: (channel) => channel.name,
+      sortable: true,
+      width: 260,
+      render: (channel) => (
+        <div className="min-w-0">
+          <div className="truncate text-xs font-medium text-foreground">
+            {channel.name}
+          </div>
+          <div className="mt-1 truncate text-[11px] text-muted-foreground">
+            {channel.id}
+          </div>
+        </div>
+      ),
+    },
+    {
+      id: "type",
+      label: t.notif_type,
+      accessor: (channel) => channel.channel_type,
+      sortable: true,
+      width: 140,
+      render: (channel) => (
+        <StatusBadge tone={channel.channel_type === "smtp" ? "info" : "brand"}>
+          {channel.channel_type === "smtp" ? t.notif_smtp : t.notif_webhook}
+        </StatusBadge>
+      ),
+    },
+    {
+      id: "config",
+      label: t.notif_config,
+      accessor: (channel) => compactNotificationConfig(channel.config),
+      sortable: true,
+      width: 360,
+      render: (channel) => {
+        const full = prettyNotificationConfig(channel.config);
+        return (
+          <span className="truncate font-mono text-xs text-muted-foreground" title={full}>
+            {compactNotificationConfig(channel.config) || "-"}
+          </span>
+        );
+      },
+    },
+    {
+      id: "status",
+      label: t.users_status,
+      accessor: (channel) => channel.is_active,
+      sortable: true,
+      width: 120,
+      render: (channel) => (
+        <StatusBadge tone={channel.is_active ? "success" : "neutral"}>
+          {channel.is_active ? t.common_active : t.common_inactive}
+        </StatusBadge>
+      ),
+    },
+    {
+      id: "actions",
+      label: t.users_actions,
+      accessor: (channel) => channel.id,
+      width: 180,
+      render: (channel) => {
+        const busy = actionBusyId === channel.id;
+        return (
+          <div className="flex items-center gap-1.5">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8 rounded-lg"
+              disabled={busy}
+              onClick={(event) => {
+                event.stopPropagation();
+                void handleTest(channel.id);
+              }}
+            >
+              {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
+              {t.notif_test}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="destructive"
+              className="h-8 rounded-lg"
+              disabled={busy}
+              onClick={(event) => {
+                event.stopPropagation();
+                void handleDelete(channel.id);
+              }}
+            >
+              {t.common_delete}
+            </Button>
+          </div>
+        );
+      },
+    },
+  ], [
+    actionBusyId,
+    handleDelete,
+    handleTest,
+    t.common_active,
+    t.common_delete,
+    t.common_inactive,
+    t.notif_config,
+    t.notif_name,
+    t.notif_smtp,
+    t.notif_test,
+    t.notif_type,
+    t.notif_webhook,
+    t.users_actions,
+    t.users_status,
+  ]);
 
   return (
     <>
@@ -245,6 +378,7 @@ export function AdminNotificationsPage() {
           description={t.notif_subtitle}
           actions={(
             <>
+              <AdminGuideButton title={t.notif_title} description={t.notif_subtitle} />
               <Button
                 type="button"
                 variant="outline"
@@ -380,100 +514,21 @@ export function AdminNotificationsPage() {
         >
           {loading ? (
             <TabLoader />
-          ) : filteredChannels.length === 0 ? (
-            <div className="p-4">
-              <EmptyCell>{t.notif_no_channels}</EmptyCell>
-            </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-[13px]">
-                <thead className="bg-muted/40">
-                  <tr className="text-left text-[11px] uppercase tracking-wider text-muted-foreground">
-                    <th className="px-4 py-2.5 font-medium">{t.notif_name}</th>
-                    <th className="w-[140px] px-4 py-2.5 font-medium">{t.notif_type}</th>
-                    <th className="px-4 py-2.5 font-medium">{t.notif_config}</th>
-                    <th className="w-[120px] px-4 py-2.5 font-medium">{t.users_status}</th>
-                    <th className="w-[160px] px-4 py-2.5 font-medium">{t.users_actions}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredChannels.map((channel) => {
-                    const busy = actionBusyId === channel.id;
-                    return (
-                      <tr
-                        key={channel.id}
-                        className="group/row border-t border-border transition-colors hover:bg-muted/40 cursor-pointer"
-                        onClick={() => {
-                          setSelectedChannelId(channel.id);
-                          setDetailOpen(true);
-                        }}
-                      >
-                        <td className="px-4 py-3">
-                          <div className="min-w-0">
-                            <div className="font-medium text-foreground truncate">
-                              {channel.name}
-                            </div>
-                            <div className="mt-1 text-[11.5px] text-muted-foreground truncate">
-                              {channel.id}
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3">
-                          <StatusBadge
-                            tone={channel.channel_type === "smtp" ? "info" : "brand"}
-                          >
-                            {channel.channel_type === "smtp"
-                              ? t.notif_smtp
-                              : t.notif_webhook}
-                          </StatusBadge>
-                        </td>
-                        <td
-                          className="max-w-[360px] px-4 py-3 font-mono text-xs text-muted-foreground truncate"
-                          title={prettyNotificationConfig(channel.config)}
-                        >
-                          {compactNotificationConfig(channel.config) || "-"}
-                        </td>
-                        <td className="px-4 py-3">
-                          <StatusBadge tone={channel.is_active ? "success" : "neutral"}>
-                            {channel.is_active ? t.common_active : t.common_inactive}
-                          </StatusBadge>
-                        </td>
-                        <td
-                          className="px-4 py-3"
-                          onClick={(event) => event.stopPropagation()}
-                        >
-                          <div className="flex items-center gap-1.5">
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              className="h-8 rounded-lg"
-                              disabled={busy}
-                              onClick={() => void handleTest(channel.id)}
-                            >
-                              {busy ? (
-                                <LoaderCircle className="size-3.5 animate-spin" />
-                              ) : null}
-                              {t.notif_test}
-                            </Button>
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="destructive"
-                              className="h-8 rounded-lg"
-                              disabled={busy}
-                              onClick={() => void handleDelete(channel.id)}
-                            >
-                              {t.common_delete}
-                            </Button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+            <DataTableSurface
+              rows={filteredChannels}
+              columns={columns}
+              defaultDensity="comfortable"
+              dictionary={t as unknown as Record<string, string>}
+              rowId={(channel) => channel.id}
+              activeRowId={selectedChannelId}
+              onRowClick={(channel) => {
+                setSelectedChannelId(channel.id);
+                setDetailOpen(true);
+              }}
+              emptyState={<EmptyCell>{t.notif_no_channels}</EmptyCell>}
+              tableClassName="min-h-[360px]"
+            />
           )}
         </AdminTableCard>
       </div>
@@ -635,4 +690,3 @@ export function AdminNotificationsPage() {
     </>
   );
 }
-

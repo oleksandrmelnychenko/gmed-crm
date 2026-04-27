@@ -23,6 +23,7 @@ const SAMPLE_PATHS = [
   "/appointments/00000000-0000-0000-0000-000000000002",
   "/orders",
   "/orders?order=x",
+  "/orders/00000000-0000-0000-0000-000000000006",
   "/leads",
   "/cases",
   "/cases/00000000-0000-0000-0000-000000000003",
@@ -32,7 +33,6 @@ const SAMPLE_PATHS = [
   "/patients",
   "/patients/00000000-0000-0000-0000-000000000005",
   "/services",
-  "/privacy",
   "/admin",
   "/admin/access",
   "/admin/activity",
@@ -184,6 +184,9 @@ describe("canAccessStaffRoute", () => {
 
   it("blocks non-order roles from /orders", () => {
     expect(canAccessStaffRoute("patient_manager", "/orders")).toBe(true);
+    expect(
+      canAccessStaffRoute("patient_manager", "/orders/00000000-0000-0000-0000-000000000006"),
+    ).toBe(true);
     expect(canAccessStaffRoute("billing", "/orders")).toBe(true);
     expect(canAccessStaffRoute("ceo", "/orders")).toBe(true);
     expect(canAccessStaffRoute("interpreter", "/orders")).toBe(false);
@@ -198,6 +201,12 @@ describe("canAccessStaffRoute", () => {
     expect(canAccessStaffRoute("interpreter", "/services")).toBe(false);
     expect(canAccessStaffRoute("sales", "/services")).toBe(false);
     expect(canAccessStaffRoute("ceo_assistant", "/services")).toBe(false);
+  });
+
+  it("keeps patient privacy out of the staff shell", () => {
+    for (const role of ALL_STAFF_ROLES) {
+      expect(canAccessStaffRoute(role, "/privacy")).toBe(false);
+    }
   });
 
   it("denies unknown paths", () => {

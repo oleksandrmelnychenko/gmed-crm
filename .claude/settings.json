@@ -42,7 +42,11 @@
       "WebFetch(domain:github.com)",
       "Bash(npm run *)",
       "Bash(grep -n \"path === \\\\\"/patients\\\\\"\\\\|/patients\\\\\"\\\\s*&&\\\\s*route\\\\|/patients$\" tests/e2e/staff-smoke.spec.ts)",
-      "Read(//c/Users/123/.claude/skills/grill-me/**)"
+      "Read(//c/Users/123/.claude/skills/grill-me/**)",
+      "Bash(git rev-list *)",
+      "Bash(netstat -ano)",
+      "Bash(npm --prefix frontend run typecheck)",
+      "Bash(npm --prefix frontend test -- --run src/lib/api.test.ts)"
     ],
     "additionalDirectories": [
       "C:\\Users\\123\\Downloads\\dev\\frontend",

@@ -15,11 +15,14 @@ import {
 } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 
+import { AdminGuideButton } from "@/components/admin-guide";
 import {
   AdminSheetScaffold,
   AdminInlineMetric,
   AdminTableCard,
 } from "@/components/admin-page-patterns";
+import { DataTableSurface } from "@/components/data-table/data-table-surface";
+import type { ColumnDef } from "@/components/data-table/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,14 +34,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useAuth } from "@/lib/auth";
 import { useLang, type Translations } from "@/lib/i18n";
 import {
@@ -63,6 +58,8 @@ import {
   reviewCompliancePrivacyRequest,
   savePatientConsent,
 } from "@/pages/admin/data/admin-api";
+import { clearApiCache } from "@/lib/api";
+import { useRealtimeSubscription } from "@/lib/realtime";
 
 interface ConsentTypeSummary {
   consent_type: string;
@@ -162,6 +159,12 @@ const PRIVACY_REQUEST_TYPE_VALUES = [
   "erasure",
   "restriction",
   "third_party_revoke",
+] as const;
+
+const COMPLIANCE_REALTIME_EVENTS = [
+  "privacy_request.created",
+  "privacy_request.reviewed",
+  "privacy_request.executed",
 ] as const;
 
 function compactDt(dt: string | null | undefined): string {
@@ -469,6 +472,16 @@ export function AdminCompliancePage() {
     ]);
   }, [activePatientId, loadConsentDashboard, loadPatientWorkspace, loadPrivacyQueue]);
 
+  useRealtimeSubscription(COMPLIANCE_REALTIME_EVENTS, () => {
+    clearApiCache("/admin/compliance/consents");
+    clearApiCache("/admin/compliance/consents/expired");
+    clearApiCache("/admin/compliance/privacy-requests");
+    if (activePatientId) {
+      clearApiCache(`/admin/compliance/patient/${activePatientId}`);
+    }
+    void refreshWorkspace();
+  });
+
   const handleLoadPatientRegister = async (
     event: FormEvent<HTMLFormElement>,
   ) => {
@@ -660,6 +673,460 @@ export function AdminCompliancePage() {
     }
   };
 
+  const patientConsentColumns = useMemo<ColumnDef<PatientConsentRecord>[]>(() => [
+    {
+      id: "consent",
+      label: t.compliance_col_consent,
+      accessor: (record) => consentTypeLabel(record.consent_type, t),
+      required: true,
+      pinned: "left",
+      width: 220,
+      render: (record) => (
+        <span className="truncate font-medium text-foreground">
+          {consentTypeLabel(record.consent_type, t)}
+        </span>
+      ),
+    },
+    {
+      id: "status",
+      label: t.compliance_col_status,
+      accessor: (record) => {
+        const isRevoked = Boolean(record.revoked_at) && !record.granted;
+        const isExpired =
+          !isRevoked && record.granted && isPastDate(record.expires_at);
+        return isRevoked
+          ? t.compliance_revoked
+          : isExpired
+            ? t.compliance_expired
+            : t.compliance_granted;
+      },
+      width: 132,
+      render: (record) => {
+        const isRevoked = Boolean(record.revoked_at) && !record.granted;
+        const isExpired =
+          !isRevoked && record.granted && isPastDate(record.expires_at);
+        const badgeClass = isRevoked
+          ? "bg-red-500/15 text-red-700"
+          : isExpired
+            ? "bg-amber-500/15 text-amber-700"
+            : record.granted
+              ? "bg-green-500/15 text-green-700"
+              : "bg-slate-500/15 text-slate-700";
+
+        return (
+          <Badge className={badgeClass}>
+            {isRevoked
+              ? t.compliance_revoked
+              : isExpired
+                ? t.compliance_expired
+                : t.compliance_granted}
+          </Badge>
+        );
+      },
+    },
+    {
+      id: "managed_by",
+      label: t.compliance_col_managed_by,
+      accessor: (record) => record.managed_by_name,
+      width: 170,
+    },
+    {
+      id: "effective_at",
+      label: t.compliance_col_effective_at,
+      accessor: (record) =>
+        Boolean(record.revoked_at) && !record.granted
+          ? compactDt(record.revoked_at)
+          : compactDt(record.granted_at ?? record.created_at),
+      width: 132,
+      render: (record) => (
+        <span className="font-mono text-sm text-slate-500">
+          {Boolean(record.revoked_at) && !record.granted
+            ? compactDt(record.revoked_at)
+            : compactDt(record.granted_at ?? record.created_at)}
+        </span>
+      ),
+    },
+    {
+      id: "expires_at",
+      label: t.compliance_col_expires,
+      accessor: (record) => compactDt(record.expires_at),
+      width: 132,
+      render: (record) => (
+        <span className="font-mono text-sm text-slate-500">
+          {compactDt(record.expires_at)}
+        </span>
+      ),
+    },
+    {
+      id: "note",
+      label: t.compliance_col_note,
+      accessor: (record) => record.note?.trim() || "",
+      width: 240,
+      render: (record) => (
+        <span className="truncate text-sm text-slate-600">
+          {record.note?.trim() || "\u2014"}
+        </span>
+      ),
+    },
+  ], [t]);
+
+  const patientPrivacyColumns = useMemo<ColumnDef<PrivacyRequestRecord>[]>(() => [
+    {
+      id: "request",
+      label: t.compliance_col_request,
+      accessor: (record) => privacyRequestTypeLabel(record.request_type, t),
+      required: true,
+      pinned: "left",
+      width: 240,
+      render: (record) => (
+        <div className="min-w-0">
+          <div className="truncate font-medium text-foreground">
+            {privacyRequestTypeLabel(record.request_type, t)}
+          </div>
+          <div className="truncate text-xs text-slate-500">
+            {t.compliance_created_label} {compactDt(record.requested_at)}
+          </div>
+        </div>
+      ),
+    },
+    {
+      id: "status",
+      label: t.compliance_col_status,
+      accessor: (record) => privacyStatusLabel(record.status, t),
+      width: 190,
+      render: (record) => (
+        <div className="flex min-w-0 items-center gap-1.5">
+          <Badge className={privacyStatusBadgeClass(record.status)}>
+            {privacyStatusLabel(record.status, t)}
+          </Badge>
+          {record.manual_override ? (
+            <span className="truncate text-xs text-slate-500">
+              {t.compliance_manual_override}
+            </span>
+          ) : null}
+        </div>
+      ),
+    },
+    {
+      id: "requested_by",
+      label: t.compliance_col_requested_by,
+      accessor: (record) => record.requested_by_name,
+      width: 170,
+    },
+    {
+      id: "due_at",
+      label: t.compliance_col_due,
+      accessor: (record) => compactDt(record.due_at),
+      width: 126,
+      render: (record) => (
+        <span className="font-mono text-sm text-slate-500">
+          {compactDt(record.due_at)}
+        </span>
+      ),
+    },
+    {
+      id: "retention_until",
+      label: t.compliance_col_retention_until,
+      accessor: (record) => compactDt(record.retention_until),
+      width: 150,
+      render: (record) => (
+        <span className="font-mono text-sm text-slate-500">
+          {compactDt(record.retention_until)}
+        </span>
+      ),
+    },
+    {
+      id: "linked_records",
+      label: t.compliance_col_linked_records,
+      accessor: (record) => recordSummaryLabel(record.record_summary),
+      width: 142,
+      render: (record) => (
+        <span className="truncate text-xs text-slate-600">
+          {recordSummaryLabel(record.record_summary)}
+        </span>
+      ),
+    },
+    {
+      id: "notes",
+      label: t.compliance_col_notes,
+      accessor: (record) => privacyNotesLabel(record),
+      width: 240,
+      render: (record) => (
+        <span className="truncate text-sm text-slate-600">
+          {privacyNotesLabel(record)}
+        </span>
+      ),
+    },
+  ], [t]);
+
+  const consentTypeColumns = useMemo<ColumnDef<ConsentTypeSummary>[]>(() => [
+    {
+      id: "type",
+      label: t.compliance_col_type,
+      accessor: (entry) => consentTypeLabel(entry.consent_type, t),
+      required: true,
+      pinned: "left",
+      width: 260,
+      render: (entry) => (
+        <span className="truncate font-medium text-foreground">
+          {consentTypeLabel(entry.consent_type, t)}
+        </span>
+      ),
+    },
+    {
+      id: "total",
+      label: t.compliance_col_total,
+      accessor: (entry) => entry.total,
+      width: 110,
+      render: (entry) => (
+        <span className="font-mono text-sm">{entry.total}</span>
+      ),
+    },
+    {
+      id: "active",
+      label: t.compliance_granted,
+      accessor: (entry) => entry.active,
+      width: 120,
+      render: (entry) => (
+        <Badge className="bg-green-500/15 text-green-700">
+          {entry.active}
+        </Badge>
+      ),
+    },
+  ], [t]);
+
+  const expiredConsentColumns = useMemo<ColumnDef<ExpiredConsent>[]>(() => [
+    {
+      id: "patient",
+      label: t.compliance_col_patient,
+      accessor: (item) => patientLabel(item.patient_pid, item.patient_name),
+      required: true,
+      pinned: "left",
+      width: 260,
+      render: (item) => (
+        <span className="truncate font-medium text-foreground">
+          {patientLabel(item.patient_pid, item.patient_name)}
+        </span>
+      ),
+    },
+    {
+      id: "user",
+      label: t.activity_user,
+      accessor: (item) => item.user_name,
+      width: 180,
+    },
+    {
+      id: "type",
+      label: t.compliance_col_type,
+      accessor: (item) => consentTypeLabel(item.consent_type, t),
+      width: 220,
+    },
+    {
+      id: "expired_at",
+      label: t.compliance_col_expired_at,
+      accessor: (item) => compactDt(item.expires_at),
+      width: 132,
+      render: (item) => (
+        <span className="font-mono text-sm text-slate-500">
+          {compactDt(item.expires_at)}
+        </span>
+      ),
+    },
+  ], [t]);
+
+  const recentChangeColumns = useMemo<ColumnDef<ConsentChange>[]>(() => [
+    {
+      id: "patient",
+      label: t.compliance_col_patient,
+      accessor: (item) => patientLabel(item.patient_pid, item.patient_name),
+      required: true,
+      pinned: "left",
+      width: 260,
+      render: (item) => (
+        <span className="truncate font-medium text-foreground">
+          {patientLabel(item.patient_pid, item.patient_name)}
+        </span>
+      ),
+    },
+    {
+      id: "user",
+      label: t.activity_user,
+      accessor: (item) => item.user_name,
+      width: 180,
+    },
+    {
+      id: "type",
+      label: t.compliance_col_type,
+      accessor: (item) => consentTypeLabel(item.consent_type, t),
+      width: 220,
+    },
+    {
+      id: "status",
+      label: t.users_status,
+      accessor: (item) =>
+        Boolean(item.revoked_at) && !item.granted
+          ? t.compliance_revoked
+          : t.compliance_granted,
+      width: 130,
+      render: (item) => {
+        const isRevoked = Boolean(item.revoked_at) && !item.granted;
+        const badgeCls = isRevoked
+          ? "bg-red-500/15 text-red-700"
+          : item.granted
+            ? "bg-green-500/15 text-green-700"
+            : "bg-slate-500/15 text-slate-700";
+        return (
+          <Badge className={badgeCls}>
+            {isRevoked ? t.compliance_revoked : t.compliance_granted}
+          </Badge>
+        );
+      },
+    },
+    {
+      id: "time",
+      label: t.activity_time,
+      accessor: (item) =>
+        Boolean(item.revoked_at) && !item.granted
+          ? compactDt(item.revoked_at)
+          : compactDt(item.granted_at),
+      width: 132,
+      render: (item) => (
+        <span className="font-mono text-sm text-slate-500">
+          {Boolean(item.revoked_at) && !item.granted
+            ? compactDt(item.revoked_at)
+            : compactDt(item.granted_at)}
+        </span>
+      ),
+    },
+  ], [t]);
+
+  const privacyQueueColumns = useMemo<ColumnDef<PrivacyRequestRecord>[]>(() => [
+    {
+      id: "patient",
+      label: t.compliance_col_patient,
+      accessor: (record) => patientLabel(record.patient_pid, record.patient_name),
+      required: true,
+      pinned: "left",
+      width: 250,
+      render: (record) => (
+        <span className="truncate font-medium text-foreground">
+          {patientLabel(record.patient_pid, record.patient_name)}
+        </span>
+      ),
+    },
+    {
+      id: "request",
+      label: t.compliance_col_request,
+      accessor: (record) => privacyRequestTypeLabel(record.request_type, t),
+      width: 220,
+      render: (record) => (
+        <div className="min-w-0">
+          <div className="truncate font-medium text-foreground">
+            {privacyRequestTypeLabel(record.request_type, t)}
+          </div>
+          <div className="truncate text-xs text-slate-500">
+            {record.source.replaceAll("_", " ")}
+          </div>
+        </div>
+      ),
+    },
+    {
+      id: "status",
+      label: t.compliance_col_status,
+      accessor: (record) => privacyStatusLabel(record.status, t),
+      width: 190,
+      render: (record) => (
+        <div className="flex min-w-0 items-center gap-1.5">
+          <Badge className={privacyStatusBadgeClass(record.status)}>
+            {privacyStatusLabel(record.status, t)}
+          </Badge>
+          {record.is_overdue &&
+          (record.status === "requested" ||
+            record.status === "retention_hold" ||
+            record.status === "approved") ? (
+            <span className="truncate text-xs font-medium text-red-600">
+              {t.compliance_stat_overdue}
+            </span>
+          ) : null}
+        </div>
+      ),
+    },
+    {
+      id: "due_at",
+      label: t.compliance_col_due,
+      accessor: (record) => compactDt(record.due_at),
+      width: 126,
+      render: (record) => (
+        <span className="font-mono text-sm text-slate-500">
+          {compactDt(record.due_at)}
+        </span>
+      ),
+    },
+    {
+      id: "linked_records",
+      label: t.compliance_col_linked_records,
+      accessor: (record) => recordSummaryLabel(record.record_summary),
+      width: 142,
+      render: (record) => (
+        <span className="truncate text-xs text-slate-600">
+          {recordSummaryLabel(record.record_summary)}
+        </span>
+      ),
+    },
+    {
+      id: "notes",
+      label: t.compliance_col_notes,
+      accessor: (record) => privacyNotesLabel(record),
+      width: 220,
+      render: (record) => (
+        <span className="truncate text-sm text-slate-600">
+          {privacyNotesLabel(record)}
+        </span>
+      ),
+    },
+    {
+      id: "actions",
+      label: t.compliance_col_actions,
+      accessor: (record) => record.status,
+      width: 160,
+      render: (record) => {
+        const isActionable =
+          record.status === "requested" ||
+          record.status === "retention_hold" ||
+          (record.status === "approved" &&
+            canExecutePrivacyRequest(user?.role, record.request_type));
+
+        if (isActionable) {
+          return (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8 rounded-lg"
+              disabled={privacyActionBusy !== null}
+              onClick={(event) => {
+                event.stopPropagation();
+                setReviewSheetRecord(record);
+              }}
+            >
+              {t.activity_details}
+            </Button>
+          );
+        }
+
+        if (record.status === "completed" && record.executed_at) {
+          return (
+            <span className="truncate text-xs text-slate-500">
+              {t.compliance_executed_label} {compactDt(record.executed_at)}
+            </span>
+          );
+        }
+
+        return <span className="text-xs text-slate-500">-</span>;
+      },
+    },
+  ], [privacyActionBusy, t, user?.role]);
+
   const stats = [
     { label: t.compliance_consents, value: dashboard?.total ?? 0 },
     { label: t.compliance_granted, value: dashboard?.granted_active ?? 0 },
@@ -687,16 +1154,19 @@ export function AdminCompliancePage() {
         title={t.compliance_title}
         description={t.compliance_subtitle}
         actions={(
-          <Button
-            type="button"
-            variant="outline"
-            className="h-9 rounded-lg gap-1.5 bg-card px-3.5"
-            disabled={loading}
-            onClick={() => void refreshWorkspace()}
-          >
-            <RefreshCcw className="size-3.5" />
-            {t.common_refresh}
-          </Button>
+          <>
+            <AdminGuideButton title={t.compliance_title} description={t.compliance_subtitle} />
+            <Button
+              type="button"
+              variant="outline"
+              className="h-9 rounded-lg gap-1.5 bg-card px-3.5"
+              disabled={loading}
+              onClick={() => void refreshWorkspace()}
+            >
+              <RefreshCcw className="size-3.5" />
+              {t.common_refresh}
+            </Button>
+          </>
         )}
       />
 
@@ -807,64 +1277,15 @@ export function AdminCompliancePage() {
                   </EmptyCell>
                 </div>
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>{t.compliance_col_consent}</TableHead>
-                      <TableHead>{t.compliance_col_status}</TableHead>
-                      <TableHead>{t.compliance_col_managed_by}</TableHead>
-                      <TableHead>{t.compliance_col_effective_at}</TableHead>
-                      <TableHead>{t.compliance_col_expires}</TableHead>
-                      <TableHead>{t.compliance_col_note}</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {patientConsents.map((record) => {
-                      const isRevoked = Boolean(record.revoked_at) && !record.granted;
-                      const isExpired =
-                        !isRevoked && record.granted && isPastDate(record.expires_at);
-                      const badgeClass = isRevoked
-                        ? "bg-red-500/15 text-red-700"
-                        : isExpired
-                          ? "bg-amber-500/15 text-amber-700"
-                          : record.granted
-                            ? "bg-green-500/15 text-green-700"
-                            : "bg-slate-500/15 text-slate-700";
-                      const effectiveAt = isRevoked
-                        ? compactDt(record.revoked_at)
-                        : compactDt(record.granted_at ?? record.created_at);
-
-                      return (
-                        <TableRow key={record.id}>
-                          <TableCell className="font-medium">
-                            {consentTypeLabel(record.consent_type, t)}
-                          </TableCell>
-                          <TableCell>
-                            <Badge className={badgeClass}>
-                              {isRevoked
-                                ? t.compliance_revoked
-                                : isExpired
-                                  ? t.compliance_expired
-                                  : t.compliance_granted}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>{record.managed_by_name}</TableCell>
-                          <TableCell className="font-mono text-sm text-slate-500">
-                            {effectiveAt}
-                          </TableCell>
-                          <TableCell className="font-mono text-sm text-slate-500">
-                            {compactDt(record.expires_at)}
-                          </TableCell>
-                          <TableCell className="text-sm text-slate-600">
-                            {typeof record.note === "string" && record.note.trim()
-                              ? record.note
-                              : "\u2014"}
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
+                <DataTableSurface
+                  rows={patientConsents}
+                  columns={patientConsentColumns}
+                  defaultDensity="comfortable"
+                  defaultSort={[{ field: "effective_at", dir: "desc" }]}
+                  dictionary={t as unknown as Record<string, string>}
+                  rowId={(record) => record.id}
+                  tableClassName="min-h-[320px]"
+                />
               )}
             </AdminTableCard>
           </Section>
@@ -911,56 +1332,15 @@ export function AdminCompliancePage() {
                   </EmptyCell>
                 </div>
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>{t.compliance_col_request}</TableHead>
-                      <TableHead>{t.compliance_col_status}</TableHead>
-                      <TableHead>{t.compliance_col_requested_by}</TableHead>
-                      <TableHead>{t.compliance_col_due}</TableHead>
-                      <TableHead>{t.compliance_col_retention_until}</TableHead>
-                      <TableHead>{t.compliance_col_linked_records}</TableHead>
-                      <TableHead>{t.compliance_col_notes}</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {patientPrivacyRequests.map((record) => (
-                      <TableRow key={record.id}>
-                        <TableCell className="font-medium">
-                          <div>{privacyRequestTypeLabel(record.request_type, t)}</div>
-                          <div className="text-xs text-slate-500">
-                            {t.compliance_created_label} {compactDt(record.requested_at)}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex flex-col gap-2">
-                            <Badge className={privacyStatusBadgeClass(record.status)}>
-                              {privacyStatusLabel(record.status, t)}
-                            </Badge>
-                            {record.manual_override ? (
-                              <span className="text-xs text-slate-500">
-                                {t.compliance_manual_override}
-                              </span>
-                            ) : null}
-                          </div>
-                        </TableCell>
-                        <TableCell>{record.requested_by_name}</TableCell>
-                        <TableCell className="font-mono text-sm text-slate-500">
-                          {compactDt(record.due_at)}
-                        </TableCell>
-                        <TableCell className="font-mono text-sm text-slate-500">
-                          {compactDt(record.retention_until)}
-                        </TableCell>
-                        <TableCell className="text-xs text-slate-600">
-                          {recordSummaryLabel(record.record_summary)}
-                        </TableCell>
-                        <TableCell className="text-sm text-slate-600">
-                          {privacyNotesLabel(record)}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                <DataTableSurface
+                  rows={patientPrivacyRequests}
+                  columns={patientPrivacyColumns}
+                  defaultDensity="comfortable"
+                  defaultSort={[{ field: "due_at", dir: "asc" }]}
+                  dictionary={t as unknown as Record<string, string>}
+                  rowId={(record) => record.id}
+                  tableClassName="min-h-[320px]"
+                />
               )}
             </AdminTableCard>
           </Section>
@@ -1002,30 +1382,15 @@ export function AdminCompliancePage() {
                 description={t.common_registry}
                 count={dashboard.by_type.length}
               >
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>{t.compliance_col_type}</TableHead>
-                      <TableHead>{t.compliance_col_total}</TableHead>
-                      <TableHead>{t.compliance_granted}</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {dashboard.by_type.map((entry) => (
-                      <TableRow key={entry.consent_type}>
-                        <TableCell className="font-medium">
-                          {consentTypeLabel(entry.consent_type, t)}
-                        </TableCell>
-                        <TableCell className="font-mono text-sm">{entry.total}</TableCell>
-                        <TableCell>
-                          <Badge className="bg-green-500/15 text-green-700">
-                            {entry.active}
-                          </Badge>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                <DataTableSurface
+                  rows={dashboard.by_type}
+                  columns={consentTypeColumns}
+                  defaultDensity="comfortable"
+                  defaultSort={[{ field: "total", dir: "desc" }]}
+                  dictionary={t as unknown as Record<string, string>}
+                  rowId={(entry) => entry.consent_type}
+                  tableClassName="min-h-[240px]"
+                />
               </AdminTableCard>
             ) : null}
 
@@ -1039,32 +1404,17 @@ export function AdminCompliancePage() {
                   <EmptyCell>{t.compliance_no_expired}</EmptyCell>
                 </div>
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>{t.compliance_col_patient}</TableHead>
-                      <TableHead>{t.activity_user}</TableHead>
-                      <TableHead>{t.compliance_col_type}</TableHead>
-                      <TableHead>{t.compliance_col_expired_at}</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {expired.map((item) => (
-                      <TableRow
-                        key={`${item.patient_id}-${item.consent_type}-${item.expires_at ?? item.granted_at}`}
-                      >
-                        <TableCell className="font-medium">
-                          {patientLabel(item.patient_pid, item.patient_name)}
-                        </TableCell>
-                        <TableCell>{item.user_name}</TableCell>
-                        <TableCell>{consentTypeLabel(item.consent_type, t)}</TableCell>
-                        <TableCell className="font-mono text-sm text-slate-500">
-                          {compactDt(item.expires_at)}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                <DataTableSurface
+                  rows={expired}
+                  columns={expiredConsentColumns}
+                  defaultDensity="comfortable"
+                  defaultSort={[{ field: "expired_at", dir: "desc" }]}
+                  dictionary={t as unknown as Record<string, string>}
+                  rowId={(item) =>
+                    `${item.patient_id}-${item.consent_type}-${item.expires_at ?? item.granted_at}`
+                  }
+                  tableClassName="min-h-[280px]"
+                />
               )}
             </AdminTableCard>
 
@@ -1074,49 +1424,17 @@ export function AdminCompliancePage() {
                 description={t.common_monitoring}
                 count={dashboard.recent_changes.length}
               >
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>{t.compliance_col_patient}</TableHead>
-                      <TableHead>{t.activity_user}</TableHead>
-                      <TableHead>{t.compliance_col_type}</TableHead>
-                      <TableHead>{t.users_status}</TableHead>
-                      <TableHead>{t.activity_time}</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {dashboard.recent_changes.map((item) => {
-                      const isRevoked = Boolean(item.revoked_at) && !item.granted;
-                      const badgeCls = isRevoked
-                        ? "bg-red-500/15 text-red-700"
-                        : item.granted
-                          ? "bg-green-500/15 text-green-700"
-                          : "bg-slate-500/15 text-slate-700";
-                      const label = isRevoked ? t.compliance_revoked : t.compliance_granted;
-                      const timestamp = isRevoked
-                        ? compactDt(item.revoked_at)
-                        : compactDt(item.granted_at);
-
-                      return (
-                        <TableRow
-                          key={`${item.patient_id}-${item.consent_type}-${item.granted_at ?? item.revoked_at}`}
-                        >
-                          <TableCell className="font-medium">
-                            {patientLabel(item.patient_pid, item.patient_name)}
-                          </TableCell>
-                          <TableCell>{item.user_name}</TableCell>
-                          <TableCell>{consentTypeLabel(item.consent_type, t)}</TableCell>
-                          <TableCell>
-                            <Badge className={badgeCls}>{label}</Badge>
-                          </TableCell>
-                          <TableCell className="font-mono text-sm text-slate-500">
-                            {timestamp}
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
+                <DataTableSurface
+                  rows={dashboard.recent_changes}
+                  columns={recentChangeColumns}
+                  defaultDensity="comfortable"
+                  defaultSort={[{ field: "time", dir: "desc" }]}
+                  dictionary={t as unknown as Record<string, string>}
+                  rowId={(item) =>
+                    `${item.patient_id}-${item.consent_type}-${item.granted_at ?? item.revoked_at}`
+                  }
+                  tableClassName="min-h-[280px]"
+                />
               </AdminTableCard>
             ) : null}
           </Section>
@@ -1134,86 +1452,15 @@ export function AdminCompliancePage() {
                   <EmptyCell>{t.compliance_no_privacy_scope}</EmptyCell>
                 </div>
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>{t.compliance_col_patient}</TableHead>
-                      <TableHead>{t.compliance_col_request}</TableHead>
-                      <TableHead>{t.compliance_col_status}</TableHead>
-                      <TableHead>{t.compliance_col_due}</TableHead>
-                      <TableHead>{t.compliance_col_linked_records}</TableHead>
-                      <TableHead>{t.compliance_col_notes}</TableHead>
-                      <TableHead>{t.compliance_col_actions}</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {privacyQueue.map((record) => {
-                      const isActionable =
-                        record.status === "requested" ||
-                        record.status === "retention_hold" ||
-                        (record.status === "approved" &&
-                          canExecutePrivacyRequest(user?.role, record.request_type));
-
-                      return (
-                        <TableRow key={record.id}>
-                          <TableCell className="font-medium">
-                            {patientLabel(record.patient_pid, record.patient_name)}
-                          </TableCell>
-                          <TableCell className="font-medium">
-                            <div>{privacyRequestTypeLabel(record.request_type, t)}</div>
-                            <div className="text-xs text-slate-500">
-                              {record.source.replaceAll("_", " ")}
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex flex-col gap-2">
-                              <Badge className={privacyStatusBadgeClass(record.status)}>
-                                {privacyStatusLabel(record.status, t)}
-                              </Badge>
-                              {record.is_overdue &&
-                              (record.status === "requested" ||
-                                record.status === "retention_hold" ||
-                                record.status === "approved") ? (
-                                <span className="text-xs font-medium text-red-600">
-                                  {t.compliance_stat_overdue}
-                                </span>
-                              ) : null}
-                            </div>
-                          </TableCell>
-                          <TableCell className="font-mono text-sm text-slate-500">
-                            {compactDt(record.due_at)}
-                          </TableCell>
-                          <TableCell className="text-xs text-slate-600">
-                            {recordSummaryLabel(record.record_summary)}
-                          </TableCell>
-                          <TableCell className="text-sm text-slate-600">
-                            {privacyNotesLabel(record)}
-                          </TableCell>
-                          <TableCell>
-                            {isActionable ? (
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                className="h-8 rounded-lg"
-                                disabled={privacyActionBusy !== null}
-                                onClick={() => setReviewSheetRecord(record)}
-                              >
-                                {t.activity_details}
-                              </Button>
-                            ) : record.status === "completed" && record.executed_at ? (
-                              <span className="text-xs text-slate-500">
-                                {t.compliance_executed_label} {compactDt(record.executed_at)}
-                              </span>
-                            ) : (
-                              <span className="text-xs text-slate-500">-</span>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
+                <DataTableSurface
+                  rows={privacyQueue}
+                  columns={privacyQueueColumns}
+                  defaultDensity="comfortable"
+                  defaultSort={[{ field: "due_at", dir: "asc" }]}
+                  dictionary={t as unknown as Record<string, string>}
+                  rowId={(record) => record.id}
+                  tableClassName="min-h-[360px]"
+                />
               )}
             </AdminTableCard>
           </Section>

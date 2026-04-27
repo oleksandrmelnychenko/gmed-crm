@@ -31,7 +31,7 @@ import {
   AdminToolbar,
   SheetFormFooter,
 } from "@/components/admin-page-patterns";
-import { DataTable } from "@/components/data-table/data-table";
+import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
 import {
   PageHeader,
@@ -52,8 +52,10 @@ import {
   SheetContent,
 } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
+import { useRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
 import {
@@ -122,6 +124,12 @@ import type {
 
 const selectTriggerClassName = cn("w-full", shellInputClassName, "justify-between");
 const textareaClassName = shellTextareaClass;
+const CONTRACT_REALTIME_EVENTS = [
+  "framework_contract.created",
+  "framework_contract.status_changed",
+  "quote.created",
+  "quote.status_changed",
+] as const;
 
 export function ContractsPage() {
   const { user } = useAuth();
@@ -466,6 +474,39 @@ export function ContractsPage() {
   const deferredContractSearch = useDeferredValue(contractFilters.search);
   const deferredQuoteSearch = useDeferredValue(quoteFilters.search);
   const deferredAgencyServiceSearch = useDeferredValue(agencyServiceFilters.search);
+
+  useRealtimeSubscription(CONTRACT_REALTIME_EVENTS, (event) => {
+    if (!permissions.canViewPage) return;
+    clearApiCache("/framework-contracts");
+    clearApiCache("/quotes");
+    clearApiCache("/orders");
+
+    if (event.entity_type === "framework_contract" && event.entity_id) {
+      clearApiCache(`/framework-contracts/${event.entity_id}`);
+    }
+    if (event.entity_type === "quote" && event.entity_id) {
+      clearApiCache(`/quotes/${event.entity_id}`);
+      clearApiCache(`/quotes/${event.entity_id}/versions`);
+    }
+
+    const orderId =
+      typeof event.payload?.order_id === "string" ? event.payload.order_id : "";
+    if (orderId) {
+      clearApiCache(`/orders/${orderId}`);
+    }
+    if (selectedContractId && selectedContractId !== event.entity_id) {
+      clearApiCache(`/framework-contracts/${selectedContractId}`);
+    }
+    if (selectedQuoteId && selectedQuoteId !== event.entity_id) {
+      clearApiCache(`/quotes/${selectedQuoteId}`);
+      clearApiCache(`/quotes/${selectedQuoteId}/versions`);
+    }
+
+    startTransition(() => {
+      setContractsReloadToken((current) => current + 1);
+      setQuotesReloadToken((current) => current + 1);
+    });
+  });
 
   const contractQuery = useMemo(
     () => ({ ...contractFilters, search: deferredContractSearch }),
@@ -1503,11 +1544,12 @@ export function ContractsPage() {
             {agencyServicesError ? <ShellBanner tone="error">{agencyServicesError}</ShellBanner> : null}
           </div>
 
-          <DataTable
+          <DataTableSurface
             rows={agencyServices}
             columns={agencyServiceColumns}
             rowId={(row) => row.id}
-            density="compact"
+            defaultDensity="compact"
+            dictionary={t as unknown as Record<string, string>}
             loading={agencyServicesLoading}
             activeRowId={agencyServiceForm.id || null}
             onRowClick={permissions.canManageCatalog ? handleEditAgencyService : undefined}
@@ -1653,11 +1695,12 @@ export function ContractsPage() {
                 {contractsError ? <ShellBanner tone="error">{contractsError}</ShellBanner> : null}
               </div>
 
-              <DataTable
+              <DataTableSurface
                 rows={contracts}
                 columns={contractTableColumns}
                 rowId={(row) => row.id}
-                density="compact"
+                defaultDensity="compact"
+                dictionary={t as unknown as Record<string, string>}
                 loading={contractsLoading}
                 activeRowId={selectedContractId || null}
                 onRowClick={(row) => openContract(row.id)}
@@ -1813,11 +1856,12 @@ export function ContractsPage() {
                 {quotesError ? <ShellBanner tone="error">{quotesError}</ShellBanner> : null}
               </div>
 
-              <DataTable
+              <DataTableSurface
                 rows={quotes}
                 columns={quoteTableColumns}
                 rowId={(row) => row.id}
-                density="compact"
+                defaultDensity="compact"
+                dictionary={t as unknown as Record<string, string>}
                 loading={quotesLoading}
                 activeRowId={selectedQuoteId || null}
                 onRowClick={(row) => openQuote(row.id)}
@@ -2461,11 +2505,12 @@ export function ContractsPage() {
                 </AdminTableCard>
 
                 <AdminTableCard title={titleWithDot(text.lineItems)} description={text.lineItemsDescription}>
-                  <DataTable
+                  <DataTableSurface
                     rows={quoteLineItemRows}
                     columns={quoteLineItemColumns}
                     rowId={(row) => row.id}
-                    density="compact"
+                    defaultDensity="compact"
+                    dictionary={t as unknown as Record<string, string>}
                     rowAccent={(row) => (row.is_cost_passthrough ? "bg-amber-500" : null)}
                     emptyState={<EmptyState title={text.noLineItems} description={text.noLineItemsDescription} />}
                   />
@@ -2473,11 +2518,12 @@ export function ContractsPage() {
 
                 <AdminTableCard title={titleWithDot(text.versionHistory)} description={text.versionHistoryDescription}>
                   {quoteVersionsError ? <div className="p-4"><ShellBanner tone="error">{quoteVersionsError}</ShellBanner></div> : null}
-                  <DataTable
+                  <DataTableSurface
                     rows={quoteVersions}
                     columns={quoteVersionColumns}
                     rowId={(row) => row.id}
-                    density="compact"
+                    defaultDensity="compact"
+                    dictionary={t as unknown as Record<string, string>}
                     loading={quoteVersionsLoading}
                     emptyState={<EmptyState title={text.noVersions} description={text.noVersionsDescription} />}
                   />

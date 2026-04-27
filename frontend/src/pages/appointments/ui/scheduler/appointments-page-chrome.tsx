@@ -2,6 +2,7 @@ import {
   AlertTriangle,
   CalendarDays,
   CheckCircle2,
+  ClipboardList,
   Clock3,
   Plus,
   RefreshCw,
@@ -22,11 +23,13 @@ type AppointmentsPageChromeProps = {
   todayLabel: string;
   activeLabel: string;
   pendingLabel: string;
+  requestLabel: string;
   attentionLabel: string;
   totalLabel: string;
   todayAppointments: number;
   activeAppointments: number;
   pendingInterpreterResponses: number;
+  appointmentRequestCount: number;
   attentionCount: number;
   totalAppointments: number;
   appointmentsError?: string | null;
@@ -44,11 +47,13 @@ export function AppointmentsPageChrome({
   todayLabel,
   activeLabel,
   pendingLabel,
+  requestLabel,
   attentionLabel,
   totalLabel,
   todayAppointments,
   activeAppointments,
   pendingInterpreterResponses,
+  appointmentRequestCount,
   attentionCount,
   totalAppointments,
   appointmentsError,
@@ -85,7 +90,7 @@ export function AppointmentsPageChrome({
         </Button>
       </div>
 
-      <div className="grid grid-cols-2 divide-x divide-border/60 xl:grid-cols-5">
+      <div className="grid grid-cols-2 divide-x divide-border/60 xl:grid-cols-6">
         <AptKpi
           icon={CalendarDays}
           tone="sky"
@@ -103,6 +108,12 @@ export function AppointmentsPageChrome({
           tone="amber"
           label={pendingLabel}
           value={pendingInterpreterResponses}
+        />
+        <AptKpi
+          icon={ClipboardList}
+          tone="sky"
+          label={requestLabel}
+          value={appointmentRequestCount}
         />
         <AptKpi
           icon={AlertTriangle}

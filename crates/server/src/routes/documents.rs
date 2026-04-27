@@ -8504,6 +8504,23 @@ async fn generate_document(
         }),
     ));
 
+    crate::realtime::publish_document_event(
+        &state,
+        Some(auth.user_id),
+        "document.generated",
+        document_id,
+        json!({
+            "template_id": template.id,
+            "patient_id": patient_uuid,
+            "order_id": order_id,
+            "appointment_id": appointment_id,
+            "language": language,
+            "replace_document_id": replacement.as_ref().map(|value| value.document_id),
+            "version_number": persist_input.version_number,
+        }),
+    )
+    .await;
+
     Json(json!({
         "ok": true,
         "id": document_id,
@@ -9165,6 +9182,19 @@ async fn create_document_translation_request(
         }),
     ));
 
+    crate::realtime::publish_document_event(
+        &state,
+        Some(auth.user_id),
+        "document.translation_requested",
+        id,
+        json!({
+            "request_id": request_id,
+            "requested_language": requested_language,
+            "patient_id": patient_id,
+        }),
+    )
+    .await;
+
     let response_row = match sqlx::query(
         r#"SELECT dtr.id, dtr.document_id, dtr.patient_id, dtr.requested_language,
                   dtr.status, dtr.note, dtr.source_language, dtr.source_text,
@@ -9348,6 +9378,18 @@ async fn update_document_translation_request(
             "status": next_status,
         }),
     ));
+
+    crate::realtime::publish_document_event(
+        &state,
+        Some(auth.user_id),
+        "document.translation_updated",
+        document_id,
+        json!({
+            "request_id": request_id,
+            "status": next_status,
+        }),
+    )
+    .await;
 
     let response_row = match sqlx::query(
         r#"SELECT dtr.id, dtr.document_id, dtr.patient_id, dtr.requested_language,
@@ -9796,7 +9838,7 @@ async fn upload_my_document(
         )
     };
 
-    let _ = if preset.kind == "payment_proof" {
+    let notification_rows = if preset.kind == "payment_proof" {
         sqlx::query(
             r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
                SELECT DISTINCT target.user_id, 'patient_upload', $2, $3, 'document', $1
@@ -9813,13 +9855,14 @@ async fn upload_my_document(
                     FROM users u
                     WHERE u.is_active = true
                       AND u.role = 'billing'
-               ) AS target"#,
+               ) AS target
+               RETURNING id, user_id"#,
         )
         .bind(document_id)
         .bind("Patient payment proof uploaded")
         .bind(notification_body)
         .bind(patient_id)
-        .execute(&state.db)
+        .fetch_all(&state.db)
         .await
     } else {
         sqlx::query(
@@ -9830,15 +9873,63 @@ async fn upload_my_document(
                WHERE pa.patient_id = $4
                  AND pa.revoked_at IS NULL
                  AND u.is_active = true
-                 AND u.role IN ('patient_manager', 'ceo')"#,
+                 AND u.role IN ('patient_manager', 'ceo')
+               RETURNING id, user_id"#,
         )
         .bind(document_id)
         .bind("Patient portal upload received")
         .bind(notification_body)
         .bind(patient_id)
-        .execute(&state.db)
+        .fetch_all(&state.db)
         .await
     };
+
+    if let Ok(notification_rows) = notification_rows {
+        for notification_row in notification_rows {
+            let notification_id = notification_row
+                .try_get::<Uuid, _>("id")
+                .unwrap_or_else(|_| Uuid::nil());
+            let user_id = notification_row
+                .try_get::<Uuid, _>("user_id")
+                .unwrap_or_else(|_| Uuid::nil());
+            if notification_id != Uuid::nil() && user_id != Uuid::nil() {
+                crate::realtime::publish_notification_event(
+                    &state,
+                    user_id,
+                    "notification.created",
+                    Some(notification_id),
+                    json!({
+                        "entity_type": "document",
+                        "entity_id": document_id,
+                    }),
+                )
+                .await;
+            }
+        }
+    }
+
+    let event_type = if preset.kind == "payment_proof" {
+        "document.payment_proof_uploaded"
+    } else {
+        "document.uploaded"
+    };
+    crate::realtime::publish_document_event(
+        &state,
+        Some(auth.user_id),
+        event_type,
+        document_id,
+        json!({
+            "patient_id": patient_id,
+            "order_id": order_id,
+            "appointment_id": appointment_id,
+            "upload_kind": preset.kind,
+            "art": preset.art,
+            "category": preset.category,
+            "visibility": "internal",
+            "status": "active",
+        }),
+    )
+    .await;
 
     (
         StatusCode::CREATED,
@@ -10145,7 +10236,7 @@ async fn upload_document(
         })
         .unwrap_or_else(|| document_patient_id.to_string());
 
-        let _ = sqlx::query(
+        if let Ok(notification_rows) = sqlx::query(
             r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
                SELECT pa.user_id, 'interpreter_upload', $2, $3, 'document', $1
                FROM patient_assignments pa
@@ -10153,7 +10244,8 @@ async fn upload_document(
                WHERE pa.patient_id = $4
                  AND pa.revoked_at IS NULL
                  AND u.is_active = true
-                 AND u.role IN ('patient_manager', 'teamlead_interpreter', 'ceo')"#,
+                 AND u.role IN ('patient_manager', 'teamlead_interpreter', 'ceo')
+               RETURNING id, user_id"#,
         )
         .bind(document_id)
         .bind("Interpreter document uploaded")
@@ -10162,9 +10254,52 @@ async fn upload_document(
             auto_name.trim()
         ))
         .bind(document_patient_id)
-        .execute(&state.db)
-        .await;
+        .fetch_all(&state.db)
+        .await
+        {
+            for notification_row in notification_rows {
+                let notification_id = notification_row
+                    .try_get::<Uuid, _>("id")
+                    .unwrap_or_else(|_| Uuid::nil());
+                let user_id = notification_row
+                    .try_get::<Uuid, _>("user_id")
+                    .unwrap_or_else(|_| Uuid::nil());
+                if notification_id != Uuid::nil() && user_id != Uuid::nil() {
+                    crate::realtime::publish_notification_event(
+                        &state,
+                        user_id,
+                        "notification.created",
+                        Some(notification_id),
+                        json!({
+                            "entity_type": "document",
+                            "entity_id": document_id,
+                        }),
+                    )
+                    .await;
+                }
+            }
+        }
     }
+
+    crate::realtime::publish_document_event(
+        &state,
+        Some(auth.user_id),
+        "document.uploaded",
+        document_id,
+        json!({
+            "patient_id": patient_id,
+            "order_id": order_id,
+            "appointment_id": appointment_id,
+            "art": persist_input.art,
+            "category": resolved_category.as_deref(),
+            "visibility": persist_input.visibility,
+            "status": persist_input.status,
+            "is_medical": resolved_is_medical,
+            "ursprung": ursprung.as_deref(),
+            "needs_categorization": needs_categorization,
+        }),
+    )
+    .await;
 
     Json(json!({
         "ok": true,
@@ -10307,6 +10442,9 @@ async fn update_document(
         );
     }
 
+    let next_status = status.clone();
+    let next_visibility = visibility.clone();
+
     match sqlx::query(
         r#"UPDATE documents
            SET patient_id = $2,
@@ -10354,6 +10492,21 @@ async fn update_document(
                     "is_medical": body.is_medical,
                 }),
             ));
+            crate::realtime::publish_document_event(
+                &state,
+                Some(auth.user_id),
+                "document.updated",
+                id,
+                json!({
+                    "patient_id": patient_id,
+                    "order_id": order_id,
+                    "appointment_id": appointment_id,
+                    "status": next_status,
+                    "visibility": next_visibility,
+                    "is_medical": is_medical,
+                }),
+            )
+            .await;
             Json(json!({ "ok": true })).into_response()
         }
         Err(e) => {
@@ -10514,6 +10667,21 @@ async fn delete_document_file(
             "revoked_share_ids": revoked_share_ids,
         }),
     ));
+
+    crate::realtime::publish_document_event(
+        &state,
+        Some(auth.user_id),
+        "document.deleted",
+        id,
+        json!({
+            "patient_id": patient_id,
+            "previous_status": previous_status,
+            "previous_visibility": previous_visibility,
+            "revoked_share_count": revoked_share_ids.len(),
+            "file_removed_from_disk": staged_delete.is_some(),
+        }),
+    )
+    .await;
 
     let fresh_row = match fetch_document_row(&state, id, auth.user_id).await {
         Ok(Some(row)) => row,
@@ -10692,16 +10860,30 @@ async fn release_document_to_patient_portal_internal(
             .unwrap_or_else(|_| Uuid::nil());
         created_share_ids.push(share_id);
 
-        let _ = sqlx::query(
+        if let Ok(notification_id) = sqlx::query_scalar::<_, Uuid>(
             r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
-               VALUES ($1, 'document_release', $2, $3, 'document', $4)"#,
+               VALUES ($1, 'document_release', $2, $3, 'document', $4)
+               RETURNING id"#,
         )
         .bind(recipient_id)
         .bind(format!("New document released: {auto_name}"))
         .bind("A new document is available in your patient portal.")
         .bind(id)
-        .execute(&state.db)
-        .await;
+        .fetch_one(&state.db)
+        .await
+        {
+            crate::realtime::publish_notification_event(
+                state,
+                recipient_id,
+                "notification.created",
+                Some(notification_id),
+                json!({
+                    "entity_type": "document",
+                    "entity_id": id,
+                }),
+            )
+            .await;
+        }
     }
 
     state.audit_sender.try_send(audit::domain_event(
@@ -10719,6 +10901,21 @@ async fn release_document_to_patient_portal_internal(
             "created_share_ids": created_share_ids,
         }),
     ));
+
+    crate::realtime::publish_document_event(
+        state,
+        Some(actor_user_id),
+        "document.portal_released",
+        id,
+        json!({
+            "patient_id": patient_id,
+            "visibility": "patient_visible",
+            "requires_confirmation": requires_confirmation,
+            "recipient_count": recipients.len(),
+            "created_share_count": created_share_ids.len(),
+        }),
+    )
+    .await;
 
     Ok(PortalReleaseResult {
         document_id: id,
@@ -11093,6 +11290,18 @@ async fn revoke_document_from_patient_portal(
             "revoked_share_ids": revoked_share_ids,
         }),
     ));
+
+    crate::realtime::publish_document_event(
+        &state,
+        Some(auth.user_id),
+        "document.portal_revoked",
+        id,
+        json!({
+            "patient_id": patient_id,
+            "revoked_share_count": revoked_share_ids.len(),
+        }),
+    )
+    .await;
 
     Json(json!({
         "ok": true,
@@ -11485,6 +11694,16 @@ async fn confirm_document_share(
                 Some(id),
                 json!({ "share_id": share_id }),
             ));
+            crate::realtime::publish_document_event(
+                &state,
+                Some(auth.user_id),
+                "document.confirmed",
+                id,
+                json!({
+                    "share_id": share_id,
+                }),
+            )
+            .await;
             Json(json!({ "ok": true })).into_response()
         }
         Err(e) => {

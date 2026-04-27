@@ -3,8 +3,10 @@ import { Download, LoaderCircle, ShieldCheck } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
+import { useRealtimeSubscription } from "@/lib/realtime";
 import { localizeRequiredDocumentLabel } from "@/lib/required-document-labels";
 import {
   downloadPatientPortalExport,
@@ -39,6 +41,39 @@ function shellCard(extra?: string) {
   );
 }
 
+const PATIENT_DASHBOARD_REALTIME_EVENTS = [
+  "appointment.created",
+  "appointment.updated",
+  "appointment.status_changed",
+  "appointment_request.created",
+  "appointment_request.reviewed",
+  "appointment_request.converted",
+  "concierge_service.created",
+  "concierge_service.updated",
+  "concierge_service.cancelled",
+  "concierge_service.billing_ready",
+  "document.uploaded",
+  "document.payment_proof_uploaded",
+  "document.generated",
+  "document.updated",
+  "document.deleted",
+  "document.portal_released",
+  "document.portal_revoked",
+  "document.confirmed",
+  "invoice.created",
+  "invoice.status_changed",
+  "invoice.dunning_created",
+  "invoice.overdue_marked",
+  "privacy_request.created",
+  "privacy_request.reviewed",
+  "privacy_request.executed",
+  "feedback.submitted",
+  "feedback.reviewed",
+  "order.phase_changed",
+  "order.followup_flow_updated",
+  "order.external_invoice_overdue",
+] as const;
+
 export function PatientDashboardPage() {
   const { user } = useAuth();
   const { lang } = useLang();
@@ -61,6 +96,19 @@ export function PatientDashboardPage() {
   );
   const greeting = l("Hallo", "Здравствуйте", "Hello");
   const patientLabel = l("Patient", "Пациент", "Patient");
+
+  useRealtimeSubscription(PATIENT_DASHBOARD_REALTIME_EVENTS, () => {
+    clearApiCache("/me/appointments");
+    clearApiCache("/me/appointment-requests");
+    clearApiCache("/me/concierge-services");
+    clearApiCache("/me/documents");
+    clearApiCache("/me/document-alerts");
+    clearApiCache("/me/invoices");
+    clearApiCache("/me/privacy-requests");
+    clearApiCache("/me/feedback");
+    clearApiCache("/me/followup-milestones");
+    setVersion((value) => value + 1);
+  });
 
   useEffect(() => {
     let cancelled = false;

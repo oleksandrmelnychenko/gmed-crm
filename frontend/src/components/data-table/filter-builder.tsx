@@ -40,14 +40,19 @@ function resolveOptions<T>(
 function valueSummary(
   predicate: FilterPredicate,
   options: readonly FilterOption[],
+  translations?: FilterBuilderTranslations,
 ): string {
   const { operator, value } = predicate;
   if (!operatorTakesValue(operator)) return "";
   if (operator === "between") {
     const range = (value ?? {}) as { from?: string; to?: string };
     if (range.from && range.to) return `${range.from} → ${range.to}`;
-    if (range.from) return `after ${range.from}`;
-    if (range.to) return `before ${range.to}`;
+    if (range.from) {
+      return `${labelForOperator("after", translations?.operatorLabels)} ${range.from}`;
+    }
+    if (range.to) {
+      return `${labelForOperator("before", translations?.operatorLabels)} ${range.to}`;
+    }
     return "—";
   }
   if (operator === "last_n_days") {
@@ -62,7 +67,9 @@ function valueSummary(
     if (labels.length <= 2) return labels.join(", ");
     return `${labels.slice(0, 2).join(", ")} +${labels.length - 2}`;
   }
-  if (typeof value === "boolean") return value ? "yes" : "no";
+  if (typeof value === "boolean") {
+    return value ? translations?.yes ?? "yes" : translations?.no ?? "no";
+  }
   if (value == null || value === "") return "—";
   const opt = options.find((o) => o.value === String(value));
   return opt?.label ?? String(value);
@@ -186,7 +193,7 @@ export function FilterBuilder<T>({
           <div
             role="menu"
             data-table-filter-picker
-            className="absolute left-0 z-[80] mt-1 flex w-64 flex-col rounded-lg border border-border bg-popover text-popover-foreground shadow-lg"
+            className="absolute left-0 z-[110] mt-1 flex w-64 flex-col rounded-lg border border-border bg-popover text-popover-foreground shadow-xl"
           >
             <div className="flex items-center gap-1.5 border-b border-border p-2">
               <Search className="size-3.5 text-muted-foreground" />
@@ -261,7 +268,7 @@ function FilterChip<T>({
   const options = resolveOptions(column, rows);
   const operators = OPERATORS_BY_FIELD_TYPE[column.filterType ?? "text"];
   const opLabel = labelForOperator(predicate.operator, translations?.operatorLabels);
-  const valSummary = valueSummary(predicate, options);
+  const valSummary = valueSummary(predicate, options, translations);
 
   const changeOperator = (next: FilterOperator) => {
     onUpdate({
@@ -278,7 +285,7 @@ function FilterChip<T>({
     <div
       ref={chipRef}
       data-filter-field={predicate.field}
-      className={cn("relative", isEditing && "z-[90]")}
+      className={cn("relative", isEditing && "z-[120]")}
     >
       <div
         className={cn(
@@ -310,7 +317,7 @@ function FilterChip<T>({
       {isEditing ? (
         <div
           data-table-filter-editor
-          className="absolute left-0 top-full z-[90] mt-1 flex items-center gap-1.5 rounded-lg border border-border bg-popover p-1.5 text-popover-foreground shadow-xl"
+          className="absolute left-0 top-full z-[120] mt-1 flex items-center gap-1.5 rounded-lg border border-border bg-popover p-1.5 text-popover-foreground shadow-xl"
         >
           <select
             value={predicate.operator}

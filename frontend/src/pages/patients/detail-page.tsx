@@ -23,8 +23,10 @@ import { toast } from "@/components/ui/toast";
 import {
   localizeWorkflowGroupLabel,
 } from "@/lib/workflow-labels";
+import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { getLang, useLang } from "@/lib/i18n";
+import { useRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
 
@@ -869,6 +871,64 @@ const STATUS_BADGE_CLASSES: Record<string, string> = {
   completed: "border-sky-200 bg-sky-50 text-sky-700",
   cancelled: "border-rose-200 bg-rose-50 text-rose-700",
 };
+
+const PATIENT_DETAIL_REALTIME_EVENTS = [
+  "patient.updated",
+  "patient.assigned",
+  "patient.assignment_revoked",
+  "patient.activated",
+  "patient.deactivated",
+  "appointment.created",
+  "appointment.updated",
+  "appointment.status_changed",
+  "appointment_request.created",
+  "appointment_request.reviewed",
+  "appointment_request.converted",
+  "concierge_service.created",
+  "concierge_service.updated",
+  "concierge_service.cancelled",
+  "concierge_service.billing_ready",
+  "document.uploaded",
+  "document.payment_proof_uploaded",
+  "document.generated",
+  "document.updated",
+  "document.deleted",
+  "document.portal_released",
+  "document.portal_revoked",
+  "document.confirmed",
+  "document.translation_requested",
+  "document.translation_updated",
+  "invoice.created",
+  "invoice.status_changed",
+  "invoice.dunning_created",
+  "invoice.overdue_marked",
+  "privacy_request.created",
+  "privacy_request.reviewed",
+  "privacy_request.executed",
+  "feedback.submitted",
+  "feedback.reviewed",
+  "order.created",
+  "order.phase_changed",
+  "order.process_gates_updated",
+  "order.debt_management_updated",
+  "order.planning_preparation_updated",
+  "order.execution_flow_updated",
+  "order.followup_flow_updated",
+  "order.external_invoice_created",
+  "order.external_invoice_updated",
+  "order.external_invoice_overdue",
+  "order.leistung_added",
+  "order.leistung_approved",
+  "framework_contract.created",
+  "framework_contract.status_changed",
+  "quote.created",
+  "quote.status_changed",
+  "case.created",
+  "case.updated",
+  "case.medication_expiry_confirmed",
+  "case.medication_expiry_flagged",
+] as const;
+
 export function PatientDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -1307,6 +1367,26 @@ export function PatientDetailPage() {
     setTabVersion((v) => v + 1);
   }, [id]);
   const reloadTab = useCallback(() => setTabVersion((v) => v + 1), []);
+
+  useRealtimeSubscription(PATIENT_DETAIL_REALTIME_EVENTS, (event) => {
+    if (!id) return;
+    const matchesCurrentPatient =
+      event.patient_id === id ||
+      (event.entity_type === "patient" && event.entity_id === id);
+    if (!matchesCurrentPatient) return;
+
+    clearApiCache(`/patients/${id}`);
+    clearApiCache(`/patients/${id}/cases`);
+    clearApiCache(`/patients/${id}/orders`);
+    clearApiCache(`/patients/${id}/appointments`);
+    clearApiCache(`/patients/${id}/documents`);
+    clearApiCache(`/patients/${id}/document-alerts`);
+    clearApiCache(`/patients/${id}/framework-contracts`);
+    clearApiCache(`/patients/${id}/invoices`);
+    clearApiCache(`/patients/${id}/timeline`);
+    reload();
+  });
+
   void reloadTab;
   void blankPatientCardEntryForm;
   void blankPatientMedicalOrderForm;

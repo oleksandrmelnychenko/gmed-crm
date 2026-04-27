@@ -98,6 +98,15 @@ async fn create_field(
                     "field_key": body.field_key,
                 }),
             ));
+            crate::realtime::publish_admin_event(
+                &state,
+                Some(auth.user_id),
+                "custom_field.created",
+                "custom_field",
+                r.id,
+                serde_json::json!({}),
+            )
+            .await;
             Json(serde_json::json!({"ok": true, "id": r.id})).into_response()
         }
         Err(e) => {
@@ -128,7 +137,18 @@ async fn update_field(
         "UPDATE custom_fields SET field_label=$2, field_type=$3, options=$4, is_required=$5, sort_order=$6, is_active=true WHERE id=$1",
         id, body.field_label, ft, body.options, body.is_required.unwrap_or(false), body.sort_order.unwrap_or(0)
     ).execute(&state.db).await {
-        Ok(r) if r.rows_affected() > 0 => Json(serde_json::json!({"ok": true})).into_response(),
+        Ok(r) if r.rows_affected() > 0 => {
+            crate::realtime::publish_admin_event(
+                &state,
+                Some(auth.user_id),
+                "custom_field.updated",
+                "custom_field",
+                id,
+                serde_json::json!({}),
+            )
+            .await;
+            Json(serde_json::json!({"ok": true})).into_response()
+        }
         Ok(_) => err(StatusCode::NOT_FOUND, "Field not found"),
         Err(e) => { tracing::error!(error = %e, "update custom field"); err(StatusCode::INTERNAL_SERVER_ERROR, "Failed") }
     }
@@ -156,6 +176,15 @@ async fn delete_field(
         Some(id),
         serde_json::json!({}),
     ));
+    crate::realtime::publish_admin_event(
+        &state,
+        Some(auth.user_id),
+        "custom_field.deleted",
+        "custom_field",
+        id,
+        serde_json::json!({}),
+    )
+    .await;
     Json(serde_json::json!({"ok": true})).into_response()
 }
 

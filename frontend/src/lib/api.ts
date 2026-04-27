@@ -2,6 +2,7 @@ const CLIENT_API_ORIGIN =
   (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/+$/, "") ?? "";
 const API_PREFIX = "/api/v1";
 const ACCESS_TOKEN_KEY = "gmed_access_token";
+const REFRESH_TOKEN_KEY = "gmed_refresh_token";
 
 type ApiErrorBody = {
   error?: string;
@@ -16,6 +17,59 @@ type ApiFetchInit = RequestInit & {
 
 export function getAccessToken() {
   return localStorage.getItem(ACCESS_TOKEN_KEY);
+}
+
+function getRefreshToken() {
+  return localStorage.getItem(REFRESH_TOKEN_KEY);
+}
+
+function clearAuthTokens() {
+  localStorage.removeItem(ACCESS_TOKEN_KEY);
+  localStorage.removeItem(REFRESH_TOKEN_KEY);
+}
+
+let refreshInFlight: Promise<string | null> | null = null;
+
+async function tryRefreshAccessToken(): Promise<string | null> {
+  if (refreshInFlight) return refreshInFlight;
+
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) return null;
+
+  refreshInFlight = (async () => {
+    try {
+      const res = await fetch(buildApiUrl("/auth/refresh"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      });
+      if (!res.ok) {
+        clearAuthTokens();
+        jsonCache.clear();
+        return null;
+      }
+      const tokens = (await res.json()) as { access_token?: string; refresh_token?: string };
+      if (!tokens.access_token || !tokens.refresh_token) {
+        clearAuthTokens();
+        jsonCache.clear();
+        return null;
+      }
+      localStorage.setItem(ACCESS_TOKEN_KEY, tokens.access_token);
+      localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refresh_token);
+      jsonCache.clear();
+      return tokens.access_token;
+    } catch {
+      return null;
+    } finally {
+      refreshInFlight = null;
+    }
+  })();
+
+  return refreshInFlight;
+}
+
+function isAuthEndpoint(path: string) {
+  return path.startsWith("/auth/") || path === "/auth";
 }
 
 function normalizeApiPath(path: string) {
@@ -227,6 +281,7 @@ export async function apiFetch<T>(path: string, init: ApiFetchInit = {}): Promis
   const method = requestMethod(requestInit);
   const canCacheGet = isCacheableJsonGet(requestInit);
   const cacheKey = canCacheGet ? jsonRequestCacheKey(url, headers) : "";
+  const canRetryAuth = headers.has("Authorization") && !isAuthEndpoint(path);
 
   if (canCacheGet && !forceFresh) {
     const cached = readFreshJsonCache(cacheKey);
@@ -240,16 +295,26 @@ export async function apiFetch<T>(path: string, init: ApiFetchInit = {}): Promis
     }
   }
 
-  const request = fetchWithRateLimitRetry(url, { ...requestInit, headers })
-    .then(async (res) => {
-      const payload = await readApiJsonResponse<T>(res);
-      if (canCacheGet) {
-        rememberJsonCache(cacheKey, payload, cacheTtlMs);
-      } else if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
-        clearApiCache();
+  const request = (async () => {
+    let res = await fetchWithRateLimitRetry(url, { ...requestInit, headers });
+
+    if (res.status === 401 && canRetryAuth) {
+      const newAccessToken = await tryRefreshAccessToken();
+      if (newAccessToken) {
+        const retriedHeaders = new Headers(headers);
+        retriedHeaders.set("Authorization", `Bearer ${newAccessToken}`);
+        res = await fetchWithRateLimitRetry(url, { ...requestInit, headers: retriedHeaders });
       }
-      return payload;
-    });
+    }
+
+    const payload = await readApiJsonResponse<T>(res);
+    if (canCacheGet) {
+      rememberJsonCache(cacheKey, payload, cacheTtlMs);
+    } else if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
+      clearApiCache();
+    }
+    return payload;
+  })();
 
   if (!canCacheGet || skipDedupe) {
     return request;
@@ -275,7 +340,18 @@ export function buildApiWebSocketUrl(
 
 export async function apiFetchFile(path: string, init: RequestInit = {}) {
   const headers = buildApiHeaders(init);
-  const res = await fetchWithRateLimitRetry(buildApiUrl(path), { ...init, headers });
+  const url = buildApiUrl(path);
+  const canRetryAuth = headers.has("Authorization") && !isAuthEndpoint(path);
+  let res = await fetchWithRateLimitRetry(url, { ...init, headers });
+
+  if (res.status === 401 && canRetryAuth) {
+    const newAccessToken = await tryRefreshAccessToken();
+    if (newAccessToken) {
+      const retriedHeaders = new Headers(headers);
+      retriedHeaders.set("Authorization", `Bearer ${newAccessToken}`);
+      res = await fetchWithRateLimitRetry(url, { ...init, headers: retriedHeaders });
+    }
+  }
 
   if (!res.ok) {
     const body = await res.json().catch(() => null) as ApiErrorBody | null;

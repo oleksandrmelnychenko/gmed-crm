@@ -82,34 +82,49 @@ pub async fn require_auth(State(state): State<AppState>, mut req: Request, next:
         return unauthorized();
     };
 
+    let auth_user = match auth_user_from_access_token(&state, token).await {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+
+    req.extensions_mut().insert(auth_user);
+
+    next.run(req).await
+}
+
+#[allow(clippy::result_large_err)]
+pub async fn auth_user_from_access_token(
+    state: &AppState,
+    token: &str,
+) -> Result<AuthUser, Response> {
     let Ok(data) = jwt::verify_access_token(state.jwt_secret(), token) else {
-        return unauthorized();
+        return Err(unauthorized());
     };
 
     let Some(role) = parse_role(&data.claims.role) else {
         tracing::warn!(role = %data.claims.role, user_id = %data.claims.sub, "Unknown role in JWT");
-        return unauthorized();
+        return Err(unauthorized());
     };
 
     match blacklist::is_revoked(&state.db, data.claims.jti).await {
         Ok(true) => {
             tracing::info!(jti = %data.claims.jti, user_id = %data.claims.sub, "Rejected revoked access token");
-            return unauthorized();
+            return Err(unauthorized());
         }
         Err(e) => {
             tracing::error!(error = %e, "Failed to check token revocation — denying request");
-            return unauthorized();
+            return Err(unauthorized());
         }
         Ok(false) => {}
     }
     match blacklist::is_family_revoked(&state.db, data.claims.fam).await {
         Ok(true) => {
             tracing::info!(family_id = %data.claims.fam, user_id = %data.claims.sub, "Rejected token from revoked family");
-            return unauthorized();
+            return Err(unauthorized());
         }
         Err(e) => {
             tracing::error!(error = %e, "Failed to check family revocation — denying request");
-            return unauthorized();
+            return Err(unauthorized());
         }
         Ok(false) => {}
     }
@@ -121,18 +136,16 @@ pub async fn require_auth(State(state): State<AppState>, mut req: Request, next:
             exp = data.claims.exp,
             "Rejected token with unrepresentable exp claim"
         );
-        return unauthorized();
+        return Err(unauthorized());
     };
 
-    req.extensions_mut().insert(AuthUser {
+    Ok(AuthUser {
         user_id: data.claims.sub,
         role,
         family_id: data.claims.fam,
         access_token_jti: data.claims.jti,
         access_token_expires_at,
-    });
-
-    next.run(req).await
+    })
 }
 
 fn unauthorized() -> Response {

@@ -10,12 +10,15 @@ import {
   Waypoints,
 } from "lucide-react";
 
+import { AdminGuideButton } from "@/components/admin-guide";
 import {
   AdminInlineMetric,
   AdminSheetScaffold,
   SheetActionsFooter,
   AdminTableCard,
 } from "@/components/admin-page-patterns";
+import { DataTableSurface } from "@/components/data-table/data-table-surface";
+import type { ColumnDef } from "@/components/data-table/types";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -41,6 +44,8 @@ import {
   tokens,
 } from "@/components/ui-shell";
 import { Input } from "@/components/ui/input";
+import { clearApiCache } from "@/lib/api";
+import { useRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 import {
   createIpWhitelistEntry,
@@ -106,6 +111,20 @@ type FlashState =
   | { tone: "error"; text: string }
   | null;
 
+const ADMIN_SECURITY_REALTIME_EVENTS = [
+  "security.ip_whitelist_added",
+  "security.ip_whitelist_deleted",
+  "system_setting.updated",
+  "system_setting.maintenance_toggled",
+  "session.revoked",
+  "session.revoked_all",
+  "pending_login.approved",
+  "pending_login.rejected",
+  "user.unlocked",
+  "user.force_password_reset",
+  "user.mfa_toggled",
+] as const;
+
 export function AdminSecurityPage() {
   const { t, lang } = useLang();
   const [ips, setIps] = useState<IpEntry[]>([]);
@@ -161,6 +180,16 @@ export function AdminSecurityPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useRealtimeSubscription(ADMIN_SECURITY_REALTIME_EVENTS, () => {
+    clearApiCache("/admin/ip-whitelist");
+    clearApiCache("/admin/login-geo");
+    clearApiCache("/admin/audit-analytics");
+    clearApiCache("/admin/settings");
+    clearApiCache("/admin/sessions");
+    clearApiCache("/admin/mfa/pending");
+    void load();
+  });
 
   const metrics = useMemo(
     () => ({
@@ -246,7 +275,7 @@ export function AdminSecurityPage() {
     }
   }
 
-  async function deleteIp(id: string) {
+  const deleteIp = useCallback(async (id: string) => {
     setDeleteBusyId(id);
     setFlash(null);
     try {
@@ -260,7 +289,261 @@ export function AdminSecurityPage() {
     } finally {
       setDeleteBusyId("");
     }
-  }
+  }, [load, t.common_error]);
+
+  const suspiciousEventColumns = useMemo<ColumnDef<AuditAnalyticsEvent>[]>(() => [
+    {
+      id: "created_at",
+      label: t.activity_time,
+      accessor: (event) => event.created_at,
+      sortable: true,
+      width: 170,
+      render: (event) => (
+        <span className="font-mono text-xs text-muted-foreground">
+          {formatAdminDateTime(event.created_at, lang)}
+        </span>
+      ),
+    },
+    {
+      id: "user",
+      label: t.activity_user,
+      accessor: (event) => `${event.user_name ?? ""} ${event.user_role ?? ""}`,
+      sortable: true,
+      width: 220,
+      render: (event) => (
+        <div className="min-w-0">
+          <div className="text-xs font-medium text-foreground">
+            {event.user_name ?? t.security_anonymous}
+          </div>
+          <div className="text-[11px] text-muted-foreground">
+            {event.user_role ?? event.action}
+          </div>
+        </div>
+      ),
+    },
+    {
+      id: "reason",
+      label: t.security_col_reason,
+      accessor: (event) => event.reason,
+      sortable: true,
+      width: 260,
+      render: (event) => (
+        <div className="min-w-0">
+          <div className="truncate text-xs text-foreground">{event.reason}</div>
+          <div className="text-[11px] text-muted-foreground">
+            {event.entity_type} - {event.action}
+          </div>
+        </div>
+      ),
+    },
+    {
+      id: "route",
+      label: t.security_col_route,
+      accessor: (event) => event.route ?? "",
+      sortable: true,
+      width: 220,
+      render: (event) => (
+        <span className="truncate text-xs text-muted-foreground">
+          {event.route ?? "-"}
+        </span>
+      ),
+    },
+    {
+      id: "ip",
+      label: t.common_ip,
+      accessor: (event) => event.ip_hash ?? "",
+      sortable: true,
+      width: 140,
+      render: (event) => (
+        <span className="font-mono text-xs text-muted-foreground">
+          {event.ip_hash ?? "-"}
+        </span>
+      ),
+    },
+  ], [
+    lang,
+    t.activity_time,
+    t.activity_user,
+    t.common_ip,
+    t.security_anonymous,
+    t.security_col_reason,
+    t.security_col_route,
+  ]);
+
+  const readerColumns = useMemo<ColumnDef<AuditAnalyticsReader>[]>(() => [
+    {
+      id: "user",
+      label: t.activity_user,
+      accessor: (reader) => reader.user_name,
+      sortable: true,
+      width: 220,
+      render: (reader) => (
+        <div className="min-w-0">
+          <div className="text-xs font-medium text-foreground">{reader.user_name}</div>
+          <div className="text-[11px] text-muted-foreground">{reader.user_role}</div>
+        </div>
+      ),
+    },
+    {
+      id: "event_count",
+      label: t.security_col_events,
+      accessor: (reader) => reader.event_count,
+      sortable: true,
+      width: 120,
+      render: (reader) => <span className="tabular-nums">{reader.event_count}</span>,
+    },
+    {
+      id: "distinct_entities",
+      label: t.security_col_distinct_entities,
+      accessor: (reader) => reader.distinct_entities,
+      sortable: true,
+      width: 160,
+      render: (reader) => <span className="tabular-nums">{reader.distinct_entities}</span>,
+    },
+  ], [t.activity_user, t.security_col_distinct_entities, t.security_col_events]);
+
+  const ipColumns = useMemo<ColumnDef<IpEntry>[]>(() => [
+    {
+      id: "cidr",
+      label: t.security_col_cidr,
+      accessor: (ip) => ip.cidr,
+      sortable: true,
+      width: 220,
+      render: (ip) => <span className="font-mono text-xs text-foreground">{ip.cidr}</span>,
+    },
+    {
+      id: "description",
+      label: t.security_ip_desc,
+      accessor: (ip) => ip.description ?? "",
+      sortable: true,
+      width: 280,
+      render: (ip) => (
+        <span className="truncate text-xs text-muted-foreground">
+          {ip.description || "-"}
+        </span>
+      ),
+    },
+    {
+      id: "status",
+      label: t.users_status,
+      accessor: (ip) => ip.is_active,
+      sortable: true,
+      width: 140,
+      render: (ip) => (
+        <StatusBadge tone={ip.is_active ? "success" : "neutral"}>
+          {ip.is_active ? t.common_active : t.common_inactive}
+        </StatusBadge>
+      ),
+    },
+    {
+      id: "actions",
+      label: t.users_actions,
+      accessor: (ip) => ip.id,
+      width: 160,
+      render: (ip) => {
+        const busy = deleteBusyId === ip.id;
+        return (
+          <Button
+            type="button"
+            variant="destructive"
+            size="sm"
+            className="h-8 rounded-lg"
+            disabled={busy}
+            onClick={(event) => {
+              event.stopPropagation();
+              void deleteIp(ip.id);
+            }}
+          >
+            {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
+            {t.common_delete}
+          </Button>
+        );
+      },
+    },
+  ], [
+    deleteBusyId,
+    deleteIp,
+    t.common_active,
+    t.common_delete,
+    t.common_inactive,
+    t.security_col_cidr,
+    t.security_ip_desc,
+    t.users_actions,
+    t.users_status,
+  ]);
+
+  const geoColumns = useMemo<ColumnDef<GeoLogin>[]>(() => [
+    {
+      id: "created_at",
+      label: t.activity_time,
+      accessor: (entry) => entry.created_at,
+      sortable: true,
+      width: 170,
+      render: (entry) => (
+        <span className="font-mono text-xs text-muted-foreground">
+          {formatAdminDateTime(entry.created_at, lang)}
+        </span>
+      ),
+    },
+    {
+      id: "user",
+      label: t.activity_user,
+      accessor: (entry) => `${entry.user_name} ${entry.user_email}`,
+      sortable: true,
+      width: 240,
+      render: (entry) => (
+        <div className="min-w-0">
+          <div className="text-xs font-medium text-foreground">{entry.user_name}</div>
+          <div className="text-[11px] text-muted-foreground">{entry.user_email}</div>
+        </div>
+      ),
+    },
+    {
+      id: "ip",
+      label: t.common_ip,
+      accessor: (entry) => entry.ip_address ?? "",
+      sortable: true,
+      width: 140,
+      render: (entry) => (
+        <span className="font-mono text-xs text-muted-foreground">
+          {entry.ip_address ?? "-"}
+        </span>
+      ),
+    },
+    {
+      id: "device",
+      label: t.common_device,
+      accessor: (entry) => shortAdminUserAgent(entry.user_agent),
+      sortable: true,
+      width: 260,
+      render: (entry) => (
+        <span className="truncate text-xs text-muted-foreground" title={entry.user_agent ?? ""}>
+          {shortAdminUserAgent(entry.user_agent)}
+        </span>
+      ),
+    },
+    {
+      id: "status",
+      label: t.users_status,
+      accessor: (entry) => entry.is_revoked,
+      sortable: true,
+      width: 140,
+      render: (entry) => (
+        <StatusBadge tone={entry.is_revoked ? "error" : "success"}>
+          {entry.is_revoked ? t.compliance_revoked : t.common_active}
+        </StatusBadge>
+      ),
+    },
+  ], [
+    lang,
+    t.activity_time,
+    t.activity_user,
+    t.common_active,
+    t.common_device,
+    t.common_ip,
+    t.compliance_revoked,
+    t.users_status,
+  ]);
 
   return (
     <>
@@ -270,6 +553,7 @@ export function AdminSecurityPage() {
           description={t.security_subtitle}
           actions={(
             <>
+              <AdminGuideButton title={t.security_title} description={t.security_subtitle} />
               <Button
                 type="button"
                 variant="outline"
@@ -420,48 +704,15 @@ export function AdminSecurityPage() {
                   count={auditAnalytics?.recent_suspicious_events.length ?? 0}
                 >
                   {auditAnalytics?.recent_suspicious_events.length ? (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-[13px]">
-                        <thead className="bg-muted/40">
-                          <tr className="text-left text-[11px] uppercase tracking-wider text-muted-foreground">
-                            <th className="px-4 py-2.5 font-medium">{t.activity_time}</th>
-                            <th className="px-4 py-2.5 font-medium">{t.activity_user}</th>
-                            <th className="px-4 py-2.5 font-medium">{t.security_col_reason}</th>
-                            <th className="px-4 py-2.5 font-medium">{t.security_col_route}</th>
-                            <th className="w-[140px] px-4 py-2.5 font-medium">{t.common_ip}</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {auditAnalytics.recent_suspicious_events.map((event) => (
-                            <tr key={event.id} className="border-t border-border">
-                              <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                                {formatAdminDateTime(event.created_at, lang)}
-                              </td>
-                              <td className="px-4 py-3">
-                                <div className="text-sm font-medium text-foreground">
-                                  {event.user_name ?? t.security_anonymous}
-                                </div>
-                                <div className="text-[11.5px] text-muted-foreground">
-                                  {event.user_role ?? event.action}
-                                </div>
-                              </td>
-                              <td className="px-4 py-3">
-                                <div className="text-sm text-foreground">{event.reason}</div>
-                                <div className="text-[11.5px] text-muted-foreground">
-                                  {event.entity_type} - {event.action}
-                                </div>
-                              </td>
-                              <td className="max-w-[240px] px-4 py-3 text-xs text-muted-foreground truncate">
-                                {event.route ?? "-"}
-                              </td>
-                              <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                                {event.ip_hash ?? "-"}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                    <DataTableSurface
+                      rows={auditAnalytics.recent_suspicious_events}
+                      columns={suspiciousEventColumns}
+                      defaultDensity="comfortable"
+                      defaultSort={[{ field: "created_at", dir: "desc" }]}
+                      dictionary={t as unknown as Record<string, string>}
+                      rowId={(event) => String(event.id)}
+                      tableClassName="min-h-[320px]"
+                    />
                   ) : (
                     <div className="p-4">
                       <EmptyCell>{t.security_no_suspicious}</EmptyCell>
@@ -474,39 +725,15 @@ export function AdminSecurityPage() {
                   count={auditAnalytics?.top_sensitive_readers.length ?? 0}
                 >
                   {auditAnalytics?.top_sensitive_readers.length ? (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-[13px]">
-                        <thead className="bg-muted/40">
-                          <tr className="text-left text-[11px] uppercase tracking-wider text-muted-foreground">
-                            <th className="px-4 py-2.5 font-medium">{t.activity_user}</th>
-                            <th className="w-[120px] px-4 py-2.5 font-medium">{t.security_col_events}</th>
-                            <th className="w-[160px] px-4 py-2.5 font-medium">
-                              {t.security_col_distinct_entities}
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {auditAnalytics.top_sensitive_readers.map((reader) => (
-                            <tr key={reader.user_id} className="border-t border-border">
-                              <td className="px-4 py-3">
-                                <div className="text-sm font-medium text-foreground">
-                                  {reader.user_name}
-                                </div>
-                                <div className="text-[11.5px] text-muted-foreground">
-                                  {reader.user_role}
-                                </div>
-                              </td>
-                              <td className="px-4 py-3 text-foreground">
-                                {reader.event_count}
-                              </td>
-                              <td className="px-4 py-3 text-foreground">
-                                {reader.distinct_entities}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                    <DataTableSurface
+                      rows={auditAnalytics.top_sensitive_readers}
+                      columns={readerColumns}
+                      defaultDensity="comfortable"
+                      defaultSort={[{ field: "event_count", dir: "desc" }]}
+                      dictionary={t as unknown as Record<string, string>}
+                      rowId={(reader) => reader.user_id}
+                      tableClassName="min-h-[320px]"
+                    />
                   ) : (
                     <div className="p-4">
                       <EmptyCell>{t.security_no_outlier_readers}</EmptyCell>
@@ -540,53 +767,14 @@ export function AdminSecurityPage() {
                     <EmptyCell>{t.security_ip_none}</EmptyCell>
                   </div>
                 ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-[13px]">
-                      <thead className="bg-muted/40">
-                        <tr className="text-left text-[11px] uppercase tracking-wider text-muted-foreground">
-                          <th className="px-4 py-2.5 font-medium">{t.security_col_cidr}</th>
-                          <th className="px-4 py-2.5 font-medium">{t.security_ip_desc}</th>
-                          <th className="w-[140px] px-4 py-2.5 font-medium">{t.users_status}</th>
-                          <th className="w-[160px] px-4 py-2.5 font-medium">{t.users_actions}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {ips.map((ip) => {
-                          const busy = deleteBusyId === ip.id;
-                          return (
-                            <tr key={ip.id} className="border-t border-border">
-                              <td className="px-4 py-3 font-mono text-xs text-foreground">
-                                {ip.cidr}
-                              </td>
-                              <td className="px-4 py-3 text-muted-foreground">
-                                {ip.description || "-"}
-                              </td>
-                              <td className="px-4 py-3">
-                                <StatusBadge tone={ip.is_active ? "success" : "neutral"}>
-                                  {ip.is_active ? t.common_active : t.common_inactive}
-                                </StatusBadge>
-                              </td>
-                              <td className="px-4 py-3">
-                                <Button
-                                  type="button"
-                                  variant="destructive"
-                                  size="sm"
-                                  className="h-8 rounded-lg"
-                                  disabled={busy}
-                                  onClick={() => void deleteIp(ip.id)}
-                                >
-                                  {busy ? (
-                                    <LoaderCircle className="size-3.5 animate-spin" />
-                                  ) : null}
-                                  {t.common_delete}
-                                </Button>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
+                  <DataTableSurface
+                    rows={ips}
+                    columns={ipColumns}
+                    defaultDensity="compact"
+                    dictionary={t as unknown as Record<string, string>}
+                    rowId={(ip) => ip.id}
+                    tableClassName="min-h-[320px]"
+                  />
                 )}
               </AdminTableCard>
             </Section>
@@ -602,53 +790,15 @@ export function AdminSecurityPage() {
                     <EmptyCell>{t.security_login_history}</EmptyCell>
                   </div>
                 ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-[13px]">
-                      <thead className="bg-muted/40">
-                        <tr className="text-left text-[11px] uppercase tracking-wider text-muted-foreground">
-                          <th className="px-4 py-2.5 font-medium">{t.activity_time}</th>
-                          <th className="px-4 py-2.5 font-medium">{t.activity_user}</th>
-                          <th className="w-[140px] px-4 py-2.5 font-medium">{t.common_ip}</th>
-                          <th className="px-4 py-2.5 font-medium">{t.common_device}</th>
-                          <th className="w-[140px] px-4 py-2.5 font-medium">{t.users_status}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {geo.map((entry, index) => (
-                          <tr
-                            key={`${entry.user_email}-${entry.created_at}-${index}`}
-                            className="border-t border-border"
-                          >
-                            <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                                {formatAdminDateTime(entry.created_at, lang)}
-                            </td>
-                            <td className="px-4 py-3">
-                              <div className="text-sm font-medium text-foreground">
-                                {entry.user_name}
-                              </div>
-                              <div className="text-[11.5px] text-muted-foreground">
-                                {entry.user_email}
-                              </div>
-                            </td>
-                            <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                              {entry.ip_address ?? "-"}
-                            </td>
-                            <td
-                              className="max-w-[260px] px-4 py-3 text-xs text-muted-foreground truncate"
-                              title={entry.user_agent ?? ""}
-                            >
-                              {shortAdminUserAgent(entry.user_agent)}
-                            </td>
-                            <td className="px-4 py-3">
-                              <StatusBadge tone={entry.is_revoked ? "error" : "success"}>
-                                {entry.is_revoked ? t.compliance_revoked : t.common_active}
-                              </StatusBadge>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  <DataTableSurface
+                    rows={geo}
+                    columns={geoColumns}
+                    defaultDensity="comfortable"
+                    defaultSort={[{ field: "created_at", dir: "desc" }]}
+                    dictionary={t as unknown as Record<string, string>}
+                    rowId={(entry) => `${entry.user_email}-${entry.created_at}-${entry.ip_address ?? ""}`}
+                    tableClassName="min-h-[360px]"
+                  />
                 )}
               </AdminTableCard>
             </Section>

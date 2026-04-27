@@ -10,6 +10,7 @@ import {
 import { useSearchParams } from "react-router-dom";
 import {
   CheckCircle2,
+  Filter,
   LoaderCircle,
   Plus,
   RefreshCw,
@@ -17,16 +18,16 @@ import {
   TrendingUp,
   UserPlus,
   Users,
+  X,
 } from "lucide-react";
 
 import {
   AdminInlineMetric,
   AdminSheetScaffold,
   AdminTableCard,
-  AdminToolbar,
   SheetFormFooter,
 } from "@/components/admin-page-patterns";
-import { DataTable } from "@/components/data-table/data-table";
+import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -61,8 +62,10 @@ import {
   textareaClass as shellTextareaClass,
   tokens,
 } from "@/components/ui-shell";
+import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
+import { useRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import type { CreateLeadBody, LeadDetail, LeadsStats, MonthlyEntry, StatusCount } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
@@ -112,6 +115,23 @@ import type {
 
 const selectClassName = shellSelectClassName;
 const textareaClassName = shellTextareaClass;
+const LEAD_DEFAULT_FROZEN_COLUMNS = ["lead"];
+const LEAD_MAX_FROZEN_COLUMNS = 2;
+const LEAD_COLUMN_GROUPS = {
+  identity: "Identity",
+  qualification: "Qualification",
+  contact: "Contact",
+  origin: "Origin",
+  lifecycle: "Lifecycle",
+};
+const FAILED_OUTCOME_OPTIONS = ["archived", "delete_anonymized"] as const;
+const LEAD_REALTIME_EVENTS = [
+  "lead.created",
+  "lead.updated",
+  "lead.status_changed",
+  "lead.converted",
+  "lead.failed_resolved",
+] as const;
 
 function titleWithDot(title: ReactNode) {
   return (
@@ -204,6 +224,8 @@ export function LeadsPage() {
         id: "lead",
         label: t.leads_title,
         accessor: (row) => `${row.first_name} ${row.last_name}`.trim(),
+        filterType: "text",
+        group: "identity",
         sortable: true,
         width: 260,
         pinned: "left",
@@ -213,6 +235,12 @@ export function LeadsPage() {
         id: "status",
         label: t.users_status,
         accessor: (row) => row.qualification_status,
+        filterType: "enum",
+        filterOptions: STATUS_OPTIONS.map((status) => ({
+          value: status,
+          label: statusLabel(status),
+        })),
+        group: "qualification",
         sortable: true,
         width: 180,
         render: (row) => (
@@ -225,6 +253,12 @@ export function LeadsPage() {
         id: "compliance",
         label: "Compliance",
         accessor: (row) => row.compliance_status ?? "",
+        filterType: "enum",
+        filterOptions: COMPLIANCE_OPTIONS.map((status) => ({
+          value: status,
+          label: statusLabel(status),
+        })),
+        group: "qualification",
         width: 170,
         render: (row) => (
           <StatusBadge tone={complianceTone(row.compliance_status)}>
@@ -236,6 +270,8 @@ export function LeadsPage() {
         id: "email",
         label: t.patients_email,
         accessor: (row) => row.email ?? "",
+        filterType: "text",
+        group: "contact",
         width: 240,
         render: (row) => <span className="text-xs text-foreground">{row.email || t.common_not_set}</span>,
       },
@@ -243,6 +279,8 @@ export function LeadsPage() {
         id: "phone",
         label: t.field_phone,
         accessor: (row) => row.phone ?? "",
+        filterType: "text",
+        group: "contact",
         width: 180,
         render: (row) => <span className="text-xs text-foreground">{row.phone || t.common_not_set}</span>,
       },
@@ -250,6 +288,8 @@ export function LeadsPage() {
         id: "source",
         label: t.leads_source,
         accessor: (row) => row.source ?? "",
+        filterType: "text",
+        group: "origin",
         width: 180,
         render: (row) => <span className="text-xs text-foreground">{row.source || t.common_not_set}</span>,
       },
@@ -257,6 +297,8 @@ export function LeadsPage() {
         id: "country",
         label: t.providers_country,
         accessor: (row) => row.country ?? "",
+        filterType: "text",
+        group: "origin",
         width: 150,
         render: (row) => <span className="text-xs text-foreground">{row.country || t.common_not_set}</span>,
       },
@@ -264,6 +306,8 @@ export function LeadsPage() {
         id: "created",
         label: "Date",
         accessor: (row) => row.created_at,
+        filterType: "date",
+        group: "lifecycle",
         sortable: true,
         width: 130,
         render: (row) => <span className="text-xs text-foreground">{formatDate(row.created_at)}</span>,
@@ -272,6 +316,12 @@ export function LeadsPage() {
         id: "failed",
         label: "Failed",
         accessor: (row) => row.failed_outcome?.status ?? "",
+        filterType: "enum",
+        filterOptions: FAILED_OUTCOME_OPTIONS.map((status) => ({
+          value: status,
+          label: statusLabel(status),
+        })),
+        group: "lifecycle",
         width: 170,
         render: (row) =>
           row.failed_outcome?.status && row.failed_outcome.status !== "none" ? (
@@ -420,6 +470,23 @@ export function LeadsPage() {
     setVersion((current) => current + 1);
   }
 
+  useRealtimeSubscription(LEAD_REALTIME_EVENTS, (event) => {
+    if (!permissions.canViewPage) return;
+    clearApiCache("/leads");
+    clearApiCache("/stats/leads");
+    clearApiCache("/stats/leads/monthly");
+    clearApiCache("/stats/leads/by-status");
+    if (event.entity_type === "lead" && event.entity_id) {
+      clearApiCache(`/leads/${event.entity_id}`);
+    }
+    if (selectedLeadId && selectedLeadId !== event.entity_id) {
+      clearApiCache(`/leads/${selectedLeadId}`);
+    }
+    startTransition(() => {
+      setVersion((current) => current + 1);
+    });
+  });
+
   async function handleCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setCreateBusy(true);
@@ -560,6 +627,14 @@ export function LeadsPage() {
   const growthPct = stats?.growth_pct ?? 0;
   const growthAbs = stats?.growth_abs ?? 0;
   const growthSign = growthPct >= 0 ? "+" : "";
+  const anyQuickFilterActive =
+    filters.search.trim() !== "" ||
+    filters.status !== "" ||
+    filters.includeArchived !== "false";
+  const archiveFilterLabel =
+    filters.includeArchived === "true"
+      ? l("Mit Archiv", "С архивом", "With archive")
+      : l("Aktive Leads", "Активные лиды", "Active leads");
 
   return (
     <>
@@ -569,10 +644,6 @@ export function LeadsPage() {
           description={t.leads_subtitle}
           actions={
             <>
-              <Button type="button" variant="outline" className="h-9 rounded-lg px-3.5" onClick={reload}>
-                <RefreshCw className="size-4" />
-                {l("Aktualisieren", "Обновить", "Refresh")}
-              </Button>
               {permissions.canCreate ? (
                 <Button
                   type="button"
@@ -667,114 +738,122 @@ export function LeadsPage() {
 
         <AdminTableCard
           title={titleWithDot(t.leads_title)}
-          description="Lead queue with qualification and conversion actions."
           count={filteredLeads.length}
         >
-          <div className="space-y-4 border-b border-border px-4 py-4">
-            <AdminToolbar className="gap-2">
-              <div className="relative min-w-[260px] flex-1">
-                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  className={cn(shellInputClassName, "pl-9")}
-                  placeholder={t.common_search}
-                  value={filters.search}
-                  onChange={(event) =>
-                    setFilters((current) => ({ ...current, search: event.target.value }))
+          <div className="relative z-30 flex flex-wrap items-center gap-1.5 border-b border-border/70 bg-card px-3 py-2">
+            <div className="relative min-w-[220px] flex-1 sm:max-w-sm">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                className={cn(shellInputClassName, "h-8 rounded-lg bg-background pl-8 text-[13px]")}
+                placeholder={t.common_search}
+                value={filters.search}
+                onChange={(event) =>
+                  setFilters((current) => ({ ...current, search: event.target.value }))
+                }
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    setFilters((current) => ({ ...current, search: "" }));
+                    (event.target as HTMLInputElement).blur();
                   }
-                />
-              </div>
-              <ShadSelect
-                value={filters.status || "__all__"}
-                onValueChange={(value) =>
-                  setFilters((current) => ({
-                    ...current,
-                    status: value && value !== "__all__" ? value : "",
-                  }))
-                }
-              >
-                <SelectTrigger className={cn(selectClassName, "w-[180px] min-w-[180px]")}>
-                  <SelectValue>
-                    {filters.status ? statusLabel(filters.status) : t.providers_all}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__all__">{t.providers_all}</SelectItem>
-                  {STATUS_OPTIONS.map((status) => (
-                    <SelectItem key={status} value={status}>
-                      {statusLabel(status)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </ShadSelect>
-              <Input
-                value={filters.email}
-                onChange={(event) =>
-                  setFilters((current) => ({ ...current, email: event.target.value }))
-                }
-                className={cn(shellInputClassName, "w-[220px] min-w-[220px]")}
-                placeholder={t.patients_email}
+                }}
               />
-              <Input
-                value={filters.phone}
-                onChange={(event) =>
-                  setFilters((current) => ({ ...current, phone: event.target.value }))
-                }
-                className={cn(shellInputClassName, "w-[180px] min-w-[180px]")}
-                placeholder={t.field_phone}
-              />
-              <Input
-                value={filters.source}
-                onChange={(event) =>
-                  setFilters((current) => ({ ...current, source: event.target.value }))
-                }
-                className={cn(shellInputClassName, "w-[180px] min-w-[180px]")}
-                placeholder={t.leads_source}
-              />
-              <Input
-                value={filters.country}
-                onChange={(event) =>
-                  setFilters((current) => ({ ...current, country: event.target.value }))
-                }
-                className={cn(shellInputClassName, "w-[180px] min-w-[180px]")}
-                placeholder={t.providers_country}
-              />
-              <ShadSelect
-                value={filters.includeArchived || "false"}
-                onValueChange={(value) =>
-                  setFilters((current) => ({
-                    ...current,
-                    includeArchived: value === "true" ? "true" : "false",
-                  }))
-                }
-              >
-                <SelectTrigger className={cn(selectClassName, "w-[180px] min-w-[180px]")}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="false">Hide archived</SelectItem>
-                  <SelectItem value="true">Include archived</SelectItem>
-                </SelectContent>
-              </ShadSelect>
+            </div>
+
+            <ShadSelect
+              value={filters.status || "__all__"}
+              onValueChange={(value) => {
+                const status = value && value !== "__all__" ? value : "";
+                setFilters((current) => ({
+                  ...current,
+                  status,
+                  includeArchived: status === "archived" ? "true" : current.includeArchived,
+                }));
+              }}
+            >
+              <SelectTrigger size="sm" className="h-8 w-[190px] bg-background text-[13px]">
+                <Filter className="mr-1 size-3.5 text-muted-foreground" />
+                <SelectValue>
+                  {filters.status ? statusLabel(filters.status) : t.users_status}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">{t.providers_all}</SelectItem>
+                {STATUS_OPTIONS.map((status) => (
+                  <SelectItem key={status} value={status}>
+                    {statusLabel(status)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </ShadSelect>
+
+            <ShadSelect
+              value={filters.includeArchived || "false"}
+              onValueChange={(value) => {
+                const includeArchived = value === "true" ? "true" : "false";
+                setFilters((current) => ({
+                  ...current,
+                  includeArchived,
+                  status:
+                    includeArchived === "false" && current.status === "archived"
+                      ? ""
+                      : current.status,
+                }));
+              }}
+            >
+              <SelectTrigger size="sm" className="h-8 w-[170px] bg-background text-[13px]">
+                <SelectValue>{archiveFilterLabel}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="false">
+                  {l("Aktive Leads", "Активные лиды", "Active leads")}
+                </SelectItem>
+                <SelectItem value="true">
+                  {l("Mit Archiv", "С архивом", "With archive")}
+                </SelectItem>
+              </SelectContent>
+            </ShadSelect>
+
+            <div className="ml-auto flex items-center gap-1">
               <Button
                 type="button"
                 variant="outline"
-                className="h-9 rounded-lg px-3.5"
-                onClick={() => setFilters(DEFAULT_FILTERS)}
+                size="icon-sm"
+                title={l("Aktualisieren", "Обновить", "Refresh")}
+                aria-label={l("Aktualisieren", "Обновить", "Refresh")}
+                onClick={reload}
               >
-                {t.access_reset}
+                <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
               </Button>
-            </AdminToolbar>
+              {anyQuickFilterActive ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setFilters(DEFAULT_FILTERS)}
+                >
+                  <X className="size-3.5" />
+                  {t.common_reset}
+                </Button>
+              ) : null}
+            </div>
           </div>
 
-          <DataTable
+          <DataTableSurface
             rows={filteredLeads}
             columns={leadColumns}
             rowId={(row) => row.id}
-            density="compact"
+            defaultDensity="compact"
+            defaultFrozenColumns={LEAD_DEFAULT_FROZEN_COLUMNS}
+            dictionary={t as unknown as Record<string, string>}
+            groupLabels={LEAD_COLUMN_GROUPS}
             loading={loading}
+            maxFrozenColumns={LEAD_MAX_FROZEN_COLUMNS}
+            toolbarClassName="border-b border-border/70 bg-card px-3 py-2"
             activeRowId={selectedLeadId || null}
             onRowClick={(row) => openLeadDetail(row.id)}
             rowAccent={(row) => leadRowAccent(row.qualification_status)}
+            rowActionsLabel={t.users_actions ?? "Actions"}
+            rowActionsWidth={224}
             rowActions={(row) => {
               const canQualify =
                 row.qualification_status === "new" || row.qualification_status === "in_progress";

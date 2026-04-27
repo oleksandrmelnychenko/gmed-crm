@@ -16,6 +16,7 @@ import {
   X,
 } from "lucide-react";
 
+import { AdminGuideButton } from "@/components/admin-guide";
 import {
   AdminInlineMetric,
   AdminSheetScaffold,
@@ -23,6 +24,8 @@ import {
   AdminToolbar,
   AdminTableCard,
 } from "@/components/admin-page-patterns";
+import { DataTableSurface } from "@/components/data-table/data-table-surface";
+import type { ColumnDef } from "@/components/data-table/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -203,6 +206,80 @@ export function AdminActivityPage() {
 
   const selectedActivity =
     selectedIndex !== null ? filtered[selectedIndex] ?? null : null;
+  const selectedActivityId = selectedActivity
+    ? `${selectedActivity.user_email}-${selectedActivity.created_at}-${selectedActivity.action}`
+    : null;
+
+  const columns = useMemo<ColumnDef<ActivityRow>[]>(() => [
+    {
+      id: "created_at",
+      label: t.activity_time,
+      accessor: (activity) => activity.created_at,
+      width: 170,
+      render: (activity) => (
+        <span className="font-mono text-xs text-muted-foreground whitespace-nowrap">
+          {formatAdminDateTime(activity.created_at, lang)}
+        </span>
+      ),
+    },
+    {
+      id: "user",
+      label: t.activity_user,
+      accessor: (activity) => `${activity.user_name} ${activity.user_email}`,
+      width: 260,
+      render: (activity) => (
+        <div className="flex min-w-0 items-center gap-2.5">
+          <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-medium text-foreground">
+            {activityInitials(activity.user_name)}
+          </div>
+          <div className="min-w-0">
+            <div className="truncate text-xs font-medium text-foreground">
+              {activity.user_name}
+            </div>
+            <div className="truncate text-[11px] text-muted-foreground">
+              {activity.user_email}
+            </div>
+          </div>
+        </div>
+      ),
+    },
+    {
+      id: "action",
+      label: t.activity_action,
+      accessor: (activity) => activity.action,
+      width: 180,
+      render: (activity) => (
+        <StatusBadge tone={actionTone(activity.action)}>
+          {actionLabel(activity.action)}
+        </StatusBadge>
+      ),
+    },
+    {
+      id: "entity",
+      label: t.activity_entity,
+      accessor: (activity) => entityDisplay(activity.entity_type, activity.entity_id),
+      width: 180,
+      render: (activity) => (
+        <span className="font-mono text-xs text-muted-foreground">
+          {entityDisplay(activity.entity_type, activity.entity_id)}
+        </span>
+      ),
+    },
+    {
+      id: "details",
+      label: t.activity_details,
+      accessor: (activity) => contextSummary(activity.context),
+      width: 360,
+      render: (activity) => {
+        const details = contextSummary(activity.context);
+        return (
+          <span className="truncate text-xs text-muted-foreground" title={details}>
+            {details}
+          </span>
+        );
+      },
+    },
+  ], [lang, t.activity_action, t.activity_details, t.activity_entity, t.activity_time, t.activity_user]);
 
   const anyFilterActive = search.trim() !== "" || filterAction !== "";
 
@@ -213,16 +290,22 @@ export function AdminActivityPage() {
           title={t.activity_title}
           description={t.activity_subtitle}
           actions={(
-            <Button
-              type="button"
-              variant="outline"
-              className="h-9 rounded-lg gap-1.5 bg-card px-3.5"
-              disabled={loading}
-              onClick={() => void loadData(filterAction)}
-            >
-              <RefreshCcw className="size-3.5" />
-              {t.common_refresh}
-            </Button>
+            <>
+              <AdminGuideButton
+                title={t.activity_title}
+                description={t.activity_subtitle}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                className="h-9 rounded-lg gap-1.5 bg-card px-3.5"
+                disabled={loading}
+                onClick={() => void loadData(filterAction)}
+              >
+                <RefreshCcw className="size-3.5" />
+                {t.common_refresh}
+              </Button>
+            </>
           )}
         />
 
@@ -319,67 +402,20 @@ export function AdminActivityPage() {
                 <EmptyCell>{t.activity_subtitle}</EmptyCell>
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-[13px]">
-                  <thead className="bg-muted/40">
-                    <tr className="text-left text-[11px] uppercase tracking-wider text-muted-foreground">
-                      <th className="w-[170px] px-4 py-2.5 font-medium">{t.activity_time}</th>
-                      <th className="px-4 py-2.5 font-medium">{t.activity_user}</th>
-                      <th className="w-[180px] px-4 py-2.5 font-medium">{t.activity_action}</th>
-                      <th className="w-[160px] px-4 py-2.5 font-medium">{t.activity_entity}</th>
-                      <th className="px-4 py-2.5 font-medium">{t.activity_details}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filtered.map((activity, index) => {
-                      const details = contextSummary(activity.context);
-                      return (
-                        <tr
-                          key={`${activity.user_email}-${activity.created_at}-${index}`}
-                          className="group/row border-t border-border transition-colors hover:bg-muted/40 cursor-pointer"
-                          onClick={() => {
-                            setSelectedIndex(index);
-                            setDetailOpen(true);
-                          }}
-                        >
-                          <td className="px-4 py-3 font-mono text-xs text-muted-foreground whitespace-nowrap">
-                            {formatAdminDateTime(activity.created_at, lang)}
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-2.5">
-                              <div className="flex size-7 items-center justify-center rounded-full bg-muted text-[11px] font-medium text-foreground shrink-0">
-                                {activityInitials(activity.user_name)}
-                              </div>
-                              <div className="min-w-0">
-                                <div className="font-medium text-foreground truncate">
-                                  {activity.user_name}
-                                </div>
-                                <div className="text-[11.5px] text-muted-foreground truncate">
-                                  {activity.user_email}
-                                </div>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3">
-                            <StatusBadge tone={actionTone(activity.action)}>
-                              {actionLabel(activity.action)}
-                            </StatusBadge>
-                          </td>
-                          <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                            {entityDisplay(activity.entity_type, activity.entity_id)}
-                          </td>
-                          <td
-                            className="max-w-[340px] px-4 py-3 text-xs text-muted-foreground truncate"
-                            title={details}
-                          >
-                            {details}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+              <DataTableSurface
+                rows={filtered}
+                columns={columns}
+                defaultDensity="comfortable"
+                defaultSort={[{ field: "created_at", dir: "desc" }]}
+                dictionary={t as unknown as Record<string, string>}
+                rowId={(activity) => `${activity.user_email}-${activity.created_at}-${activity.action}`}
+                activeRowId={selectedActivityId}
+                onRowClick={(activity) => {
+                  setSelectedIndex(filtered.indexOf(activity));
+                  setDetailOpen(true);
+                }}
+                tableClassName="min-h-[360px]"
+              />
             )}
           </AdminTableCard>
         ) : null}

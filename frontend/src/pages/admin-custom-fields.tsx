@@ -1,19 +1,24 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { Plus, RefreshCcw, X } from "lucide-react";
 
+import { AdminGuideButton } from "@/components/admin-guide";
 import {
   AdminSheetScaffold,
   SheetFormFooter,
   AdminTableCard,
   AdminToolbar,
 } from "@/components/admin-page-patterns";
+import { DataTableSurface } from "@/components/data-table/data-table-surface";
+import type { ColumnDef } from "@/components/data-table/types";
 import {
   Banner,
   EmptyCell,
   PageHeader,
   TabLoader,
 } from "@/components/ui-shell";
+import { clearApiCache } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
+import { useRealtimeSubscription } from "@/lib/realtime";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,14 +31,6 @@ import {
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useSheetDirtyGuard } from "@/hooks/use-sheet-dirty-guard";
 import {
   createAdminCustomField,
@@ -55,6 +52,12 @@ interface CustomField {
 
 const ENTITY_TYPES = ["lead", "patient", "order", "provider"] as const;
 const FIELD_TYPES = ["text", "number", "date", "boolean", "select"] as const;
+
+const ADMIN_CUSTOM_FIELD_REALTIME_EVENTS = [
+  "custom_field.created",
+  "custom_field.updated",
+  "custom_field.deleted",
+] as const;
 
 export function AdminCustomFieldsPage() {
   const { t } = useLang();
@@ -92,6 +95,11 @@ export function AdminCustomFieldsPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useRealtimeSubscription(ADMIN_CUSTOM_FIELD_REALTIME_EVENTS, () => {
+    clearApiCache("/admin/custom-fields");
+    void load();
+  });
 
   const onCreate = async (ev: FormEvent) => {
     ev.preventDefault();
@@ -152,12 +160,89 @@ export function AdminCustomFieldsPage() {
     confirmMessage: closeUnsavedConfirmMessage,
   });
 
-  const onDelete = async (id: string) => {
+  const onDelete = useCallback(async (id: string) => {
     await deleteAdminCustomField(id);
     void load();
-  };
+  }, [load]);
 
   const activeFields = fields.filter((f) => f.is_active);
+  const columns = useMemo<ColumnDef<CustomField>[]>(() => [
+    {
+      id: "entity_type",
+      label: t.cf_entity_type,
+      accessor: (field) => field.entity_type,
+      sortable: true,
+      width: 150,
+      render: (field) => (
+        <Badge className="bg-blue-500/15 text-blue-700 dark:text-blue-400">
+          {field.entity_type}
+        </Badge>
+      ),
+    },
+    {
+      id: "field_key",
+      label: t.cf_field_key,
+      accessor: (field) => field.field_key,
+      sortable: true,
+      width: 190,
+      render: (field) => <span className="font-mono text-xs">{field.field_key}</span>,
+    },
+    {
+      id: "field_label",
+      label: t.cf_field_label,
+      accessor: (field) => field.field_label,
+      sortable: true,
+      width: 220,
+      render: (field) => <span className="font-medium">{field.field_label}</span>,
+    },
+    {
+      id: "field_type",
+      label: t.cf_field_type,
+      accessor: (field) => field.field_type,
+      sortable: true,
+      width: 150,
+      render: (field) => (
+        <Badge className="bg-neutral-500/15 text-neutral-700 dark:text-neutral-400">
+          {field.field_type}
+        </Badge>
+      ),
+    },
+    {
+      id: "required",
+      label: t.cf_required,
+      accessor: (field) => field.is_required,
+      sortable: true,
+      width: 110,
+      render: (field) => (field.is_required ? "yes" : ""),
+    },
+    {
+      id: "actions",
+      label: t.users_actions,
+      accessor: (field) => field.id,
+      width: 150,
+      render: (field) => (
+        <Button
+          size="sm"
+          variant="destructive"
+          onClick={(event) => {
+            event.stopPropagation();
+            void onDelete(field.id);
+          }}
+        >
+          {t.common_delete}
+        </Button>
+      ),
+    },
+  ], [
+    t.cf_entity_type,
+    t.cf_field_key,
+    t.cf_field_label,
+    t.cf_field_type,
+    t.cf_required,
+    t.common_delete,
+    t.users_actions,
+    onDelete,
+  ]);
 
   return (
     <div className="space-y-4">
@@ -166,6 +251,7 @@ export function AdminCustomFieldsPage() {
         description={t.cf_subtitle}
         actions={(
           <>
+            <AdminGuideButton title={t.cf_title} description={t.cf_subtitle} />
             <Button
               type="button"
               variant="outline"
@@ -324,56 +410,15 @@ export function AdminCustomFieldsPage() {
           description={t.cf_title}
           count={activeFields.length}
         >
-          {activeFields.length === 0 ? (
-            <div className="p-4">
-              <EmptyCell>{t.cf_no_fields}</EmptyCell>
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{t.cf_entity_type}</TableHead>
-                  <TableHead>{t.cf_field_key}</TableHead>
-                  <TableHead>{t.cf_field_label}</TableHead>
-                  <TableHead>{t.cf_field_type}</TableHead>
-                  <TableHead>{t.cf_required}</TableHead>
-                  <TableHead>{t.users_actions}</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {activeFields.map((f) => (
-                  <TableRow key={f.id}>
-                    <TableCell>
-                      <Badge className="bg-blue-500/15 text-blue-700 dark:text-blue-400">
-                        {f.entity_type}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="font-mono text-sm">
-                      {f.field_key}
-                    </TableCell>
-                    <TableCell className="font-medium">
-                      {f.field_label}
-                    </TableCell>
-                    <TableCell>
-                      <Badge className="bg-neutral-500/15 text-neutral-700 dark:text-neutral-400">
-                        {f.field_type}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>{f.is_required ? "\u2713" : ""}</TableCell>
-                    <TableCell>
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        onClick={() => onDelete(f.id)}
-                      >
-                        {t.common_delete}
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
+          <DataTableSurface
+            rows={activeFields}
+            columns={columns}
+            defaultDensity="compact"
+            dictionary={t as unknown as Record<string, string>}
+            rowId={(field) => field.id}
+            emptyState={<EmptyCell>{t.cf_no_fields}</EmptyCell>}
+            tableClassName="min-h-[320px]"
+          />
         </AdminTableCard>
       ) : null}
     </div>

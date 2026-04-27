@@ -1986,6 +1986,18 @@ async fn create_order(
             {
                 return resp;
             }
+            crate::realtime::publish_order_event(
+                &state,
+                Some(auth.user_id),
+                "order.created",
+                r.id,
+                serde_json::json!({
+                    "order_number": order_number.clone(),
+                    "patient_id": body.patient_id,
+                    "phase": "discovery",
+                }),
+            )
+            .await;
             tracing::info!(by = %auth.user_id, order = %order_number, "Order created");
             (StatusCode::CREATED, Json(serde_json::json!({"id": r.id, "order_number": order_number, "created_at": r.created_at}))).into_response()
         }
@@ -2305,6 +2317,18 @@ async fn update_phase(
             {
                 return resp;
             }
+            crate::realtime::publish_order_event(
+                &state,
+                Some(auth.user_id),
+                "order.phase_changed",
+                order_id,
+                serde_json::json!({
+                    "from_phase": current_phase,
+                    "phase": body.phase,
+                    "note": phase_note,
+                }),
+            )
+            .await;
             Json(serde_json::json!({"ok": true})).into_response()
         }
         Ok(_) => err(StatusCode::NOT_FOUND, "Order not found"),
@@ -2413,18 +2437,27 @@ async fn update_process_gates(
     .await
     {
         Ok(result) if result.rows_affected() > 0 => {
+            let realtime_payload = serde_json::json!({
+                "billing_release_status": billing_release_status,
+                "billing_release_note": body.billing_release_note,
+                "package_coverage_status": package_coverage_status,
+                "package_coverage_note": body.package_coverage_note,
+            });
             state.audit_sender.try_send(audit::domain_event(
                 "update_order_process_gates",
                 Some(auth.user_id),
                 "order",
                 Some(order_id),
-                serde_json::json!({
-                    "billing_release_status": billing_release_status,
-                    "billing_release_note": body.billing_release_note,
-                    "package_coverage_status": package_coverage_status,
-                    "package_coverage_note": body.package_coverage_note,
-                }),
+                realtime_payload.clone(),
             ));
+            crate::realtime::publish_order_event(
+                &state,
+                Some(auth.user_id),
+                "order.process_gates_updated",
+                order_id,
+                realtime_payload,
+            )
+            .await;
 
             match load_order_process_readiness(&state, order_id, patient_id).await {
                 Ok(readiness) => Json(readiness.payload).into_response(),
@@ -2590,20 +2623,29 @@ async fn update_debt_management(
     .await
     {
         Ok(result) if result.rows_affected() > 0 => {
+            let realtime_payload = serde_json::json!({
+                "status": status,
+                "note": note,
+                "owner_user_id": body.owner_user_id,
+                "next_review_at": next_review_at.map(|value| value.to_rfc3339()),
+                "last_contact_at": last_contact_at.map(|value| value.to_rfc3339()),
+                "resolution_note": resolution_note,
+            });
             state.audit_sender.try_send(audit::domain_event(
                 "update_order_debt_management",
                 Some(auth.user_id),
                 "order",
                 Some(order_id),
-                serde_json::json!({
-                    "status": status,
-                    "note": note,
-                    "owner_user_id": body.owner_user_id,
-                    "next_review_at": next_review_at.map(|value| value.to_rfc3339()),
-                    "last_contact_at": last_contact_at.map(|value| value.to_rfc3339()),
-                    "resolution_note": resolution_note,
-                }),
+                realtime_payload.clone(),
             ));
+            crate::realtime::publish_order_event(
+                &state,
+                Some(auth.user_id),
+                "order.debt_management_updated",
+                order_id,
+                realtime_payload,
+            )
+            .await;
 
             match load_order_process_readiness(&state, order_id, patient_id).await {
                 Ok(readiness) => Json(readiness.payload).into_response(),
@@ -2772,20 +2814,29 @@ async fn update_planning_preparation(
     .await
     {
         Ok(result) if result.rows_affected() > 0 => {
+            let realtime_payload = serde_json::json!({
+                "treatment_plan_status": treatment_plan_status,
+                "treatment_plan_note": body.treatment_plan_note,
+                "non_medical_required": body.non_medical_required,
+                "interpreter_required": body.interpreter_required,
+                "preparation_documents_status": preparation_documents_status,
+                "interpreter_briefing_status": effective_interpreter_briefing_status,
+            });
             state.audit_sender.try_send(audit::domain_event(
                 "update_order_planning_preparation",
                 Some(auth.user_id),
                 "order",
                 Some(order_id),
-                serde_json::json!({
-                    "treatment_plan_status": treatment_plan_status,
-                    "treatment_plan_note": body.treatment_plan_note,
-                    "non_medical_required": body.non_medical_required,
-                    "interpreter_required": body.interpreter_required,
-                    "preparation_documents_status": preparation_documents_status,
-                    "interpreter_briefing_status": effective_interpreter_briefing_status,
-                }),
+                realtime_payload.clone(),
             ));
+            crate::realtime::publish_order_event(
+                &state,
+                Some(auth.user_id),
+                "order.planning_preparation_updated",
+                order_id,
+                realtime_payload,
+            )
+            .await;
 
             match load_order_planning_readiness(&state, order_id).await {
                 Ok(readiness) => Json(readiness.payload).into_response(),
@@ -2963,21 +3014,30 @@ async fn update_execution_flow(
     .await
     {
         Ok(result) if result.rows_affected() > 0 => {
+            let realtime_payload = serde_json::json!({
+                "arrival_status": arrival_status,
+                "medical_execution_status": medical_execution_status,
+                "non_medical_execution_status": non_medical_execution_status,
+                "interpreter_service_status": interpreter_service_status,
+                "issue_status": issue_status,
+                "deviation_note": deviation_note,
+                "execution_summary": execution_summary,
+            });
             state.audit_sender.try_send(audit::domain_event(
                 "update_order_execution_flow",
                 Some(auth.user_id),
                 "order",
                 Some(order_id),
-                serde_json::json!({
-                    "arrival_status": arrival_status,
-                    "medical_execution_status": medical_execution_status,
-                    "non_medical_execution_status": non_medical_execution_status,
-                    "interpreter_service_status": interpreter_service_status,
-                    "issue_status": issue_status,
-                    "deviation_note": deviation_note,
-                    "execution_summary": execution_summary,
-                }),
+                realtime_payload.clone(),
             ));
+            crate::realtime::publish_order_event(
+                &state,
+                Some(auth.user_id),
+                "order.execution_flow_updated",
+                order_id,
+                realtime_payload,
+            )
+            .await;
 
             match load_order_execution_readiness(&state, order_id).await {
                 Ok(readiness) => Json(readiness.payload).into_response(),
@@ -3133,22 +3193,31 @@ async fn update_followup_flow(
     .await
     {
         Ok(result) if result.rows_affected() > 0 => {
+            let realtime_payload = serde_json::json!({
+                "doctor_followup_status": doctor_followup_status,
+                "followup_1w_status": followup_1w_status,
+                "followup_1m_status": followup_1m_status,
+                "followup_6m_status": followup_6m_status,
+                "package_end_date": package_end_date.map(|value| value.to_string()),
+                "package_end_status": package_end_status,
+                "results_handoff_status": results_handoff_status,
+                "followup_summary": followup_summary,
+            });
             state.audit_sender.try_send(audit::domain_event(
                 "update_order_followup_flow",
                 Some(auth.user_id),
                 "order",
                 Some(order_id),
-                serde_json::json!({
-                    "doctor_followup_status": doctor_followup_status,
-                    "followup_1w_status": followup_1w_status,
-                    "followup_1m_status": followup_1m_status,
-                    "followup_6m_status": followup_6m_status,
-                    "package_end_date": package_end_date.map(|value| value.to_string()),
-                    "package_end_status": package_end_status,
-                    "results_handoff_status": results_handoff_status,
-                    "followup_summary": followup_summary,
-                }),
+                realtime_payload.clone(),
             ));
+            crate::realtime::publish_order_event(
+                &state,
+                Some(auth.user_id),
+                "order.followup_flow_updated",
+                order_id,
+                realtime_payload,
+            )
+            .await;
 
             match load_order_followup_readiness(&state, order_id).await {
                 Ok(readiness) => Json(readiness.payload).into_response(),
@@ -3424,6 +3493,19 @@ async fn create_external_invoice(
                     "amount_gross": amount_gross.to_string(),
                 }),
             ));
+            crate::realtime::publish_order_event(
+                &state,
+                Some(auth.user_id),
+                "order.external_invoice_created",
+                order_id,
+                serde_json::json!({
+                    "external_invoice_id": id,
+                    "external_invoice_number": external_invoice_number,
+                    "status": status,
+                    "amount_gross": amount_gross.to_string(),
+                }),
+            )
+            .await;
             (StatusCode::CREATED, Json(serde_json::json!({ "id": id }))).into_response()
         }
         Err(error) => {
@@ -3559,6 +3641,17 @@ async fn update_external_invoice(
                     "status": status,
                 }),
             ));
+            crate::realtime::publish_order_event(
+                &state,
+                Some(auth.user_id),
+                "order.external_invoice_updated",
+                order_id,
+                serde_json::json!({
+                    "external_invoice_id": external_invoice_id,
+                    "status": status,
+                }),
+            )
+            .await;
             Json(serde_json::json!({ "ok": true })).into_response()
         }
         Ok(None) => err(StatusCode::NOT_FOUND, "External invoice not found"),
@@ -3664,6 +3757,7 @@ async fn add_leistung(
     let price =
         rust_decimal::Decimal::try_from(body.unit_price).unwrap_or(rust_decimal::Decimal::ZERO);
     let passthrough = body.is_cost_passthrough.unwrap_or(false);
+    let description = body.description.clone();
     if let Err(resp) =
         validate_provider_doctor_context(&state, body.provider_id, body.doctor_id).await
     {
@@ -3701,6 +3795,18 @@ async fn add_leistung(
     {
         Ok(r) => {
             let id: Uuid = r.try_get("id").unwrap_or_default();
+            crate::realtime::publish_order_event(
+                &state,
+                Some(auth.user_id),
+                "order.leistung_added",
+                order_id,
+                serde_json::json!({
+                    "leistung_id": id,
+                    "description": description,
+                    "is_cost_passthrough": passthrough,
+                }),
+            )
+            .await;
             (StatusCode::CREATED, Json(serde_json::json!({"id": id}))).into_response()
         }
         Err(e) => { tracing::error!(error = %e, "add leistung"); err(StatusCode::INTERNAL_SERVER_ERROR, "Failed") }
@@ -3731,7 +3837,19 @@ async fn approve_leistung(
     .execute(&state.db)
     .await
     {
-        Ok(r) if r.rows_affected() > 0 => Json(serde_json::json!({"ok": true})).into_response(),
+        Ok(r) if r.rows_affected() > 0 => {
+            crate::realtime::publish_order_event(
+                &state,
+                Some(auth.user_id),
+                "order.leistung_approved",
+                order_id,
+                serde_json::json!({
+                    "leistung_id": leistung_id,
+                }),
+            )
+            .await;
+            Json(serde_json::json!({"ok": true})).into_response()
+        }
         Ok(_) => err(
             StatusCode::NOT_FOUND,
             "Leistung not found or not in delivered status",
@@ -3965,9 +4083,10 @@ pub async fn run_external_invoice_deadline_scheduler_once(
         summary.overdue_marked += result.rows_affected();
 
         for recipient_id in &recipients {
-            sqlx::query(
+            let notification_row = sqlx::query(
                 r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
-                   VALUES ($1, $2, $3, $4, 'order', $5)"#,
+                   VALUES ($1, $2, $3, $4, 'order', $5)
+                   RETURNING id, user_id"#,
             )
             .bind(recipient_id)
             .bind("external_invoice_overdue")
@@ -3980,8 +4099,23 @@ pub async fn run_external_invoice_deadline_scheduler_once(
                 currency
             ))
             .bind(order_id)
-            .execute(&state.db)
+            .fetch_one(&state.db)
             .await?;
+            let notification_id: Uuid = notification_row.try_get("id").unwrap_or_default();
+            let user_id: Uuid = notification_row.try_get("user_id").unwrap_or_default();
+            if !notification_id.is_nil() && !user_id.is_nil() {
+                crate::realtime::publish_notification_event(
+                    state,
+                    user_id,
+                    "notification.created",
+                    Some(notification_id),
+                    serde_json::json!({
+                        "entity_type": "order",
+                        "entity_id": order_id,
+                    }),
+                )
+                .await;
+            }
             summary.notifications_created += 1;
         }
 
@@ -3997,6 +4131,19 @@ pub async fn run_external_invoice_deadline_scheduler_once(
                 "due_date": due_date.to_string(),
             }),
         ));
+        crate::realtime::publish_order_event(
+            state,
+            None,
+            "order.external_invoice_overdue",
+            order_id,
+            serde_json::json!({
+                "external_invoice_id": external_invoice_id,
+                "external_invoice_number": external_invoice_number,
+                "patient_id": patient_id,
+                "due_date": due_date.to_string(),
+            }),
+        )
+        .await;
     }
 
     Ok(summary)

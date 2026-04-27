@@ -689,6 +689,20 @@ async fn review_feedback(
         }),
     ));
 
+    crate::realtime::publish_feedback_event(
+        &state,
+        Some(auth.user_id),
+        "feedback.reviewed",
+        feedback_id,
+        json!({
+            "patient_id": patient_id,
+            "status": status,
+            "review_note": review_note.clone(),
+            "reviewed_at": reviewed_at.to_rfc3339(),
+        }),
+    )
+    .await;
+
     Json(json!({
         "ok": true,
         "status": status,
@@ -834,26 +848,69 @@ async fn create_feedback_record(
         let patient_label = load_patient_label(state, patient_id)
             .await
             .unwrap_or_else(|| "Patient".to_string());
-        let _ = sqlx::query(
+        if let Ok(notification_rows) = sqlx::query(
             r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
-               SELECT DISTINCT u.id, 'feedback', $2, $3, 'patient', $1
+               SELECT DISTINCT u.id, 'feedback', $2, $3, 'feedback', $1
                FROM users u
                LEFT JOIN patient_assignments pa
                  ON pa.user_id = u.id
-                AND pa.patient_id = $1
+                AND pa.patient_id = $4
                 AND pa.revoked_at IS NULL
                WHERE u.is_active = true
                  AND (
                     u.role = 'ceo'
                     OR (pa.user_id IS NOT NULL AND u.role IN ('patient_manager', 'teamlead_interpreter', 'concierge'))
-                 )"#,
+                 )
+               RETURNING id, user_id"#,
         )
-        .bind(patient_id)
+        .bind(feedback_id)
         .bind(format!("New patient feedback: {patient_label}"))
         .bind("A patient submitted a satisfaction survey in the portal.")
-        .execute(&state.db)
-        .await;
+        .bind(patient_id)
+        .fetch_all(&state.db)
+        .await
+        {
+            for notification_row in notification_rows {
+                let notification_id = notification_row
+                    .try_get::<Uuid, _>("id")
+                    .unwrap_or_else(|_| Uuid::nil());
+                let user_id = notification_row
+                    .try_get::<Uuid, _>("user_id")
+                    .unwrap_or_else(|_| Uuid::nil());
+                if notification_id != Uuid::nil() && user_id != Uuid::nil() {
+                    crate::realtime::publish_notification_event(
+                        state,
+                        user_id,
+                        "notification.created",
+                        Some(notification_id),
+                        json!({
+                            "entity_type": "feedback",
+                            "entity_id": feedback_id,
+                        }),
+                    )
+                    .await;
+                }
+            }
+        }
     }
+
+    crate::realtime::publish_feedback_event(
+        state,
+        Some(auth.user_id),
+        "feedback.submitted",
+        feedback_id,
+        json!({
+            "patient_id": patient_id,
+            "source": source,
+            "appointment_id": context.appointment_id,
+            "provider_id": context.provider_id,
+            "doctor_id": context.doctor_id,
+            "overall_score": body.overall_score,
+            "nps_score": body.nps_score,
+            "status": "submitted",
+        }),
+    )
+    .await;
 
     Ok((
         StatusCode::CREATED,

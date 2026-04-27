@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
 import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
 import { AuthProvider } from "@/lib/auth";
+import { RealtimeProvider } from "@/lib/realtime";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppLayout } from "@/components/layout";
 import { LoginPage } from "@/pages/login";
@@ -79,15 +80,15 @@ const DocumentsPage = lazy(() =>
   })),
 );
 
-const PatientPrivacyPage = lazy(() =>
-  import("@/pages/patients/portal-privacy-page").then((module) => ({
-    default: module.PatientPrivacyPage,
+const PrivacyPage = lazy(() =>
+  import("@/pages/privacy").then((module) => ({
+    default: module.PrivacyPage,
   })),
 );
 
-const PatientServicesPage = lazy(() =>
-  import("@/pages/patients/portal-services-page").then((module) => ({
-    default: module.PatientServicesPage,
+const ServicesPage = lazy(() =>
+  import("@/pages/services").then((module) => ({
+    default: module.ServicesPage,
   })),
 );
 
@@ -186,44 +187,47 @@ export default function App() {
     <LocalizationProvider dateAdapter={AdapterDayjs}>
       <BrowserRouter>
         <AuthProvider>
-          <TooltipProvider>
-            <Suspense fallback={<div className="min-h-screen bg-background" />}>
-              <Routes>
-                <Route path="/login" element={<LoginPage />} />
-                <Route element={<AppLayout />}>
-                  <Route index element={<DashboardPage />} />
-                  <Route path="chat" element={<ChatPage />} />
-                  <Route path="reports" element={<ReportsPage />} />
-                  <Route path="sops" element={<SopsPage />} />
-                  <Route path="leads" element={<LeadsPage />} />
-                  <Route path="patients" element={<PatientsPage />} />
-                  <Route path="patients/:id" element={<PatientDetailPage />} />
-                  <Route path="providers" element={<ProvidersPage />} />
-                  <Route path="providers/:id" element={<ProviderDetailPage />} />
-                  <Route path="orders" element={<OrdersPage />} />
-                  <Route path="contracts" element={<ContractsPage />} />
-                  <Route path="invoices" element={<InvoicesPage />} />
-                  <Route path="documents" element={<DocumentsPage />} />
-                  <Route path="services" element={<PatientServicesPage />} />
-                  <Route path="feedback" element={<FeedbackPage />} />
-                  <Route path="privacy" element={<PatientPrivacyPage />} />
-                  <Route path="cases" element={<CasesPage />} />
-                  <Route path="cases/:caseId" element={<CaseWorkspacePage />} />
-                  <Route path="appointments" element={<AppointmentsPage />} />
-                  <Route path="admin/users" element={<AdminUsersPage />} />
-                  <Route path="admin/access" element={<AdminAccessPage />} />
-                  <Route path="admin/settings" element={<AdminSettingsPage />} />
-                  <Route path="admin/activity" element={<AdminActivityPage />} />
-                  <Route path="admin/security" element={<AdminSecurityPage />} />
-                  <Route path="admin/health" element={<AdminHealthPage />} />
-                  <Route path="admin/compliance" element={<AdminCompliancePage />} />
-                  <Route path="admin/notifications" element={<AdminNotificationsPage />} />
-                  <Route path="admin/custom-fields" element={<AdminCustomFieldsPage />} />
-                  <Route path="admin/announcements" element={<AdminAnnouncementsPage />} />
-                </Route>
-              </Routes>
-            </Suspense>
-          </TooltipProvider>
+          <RealtimeProvider>
+            <TooltipProvider>
+              <Suspense fallback={<div className="min-h-screen bg-background" />}>
+                <Routes>
+                  <Route path="/login" element={<LoginPage />} />
+                  <Route element={<AppLayout />}>
+                    <Route index element={<DashboardPage />} />
+                    <Route path="chat" element={<ChatPage />} />
+                    <Route path="reports" element={<ReportsPage />} />
+                    <Route path="sops" element={<SopsPage />} />
+                    <Route path="leads" element={<LeadsPage />} />
+                    <Route path="patients" element={<PatientsPage />} />
+                    <Route path="patients/:id" element={<PatientDetailPage />} />
+                    <Route path="providers" element={<ProvidersPage />} />
+                    <Route path="providers/:id" element={<ProviderDetailPage />} />
+                    <Route path="orders" element={<OrdersPage />} />
+                    <Route path="orders/:orderId" element={<OrdersPage />} />
+                    <Route path="contracts" element={<ContractsPage />} />
+                    <Route path="invoices" element={<InvoicesPage />} />
+                    <Route path="documents" element={<DocumentsPage />} />
+                    <Route path="services" element={<ServicesPage />} />
+                    <Route path="feedback" element={<FeedbackPage />} />
+                    <Route path="privacy" element={<PrivacyPage />} />
+                    <Route path="cases" element={<CasesPage />} />
+                    <Route path="cases/:caseId" element={<CaseWorkspacePage />} />
+                    <Route path="appointments" element={<AppointmentsPage />} />
+                    <Route path="admin/users" element={<AdminUsersPage />} />
+                    <Route path="admin/access" element={<AdminAccessPage />} />
+                    <Route path="admin/settings" element={<AdminSettingsPage />} />
+                    <Route path="admin/activity" element={<AdminActivityPage />} />
+                    <Route path="admin/security" element={<AdminSecurityPage />} />
+                    <Route path="admin/health" element={<AdminHealthPage />} />
+                    <Route path="admin/compliance" element={<AdminCompliancePage />} />
+                    <Route path="admin/notifications" element={<AdminNotificationsPage />} />
+                    <Route path="admin/custom-fields" element={<AdminCustomFieldsPage />} />
+                    <Route path="admin/announcements" element={<AdminAnnouncementsPage />} />
+                  </Route>
+                </Routes>
+              </Suspense>
+            </TooltipProvider>
+          </RealtimeProvider>
         </AuthProvider>
       </BrowserRouter>
     </LocalizationProvider>

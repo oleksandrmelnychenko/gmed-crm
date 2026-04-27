@@ -87,6 +87,15 @@ async fn add_ip(
                 Some(r.id),
                 serde_json::json!({ "cidr": body.cidr }),
             ));
+            crate::realtime::publish_admin_event(
+                &state,
+                Some(auth.user_id),
+                "security.ip_whitelist_added",
+                "security",
+                r.id,
+                serde_json::json!({ "cidr": body.cidr }),
+            )
+            .await;
             Json(serde_json::json!({"ok": true, "id": r.id})).into_response()
         }
         Err(e) => {
@@ -115,6 +124,15 @@ async fn delete_ip(
         Some(id),
         serde_json::json!({}),
     ));
+    crate::realtime::publish_admin_event(
+        &state,
+        Some(auth.user_id),
+        "security.ip_whitelist_deleted",
+        "security",
+        id,
+        serde_json::json!({}),
+    )
+    .await;
     Json(serde_json::json!({"ok": true})).into_response()
 }
 
@@ -143,6 +161,15 @@ async fn unlock_user(
     ));
 
     tracing::info!(admin = %auth.user_id, target = %user_id, "User unlocked");
+    crate::realtime::publish_admin_event(
+        &state,
+        Some(auth.user_id),
+        "user.unlocked",
+        "user",
+        user_id,
+        serde_json::json!({}),
+    )
+    .await;
     Json(serde_json::json!({"ok": true})).into_response()
 }
 
@@ -174,6 +201,15 @@ async fn force_password_reset(
     ));
 
     tracing::info!(admin = %auth.user_id, target = %user_id, "Forced password reset");
+    crate::realtime::publish_admin_event(
+        &state,
+        Some(auth.user_id),
+        "user.force_password_reset",
+        "user",
+        user_id,
+        serde_json::json!({}),
+    )
+    .await;
     Json(serde_json::json!({"ok": true})).into_response()
 }
 
@@ -217,6 +253,15 @@ async fn toggle_maintenance(
     ));
 
     tracing::warn!(admin = %auth.user_id, maintenance = body.enabled, "Maintenance mode toggled");
+    crate::realtime::publish_admin_event(
+        &state,
+        Some(auth.user_id),
+        "system_setting.maintenance_toggled",
+        "system_setting",
+        auth.user_id,
+        serde_json::json!({ "enabled": body.enabled }),
+    )
+    .await;
     Json(serde_json::json!({"ok": true, "maintenance_mode": body.enabled})).into_response()
 }
 

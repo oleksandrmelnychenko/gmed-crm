@@ -68,7 +68,20 @@ async fn create_channel(
         "INSERT INTO notification_channels (channel_type, name, config, is_active, created_by) VALUES ($1, $2, $3, $4, $5) RETURNING id",
         body.channel_type, body.name, body.config, body.is_active.unwrap_or(true), auth.user_id
     ).fetch_one(&state.db).await {
-        Ok(r) => Json(serde_json::json!({"ok": true, "id": r.id})).into_response(),
+        Ok(r) => {
+            crate::realtime::publish_admin_event(
+                &state,
+                Some(auth.user_id),
+                "notification_channel.created",
+                "notification_channel",
+                r.id,
+                serde_json::json!({
+                    "is_active": body.is_active.unwrap_or(true),
+                }),
+            )
+            .await;
+            Json(serde_json::json!({"ok": true, "id": r.id})).into_response()
+        }
         Err(e) => { tracing::error!(error = %e, "create channel"); err(StatusCode::INTERNAL_SERVER_ERROR, "Failed") }
     }
 }
@@ -109,7 +122,20 @@ async fn update_channel(
         "UPDATE notification_channels SET channel_type=$2, name=$3, config=$4, is_active=$5, updated_at=now() WHERE id=$1",
         id, body.channel_type, body.name, body.config, body.is_active.unwrap_or(true)
     ).execute(&state.db).await {
-        Ok(r) if r.rows_affected() > 0 => Json(serde_json::json!({"ok": true})).into_response(),
+        Ok(r) if r.rows_affected() > 0 => {
+            crate::realtime::publish_admin_event(
+                &state,
+                Some(auth.user_id),
+                "notification_channel.updated",
+                "notification_channel",
+                id,
+                serde_json::json!({
+                    "is_active": body.is_active.unwrap_or(true),
+                }),
+            )
+            .await;
+            Json(serde_json::json!({"ok": true})).into_response()
+        }
         Ok(_) => err(StatusCode::NOT_FOUND, "Channel not found"),
         Err(e) => { tracing::error!(error = %e, "update channel"); err(StatusCode::INTERNAL_SERVER_ERROR, "Failed") }
     }
@@ -134,6 +160,15 @@ async fn delete_channel(
         Some(id),
         serde_json::json!({}),
     ));
+    crate::realtime::publish_admin_event(
+        &state,
+        Some(auth.user_id),
+        "notification_channel.deleted",
+        "notification_channel",
+        id,
+        serde_json::json!({}),
+    )
+    .await;
     Json(serde_json::json!({"ok": true})).into_response()
 }
 

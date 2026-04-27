@@ -141,7 +141,7 @@ pub(crate) async fn bootstrap_default_service(
     let title = ctx.title.clone();
     let service_kind = derive_service_kind(ctx.category.as_deref(), &title);
 
-    sqlx::query(
+    let service_id = sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO concierge_services (
                 patient_id, appointment_id, provider_id, assigned_concierge_id, service_kind,
                 title, status, starts_at, ends_at, billing_status, service_notes, request_source,
@@ -149,24 +149,39 @@ pub(crate) async fn bootstrap_default_service(
            ) VALUES (
                 $1, $2, $3, $4, $5,
                 $6, 'planned', $7, $8, 'draft', $9, 'appointment_bootstrap', $10
-           )"#,
+           )
+           RETURNING id"#,
     )
     .bind(ctx.patient_id)
     .bind(appointment_id)
     .bind(ctx.provider_id)
     .bind(assigned_concierge_id)
-    .bind(service_kind)
-    .bind(title)
+    .bind(service_kind.clone())
+    .bind(title.clone())
     .bind(ctx.starts_at)
     .bind(ctx.ends_at)
     .bind(Some("Auto-created from non-medical appointment".to_string()))
     .bind(created_by)
-    .execute(&state.db)
+    .fetch_one(&state.db)
     .await
     .map_err(|e| {
         tracing::error!(error = %e, appointment_id = %appointment_id, "Failed to bootstrap concierge service");
         err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create concierge service")
     })?;
+
+    crate::realtime::publish_concierge_service_event(
+        state,
+        Some(created_by),
+        "concierge_service.created",
+        service_id,
+        serde_json::json!({
+            "appointment_id": appointment_id,
+            "request_source": "appointment_bootstrap",
+            "service_kind": service_kind,
+            "status": "planned",
+        }),
+    )
+    .await;
 
     Ok(())
 }
@@ -195,7 +210,8 @@ pub(crate) async fn mark_services_ready_for_billing(
 
     if existing_count == 0 {
         let assigned_concierge_id = load_first_assigned_concierge_id(state, ctx.patient_id).await?;
-        sqlx::query(
+        let service_kind = derive_service_kind(ctx.category.as_deref(), &ctx.title);
+        let service_id = sqlx::query_scalar::<_, Uuid>(
             r#"INSERT INTO concierge_services (
                     patient_id, appointment_id, provider_id, assigned_concierge_id, service_kind,
                     title, status, starts_at, ends_at, billing_status, service_notes, completed_at,
@@ -203,19 +219,20 @@ pub(crate) async fn mark_services_ready_for_billing(
                ) VALUES (
                     $1, $2, $3, $4, $5,
                     $6, 'completed', $7, $8, 'ready', $9, now(), 'appointment_bootstrap', $10
-               )"#,
+               )
+               RETURNING id"#,
         )
         .bind(ctx.patient_id)
         .bind(appointment_id)
         .bind(ctx.provider_id)
         .bind(assigned_concierge_id)
-        .bind(derive_service_kind(ctx.category.as_deref(), &ctx.title))
-        .bind(ctx.title)
+        .bind(service_kind.clone())
+        .bind(ctx.title.clone())
         .bind(ctx.starts_at)
         .bind(ctx.ends_at)
         .bind(Some("Auto-created during appointment completion for billing handoff".to_string()))
         .bind(created_by)
-        .execute(&state.db)
+        .fetch_one(&state.db)
         .await
         .map_err(|e| {
             tracing::error!(error = %e, appointment_id = %appointment_id, "Failed to create billing-ready concierge service");
@@ -224,10 +241,25 @@ pub(crate) async fn mark_services_ready_for_billing(
                 "Failed to update concierge services",
             )
         })?;
+
+        crate::realtime::publish_concierge_service_event(
+            state,
+            Some(created_by),
+            "concierge_service.created",
+            service_id,
+            serde_json::json!({
+                "appointment_id": appointment_id,
+                "request_source": "appointment_bootstrap",
+                "service_kind": service_kind,
+                "status": "completed",
+                "billing_status": "ready",
+            }),
+        )
+        .await;
         return Ok(());
     }
 
-    sqlx::query(
+    let rows = sqlx::query(
         r#"UPDATE concierge_services
            SET status = CASE
                    WHEN status IN ('planned', 'booked', 'confirmed', 'in_service')
@@ -239,10 +271,11 @@ pub(crate) async fn mark_services_ready_for_billing(
                    WHEN billing_status = 'draft' THEN 'ready'
                    ELSE billing_status
                END
-           WHERE appointment_id = $1"#,
+           WHERE appointment_id = $1
+           RETURNING id"#,
     )
     .bind(appointment_id)
-    .execute(&state.db)
+    .fetch_all(&state.db)
     .await
     .map_err(|e| {
         tracing::error!(error = %e, appointment_id = %appointment_id, "Failed to mark concierge services ready for billing");
@@ -251,6 +284,22 @@ pub(crate) async fn mark_services_ready_for_billing(
             "Failed to update concierge services",
         )
     })?;
+
+    for row in rows {
+        if let Ok(service_id) = row.try_get::<Uuid, _>("id") {
+            crate::realtime::publish_concierge_service_event(
+                state,
+                Some(created_by),
+                "concierge_service.billing_ready",
+                service_id,
+                serde_json::json!({
+                    "appointment_id": appointment_id,
+                    "billing_status": "ready",
+                }),
+            )
+            .await;
+        }
+    }
 
     Ok(())
 }
@@ -435,7 +484,7 @@ async fn create_my_concierge_service(
     let timing_hint = starts_at
         .map(|value| value.format("%Y-%m-%d %H:%M UTC").to_string())
         .unwrap_or_else(|| "No preferred slot".to_string());
-    let _ = sqlx::query(
+    if let Ok(notification_rows) = sqlx::query(
         r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
            SELECT DISTINCT pa.user_id, 'concierge_service_request', $2, $3, 'concierge_service', $1
            FROM patient_assignments pa
@@ -443,7 +492,8 @@ async fn create_my_concierge_service(
            WHERE pa.patient_id = $4
              AND pa.revoked_at IS NULL
              AND u.is_active = true
-             AND u.role IN ('patient_manager', 'concierge')"#,
+             AND u.role IN ('patient_manager', 'concierge')
+           RETURNING id, user_id"#,
     )
     .bind(service_id)
     .bind(format!("Patient service request: {patient_label}"))
@@ -454,7 +504,43 @@ async fn create_my_concierge_service(
         timing_hint
     ))
     .bind(patient_id)
-    .execute(&state.db)
+    .fetch_all(&state.db)
+    .await
+    {
+        for notification_row in notification_rows {
+            let notification_id = notification_row
+                .try_get::<Uuid, _>("id")
+                .unwrap_or_else(|_| Uuid::nil());
+            let user_id = notification_row
+                .try_get::<Uuid, _>("user_id")
+                .unwrap_or_else(|_| Uuid::nil());
+            if notification_id != Uuid::nil() && user_id != Uuid::nil() {
+                crate::realtime::publish_notification_event(
+                    &state,
+                    user_id,
+                    "notification.created",
+                    Some(notification_id),
+                    serde_json::json!({
+                        "entity_type": "concierge_service",
+                        "entity_id": service_id,
+                    }),
+                )
+                .await;
+            }
+        }
+    }
+
+    crate::realtime::publish_concierge_service_event(
+        &state,
+        Some(auth.user_id),
+        "concierge_service.created",
+        service_id,
+        serde_json::json!({
+            "request_source": "patient_portal",
+            "service_kind": service_kind,
+            "status": "planned",
+        }),
+    )
     .await;
 
     match load_service_row(&state, service_id).await {
@@ -544,6 +630,18 @@ async fn cancel_my_concierge_service(
                     "request_source": "patient_portal",
                 }),
             ));
+
+            crate::realtime::publish_concierge_service_event(
+                &state,
+                Some(auth.user_id),
+                "concierge_service.cancelled",
+                service_id,
+                serde_json::json!({
+                    "request_source": "patient_portal",
+                    "status": "cancelled",
+                }),
+            )
+            .await;
 
             match load_service_row(&state, service_id).await {
                 Ok(Some(service)) => Json(build_portal_service_json(&service)).into_response(),
@@ -838,7 +936,7 @@ async fn create_concierge_service(
     .bind(body.appointment_id)
     .bind(provider_id)
     .bind(assigned_concierge_id)
-    .bind(service_kind)
+    .bind(service_kind.clone())
     .bind(body.title.trim())
     .bind(body.booking_reference)
     .bind(body.vendor_name)
@@ -871,6 +969,20 @@ async fn create_concierge_service(
                     "assigned_concierge_id": assigned_concierge_id,
                 }),
             ));
+
+            crate::realtime::publish_concierge_service_event(
+                &state,
+                Some(auth.user_id),
+                "concierge_service.created",
+                service_id,
+                serde_json::json!({
+                    "appointment_id": body.appointment_id,
+                    "request_source": "staff",
+                    "service_kind": service_kind,
+                    "status": "planned",
+                }),
+            )
+            .await;
 
             match load_service_row(&state, service_id).await {
                 Ok(Some(service)) => {
@@ -1066,11 +1178,29 @@ async fn update_concierge_service(
                 "concierge_service",
                 Some(service_id),
                 serde_json::json!({
+                    "status": audit_status.clone(),
+                    "billing_status": audit_billing_status.clone(),
+                    "assigned_concierge_id": audit_assigned_concierge_id,
+                }),
+            ));
+
+            let realtime_event_type = if audit_status.as_deref() == Some("cancelled") {
+                "concierge_service.cancelled"
+            } else {
+                "concierge_service.updated"
+            };
+            crate::realtime::publish_concierge_service_event(
+                &state,
+                Some(auth.user_id),
+                realtime_event_type,
+                service_id,
+                serde_json::json!({
                     "status": audit_status,
                     "billing_status": audit_billing_status,
                     "assigned_concierge_id": audit_assigned_concierge_id,
                 }),
-            ));
+            )
+            .await;
 
             match load_service_row(&state, service_id).await {
                 Ok(Some(service)) => Json(build_service_json(&service)).into_response(),

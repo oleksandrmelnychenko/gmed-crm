@@ -25,8 +25,10 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
+import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
+import { useRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
 import { PROVIDER_DETAIL_STATUS_COLORS } from "./appearance/status-appearance";
@@ -63,6 +65,21 @@ const inputClassName =
 
 const textareaClassName =
   "min-h-[104px] w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30";
+const PROVIDER_DETAIL_REALTIME_EVENTS = [
+  "provider.created",
+  "provider.updated",
+  "provider.deleted",
+  "provider.activated",
+  "provider.deactivated",
+  "provider.template_created",
+  "provider.template_updated",
+  "provider.doctor_created",
+  "provider.doctor_updated",
+  "provider.doctor_deleted",
+  "provider.service_created",
+  "provider.service_updated",
+  "provider.service_deleted",
+] as const;
 
 function Lbl({ children }: { children: React.ReactNode }) {
   return <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">{children}</span>;
@@ -109,6 +126,17 @@ export function ProviderDetailPage() {
   const canManage = user?.role === "ceo" || user?.role === "patient_manager";
   const reload = useCallback(() => setVersion((v) => v + 1), []);
 
+  useRealtimeSubscription(PROVIDER_DETAIL_REALTIME_EVENTS, (event) => {
+    if (!id || event.entity_type !== "provider" || event.entity_id !== id) return;
+    clearApiCache(`/providers/${id}`);
+    clearApiCache(`/providers/${id}/templates`);
+    clearApiCache(`/providers/${id}/patients`);
+    clearApiCache(`/appointments?provider_id=${id}`);
+    startTransition(() => {
+      setVersion((current) => current + 1);
+    });
+  });
+
   useEffect(() => {
     if (!id) return;
     let cancelled = false;
@@ -131,7 +159,7 @@ export function ProviderDetailPage() {
       .finally(() => { if (!cancelled) setTabLoading(false); });
 
     return () => { cancelled = true; };
-  }, [id, activeTab]);
+  }, [id, activeTab, version]);
 
   useEffect(() => {
     if (!detail) {
@@ -386,20 +414,26 @@ export function ProviderDetailPage() {
             <div className={card("p-8 text-center")}><p className="text-sm text-slate-500">{t.common_not_set}</p></div>
           ) : (
             <div className={card("overflow-hidden")}>
-              <div className="grid grid-cols-[2fr_1fr_1fr_1fr] gap-3 px-5 py-3 border-b bg-slate-900">
+              <div className="grid grid-cols-[2fr_1fr_1fr_1fr] gap-3 border-b border-border/60 bg-card px-5 py-2.5 font-mono">
                 {[t.providers_service_name, t.providers_service_price, t.providers_service_valid_from, t.providers_service_valid_to].map((h) => (
-                  <span key={h} className="text-[11px] font-semibold uppercase tracking-wider text-white/80">{h}</span>
+                  <span key={h} className="truncate text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/80">{h}</span>
                 ))}
               </div>
               {detail.services.map((svc, idx) => (
-                <div key={svc.id} className={cn("grid grid-cols-[2fr_1fr_1fr_1fr] gap-3 items-center px-5 py-3", idx < detail.services.length - 1 && "border-b border-border/30")}>
+                <div
+                  key={svc.id}
+                  className={cn(
+                    "grid grid-cols-[2fr_1fr_1fr_1fr] items-center gap-3 px-5 py-3 transition-colors hover:bg-muted/45",
+                    idx < detail.services.length - 1 && "border-b border-border/45",
+                  )}
+                >
                   <div>
-                    <p className="text-sm font-medium text-slate-900">{svc.service_name}</p>
-                    {svc.description && <p className="text-xs text-slate-500 mt-0.5">{svc.description}</p>}
+                    <p className="text-sm font-medium text-foreground">{svc.service_name}</p>
+                    {svc.description && <p className="mt-0.5 text-xs text-muted-foreground">{svc.description}</p>}
                   </div>
-                  <span className="text-sm text-slate-900">{String(svc.price)} {svc.currency}</span>
-                  <span className="text-xs text-slate-500">{formatProviderDetailDate(svc.valid_from, t.common_not_set)}</span>
-                  <span className="text-xs text-slate-500">{formatProviderDetailDate(svc.valid_to, t.common_not_set)}</span>
+                  <span className="text-sm tabular-nums text-foreground">{String(svc.price)} {svc.currency}</span>
+                  <span className="text-xs tabular-nums text-muted-foreground">{formatProviderDetailDate(svc.valid_from, t.common_not_set)}</span>
+                  <span className="text-xs tabular-nums text-muted-foreground">{formatProviderDetailDate(svc.valid_to, t.common_not_set)}</span>
                 </div>
               ))}
             </div>

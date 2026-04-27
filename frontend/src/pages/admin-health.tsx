@@ -7,11 +7,14 @@ import {
   UsersRound,
 } from "lucide-react";
 
+import { AdminGuideButton } from "@/components/admin-guide";
 import {
   AdminSheetScaffold,
   AdminInlineMetric,
   AdminTableCard,
 } from "@/components/admin-page-patterns";
+import { DataTableSurface } from "@/components/data-table/data-table-surface";
+import type { ColumnDef } from "@/components/data-table/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
@@ -59,6 +62,29 @@ export function AdminHealthPage() {
   const [error, setError] = useState("");
   const [refreshedAt, setRefreshedAt] = useState<Date | null>(null);
   const [detailPanel, setDetailPanel] = useState<HealthDetailPanel | null>(null);
+
+  const databaseTableColumns = useMemo<ColumnDef<{ table: string; size: string }>[]>(() => [
+    {
+      id: "table",
+      label: t.health_col_table,
+      accessor: (table) => table.table,
+      sortable: true,
+      width: 260,
+      render: (table) => (
+        <span className="font-medium text-foreground">{table.table}</span>
+      ),
+    },
+    {
+      id: "size",
+      label: t.health_col_size,
+      accessor: (table) => table.size,
+      sortable: true,
+      width: 180,
+      render: (table) => (
+        <span className="font-mono text-xs text-muted-foreground">{table.size}</span>
+      ),
+    },
+  ], [t.health_col_size, t.health_col_table]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -140,16 +166,19 @@ export function AdminHealthPage() {
             : t.health_subtitle
         }
         actions={(
-          <Button
-            type="button"
-            variant="outline"
-            className="h-9 rounded-lg gap-1.5 bg-card px-3.5"
-            disabled={loading}
-            onClick={() => void load()}
-          >
-            <RefreshCcw className="size-3.5" />
-            {t.common_refresh}
-          </Button>
+          <>
+            <AdminGuideButton title={t.health_title} description={t.health_subtitle} />
+            <Button
+              type="button"
+              variant="outline"
+              className="h-9 rounded-lg gap-1.5 bg-card px-3.5"
+              disabled={loading}
+              onClick={() => void load()}
+            >
+              <RefreshCcw className="size-3.5" />
+              {t.common_refresh}
+            </Button>
+          </>
         )}
       />
 
@@ -256,28 +285,14 @@ export function AdminHealthPage() {
                   <EmptyCell>{t.health_tables}</EmptyCell>
                 </div>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-[13px]">
-                    <thead className="bg-muted/40">
-                      <tr className="text-left text-[11px] uppercase tracking-wider text-muted-foreground">
-                        <th className="px-4 py-2.5 font-medium">{t.health_col_table}</th>
-                        <th className="w-[180px] px-4 py-2.5 font-medium">{t.health_col_size}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {data.database.tables.map((table) => (
-                        <tr key={table.table} className="border-t border-border">
-                          <td className="px-4 py-3 font-medium text-foreground">
-                            {table.table}
-                          </td>
-                          <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                            {table.size}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <DataTableSurface
+                  rows={data.database.tables}
+                  columns={databaseTableColumns}
+                  defaultDensity="compact"
+                  dictionary={t as unknown as Record<string, string>}
+                  rowId={(table) => table.table}
+                  tableClassName="min-h-[280px]"
+                />
               )}
             </AdminTableCard>
           </Section>

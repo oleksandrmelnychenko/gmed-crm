@@ -1,0 +1,398 @@
+import { Badge } from "@/components/ui/badge";
+import type { ColumnDef, FilterOption } from "@/components/data-table/types";
+import { cn } from "@/lib/utils";
+
+import { compactDateTime, providerTypeLabel } from "../model/list-model";
+import type { ProviderSummary } from "../model/types";
+
+type ProviderDynamicOptions = {
+  cities: FilterOption[];
+  countries: FilterOption[];
+  fachbereiche: FilterOption[];
+};
+
+export const DEFAULT_PROVIDER_HIDDEN_COLUMNS: string[] = [
+  "phone",
+  "email",
+  "tax_id",
+  "rating",
+  "last_interaction_at",
+  "created_at",
+];
+
+export const DEFAULT_PROVIDER_FROZEN_COLUMNS: string[] = ["provider"];
+export const MAX_PROVIDER_FROZEN_COLUMNS = 3;
+
+export const PROVIDER_COLUMN_GROUPS: Record<string, string> = {
+  identity: "Identity",
+  registry: "Registry",
+  contact: "Contact",
+  activity: "Activity",
+  audit: "Audit",
+};
+
+function optionsFrom(values: Iterable<string>): FilterOption[] {
+  return Array.from(values)
+    .sort((a, b) => a.localeCompare(b))
+    .map((value) => ({ value, label: value }));
+}
+
+function deriveDynamicOptions(rows: readonly ProviderSummary[]): ProviderDynamicOptions {
+  const cities = new Set<string>();
+  const countries = new Set<string>();
+  const fachbereiche = new Set<string>();
+
+  for (const row of rows) {
+    if (row.address_city) cities.add(row.address_city);
+    if (row.address_country) countries.add(row.address_country);
+    if (row.fachbereich) fachbereiche.add(row.fachbereich);
+  }
+
+  return {
+    cities: optionsFrom(cities),
+    countries: optionsFrom(countries),
+    fachbereiche: optionsFrom(fachbereiche),
+  };
+}
+
+function commonNotSet(tr: Record<string, string>) {
+  return tr.common_not_set ?? "-";
+}
+
+function formatRating(value: number | null, fallback: string) {
+  return value == null ? fallback : value.toFixed(1);
+}
+
+function ProviderTypeBadge({
+  provider,
+  tr,
+}: {
+  provider: ProviderSummary;
+  tr: Record<string, string>;
+}) {
+  return (
+    <Badge
+      variant="outline"
+      className={cn(
+        "rounded-full text-[10px]",
+        provider.provider_type === "medical"
+          ? "border-sky-200 bg-sky-50 text-sky-700"
+          : "border-violet-200 bg-violet-50 text-violet-700",
+      )}
+    >
+      {providerTypeLabel(provider.provider_type, tr)}
+    </Badge>
+  );
+}
+
+function StatusPill({ active, tr }: { active: boolean; tr: Record<string, string> }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[11.5px] font-medium",
+        active ? "bg-emerald-50 text-emerald-700" : "bg-neutral-100 text-neutral-600",
+      )}
+    >
+      <span className={cn("size-1.5 rounded-full", active ? "bg-emerald-500" : "bg-neutral-400")} />
+      {active ? (tr.common_active ?? "Active") : (tr.common_inactive ?? "Inactive")}
+    </span>
+  );
+}
+
+function ContractBadge({
+  hasContract,
+  tr,
+}: {
+  hasContract: boolean;
+  tr: Record<string, string>;
+}) {
+  if (!hasContract) {
+    return <span className="text-xs text-muted-foreground">{tr.providers_contract_without ?? commonNotSet(tr)}</span>;
+  }
+
+  return (
+    <Badge
+      variant="outline"
+      className="rounded-full border-emerald-200 bg-emerald-50 text-[10px] text-emerald-700"
+    >
+      {tr.providers_contract_with ?? "Contract"}
+    </Badge>
+  );
+}
+
+export function buildProviderColumns(
+  tr: Record<string, string>,
+  rows: readonly ProviderSummary[] = [],
+): ColumnDef<ProviderSummary>[] {
+  const dyn = deriveDynamicOptions(rows);
+  const notSet = commonNotSet(tr);
+
+  return [
+    {
+      id: "status",
+      label: tr.patients_col_status ?? "Status",
+      accessor: (provider) => (provider.is_active ? "active" : "inactive"),
+      filterType: "enum",
+      filterOptions: [
+        { value: "active", label: tr.common_active ?? "Active" },
+        { value: "inactive", label: tr.common_inactive ?? "Inactive" },
+      ],
+      sortable: true,
+      width: 112,
+      group: "identity",
+      render: (provider) => <StatusPill active={provider.is_active} tr={tr} />,
+    },
+    {
+      id: "provider",
+      label: tr.providers_title ?? "Provider",
+      accessor: (provider) => provider.name,
+      filterType: "text",
+      sortable: true,
+      searchable: true,
+      required: true,
+      pinned: "left",
+      width: 270,
+      group: "identity",
+      render: (provider) => (
+        <div className="flex min-w-0 items-center gap-2.5">
+          <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-medium text-foreground">
+            {provider.name
+              .split(/\s+/)
+              .slice(0, 2)
+              .map((word) => word[0]?.toUpperCase() ?? "")
+              .join("")}
+          </div>
+          <div className="min-w-0">
+            <div className="truncate text-xs font-medium text-foreground">{provider.name}</div>
+            {provider.legal_name && provider.legal_name !== provider.name ? (
+              <div className="truncate text-[10px] text-muted-foreground">{provider.legal_name}</div>
+            ) : provider.tax_id ? (
+              <div className="truncate text-[10px] text-muted-foreground">
+                {(tr.providers_tax_id ?? "Tax ID")} {provider.tax_id}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ),
+    },
+    {
+      id: "type",
+      label: tr.providers_type ?? "Type",
+      accessor: (provider) => provider.provider_type,
+      filterType: "enum",
+      filterOptions: [
+        { value: "medical", label: tr.providers_type_medical ?? "Medical" },
+        { value: "non_medical", label: tr.providers_type_non_medical ?? "Non-medical" },
+      ],
+      sortable: true,
+      searchable: true,
+      width: 150,
+      group: "identity",
+      render: (provider) => <ProviderTypeBadge provider={provider} tr={tr} />,
+    },
+    {
+      id: "city",
+      label: tr.providers_city ?? "City",
+      accessor: (provider) => provider.address_city,
+      filterType: "enum",
+      filterOptions: dyn.cities,
+      sortable: true,
+      searchable: true,
+      width: 150,
+      group: "registry",
+      render: (provider) => (
+        <span className="truncate text-xs text-muted-foreground">
+          {provider.address_city || notSet}
+        </span>
+      ),
+    },
+    {
+      id: "country",
+      label: tr.providers_country ?? "Country",
+      accessor: (provider) => provider.address_country,
+      filterType: "enum",
+      filterOptions: dyn.countries,
+      sortable: true,
+      searchable: true,
+      width: 150,
+      group: "registry",
+      render: (provider) => (
+        <span className="truncate text-xs text-muted-foreground">
+          {provider.address_country || notSet}
+        </span>
+      ),
+    },
+    {
+      id: "fachbereich",
+      label: tr.providers_fachbereich ?? "Specialty",
+      accessor: (provider) => provider.fachbereich,
+      filterType: "enum",
+      filterOptions: dyn.fachbereiche,
+      sortable: true,
+      searchable: true,
+      width: 180,
+      group: "registry",
+      render: (provider) => (
+        <span className="truncate text-xs text-muted-foreground">
+          {provider.fachbereich || notSet}
+        </span>
+      ),
+    },
+    {
+      id: "contract",
+      label: tr.providers_contract ?? "Contract",
+      accessor: (provider) => provider.has_contract,
+      filterType: "boolean",
+      sortable: true,
+      width: 130,
+      group: "registry",
+      render: (provider) => <ContractBadge hasContract={provider.has_contract} tr={tr} />,
+    },
+    {
+      id: "doctors",
+      label: tr.providers_doctors ?? "Doctors",
+      accessor: (provider) => provider.doctor_count,
+      filterType: "number",
+      sortable: true,
+      width: 96,
+      group: "activity",
+      render: (provider) => (
+        <span className="tabular-nums text-xs text-foreground">{provider.doctor_count}</span>
+      ),
+    },
+    {
+      id: "patients",
+      label: tr.providers_linked_patients ?? "Patients",
+      accessor: (provider) => provider.patient_count,
+      filterType: "number",
+      sortable: true,
+      width: 104,
+      group: "activity",
+      render: (provider) => (
+        <span className="tabular-nums text-xs text-foreground">{provider.patient_count}</span>
+      ),
+    },
+    {
+      id: "appointments",
+      label: tr.providers_appointments ?? "Appointments",
+      accessor: (provider) => provider.appointment_count,
+      filterType: "number",
+      sortable: true,
+      width: 126,
+      group: "activity",
+      render: (provider) => (
+        <span className="tabular-nums text-xs text-foreground">{provider.appointment_count}</span>
+      ),
+    },
+    {
+      id: "services",
+      label: tr.providers_services ?? "Services",
+      accessor: (provider) => provider.service_count,
+      filterType: "number",
+      sortable: true,
+      width: 104,
+      group: "activity",
+      render: (provider) => (
+        <span className="tabular-nums text-xs text-foreground">{provider.service_count}</span>
+      ),
+    },
+    {
+      id: "open_requests",
+      label: tr.concierge_open_requests ?? "Open requests",
+      accessor: (provider) => provider.open_concierge_service_count,
+      filterType: "number",
+      sortable: true,
+      width: 128,
+      group: "activity",
+      render: (provider) => (
+        <span className="tabular-nums text-xs text-foreground">
+          {provider.open_concierge_service_count}
+        </span>
+      ),
+    },
+    {
+      id: "rating",
+      label: tr.providers_rating ?? "Rating",
+      accessor: (provider) => provider.avg_rating,
+      filterType: "number",
+      sortable: true,
+      width: 96,
+      group: "activity",
+      render: (provider) => (
+        <span className="tabular-nums text-xs text-muted-foreground">
+          {formatRating(provider.avg_rating, notSet)}
+          {provider.rating_count > 0 ? (
+            <span className="ml-1 text-[10px]">({provider.rating_count})</span>
+          ) : null}
+        </span>
+      ),
+    },
+    {
+      id: "phone",
+      label: tr.field_phone ?? "Phone",
+      accessor: (provider) => provider.phone,
+      filterType: "text",
+      sortable: true,
+      searchable: true,
+      width: 170,
+      group: "contact",
+      render: (provider) => (
+        <span className="truncate text-xs text-muted-foreground">{provider.phone || notSet}</span>
+      ),
+    },
+    {
+      id: "email",
+      label: tr.patients_email ?? "Email",
+      accessor: (provider) => provider.email,
+      filterType: "text",
+      sortable: true,
+      searchable: true,
+      width: 220,
+      group: "contact",
+      render: (provider) => (
+        <span className="truncate text-xs text-muted-foreground">{provider.email || notSet}</span>
+      ),
+    },
+    {
+      id: "tax_id",
+      label: tr.providers_tax_id ?? "Tax ID",
+      accessor: (provider) => provider.tax_id,
+      filterType: "text",
+      sortable: true,
+      searchable: true,
+      width: 160,
+      group: "registry",
+      render: (provider) => (
+        <span className="truncate text-xs text-muted-foreground">{provider.tax_id || notSet}</span>
+      ),
+    },
+    {
+      id: "last_interaction_at",
+      label: tr.providers_last_activity ?? "Last activity",
+      accessor: (provider) => provider.last_interaction_at,
+      filterType: "date",
+      sortable: true,
+      width: 150,
+      group: "audit",
+      render: (provider) => (
+        <span className="truncate text-xs text-muted-foreground">
+          {compactDateTime(provider.last_interaction_at, notSet)}
+        </span>
+      ),
+    },
+    {
+      id: "created_at",
+      label: tr.patients_col_created_at ?? "Created",
+      accessor: (provider) => provider.created_at,
+      filterType: "date",
+      sortable: true,
+      width: 150,
+      group: "audit",
+      render: (provider) => (
+        <span className="truncate text-xs text-muted-foreground">
+          {compactDateTime(provider.created_at, notSet)}
+        </span>
+      ),
+    },
+  ];
+}

@@ -77,6 +77,15 @@ async fn update_setting(
             // Reload cached settings
             state.settings.reload(&state.db).await;
             tracing::info!(by = %auth.user_id, key = %key, value = %body.value, "Setting updated");
+            crate::realtime::publish_admin_event(
+                &state,
+                Some(auth.user_id),
+                "system_setting.updated",
+                "system_setting",
+                auth.user_id,
+                serde_json::json!({ "key": key }),
+            )
+            .await;
             Json(serde_json::json!({ "ok": true })).into_response()
         }
         Err(settings::UpdateError::InvalidValue(msg)) => {
@@ -168,6 +177,15 @@ async fn revoke_user_sessions(
         Some(user_id),
         serde_json::json!({ "target_user_id": user_id }),
     ));
+    crate::realtime::publish_admin_event(
+        &state,
+        Some(auth.user_id),
+        "session.revoked",
+        "session",
+        user_id,
+        serde_json::json!({ "target_user_id": user_id }),
+    )
+    .await;
 
     Json(serde_json::json!({ "ok": true, "user_id": user_id })).into_response()
 }
@@ -188,6 +206,15 @@ async fn revoke_all_sessions(
     .await;
 
     tracing::warn!(admin = %auth.user_id, "Admin force-logout ALL users");
+    crate::realtime::publish_admin_event(
+        &state,
+        Some(auth.user_id),
+        "session.revoked_all",
+        "session",
+        auth.user_id,
+        serde_json::json!({}),
+    )
+    .await;
 
     Json(serde_json::json!({ "ok": true })).into_response()
 }
@@ -321,6 +348,15 @@ async fn approve_pending(
                 serde_json::json!({ "pending_id": pending_id }),
             ));
             tracing::info!(admin = %auth.user_id, pending = %pending_id, "MFA login approved");
+            crate::realtime::publish_admin_event(
+                &state,
+                Some(auth.user_id),
+                "pending_login.approved",
+                "pending_login",
+                pending_id,
+                serde_json::json!({}),
+            )
+            .await;
             Json(serde_json::json!({"ok": true})).into_response()
         }
         Ok(_) => err(StatusCode::NOT_FOUND, "Pending login not found or already resolved"),
@@ -353,6 +389,15 @@ async fn reject_pending(
                 serde_json::json!({ "pending_id": pending_id }),
             ));
             tracing::info!(admin = %auth.user_id, pending = %pending_id, "MFA login rejected");
+            crate::realtime::publish_admin_event(
+                &state,
+                Some(auth.user_id),
+                "pending_login.rejected",
+                "pending_login",
+                pending_id,
+                serde_json::json!({}),
+            )
+            .await;
             Json(serde_json::json!({"ok": true})).into_response()
         }
         Ok(_) => err(StatusCode::NOT_FOUND, "Pending login not found or already resolved"),
@@ -395,6 +440,15 @@ async fn toggle_mfa(
                 serde_json::json!({ "enabled": body.enabled, "target_user": user_id }),
             ));
             tracing::info!(admin = %auth.user_id, target = %user_id, mfa = body.enabled, "MFA toggled");
+            crate::realtime::publish_admin_event(
+                &state,
+                Some(auth.user_id),
+                "user.mfa_toggled",
+                "user",
+                user_id,
+                serde_json::json!({ "enabled": body.enabled }),
+            )
+            .await;
             Json(serde_json::json!({"ok": true, "mfa_required": body.enabled})).into_response()
         }
         Ok(_) => err(StatusCode::NOT_FOUND, "User not found"),

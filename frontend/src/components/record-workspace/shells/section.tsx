@@ -23,12 +23,12 @@ export function Section({
         className,
       )}
     >
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           <div className="h-2 w-2 shrink-0 rounded-full bg-[var(--brand)]" />
           <h3 className={cn(tokens.text.sectionTitle, "truncate")}>{title}</h3>
         </div>
-        {accessory ? <div className="shrink-0">{accessory}</div> : null}
+        {accessory ? <div className="min-w-0 max-w-full">{accessory}</div> : null}
       </div>
       <div className="space-y-3">{children}</div>
     </section>

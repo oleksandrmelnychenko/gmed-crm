@@ -3,7 +3,9 @@ import { Download, LoaderCircle, RefreshCw, ShieldCheck, Upload } from "lucide-r
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { clearApiCache } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
+import { useRealtimeSubscription } from "@/lib/realtime";
 import { localizeRequiredDocumentLabel } from "@/lib/required-document-labels";
 import {
   confirmPortalDocument,
@@ -25,6 +27,19 @@ import type {
   PortalUploadedDocumentItem,
 } from "@/pages/patients/model/portal-shared";
 import { cn } from "@/lib/utils";
+
+const PORTAL_DOCUMENT_REALTIME_EVENTS = [
+  "document.uploaded",
+  "document.payment_proof_uploaded",
+  "document.generated",
+  "document.updated",
+  "document.deleted",
+  "document.portal_released",
+  "document.portal_revoked",
+  "document.confirmed",
+  "document.translation_requested",
+  "document.translation_updated",
+] as const;
 
 export function PatientDocumentsPage() {
   const { lang } = useLang();
@@ -48,6 +63,12 @@ export function PatientDocumentsPage() {
       lang === "de" ? de : lang === "ru" ? ru : en,
     [lang],
   );
+
+  useRealtimeSubscription(PORTAL_DOCUMENT_REALTIME_EVENTS, () => {
+    clearApiCache("/me/documents");
+    clearApiCache("/me/document-alerts");
+    setVersion((value) => value + 1);
+  });
 
   useEffect(() => {
     let cancelled = false;

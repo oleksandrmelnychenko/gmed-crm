@@ -507,6 +507,14 @@ async fn create_provider(
         Some(json!({ "provider_id": provider_id })),
     )
     .await;
+    crate::realtime::publish_provider_event(
+        &state,
+        Some(auth.user_id),
+        "provider.created",
+        provider_id,
+        json!({ "provider_id": provider_id }),
+    )
+    .await;
 
     (
         StatusCode::CREATED,
@@ -688,6 +696,14 @@ async fn update_provider(
         Some(json!({ "provider_id": updated_id })),
     )
     .await;
+    crate::realtime::publish_provider_event(
+        &state,
+        Some(auth.user_id),
+        "provider.updated",
+        updated_id,
+        json!({ "provider_id": updated_id }),
+    )
+    .await;
 
     Json(json!({ "ok": true })).into_response()
 }
@@ -746,6 +762,14 @@ async fn delete_provider(
         "provider",
         Some(provider_id),
         Some(json!({ "provider_id": provider_id })),
+    )
+    .await;
+    crate::realtime::publish_provider_event(
+        &state,
+        Some(auth.user_id),
+        "provider.deleted",
+        provider_id,
+        json!({ "provider_id": provider_id }),
     )
     .await;
 
@@ -885,6 +909,14 @@ async fn create_provider_template(
         Some(json!({ "provider_id": provider_id, "template_id": template_id })),
     )
     .await;
+    crate::realtime::publish_provider_event(
+        &state,
+        Some(auth.user_id),
+        "provider.template_created",
+        provider_id,
+        json!({ "provider_id": provider_id, "template_id": template_id }),
+    )
+    .await;
 
     (
         StatusCode::CREATED,
@@ -985,6 +1017,14 @@ async fn update_provider_template(
         "provider_template",
         Some(template_id),
         Some(json!({ "provider_id": provider_id, "template_id": template_id })),
+    )
+    .await;
+    crate::realtime::publish_provider_event(
+        &state,
+        Some(auth.user_id),
+        "provider.template_updated",
+        provider_id,
+        json!({ "provider_id": provider_id, "template_id": template_id }),
     )
     .await;
 
@@ -1183,6 +1223,14 @@ async fn create_doctor(
         Some(json!({ "provider_id": provider_id, "doctor_id": doctor_id })),
     )
     .await;
+    crate::realtime::publish_provider_event(
+        &state,
+        Some(auth.user_id),
+        "provider.doctor_created",
+        provider_id,
+        json!({ "provider_id": provider_id, "doctor_id": doctor_id }),
+    )
+    .await;
 
     (
         StatusCode::CREATED,
@@ -1258,6 +1306,14 @@ async fn update_doctor(
         Some(json!({ "provider_id": provider_id, "doctor_id": doctor_id })),
     )
     .await;
+    crate::realtime::publish_provider_event(
+        &state,
+        Some(auth.user_id),
+        "provider.doctor_updated",
+        provider_id,
+        json!({ "provider_id": provider_id, "doctor_id": doctor_id }),
+    )
+    .await;
 
     Json(json!({ "ok": true })).into_response()
 }
@@ -1292,6 +1348,14 @@ async fn delete_doctor(
         "provider_doctor",
         Some(doctor_id),
         Some(json!({ "provider_id": provider_id, "doctor_id": doctor_id })),
+    )
+    .await;
+    crate::realtime::publish_provider_event(
+        &state,
+        Some(auth.user_id),
+        "provider.doctor_deleted",
+        provider_id,
+        json!({ "provider_id": provider_id, "doctor_id": doctor_id }),
     )
     .await;
 
@@ -1435,6 +1499,14 @@ async fn create_service(
         Some(json!({ "provider_id": provider_id, "service_id": service_id })),
     )
     .await;
+    crate::realtime::publish_provider_event(
+        &state,
+        Some(auth.user_id),
+        "provider.service_created",
+        provider_id,
+        json!({ "provider_id": provider_id, "service_id": service_id }),
+    )
+    .await;
 
     (
         StatusCode::CREATED,
@@ -1505,6 +1577,14 @@ async fn update_service(
         Some(json!({ "provider_id": provider_id, "service_id": service_id })),
     )
     .await;
+    crate::realtime::publish_provider_event(
+        &state,
+        Some(auth.user_id),
+        "provider.service_updated",
+        provider_id,
+        json!({ "provider_id": provider_id, "service_id": service_id }),
+    )
+    .await;
 
     Json(json!({ "ok": true })).into_response()
 }
@@ -1542,6 +1622,14 @@ async fn delete_service(
         "provider_service",
         Some(service_id),
         Some(json!({ "provider_id": provider_id, "service_id": service_id })),
+    )
+    .await;
+    crate::realtime::publish_provider_event(
+        &state,
+        Some(auth.user_id),
+        "provider.service_deleted",
+        provider_id,
+        json!({ "provider_id": provider_id, "service_id": service_id }),
     )
     .await;
 
@@ -1893,6 +1981,18 @@ async fn toggle_provider_active(
         "provider",
         Some(provider_id),
         Some(json!({ "provider_id": provider_id, "is_active": is_active })),
+    )
+    .await;
+    crate::realtime::publish_provider_event(
+        &state,
+        Some(auth.user_id),
+        if is_active {
+            "provider.activated"
+        } else {
+            "provider.deactivated"
+        },
+        provider_id,
+        json!({ "provider_id": provider_id, "is_active": is_active }),
     )
     .await;
 
