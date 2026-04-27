@@ -58,6 +58,8 @@ import {
   TASK_PRIORITY_OPTIONS,
 } from "@/pages/appointments/model/constants";
 import {
+  AppointmentDotLabel,
+  AppointmentSectionHeading,
   EmptyState,
   Field,
 } from "@/pages/appointments/ui/shared/workspace-primitives";
@@ -191,14 +193,10 @@ function AppointmentDoctorFollowUpSection({
   return (
     <section className={sectionCardClass}>
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h3 className="text-sm font-semibold text-slate-950">
-            {t.appointments_doctor_directed_followup_title}
-          </h3>
-          <p className="text-xs text-slate-500">
-            {t.appointments_doctor_directed_followup_subtitle}
-          </p>
-        </div>
+        <AppointmentSectionHeading
+          title={t.appointments_doctor_directed_followup_title}
+          description={t.appointments_doctor_directed_followup_subtitle}
+        />
         <span className={appointmentMetaPillClassName}>
           {reminders.length + tasks.length}{" "}
           {reminders.length + tasks.length === 1 ? "item" : "items"}
@@ -207,9 +205,7 @@ function AppointmentDoctorFollowUpSection({
       <div className="mt-4 grid gap-4 xl:grid-cols-2">
         <div className="space-y-4">
           <div className={appointmentSoftPanelClassName}>
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-              {t.common_search}
-            </p>
+            <AppointmentDotLabel>{t.common_search}</AppointmentDotLabel>
             <div className="mt-3 space-y-3">
               {reminders.length === 0 ? (
                 <EmptyState text={tr.common_not_set} />
@@ -249,9 +245,7 @@ function AppointmentDoctorFollowUpSection({
             </div>
           </div>
           <div className={appointmentSoftPanelClassName}>
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-              {t.appointments_task_trail}
-            </p>
+            <AppointmentDotLabel>{t.appointments_task_trail}</AppointmentDotLabel>
             <div className="mt-3 space-y-3">
               {tasks.length === 0 ? (
                 <EmptyState text={tr.common_not_set} />
@@ -355,7 +349,7 @@ function AppointmentDoctorFollowUpSection({
                       createTask: event.target.checked,
                     }))
                   }
-                  className="mt-0.5 size-4 rounded border-slate-300 text-slate-950"
+                  className="mt-0.5 size-4 rounded border-border/60 text-[var(--brand)] focus:ring-[var(--brand)]/30"
                 />
                 <span>
                   Mirror this directive as an operational task for execution and
@@ -385,7 +379,6 @@ function AppointmentDoctorFollowUpSection({
             <div className="flex justify-end">
               <Button
                 type="submit"
-                className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
                 disabled={
                   submitBusy ||
                   !form.title.trim() ||
@@ -507,15 +500,10 @@ function AppointmentPackageEndSection({
   return (
     <section className={sectionCardClass}>
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h3 className="text-sm font-semibold text-slate-950">
-            Package-end follow-up
-          </h3>
-          <p className="text-xs text-slate-500">
-            Schedule the required reminder one month before the linked package
-            or order window ends.
-          </p>
-        </div>
+        <AppointmentSectionHeading
+          title="Package-end follow-up"
+          description="Schedule the required reminder one month before the linked package or order window ends."
+        />
         <span className={appointmentMetaPillClassName}>
           {reminders.length + tasks.length} package item
           {reminders.length + tasks.length === 1 ? "" : "s"}
@@ -649,7 +637,7 @@ function AppointmentPackageEndSection({
                       createTask: event.target.checked,
                     }))
                   }
-                  className="mt-0.5 size-4 rounded border-slate-300 text-slate-950"
+                  className="mt-0.5 size-4 rounded border-border/60 text-[var(--brand)] focus:ring-[var(--brand)]/30"
                 />
                 <span>{tr.providers_linked_patients}</span>
               </label>
@@ -676,7 +664,6 @@ function AppointmentPackageEndSection({
             <div className="flex justify-end">
               <Button
                 type="submit"
-                className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
                 disabled={
                   submitBusy ||
                   !form.title.trim() ||

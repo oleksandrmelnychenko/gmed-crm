@@ -5,7 +5,7 @@ import {
   AdminSheetScaffold,
   SheetActionsFooter,
 } from "@/components/admin-page-patterns";
-import { EmptyCell } from "@/components/ui-shell";
+import { EmptyCell, tokens } from "@/components/ui-shell";
 import {
   Sheet,
   SheetContent,
@@ -241,11 +241,38 @@ export function Field({
 }) {
   return (
     <label className="flex flex-col gap-1.5">
-      <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
-        {label}
-      </span>
+      <span className={tokens.text.label}>{label}</span>
       {children}
     </label>
+  );
+}
+
+export function AppointmentSectionHeading({
+  title,
+  description,
+}: {
+  title: ReactNode;
+  description?: ReactNode;
+}) {
+  return (
+    <div className="min-w-0 space-y-1">
+      <div className="flex min-w-0 items-center gap-2">
+        <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--brand)]" />
+        <h3 className={cn(tokens.text.sectionTitle, "truncate")}>{title}</h3>
+      </div>
+      {description ? (
+        <p className={cn(tokens.text.muted, "max-w-3xl")}>{description}</p>
+      ) : null}
+    </div>
+  );
+}
+
+export function AppointmentDotLabel({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex min-w-0 items-center gap-2">
+      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+      <p className={cn(tokens.text.eyebrow, "truncate")}>{children}</p>
+    </div>
   );
 }
 

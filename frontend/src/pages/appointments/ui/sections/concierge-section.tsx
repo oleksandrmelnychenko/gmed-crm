@@ -53,6 +53,7 @@ import type {
   StaffOption,
 } from "@/pages/appointments/model/types";
 import {
+  AppointmentSectionHeading,
   EmptyState,
   Field,
 } from "@/pages/appointments/ui/shared/workspace-primitives";
@@ -232,14 +233,10 @@ function AppointmentConciergeSection({
   return (
     <section className={sectionCardClass}>
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h3 className="text-sm font-semibold text-slate-950">
-            Concierge and VIP services
-          </h3>
-          <p className="text-xs text-slate-500">
-            Travel, transfer and VIP execution linked to this appointment.
-          </p>
-        </div>
+        <AppointmentSectionHeading
+          title="Concierge and VIP services"
+          description="Travel, transfer and VIP execution linked to this appointment."
+        />
         <span className={appointmentMetaPillClassName}>
           {services.length} service{services.length === 1 ? "" : "s"}
         </span>
@@ -382,7 +379,7 @@ function AppointmentConciergeSection({
                             bookingReference: event.target.value,
                           })
                         }
-                        className="h-10 rounded-xl bg-white"
+                        className={appointmentWhiteInputClassName}
                       />
                     </Field>
                     <Field label={tr.contracts_total}>
@@ -394,7 +391,7 @@ function AppointmentConciergeSection({
                         onChange={(event) =>
                           updateDraft(service.id, { actualCost: event.target.value })
                         }
-                        className="h-10 rounded-xl bg-white"
+                        className={appointmentWhiteInputClassName}
                       />
                     </Field>
                     <Field label={tr.common_provider}>
@@ -403,7 +400,7 @@ function AppointmentConciergeSection({
                         onChange={(event) =>
                           updateDraft(service.id, { vendorName: event.target.value })
                         }
-                        className="h-10 rounded-xl bg-white"
+                        className={appointmentWhiteInputClassName}
                       />
                     </Field>
                     <Field label={tr.field_phone}>
@@ -414,7 +411,7 @@ function AppointmentConciergeSection({
                             vendorContact: event.target.value,
                           })
                         }
-                        className="h-10 rounded-xl bg-white"
+                        className={appointmentWhiteInputClassName}
                       />
                     </Field>
                     <Field label={tr.providers_service_valid_from}>
@@ -424,7 +421,7 @@ function AppointmentConciergeSection({
                         onChange={(event) =>
                           updateDraft(service.id, { startsAt: event.target.value })
                         }
-                        className="h-10 rounded-xl bg-white"
+                        className={appointmentWhiteInputClassName}
                       />
                     </Field>
                     <Field label={tr.providers_service_valid_to}>
@@ -434,7 +431,7 @@ function AppointmentConciergeSection({
                         onChange={(event) =>
                           updateDraft(service.id, { endsAt: event.target.value })
                         }
-                        className="h-10 rounded-xl bg-white"
+                        className={appointmentWhiteInputClassName}
                       />
                     </Field>
                     {canManageConciergeBilling ? (
@@ -462,7 +459,7 @@ function AppointmentConciergeSection({
                             onChange={(event) =>
                               updateDraft(service.id, { currency: event.target.value })
                             }
-                            className="h-10 rounded-xl bg-white"
+                            className={appointmentWhiteInputClassName}
                             maxLength={3}
                           />
                         </Field>
@@ -500,7 +497,6 @@ function AppointmentConciergeSection({
                   <div className="flex justify-end">
                     <Button
                       type="button"
-                      className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
                       disabled={actionBusy === `service:${service.id}`}
                       onClick={() => handleServiceSave(service.id)}
                     >
@@ -693,7 +689,6 @@ function AppointmentConciergeSection({
           <div className="flex items-end justify-end md:col-span-2">
             <Button
               type="submit"
-              className="rounded-2xl"
               disabled={submitBusy || !form.title.trim()}
             >
               {submitBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}

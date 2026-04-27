@@ -571,7 +571,6 @@ function AppointmentInterpreterSection({
             <div className="flex items-end">
               <Button
                 type="submit"
-                className="rounded-2xl"
                 disabled={!assignInterpreterId || busyAction === "assign"}
               >
                 {busyAction === "assign" ? (
@@ -603,7 +602,6 @@ function AppointmentInterpreterSection({
                 variant={
                   detail.interpreter_response === value ? "default" : "outline"
                 }
-                className="rounded-2xl"
                 disabled={Boolean(busyAction)}
                 onClick={() => void handleInterpreterResponse(value)}
               >
@@ -730,7 +728,6 @@ function AppointmentChecklistSection({
                 <Button
                   variant="outline"
                   size="sm"
-                  className="rounded-2xl"
                   disabled={Boolean(completingId)}
                   onClick={() => void handleComplete(item.id)}
                 >
@@ -787,7 +784,6 @@ function AppointmentChecklistSection({
         <div className="flex items-end">
           <Button
             type="submit"
-            className="rounded-2xl"
             disabled={submitBusy || !form.itemText.trim()}
           >
             {submitBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
@@ -928,7 +924,6 @@ function AppointmentRemindersSection({
                 <Button
                   variant="outline"
                   size="sm"
-                  className="rounded-2xl"
                   disabled={Boolean(completingId)}
                   onClick={() => void handleComplete(item.id)}
                 >
@@ -1011,7 +1006,6 @@ function AppointmentRemindersSection({
           <div className="flex justify-end md:col-span-2">
             <Button
               type="submit"
-              className="rounded-2xl"
               disabled={
                 submitBusy ||
                 !form.userId ||
@@ -1345,7 +1339,6 @@ function AppointmentCompletionSection({
             <Button
               type="button"
               variant="outline"
-              className="rounded-2xl"
               disabled={Boolean(busyAction)}
               onClick={handleCompleteOnly}
             >
@@ -1353,7 +1346,6 @@ function AppointmentCompletionSection({
             </Button>
             <Button
               type="button"
-              className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
               disabled={
                 Boolean(busyAction) ||
                 (selectedCompletionPresetCount > 0 && !followUpAssigneeId)
@@ -1833,7 +1825,6 @@ function AppointmentTasksSection({
           <div className="flex items-end justify-end md:col-span-2">
             <Button
               type="submit"
-              className="rounded-2xl"
               disabled={submitBusy || !form.title.trim() || !form.assignedTo}
             >
               {submitBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}

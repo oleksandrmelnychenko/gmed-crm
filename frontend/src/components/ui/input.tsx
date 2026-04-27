@@ -45,13 +45,19 @@ function emitDateChange(
 
 function getPickerControlStyle(className: string | undefined) {
   const isTall = hasClassToken(className, "h-10")
+  const isShellHeight = hasClassToken(className, "h-9")
   const isRoundedXl = hasClassToken(className, "rounded-xl")
   const hasSlateBorder = hasClassToken(className, "border-slate-200")
   const hasSlateBackground = hasClassToken(className, "bg-slate-50")
-  const controlHeight = isTall ? "2.5rem" : "2rem"
+  const hasCardBackground = hasClassToken(className, "bg-card")
+  const controlHeight = isTall ? "2.5rem" : isShellHeight ? "2.25rem" : "2rem"
   const controlRadius = isRoundedXl ? "0.75rem" : "0.5rem"
   const controlBorderColor = hasSlateBorder ? "rgb(226 232 240)" : "var(--input)"
-  const controlBackground = hasSlateBackground ? "rgb(248 250 252)" : "transparent"
+  const controlBackground = hasSlateBackground
+    ? "rgb(248 250 252)"
+    : hasCardBackground
+      ? "var(--card)"
+      : "transparent"
 
   return {
     controlHeight,

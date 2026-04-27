@@ -64,6 +64,8 @@ import {
 } from "@/pages/appointments/model/constants";
 import { appointmentCommunicationStatusBadgeClassName } from "@/pages/appointments/appearance/status-appearance";
 import {
+  AppointmentDotLabel,
+  AppointmentSectionHeading,
   EmptyState,
   Field,
 } from "@/pages/appointments/ui/shared/workspace-primitives";
@@ -269,15 +271,10 @@ function AppointmentExternalHandoffSection({
   return (
     <section className={sectionCardClass}>
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h3 className="text-sm font-semibold text-slate-950">
-            Clinic and doctor handoff trail
-          </h3>
-          <p className="text-xs text-slate-500">
-            External communication log for clinics, doctors and service
-            providers, plus linked internal follow-up.
-          </p>
-        </div>
+        <AppointmentSectionHeading
+          title="Clinic and doctor handoff trail"
+          description="External communication log for clinics, doctors and service providers, plus linked internal follow-up."
+        />
         <span className={appointmentMetaPillClassName}>
           {communications.length} communication
           {communications.length === 1 ? "" : "s"}
@@ -334,7 +331,6 @@ function AppointmentExternalHandoffSection({
                           type="button"
                           variant="outline"
                           size="sm"
-                          className="rounded-2xl"
                           disabled={
                             actionBusy === `communication:${item.id}:answered`
                           }
@@ -356,7 +352,6 @@ function AppointmentExternalHandoffSection({
                           type="button"
                           variant="outline"
                           size="sm"
-                          className="rounded-2xl"
                           disabled={actionBusy === `communication:${item.id}:closed`}
                           onClick={() =>
                             void handleCommunicationStatusUpdate(item.id, "closed")
@@ -373,7 +368,6 @@ function AppointmentExternalHandoffSection({
                           type="button"
                           variant="outline"
                           size="sm"
-                          className="rounded-2xl"
                           disabled={
                             actionBusy === `communication:${item.id}:cancelled`
                           }
@@ -396,9 +390,9 @@ function AppointmentExternalHandoffSection({
               ))}
               {canViewReminders && (reminders.length > 0 || tasks.length > 0) ? (
                 <div className="rounded-2xl border border-dashed border-slate-200 bg-white/70 p-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                  <AppointmentDotLabel>
                     Internal follow-up trail
-                  </p>
+                  </AppointmentDotLabel>
                   <div className="mt-3 space-y-3">
                     {reminders.map((item) => (
                       <div
@@ -564,7 +558,7 @@ function AppointmentExternalHandoffSection({
                   }))
                 }
                 placeholder={withEllipsis(tr.appointments_title_col)}
-                className="h-10 rounded-xl bg-white"
+                className={appointmentWhiteInputClassName}
                 required
               />
             </Field>
@@ -597,7 +591,7 @@ function AppointmentExternalHandoffSection({
                     dueAt: event.target.value,
                   }))
                 }
-                className="h-10 rounded-xl bg-white"
+                className={appointmentWhiteInputClassName}
               />
             </Field>
             <Field label={tr.patients_notes}>
@@ -625,7 +619,7 @@ function AppointmentExternalHandoffSection({
                       createTask: event.target.checked,
                     }))
                   }
-                  className="mt-0.5 size-4 rounded border-slate-300 text-slate-950"
+                  className="mt-0.5 size-4 rounded border-border/60 text-[var(--brand)] focus:ring-[var(--brand)]/30"
                 />
                 <span>
                   Mirror this communication as an internal task when assignee
@@ -656,7 +650,6 @@ function AppointmentExternalHandoffSection({
               <Button
                 type="button"
                 variant="outline"
-                className="rounded-2xl"
                 disabled={!form.assigneeId}
                 onClick={openChatDraft}
               >
@@ -668,7 +661,6 @@ function AppointmentExternalHandoffSection({
               </Button>
               <Button
                 type="submit"
-                className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
                 disabled={submitBusy || !form.title.trim()}
               >
                 {submitBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}

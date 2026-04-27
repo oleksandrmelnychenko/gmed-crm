@@ -59,6 +59,8 @@ import {
 } from "@/pages/appointments/model/constants";
 import { ContextCard } from "@/pages/appointments/ui/shared/context-card";
 import {
+  AppointmentDotLabel,
+  AppointmentSectionHeading,
   EmptyState,
   Field,
 } from "@/pages/appointments/ui/shared/workspace-primitives";
@@ -237,22 +239,18 @@ function AppointmentBillingHandoffSection({
   return (
     <section className={sectionCardClass}>
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h3 className="text-sm font-semibold text-slate-950">
-            {appointmentText(
+        <AppointmentSectionHeading
+          title={appointmentText(
               "Ubergabe an Abrechnung und Settlement",
               "Передача в биллинг и расчёты",
               "Billing and settlement handoff",
             )}
-          </h3>
-          <p className="text-xs text-slate-500">
-            {appointmentText(
+          description={appointmentText(
               "Strukturierte Ubergabe an die Abrechnung, bevor die Dokumentenschicht nachzieht.",
               "Структурированная передача в биллинг до того, как подключится документный слой.",
               "Structured transfer to billing before the document layer lands.",
             )}
-          </p>
-        </div>
+        />
         <span className={appointmentMetaPillClassName}>
           {tasks.length + reminders.length}{" "}
           {appointmentText("verknupft", "связано", "linked")}
@@ -346,13 +344,13 @@ function AppointmentBillingHandoffSection({
       <div className="mt-5 grid gap-4 xl:grid-cols-2">
         <div className={appointmentSoftPanelClassName}>
           <div className="flex items-center justify-between gap-3">
-            <h4 className="text-sm font-semibold text-slate-950">
+            <AppointmentDotLabel>
               {appointmentText(
                 "Billing-Erinnerungen",
                 "Напоминания для биллинга",
                 "Billing reminders",
               )}
-            </h4>
+            </AppointmentDotLabel>
             <span className="text-xs text-slate-500">
               {reminders.length} {appointmentText("verknupft", "связано", "linked")}
             </span>
@@ -381,13 +379,13 @@ function AppointmentBillingHandoffSection({
 
         <div className={appointmentSoftPanelClassName}>
           <div className="flex items-center justify-between gap-3">
-            <h4 className="text-sm font-semibold text-slate-950">
+            <AppointmentDotLabel>
               {appointmentText(
                 "Billing-Aufgaben",
                 "Задачи биллинга",
                 "Billing tasks",
               )}
-            </h4>
+            </AppointmentDotLabel>
             <span className="text-xs text-slate-500">
               {tasks.length} {appointmentText("verknupft", "связано", "linked")}
             </span>
@@ -555,7 +553,7 @@ function AppointmentBillingHandoffSection({
                     createTask: event.target.checked,
                   }))
                 }
-                className="size-4 rounded border-slate-300"
+                className="size-4 rounded border-border/60 text-[var(--brand)] focus:ring-[var(--brand)]/30"
               />
               Mirror this billing handoff as a task
             </label>
@@ -563,7 +561,6 @@ function AppointmentBillingHandoffSection({
               <Button
                 type="button"
                 variant="outline"
-                className="rounded-2xl"
                 disabled={!form.assigneeId}
                 onClick={openBillingChatDraft}
               >
@@ -575,7 +572,6 @@ function AppointmentBillingHandoffSection({
               </Button>
               <Button
                 type="submit"
-                className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
                 disabled={
                   submitBusy ||
                   !form.assigneeId ||

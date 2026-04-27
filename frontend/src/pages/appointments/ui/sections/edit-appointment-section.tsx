@@ -519,7 +519,7 @@ function EditAppointmentSection({
                       repeatInterval: event.target.value,
                     }))
                   }
-                  className="h-10 rounded-xl bg-white/80"
+                  className={inputClassName}
                   disabled={recurrenceScope === "single"}
                 />
               </Field>
@@ -540,7 +540,7 @@ function EditAppointmentSection({
                       repeatCount: event.target.value,
                     }))
                   }
-                  className="h-10 rounded-xl bg-white/80"
+                  className={inputClassName}
                   placeholder={withEllipsis(
                     appointmentText(
                       "Optional, wenn ein Enddatum gesetzt ist",
@@ -567,7 +567,7 @@ function EditAppointmentSection({
                       repeatUntil: event.target.value,
                     }))
                   }
-                  className="h-10 rounded-xl bg-white/80"
+                  className={inputClassName}
                   disabled={recurrenceScope === "single"}
                 />
               </Field>
@@ -586,7 +586,6 @@ function EditAppointmentSection({
         <div className="flex justify-end">
           <Button
             type="submit"
-            className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
             disabled={busy}
           >
             {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}

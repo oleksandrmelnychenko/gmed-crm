@@ -28,6 +28,7 @@ import type {
 } from "@/pages/appointments/model/types";
 import { FOLLOW_UP_PRESETS } from "@/pages/appointments/model/constants";
 import {
+  AppointmentSectionHeading,
   EmptyState,
   Field,
 } from "@/pages/appointments/ui/shared/workspace-primitives";
@@ -108,15 +109,10 @@ function AppointmentHandoffSection({
   return (
     <section className={sectionCardClass}>
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h3 className="text-sm font-semibold text-slate-950">
-            Handoff and follow-up
-          </h3>
-          <p className="text-xs text-slate-500">
-            Coordinate the assigned team and schedule post-care follow-up from
-            the appointment itself.
-          </p>
-        </div>
+        <AppointmentSectionHeading
+          title="Handoff and follow-up"
+          description="Coordinate the assigned team and schedule post-care follow-up from the appointment itself."
+        />
         <span className={appointmentMetaPillClassName}>
           {handoffStakeholders.length} stakeholder
           {handoffStakeholders.length === 1 ? "" : "s"}
@@ -155,7 +151,6 @@ function AppointmentHandoffSection({
               <Button
                 type="button"
                 variant="outline"
-                className="rounded-2xl"
                 onClick={() => openChat(peer)}
               >
                 Open chat
@@ -186,7 +181,6 @@ function AppointmentHandoffSection({
                 key={preset.id}
                 type="button"
                 variant="outline"
-                className="rounded-2xl"
                 disabled={followUpBusy || !followUpAssigneeId}
                 onClick={() => void handlePreset(preset)}
               >

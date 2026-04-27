@@ -59,7 +59,7 @@ import {
 } from "@/pages/appointments/model/constants";
 import { getProviderDoctors } from "@/pages/appointments/data/provider-doctors";
 import { useDebouncedValue } from "@/pages/appointments/data/use-debounced-value";
-import { Field } from "@/pages/appointments/ui/shared/workspace-primitives";
+import { AppointmentSectionHeading, Field } from "@/pages/appointments/ui/shared/workspace-primitives";
 import {
   ConflictPanel,
   ScheduleWarningsPanel,
@@ -296,15 +296,10 @@ function AppointmentFollowUpVisitSection({
   return (
     <section className={sectionCardClass}>
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h3 className="text-sm font-semibold text-slate-950">
-            Follow-up visit planning
-          </h3>
-          <p className="text-xs text-slate-500">
-            Schedule the next control visit or examination directly from the
-            current appointment context.
-          </p>
-        </div>
+        <AppointmentSectionHeading
+          title="Follow-up visit planning"
+          description="Schedule the next control visit or examination directly from the current appointment context."
+        />
         <div className="flex flex-wrap gap-2">
           {FOLLOW_UP_PRESETS.map((preset) => (
             <Button
@@ -312,7 +307,6 @@ function AppointmentFollowUpVisitSection({
               type="button"
               variant="outline"
               size="sm"
-              className="rounded-2xl"
               onClick={() => applyPreset(preset)}
             >
               {preset.label}
@@ -531,7 +525,7 @@ function AppointmentFollowUpVisitSection({
                   linkOrder: event.target.checked,
                 }))
               }
-              className="mt-0.5 size-4 rounded border-slate-300 text-slate-950"
+              className="mt-0.5 size-4 rounded border-border/60 text-[var(--brand)] focus:ring-[var(--brand)]/30"
             />
             <span>{tr.providers_linked_patients}</span>
           </label>
@@ -547,7 +541,7 @@ function AppointmentFollowUpVisitSection({
                   createReminder: event.target.checked,
                 }))
               }
-              className="mt-0.5 size-4 rounded border-slate-300 text-slate-950"
+              className="mt-0.5 size-4 rounded border-border/60 text-[var(--brand)] focus:ring-[var(--brand)]/30"
             />
             <span>Create a preparation reminder on the new follow-up visit.</span>
           </label>
@@ -592,7 +586,6 @@ function AppointmentFollowUpVisitSection({
         <div className="flex justify-end">
           <Button
             type="submit"
-            className="rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
             disabled={busy || !form.title.trim()}
           >
             {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
