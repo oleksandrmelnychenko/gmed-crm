@@ -282,6 +282,11 @@
   height: 2.25rem;
 }
 
+.appointments-calendar-shell .fc .fc-timeGridWeek-view .fc-timegrid-slot,
+.appointments-calendar-shell .fc .fc-timeGridDay-view .fc-timegrid-slot {
+  height: var(--apt-timegrid-slot-height, 2.8rem);
+}
+
 .appointments-calendar-shell .fc .fc-daygrid-day {
   padding: 0.2rem;
 }
@@ -340,6 +345,10 @@
 .appointments-calendar-shell .fc .fc-daygrid-more-link {
   position: relative;
   z-index: 8;
+}
+
+.appointments-calendar-shell {
+  --apt-timegrid-slot-height: 2.8rem;
 }
 
 .appointments-calendar-shell,
@@ -429,11 +438,191 @@
 }
 .appointments-calendar-shell .fc .fc-event:hover {
   background: #fafafa;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.14);
 }
 
 .appointments-calendar-shell .fc .fc-event-main {
   padding: 0.55rem 0.62rem 0.5rem;
+}
+
+/* Month view: keep tiles compact and scannable */
+.appointments-calendar-shell .fc .fc-dayGridMonth-view .fc-daygrid-event .fc-event-main {
+  padding: 0.38rem 0.46rem 0.34rem;
+}
+
+.appointments-calendar-shell .fc .fc-dayGridMonth-view .fc-apt-event-card {
+  gap: 0.2rem;
+}
+
+.appointments-calendar-shell .fc .fc-dayGridMonth-view .fc-apt-event-head {
+  min-height: 1.05rem;
+}
+
+.appointments-calendar-shell .fc .fc-dayGridMonth-view .fc-apt-event-tag {
+  max-width: 7.2rem;
+  padding: 0.12rem 0.42rem;
+  font-size: 0.52rem;
+}
+
+.appointments-calendar-shell .fc .fc-dayGridMonth-view .fc-apt-event-time {
+  font-size: 0.56rem;
+}
+
+.appointments-calendar-shell .fc .fc-dayGridMonth-view .fc-apt-event-title {
+  font-size: 0.71rem;
+  line-height: 1.2;
+}
+
+.appointments-calendar-shell .fc .fc-dayGridMonth-view .fc-apt-event-meta {
+  font-size: 0.62rem;
+}
+
+/* Week view: balanced detail */
+.appointments-calendar-shell .fc .fc-timeGridWeek-view .fc-timegrid-event .fc-event-main {
+  padding: 0.58rem 0.68rem 0.56rem;
+  height: 100%;
+  overflow: hidden;
+}
+
+.appointments-calendar-shell .fc .fc-timeGridWeek-view .fc-apt-event-title {
+  font-size: 0.74rem;
+  line-height: 1.2;
+  white-space: normal;
+  display: block;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+  -webkit-line-clamp: unset;
+}
+
+.appointments-calendar-shell .fc .fc-timeGridWeek-view .fc-apt-event-meta {
+  font-size: 0.64rem;
+  white-space: normal;
+  display: block;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+  -webkit-line-clamp: unset;
+}
+
+.appointments-calendar-shell .fc .fc-timeGridWeek-view .fc-apt-event-submeta,
+.appointments-calendar-shell .fc .fc-timeGridWeek-view .fc-apt-event-note {
+  white-space: normal;
+  display: block;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+  -webkit-line-clamp: unset;
+}
+
+/* Day view: expand details */
+.appointments-calendar-shell .fc .fc-timeGridDay-view .fc-timegrid-event .fc-event-main {
+  padding: 0.68rem 0.82rem 0.64rem;
+  height: 100%;
+  overflow: hidden;
+}
+
+.appointments-calendar-shell .fc .fc-timeGridDay-view .fc-apt-event-card {
+  gap: 0.34rem;
+  min-height: 100%;
+  overflow: hidden;
+}
+
+.appointments-calendar-shell .fc .fc-timeGridDay-view .fc-apt-event-title {
+  font-size: 0.82rem;
+  line-height: 1.24;
+  white-space: normal;
+  display: block;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+  -webkit-line-clamp: unset;
+}
+
+.appointments-calendar-shell .fc .fc-timeGridDay-view .fc-apt-event-meta {
+  font-size: 0.69rem;
+  white-space: normal;
+  display: block;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+  -webkit-line-clamp: unset;
+}
+
+.appointments-calendar-shell .fc .fc-timeGridDay-view .fc-apt-event-submeta,
+.appointments-calendar-shell .fc .fc-timeGridDay-view .fc-apt-event-note {
+  font-size: 0.67rem;
+  white-space: normal;
+  display: block;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+  -webkit-line-clamp: unset;
+}
+
+.appointments-calendar-shell .fc .fc-timeGridWeek-view .fc-timegrid-event,
+.appointments-calendar-shell .fc .fc-timeGridDay-view .fc-timegrid-event {
+  border: 0 !important;
+  border-left-width: 0 !important;
+  border-left-color: transparent !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  margin: 0 !important;
+  width: 100% !important;
+  overflow: hidden;
+}
+
+.appointments-calendar-shell .fc .fc-timeGridWeek-view .fc-apt-event-card {
+  min-height: 100%;
+  overflow: hidden;
+}
+
+.appointments-calendar-shell .fc .fc-timeGridWeek-view .fc-timegrid-event-harness,
+.appointments-calendar-shell .fc .fc-timeGridDay-view .fc-timegrid-event-harness {
+  left: 0 !important;
+  right: 0 !important;
+  inset-inline-start: 0 !important;
+  inset-inline-end: 0 !important;
+  width: 100% !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+
+.appointments-calendar-shell .fc .fc-timeGridWeek-view .fc-timegrid-event-harness-inset,
+.appointments-calendar-shell .fc .fc-timeGridDay-view .fc-timegrid-event-harness-inset {
+  left: 0 !important;
+  right: 0 !important;
+  inset-inline-start: 0 !important;
+  inset-inline-end: 0 !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+}
+
+.appointments-calendar-shell .fc .fc-timeGridWeek-view .fc-timegrid-event-harness > .fc-timegrid-event,
+.appointments-calendar-shell .fc .fc-timeGridDay-view .fc-timegrid-event-harness > .fc-timegrid-event {
+  width: 100% !important;
+}
+
+.appointments-calendar-shell .fc .fc-timeGridWeek-view .fc-timegrid-col-events,
+.appointments-calendar-shell .fc .fc-timeGridDay-view .fc-timegrid-col-events {
+  margin: 0 !important;
+}
+
+.appointments-calendar-shell .fc .fc-timeGridWeek-view .fc-apt-event-card[data-overflowed="true"]::after,
+.appointments-calendar-shell .fc .fc-timeGridDay-view .fc-apt-event-card[data-overflowed="true"]::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1.35rem;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.72) 58%,
+    rgba(255, 255, 255, 0.95) 100%
+  );
 }
 
 .appointments-calendar-shell .fc .fc-daygrid-event-harness {
@@ -568,14 +757,18 @@
 .appointments-calendar-shell .fc-apt-event-card .absolute.top-1.right-1 {
   top: 0.45rem;
   right: 0.4rem;
-  border-color: transparent;
-  background: transparent;
-  color: #64748b;
+  border-color: #cbd5e1;
+  background: #e2e8f0;
+  color: #475569;
   box-shadow: none;
 }
 
+.appointments-calendar-shell .fc .fc-event:hover .fc-apt-event-card .absolute.top-1.right-1 {
+  background: #fafafa;
+}
+
 .appointments-calendar-shell .fc-apt-event-card .absolute.top-1.right-1:hover {
-  background: #f8fafc;
+  background: #fafafa;
   color: #334155;
 }
 
@@ -643,7 +836,7 @@
 
 
 .appointments-calendar-shell .fc .fc-timegrid-now-indicator-line {
-  border-color: #f97316;
+  display: none !important;
 }
 
 .appointments-calendar-shell .fc .fc-timegrid-now-indicator-arrow {

@@ -1231,6 +1231,7 @@ function StaffAppointmentsPage() {
     (arg: EventContentArg) => (
       <AppointmentCalendarEventCard
         arg={arg}
+        lang={lang}
         canManageStatus={permissions.canManageStatus}
         activeQuickActionAppointmentId={
           calendarQuickActionMenu?.appointmentId ?? null
@@ -1245,6 +1246,7 @@ function StaffAppointmentsPage() {
       openCalendarQuickActionLayer,
       performStatusChange,
       permissions.canManageStatus,
+      lang,
       tr,
     ],
   );
@@ -1350,6 +1352,7 @@ function StaffAppointmentsPage() {
         <AppointmentsPageChrome
           title={tr.appointments_title ?? "Appointments"}
           createLabel={tr.appointments_new ?? "New appointment"}
+          refreshTitle={appointmentText("Aktualisieren", "Обновить", "Refresh")}
           canCreate={permissions.canCreate}
           onCreate={() => openCreateSheetFromDate()}
           onRefresh={refreshAppointments}

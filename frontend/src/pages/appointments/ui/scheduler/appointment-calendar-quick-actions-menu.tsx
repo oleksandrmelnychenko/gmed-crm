@@ -1,6 +1,8 @@
 import { LoaderCircle } from "lucide-react";
 import type { RefObject } from "react";
 
+import { selectClass } from "@/components/ui-shell";
+import { cn } from "@/lib/utils";
 import { statusActionKey } from "@/pages/appointments/model/form-factories";
 import { statusLabel } from "@/pages/appointments/model/labels";
 import type {
@@ -44,27 +46,27 @@ export function AppointmentCalendarQuickActionsMenu({
       role="menu"
       tabIndex={-1}
       aria-label={dictionary.appointments_quick_actions}
-      className="fixed z-50 w-56 rounded-2xl border border-slate-200 bg-white p-2 shadow-[0_24px_60px_rgba(15,23,42,0.18)]"
+      className="fixed z-50 w-56 rounded-2xl border border-border bg-card p-2 shadow-[0_24px_60px_rgba(15,23,42,0.18)]"
       style={{
         top: `${menu.top}px`,
         left: `${menu.left}px`,
       }}
     >
-      <div className="border-b border-slate-200 px-2 pb-2">
-        <p className="truncate text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+      <div className="border-b border-border px-2 pb-2">
+        <p className="truncate text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
           {dictionary.appointments_quick_actions}
         </p>
-        <p className="mt-1 truncate text-sm font-semibold text-slate-950">
+        <p className="mt-1 truncate text-sm font-semibold text-foreground">
           {item.title}
         </p>
-        <p className="truncate text-xs text-slate-500">
-          {item.patient_pid} · {item.patient_name}
+        <p className="truncate text-xs text-muted-foreground">
+          {item.patient_pid} - {item.patient_name}
         </p>
       </div>
       <div className="mt-2 space-y-1">
         {item.recurrence_frequency ? (
-          <label className="block rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-            <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+          <label className="block rounded-xl border border-border bg-muted/25 px-3 py-2">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
               {dictionary.appointments_scope_apply_status}
             </span>
             <select
@@ -74,7 +76,7 @@ export function AppointmentCalendarQuickActionsMenu({
                   event.target.value as AppointmentRecurringActionScope,
                 )
               }
-              className="mt-2 h-9 w-full rounded-xl border border-slate-200 bg-card px-3 text-sm text-foreground"
+              className={cn(selectClass, "mt-2 h-9")}
             >
               <option value="single">{dictionary.appointments_scope_single}</option>
               <option value="following">
@@ -87,7 +89,7 @@ export function AppointmentCalendarQuickActionsMenu({
         <button
           type="button"
           role="menuitem"
-          className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100 hover:text-slate-950"
+          className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-foreground transition hover:bg-muted/50"
           onClick={() => onOpenDetail(item.id)}
         >
           <span>{dictionary.appointments_open_detail}</span>
@@ -96,7 +98,7 @@ export function AppointmentCalendarQuickActionsMenu({
           <button
             type="button"
             role="menuitem"
-            className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
+            className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-foreground transition hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-60"
             disabled={Boolean(actionBusy)}
             onClick={() => void onStatusChange(item.id, "confirmed", activeScope)}
           >
@@ -109,7 +111,7 @@ export function AppointmentCalendarQuickActionsMenu({
         <button
           type="button"
           role="menuitem"
-          className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
+          className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-foreground transition hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-60"
           disabled={Boolean(actionBusy)}
           onClick={() => void onStatusChange(item.id, "completed", activeScope)}
         >

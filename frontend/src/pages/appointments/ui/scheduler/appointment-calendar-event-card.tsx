@@ -16,6 +16,7 @@ import type {
 
 type AppointmentCalendarEventCardProps = {
   arg: EventContentArg;
+  lang: string;
   canManageStatus: boolean;
   activeQuickActionAppointmentId: string | null;
   dictionary: Record<string, string>;
@@ -30,8 +31,47 @@ type AppointmentCalendarEventCardProps = {
   ) => Promise<void> | void;
 };
 
+function resolveCalendarLocale(lang: string): string {
+  if (lang === "de") return "de-DE";
+  if (lang === "ru") return "ru-RU";
+  return "en-GB";
+}
+
+function formatEventTime(date: Date, locale: string): string {
+  return new Intl.DateTimeFormat(locale, {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date);
+}
+
+function formatEventTimeRange(arg: EventContentArg, lang: string): string {
+  const start = arg.event.start;
+  if (!start) return arg.timeText ?? "";
+
+  const locale = resolveCalendarLocale(lang);
+  const startLabel = formatEventTime(start, locale);
+  const end = arg.event.end;
+  if (!end) return arg.timeText || startLabel;
+
+  const endLabel = formatEventTime(end, locale);
+  if (startLabel === endLabel) return startLabel;
+
+  return `${startLabel} - ${endLabel}`;
+}
+
+function resolveEventDurationMinutes(arg: EventContentArg): number {
+  const { start, end } = arg.event;
+  if (!start || !end) return 30;
+
+  const diffMs = end.getTime() - start.getTime();
+  const diffMinutes = Math.round(diffMs / (60 * 1000));
+  return diffMinutes > 0 ? diffMinutes : 30;
+}
+
 export function AppointmentCalendarEventCard({
   arg,
+  lang,
   canManageStatus,
   activeQuickActionAppointmentId,
   dictionary,
@@ -44,13 +84,15 @@ export function AppointmentCalendarEventCard({
     props.providerName ||
     props.location ||
     props.ownerName ||
-    "Appointment";
+    appointmentText("Termin", "Прием", "Appointment");
   const isListView = arg.view.type.startsWith("list");
   const canQuickManage =
     canManageStatus &&
     !props.isBlocked &&
     props.appointmentStatus !== "completed" &&
     props.appointmentStatus !== "cancelled";
+  const eventTimeRange = formatEventTimeRange(arg, lang);
+  const eventDurationMinutes = resolveEventDurationMinutes(arg);
   const canListQuickManage = isListView && canQuickManage;
   const canGridQuickManage = !isListView && canQuickManage;
 
@@ -60,6 +102,7 @@ export function AppointmentCalendarEventCard({
         "fc-apt-event-card relative",
         isListView && "fc-apt-event-card-list",
       )}
+      data-event-duration-minutes={eventDurationMinutes}
     >
       {canGridQuickManage ? (
         <button
@@ -88,8 +131,8 @@ export function AppointmentCalendarEventCard({
                 ? statusLabel("cancelled")
                 : appointmentTypeLabel(props.appointmentType, dictionary)}
         </span>
-        {arg.timeText ? (
-          <span className="fc-apt-event-time">{arg.timeText}</span>
+        {eventTimeRange ? (
+          <span className="fc-apt-event-time">{eventTimeRange}</span>
         ) : null}
       </div>
       <div className="fc-apt-event-title">{arg.event.title}</div>
@@ -105,7 +148,8 @@ export function AppointmentCalendarEventCard({
         </div>
       ) : props.interpreterName ? (
         <div className="fc-apt-event-note">
-          Interpreter: {props.interpreterName}
+          {appointmentText("Dolmetscher", "Переводчик", "Interpreter")}:{" "}
+          {props.interpreterName}
         </div>
       ) : null}
       {canListQuickManage ? (

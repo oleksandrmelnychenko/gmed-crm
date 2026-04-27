@@ -6,7 +6,15 @@ import interactionPlugin from "@fullcalendar/interaction";
 import deLocale from "@fullcalendar/core/locales/de";
 import ruLocale from "@fullcalendar/core/locales/ru";
 import type { EventInput } from "@fullcalendar/core";
-import type { ComponentProps, RefObject } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ComponentProps,
+  type RefObject,
+} from "react";
 
 import { AppointmentCalendarQuickActionsMenu } from "@/pages/appointments/ui/scheduler/appointment-calendar-quick-actions-menu";
 import type {
@@ -18,6 +26,66 @@ import type {
 } from "@/pages/appointments/model/types";
 
 type FullCalendarProps = ComponentProps<typeof FullCalendar>;
+
+const TIMEGRID_SLOT_MINUTES = 30;
+const HEIGHT_DIFF_EPSILON_PX = 1;
+
+type AdaptiveEventHeights = {
+  eventMinHeight: number;
+  eventShortHeight: number;
+};
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function isTimeGridCalendarView(view: CalendarView): boolean {
+  return view === "timeGridWeek" || view === "timeGridDay";
+}
+
+function computeBaseSlotHeight(view: CalendarView): number {
+  if (typeof window === "undefined") {
+    if (view === "timeGridDay") {
+      return 64;
+    }
+    if (view === "timeGridWeek") {
+      return 52;
+    }
+    return 36;
+  }
+
+  const viewportHeight = window.innerHeight;
+  if (view === "timeGridDay") {
+    return Math.round(clamp(viewportHeight * 0.05, 46, 92));
+  }
+  if (view === "timeGridWeek") {
+    return Math.round(clamp(viewportHeight * 0.044, 40, 78));
+  }
+  return 36;
+}
+
+function computeAdaptiveEventHeights(
+  view: CalendarView,
+  slotHeightPx: number,
+): AdaptiveEventHeights {
+  if (!isTimeGridCalendarView(view)) {
+    return {
+      eventMinHeight: 34,
+      eventShortHeight: 42,
+    };
+  }
+
+  const eventMinHeight = Math.round(clamp(slotHeightPx * 0.72, 34, 72));
+  const eventShortHeight = Math.round(
+    Math.max(eventMinHeight + 8, clamp(slotHeightPx * 0.98, 44, 92)),
+  );
+
+  return { eventMinHeight, eventShortHeight };
+}
+
+function resolveSlotHeightCeiling(view: CalendarView): number {
+  return view === "timeGridDay" ? 320 : 280;
+}
 
 type DesktopCalendarSurfaceProps = {
   calendarRef: RefObject<FullCalendar | null>;
@@ -72,9 +140,107 @@ export function DesktopCalendarSurface({
   onOpenDetail,
   onStatusChange,
 }: DesktopCalendarSurfaceProps) {
+  const shellRef = useRef<HTMLDivElement | null>(null);
+  const isTimeGridView = isTimeGridCalendarView(calendarView);
+  const [slotHeightPx, setSlotHeightPx] = useState<number>(() =>
+    computeBaseSlotHeight(calendarView),
+  );
+  const eventHeights = useMemo(
+    () => computeAdaptiveEventHeights(calendarView, slotHeightPx),
+    [calendarView, slotHeightPx],
+  );
+  const calendarShellStyle = useMemo<CSSProperties | undefined>(
+    () =>
+      isTimeGridView
+        ? ({
+            ["--apt-timegrid-slot-height" as string]: `${slotHeightPx}px`,
+          } as CSSProperties)
+        : undefined,
+    [isTimeGridView, slotHeightPx],
+  );
+
+  useEffect(() => {
+    setSlotHeightPx(computeBaseSlotHeight(calendarView));
+  }, [calendarView]);
+
+  useEffect(() => {
+    if (!isTimeGridView || typeof window === "undefined") return;
+
+    const maxSlotHeight = resolveSlotHeightCeiling(calendarView);
+    let rafId = 0;
+    let timeoutId = 0;
+
+    const measureAndSyncSlotHeight = () => {
+      const shellElement = shellRef.current;
+      const baseSlotHeight = computeBaseSlotHeight(calendarView);
+      if (!shellElement) {
+        setSlotHeightPx(baseSlotHeight);
+        return;
+      }
+
+      const cardSelector =
+        calendarView === "timeGridDay"
+          ? ".fc-timeGridDay-view .fc-timegrid-event .fc-apt-event-card"
+          : ".fc-timeGridWeek-view .fc-timegrid-event .fc-apt-event-card";
+      const cards = Array.from(
+        shellElement.querySelectorAll<HTMLElement>(cardSelector),
+      );
+
+      let requiredSlotHeight = baseSlotHeight;
+      for (const cardElement of cards) {
+        const visibleHeight = Math.max(1, cardElement.clientHeight);
+        const fullHeight = Math.max(visibleHeight, cardElement.scrollHeight);
+        const isOverflowed = fullHeight > visibleHeight + 0.5;
+        cardElement.dataset.overflowed = isOverflowed ? "true" : "false";
+        if (!isOverflowed) continue;
+
+        const rawDurationMinutes = Number(
+          cardElement.dataset.eventDurationMinutes ?? TIMEGRID_SLOT_MINUTES,
+        );
+        const safeDurationMinutes =
+          Number.isFinite(rawDurationMinutes) && rawDurationMinutes > 0
+            ? rawDurationMinutes
+            : TIMEGRID_SLOT_MINUTES;
+        const nextRequiredSlotHeight =
+          (fullHeight / safeDurationMinutes) * TIMEGRID_SLOT_MINUTES + 2;
+        requiredSlotHeight = Math.max(requiredSlotHeight, nextRequiredSlotHeight);
+      }
+
+      const normalizedHeight = Math.round(
+        clamp(requiredSlotHeight, baseSlotHeight, maxSlotHeight),
+      );
+      setSlotHeightPx((currentHeight) =>
+        Math.abs(currentHeight - normalizedHeight) <= HEIGHT_DIFF_EPSILON_PX
+          ? currentHeight
+          : normalizedHeight,
+      );
+    };
+
+    const scheduleMeasurement = () => {
+      cancelAnimationFrame(rafId);
+      rafId = window.requestAnimationFrame(() => {
+        measureAndSyncSlotHeight();
+      });
+    };
+
+    scheduleMeasurement();
+    timeoutId = window.setTimeout(scheduleMeasurement, 120);
+    window.addEventListener("resize", scheduleMeasurement);
+
+    return () => {
+      cancelAnimationFrame(rafId);
+      window.clearTimeout(timeoutId);
+      window.removeEventListener("resize", scheduleMeasurement);
+    };
+  }, [calendarView, calendarDate, events, isTimeGridView]);
+
   return (
     <section className="overflow-hidden rounded-xl border border-border bg-card">
-      <div className="appointments-calendar-shell p-3">
+      <div
+        ref={shellRef}
+        className="appointments-calendar-shell p-3"
+        style={calendarShellStyle}
+      >
         <FullCalendar
           ref={calendarRef}
           plugins={[
@@ -107,10 +273,13 @@ export function DesktopCalendarSurface({
           }}
           height="auto"
           firstDay={1}
+          slotDuration="00:30:00"
           slotMinTime="06:00:00"
           slotMaxTime="22:00:00"
           dayMaxEvents={3}
           nowIndicator
+          eventMinHeight={eventHeights.eventMinHeight}
+          eventShortHeight={eventHeights.eventShortHeight}
           editable={canEditSchedule}
           eventStartEditable={canEditSchedule}
           eventDurationEditable={canEditSchedule}

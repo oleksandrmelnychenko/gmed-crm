@@ -15,6 +15,7 @@ import { AptKpi } from "@/pages/appointments/ui/shared/workspace-primitives";
 type AppointmentsPageChromeProps = {
   title: string;
   createLabel: string;
+  refreshTitle: string;
   canCreate: boolean;
   onCreate: () => void;
   onRefresh: () => void;
@@ -36,6 +37,7 @@ type AppointmentsPageChromeProps = {
 export function AppointmentsPageChrome({
   title,
   createLabel,
+  refreshTitle,
   canCreate,
   onCreate,
   onRefresh,
@@ -77,7 +79,7 @@ export function AppointmentsPageChrome({
           size="sm"
           className="h-9 w-9 rounded-lg p-0 text-muted-foreground"
           onClick={onRefresh}
-          title="Refresh"
+          title={refreshTitle}
         >
           <RefreshCw className="size-3.5" />
         </Button>

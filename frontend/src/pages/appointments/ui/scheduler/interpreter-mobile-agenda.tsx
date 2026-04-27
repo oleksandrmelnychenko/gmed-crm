@@ -78,7 +78,7 @@ type InterpreterMobileAgendaProps = {
 function withEllipsis(value: string | null | undefined) {
   const normalized = String(value ?? "").trim();
   if (!normalized) return "";
-  return /[.…]$/u.test(normalized) ? normalized : `${normalized}…`;
+  return normalized.endsWith("...") ? normalized : `${normalized}...`;
 }
 
 function StatsCard({
@@ -146,7 +146,11 @@ function MobileAgendaCard({
     item.provider_name ||
     item.location ||
     item.owner_name ||
-    "Operational slot";
+    appointmentText(
+      "Operativer Slot",
+      "Operativer Slot",
+      "Operational slot",
+    );
 
   return (
     <div className={appointmentMobileAgendaCardClassName}>
@@ -155,12 +159,12 @@ function MobileAgendaCard({
           <button
             type="button"
             onClick={onOpen}
-            className="truncate text-left text-sm font-semibold text-slate-950 hover:text-sky-700"
+            className="truncate text-left text-sm font-semibold text-foreground hover:text-[var(--brand)]"
           >
             {item.title}
           </button>
-          <p className="mt-1 truncate text-xs text-slate-500">
-            {item.patient_pid} · {item.patient_name}
+          <p className="mt-1 truncate text-xs text-muted-foreground">
+            {item.patient_pid} - {item.patient_name}
           </p>
         </div>
         <span
@@ -173,7 +177,7 @@ function MobileAgendaCard({
         </span>
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-slate-500">
+      <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
         <span className="inline-flex items-center gap-1">
           <Clock3 className="size-3.5" />
           {slotLabel(item)}
@@ -186,12 +190,12 @@ function MobileAgendaCard({
         ) : null}
       </div>
 
-      <p className="mt-3 text-xs font-medium text-slate-600">{summary}</p>
+      <p className="mt-3 text-xs font-medium text-muted-foreground">{summary}</p>
 
       <div className="mt-3 flex flex-wrap gap-2">
         {item.interpreter_response ? (
           <span className={appointmentMobileAgendaInfoBadgeClassName}>
-            Interpreter {responseLabel(item.interpreter_response)}
+            {appointmentText("Dolmetscher", "Переводчик", "Interpreter")} {responseLabel(item.interpreter_response)}
           </span>
         ) : null}
         {item.recurrence_frequency ? (
@@ -203,7 +207,7 @@ function MobileAgendaCard({
           <span className={appointmentMobileAgendaWarningBadgeClassName}>
             {appointmentText(
               "Blockierte Sicht",
-              "Заблокированная видимость",
+              "Blockierte Sicht",
               "Blocked visibility",
             )}
           </span>
@@ -218,7 +222,7 @@ function MobileAgendaCard({
           className="rounded-2xl"
           onClick={onOpen}
         >
-          {appointmentText("Öffnen", "Открыть", "Open")}
+          {appointmentText("Open", "Open", "Open")}
         </Button>
       </div>
     </div>
@@ -337,13 +341,13 @@ export function InterpreterMobileAgenda({
           >
             <div className="mb-3 flex items-start justify-between gap-3">
               <div>
-                <h2 className="text-sm font-semibold text-slate-950">
+                <h2 className="text-sm font-semibold text-foreground">
                   {section.label}
                 </h2>
                 <p className="text-xs text-muted-foreground">
-                  {section.itemCount} slot(s)
+                  {section.itemCount} {appointmentText("Termine", "приемы", "appointments")}
                   {section.pendingResponseCount > 0
-                    ? ` · ${section.pendingResponseCount} response pending`
+                    ? ` - ${section.pendingResponseCount} ${appointmentText("warten auf Antwort", "ожидают ответа", "pending responses")}`
                     : ""}
                 </p>
               </div>

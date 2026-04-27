@@ -59,7 +59,7 @@ export function DesktopSchedulerFiltersDialog({
       {open ? (
         <DialogContent className="sm:max-w-[420px]">
           <DialogHeader className="space-y-0">
-            <DialogTitle className="text-sm font-semibold text-slate-950">
+            <DialogTitle className="text-sm font-semibold text-foreground">
               {title}
             </DialogTitle>
           </DialogHeader>
